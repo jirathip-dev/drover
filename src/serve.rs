@@ -1067,8 +1067,8 @@ impl<'a> Server<'a> {
              <body data-ts={} data-mode=horse{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
              <section id=queue>{}</section><section id=lanes>{}</section><section id=host>{}</section>\
-             <section id=events>{}</section></main><nav><a href=#queue>Queue</a><a href=#lanes>Lanes</a>\
-             <a href=#host>Host</a><a href=#events>Events</a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script></body></html>\n",
+             <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
+             <a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script></body></html>\n",
             ctx.now, if paired { "" } else { self.pairb() }, f[0].1, f[1].1, f[2].1, f[3].1, f[4].1
         ))
     }
@@ -1576,49 +1576,59 @@ impl<'a> Server<'a> {
         lock(&self.host).clone()
     }
 
+    /// #141: four groups, MACHINE, SERVICES, FLEETS and ALERTS, of rows with a status (`data-t`); serve.js ranks them.
     fn host_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> String {
-        let hs = self.sample();
-        let limits = cfg.map(|c| &c.limits);
-        let lim =
-            |f: &dyn Fn(&crate::config::Limits) -> f64| limits.map_or(String::new(), |l| format!(" (limit {})", f(l)));
-        let v = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
-        let gate = limits.map(|l| host::admit(&hs, l));
-        let mut h = format!(
-            "<h2>Host</h2><p class=kv>load/cpu <b>{}</b>{}</p><p class=kv>memory pressure <b class={}>{}</b></p>\
-             <p class=kv>swap-out <b>{}</b> pages/2s{}</p>",
-            v(hs.load_per_cpu, 2),
-            lim(&|l| l.load_per_cpu),
-            tone(hs.pressure.as_deref().unwrap_or("?")),
-            esc(hs.pressure.as_deref().unwrap_or("?")),
-            v(hs.swapout, 0),
-            lim(&|l| l.swapout_rate),
-        );
-        h += &match gate {
-            Some(Ok(())) => "<p class=kv>spawn gate <b class=g>admits</b></p>".into(),
-            Some(Err(why)) => format!("<p class=kv>spawn gate <b class=r>HOST_BUSY</b>: {}</p>", esc(&why)),
-            None => String::new(),
-        };
-        // #98: green, amber or red per service, the fix on red.
-        if let Some(c) = cfg {
-            let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
-            let board = format!("v{} · up {up}", env!("CARGO_PKG_VERSION"));
-            h += "<h2>Services</h2>";
-            for (item, t, detail, fix) in crate::timer::services(ctx, c, &self.cached(ctx.now, 60), Some(board)) {
-                let fix = (t == "r").then(|| format!(" → {}", esc(&fix)));
-                let (item, detail, fix) = (esc(&item), esc(&detail), fix.unwrap_or_default());
-                h += &format!("<p class=kv>{item} · <b class={t}>{detail}</b>{fix}</p>");
+        let (hs, r, dl) = (self.sample(), &self.cached(ctx.now, 60), Limits::default());
+        let lim = cfg.map_or(&dl, |c| &c.limits);
+        let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
+        let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
+        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
+        let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
+        for (k, x, l, p) in [
+            ("load/cpu", hs.load_per_cpu, lim.load_per_cpu, 2),
+            ("swap-out", hs.swapout, lim.swapout_rate, 0),
+        ] {
+            let (t, bar, pct) = gauge(x.unwrap_or(0.0) / l, "▏");
+            let x = x.map_or("?".into(), |x| format!("{x:.p$}"));
+            let unit = ["", " <span class=mt>pages/2s</span>"][usize::from(p == 0)];
+            let val = format!("<span><b class={t}>{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
+            m += &hrow(k, t, &(bar + &val), "", "");
+        }
+        let p = hs.pressure.as_deref().unwrap_or("?");
+        m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
+        if let Some(gb) = host::free_gb(r) {
+            let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
+            let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
+            let (wt, min) = (esc(wt.rsplit(" · ").next().unwrap_or_default()), lim.min_free_gb);
+            let val =
+                format!("<span><b class={t}>{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
+            m += &hrow("disk", t, &(bar + &val), "", "");
+        }
+        m += &match (cfg, host::admit(&hs, lim)) {
+            (None, _) => String::new(),
+            (_, Ok(())) => kv("spawns", "g", "<b class=g>admitted</b>"),
+            (_, Err(why)) => {
+                let (why, x) = (esc(&why), "<span class=x><b class=r>held</b> · no new lanes while");
+                let raw = format!("<pre>spawn gate HOST_BUSY: {why}</pre>");
+                hrow("spawns", "r", &format!("{x} {why}</span>"), "", &raw)
             }
+        };
+        // #98: green, amber or red per service, what clears it otherwise.
+        let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
+        for (k, t, d, fix) in rows.iter().filter(svc) {
+            let fix = [String::new(), format!("<span class=\"mt fx\">→ {}</span>", chips(fix))];
+            s += &kv(
+                k,
+                t,
+                &format!("<b class={t}>{}</b>{}", esc(d), fix[usize::from(*t != "g")]),
+            );
         }
         if let Some(c) = cfg.filter(|c| !c.accounts.names.is_empty()) {
             let capped = |a: &&String| crate::access::capped_until(c, events, a, ctx.now).is_some();
             let all = c.accounts.names.len();
             let n = c.accounts.names.keys().filter(capped).count();
-            let t = match n {
-                0 => "g",
-                n if n == all => "r",
-                _ => "a",
-            };
-            h += &format!("<h2>Accounts</h2><p class=kv>accounts <b class={t}>{n} of {all} capped</b></p>");
+            let t = ["g", "a", "r"][usize::from(n > 0) + usize::from(n == all)];
+            let mut sub = String::new();
             for name in c.accounts.names.keys() {
                 let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
                 let usage = crate::usage::meter(ctx, c, self.r, name)
@@ -1638,28 +1648,64 @@ impl<'a> Server<'a> {
                     None => String::new(),
                 };
                 let hours = crate::usage::lane_hours(events, name, ctx.now);
-                h += &format!(
-                    "<p class=kv>{} · <b class={}>{}</b>{usage}</p><p class=m>{}</p>",
+                sub += &format!(
+                    "<p>{} · <b class={}>{}</b>{usage} <span class=mt>{}</span></p>",
                     esc(name),
                     tone(cap.split(' ').next().unwrap_or_default()),
                     esc(&cap),
                     esc(&hours)
                 );
             }
+            let x = format!("<span class=x><b class={t}>{n} of {all} capped</b></span>");
+            s += &hrow("accounts", t, &x, "", &format!("<div class=sub>{sub}</div>"));
         }
-        match cfg.and_then(|c| crate::usage::deepseek(ctx, c, self.r)) {
+        s += &match cfg.and_then(|c| crate::usage::deepseek(ctx, c, self.r)) {
             Some(Ok((b, low))) => {
-                let (class, word) = if low { ("a", "low") } else { ("g", "ok") };
-                h += &format!(
-                    "<p class=kv>deepseek · {} {:.2} · <b class={class}>{word}</b></p>",
-                    esc(&b.currency),
-                    b.total
+                let (t, word) = if low { ("a", "low") } else { ("g", "ok") };
+                let d = format!("{} {:.2}", esc(&b.currency), b.total);
+                kv("deepseek", t, &format!("{d} · <b class={t}>{word}</b>"))
+            }
+            Some(Err(hint)) => kv("deepseek", "a", &esc(&hint)),
+            None => String::new(),
+        };
+        // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
+        for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
+            let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
+            let orch = rows.iter().find(|s| s.0 == format!("drive {name}"));
+            let od = orch.map_or(String::new(), |o| o.2.replace("orch · ", ""));
+            let (t, w, x) = match last {
+                _ if fc.paused => ("m", "paused", format!("`herdsman resume {name}` starts it again")),
+                Some(e) if fc.driven() => in_words(e, fc.serial_label()),
+                _ if fc.driven() => ("m", "nothing yet", String::new()),
+                _ => (orch.map_or("a", |o| o.1), "orch", od),
+            };
+            let sep = [" · ", " "][usize::from(t == "g" || x.is_empty())];
+            let val = format!("<span class=x><b class={t}>{w}</b>{sep}{}</span>", chips(&x));
+            let e = last.filter(|_| fc.driven() && !fc.paused);
+            let ago = e.map_or(String::new(), |e| age(ctx.now.saturating_sub(e.ts)));
+            let raw = e
+                .and_then(|e| e.str("result"))
+                .map(|r| format!("<pre>{}</pre>", esc(r)));
+            f += &hrow(name, t, &val, &ago, &raw.unwrap_or_default());
+        }
+        // #87: on/off from fleet.toml; the last `push-sent`, unless a webpush `notify-failed` is newer.
+        let (t, d) = crate::timer::phone(ctx, cfg, events);
+        a += &kv("push", t, &format!("<b class={t}>{}</b>", esc(&d)));
+        if self.addr.is_some() && self.export.is_none() {
+            // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
+            let key = crate::webpush::vapid(&ctx.state)
+                .map(|k| crate::webpush::public(&k))
+                .unwrap_or_default();
+            let key = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key);
+            a += &format!("<button id=push type=button hidden data-key={key}>Enable alerts</button>");
+            for s in crate::webpush::load(&ctx.state) {
+                a += &format!(
+                    "<form method=post action=/push/unsubscribe class=role><input type=hidden name=id value={}><span>{} <span class=mt>alerts on {} ago</span></span><button>Remove</button></form>",
+                    s.id(),
+                    esc(&s.label),
+                    age(ctx.now.saturating_sub(s.created))
                 );
             }
-            Some(Err(hint)) => h += &format!("<p class=m>deepseek · {}</p>", esc(&hint)),
-            None => {}
-        }
-        if self.addr.is_some() && self.export.is_none() {
             let (all, mt) = (
                 devices::load(ctx)
                     .into_iter()
@@ -1667,9 +1713,8 @@ impl<'a> Server<'a> {
                     .collect::<Vec<_>>(),
                 mtime(ctx),
             );
-            h += "<h2>Paired devices</h2>";
             if all.is_empty() {
-                h += "<p class=m>none yet: tap Pair this phone, then `herdsman serve approve &lt;code&gt;` here</p>";
+                a += "<p class=mt>no paired device yet: tap Pair this phone, then `herdsman serve approve &lt;code&gt;` here</p>";
             }
             for d in all {
                 let when = format!(
@@ -1677,31 +1722,89 @@ impl<'a> Server<'a> {
                     age(ctx.now.saturating_sub(d.created)),
                     age(ctx.now.saturating_sub(d.used))
                 );
-                h += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
-            }
-            // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
-            let key = crate::webpush::vapid(&ctx.state)
-                .map(|k| crate::webpush::public(&k))
-                .unwrap_or_default();
-            // #87: on/off from fleet.toml; the last `push-sent`, unless a webpush `notify-failed` is newer.
-            let (subs, row) = (
-                crate::webpush::load(&ctx.state),
-                crate::timer::phone(ctx, cfg, events).1,
-            );
-            let key = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key);
-            h += &format!("<h2>Alerts</h2><p class=kv>{}</p>", esc(&row));
-            h += &format!("<button id=push type=button hidden data-key={key}>Enable alerts</button>");
-            for s in subs {
-                h += &format!(
-                    "<form method=post action=/push/unsubscribe class=role><input type=hidden name=id value={}><span>{} <span class=m>alerts on {} ago</span></span><button>Remove</button></form>",
-                    s.id(),
-                    esc(&s.label),
-                    age(ctx.now.saturating_sub(s.created))
-                );
+                a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
-        h
+        let head = "<summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
+        let grp = |(n, rows): (&str, String)| format!("<details class=grp>{}{rows}</details>", head.replace("{}", n));
+        let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
+        gs.map(grp).concat()
     }
+}
+
+/// #141: a 12-cell text gauge of `x` (value ÷ limit; disk: floor ÷ free): (status, the bar, how far past the limit).
+/// Green under 80 %, amber to 100 %, red past it with `▶`; `end` closes it (disk's floor tick).
+fn gauge(x: f64, end: &str) -> (&'static str, String, String) {
+    let t = ["g", "a", "r"][usize::from(x >= 0.8) + usize::from(x > 1.0)];
+    let n = (1..=12).filter(|i| f64::from(*i) <= x * 12.0 + 0.5).count();
+    let (full, empty, over) = ("█".repeat(n), "░".repeat(12 - n), if x > 1.0 { "▶" } else { "" });
+    let pct = Some(x).filter(|x| *x > 1.0).map(|x| format!(" ({:.0}%)", x * 100.0));
+    let bar = format!("<span class=\"bar {t}\">▕{full}<i>{empty}</i>{end}{over}</span>");
+    (t, bar, pct.unwrap_or_default())
+}
+
+/// #141: a Host row with status `t`: its label, then `cells`; with `more` (a raw line, the accounts) it opens on tap.
+fn hrow(k: &str, t: &str, cells: &str, age: &str, more: &str) -> String {
+    let k = format!("<span class=k>{}</span>", esc(k));
+    if more.is_empty() {
+        return format!("<p class=gr data-t={t}>{k}{cells}</p>");
+    }
+    let t = format!("data-t={t}><summary>{k}{cells}<span class=t>{age}<i class=cv></i></span>");
+    format!("<details class=rw {t}</summary>{more}</details>")
+}
+
+/// A Host row of a label and one value.
+fn kv(k: &str, t: &str, val: &str) -> String {
+    hrow(k, t, &format!("<span class=w>{val}</span>"), "", "")
+}
+
+/// Escaped text with each `command` as a code chip.
+fn chips(s: &str) -> String {
+    let part = |(i, p): (usize, &str)| [esc(p), format!("<code>{}</code>", esc(p))][i % 2].clone();
+    s.split('`').enumerate().map(part).collect()
+}
+
+/// #141: a `driven` result as the Host tab says it, by code (`ok:<step>` when it ran): status, word, the plain rest with
+/// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
+const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
+DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
+ALL_CAPPED|a|waiting|{why} · {then}
+CAP|a|waiting|{why} · starts when a lane finishes
+SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
+ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
+WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`
+CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
+NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
+PAUSED|m|paused|{then}
+EXIT4|g|started|#{n} · prompt not confirmed yet
+ok:merge|g|merged|#{n}
+ok:clean|g|cleaned|merged lanes
+ok:ci-red|a|sent back|#{n}: red CI, a fix round next
+ok:review|g|started|review #{n}
+ok:fix|g|started|fix #{n}
+ok:conflict|g|started|update #{n}
+ok:|g|started|#{n}";
+
+/// #141: a `driven` event in plain words (WORDS, else `failed` and the raw `result`); `serial`: the fleet's label.
+pub fn in_words(e: &Event, serial: &str) -> (&'static str, &'static str, String) {
+    let (raw, n) = (e.str("result").unwrap_or_default(), e.issue.unwrap_or(0).to_string());
+    let body = raw.split_once(": ").map_or(raw, |x| x.1);
+    let (why, then) = body.split_once("; ").unwrap_or((body, ""));
+    let busy: Vec<_> = raw.split(' ').filter(|w| w.starts_with('#')).collect();
+    let noun = format!("serial ({serial})").replace("serial (serial)", "serial");
+    let slots = format!("{} {noun} slot{}", busy.len(), ["s", ""][usize::from(busy.len() == 1)]);
+    let code = match e.str("code") {
+        Some("EXIT") if raw.starts_with("exit 4:") => "EXIT4".into(),
+        Some(c) => c.to_string(),
+        None => format!("ok:{}", e.str("step").unwrap_or_default()),
+    };
+    let ok = |l: &&str| code.starts_with("ok:") && l.starts_with("ok:|");
+    let row = |l: &&str| l.split('|').next().unwrap_or_default().split(' ').any(|c| c == code) || ok(l);
+    let w = WORDS.lines().find(row).unwrap_or("|r|failed|{raw}");
+    let w: Vec<_> = w.split('|').collect();
+    let x = w[3].replace("{why}", why).replace("{then}", then).replace("{n}", &n);
+    let x = x.replace("{busy}", &busy.join(", ")).replace("{slots}", &slots);
+    (w[1], w[2], x.replace("{raw}", raw))
 }
 
 /// `--demo`'s runner (#39): `runner.json`'s stdout for the longest matching command-line prefix, else exit 1.

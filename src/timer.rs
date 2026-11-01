@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub const TICK: &str = "dev.herdsman.tick";
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
+const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
 
@@ -314,13 +315,14 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let shown = |(c, s, _): &(String, String, bool)| format!("client {c}, server {s}");
     let d = v.as_ref().map_or("not on PATH, or no server".into(), shown);
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
-    rows.push(row(herdr::BIN, t, d, herdr::BIN));
+    rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
         // The worktree total by `du -sk` (not #103's `check::du` walk): the page reads it through its 60 s cache.
         let du = ok(r, "du", &["-sk", &ctx.worktrees.to_string_lossy()]).unwrap_or_default();
         let kb = du.split_whitespace().next().and_then(|k| k.parse::<f64>().ok());
         let wt = kb.unwrap_or(0.0) / 1_048_576.0;
-        let t = ["g", "a", "r"][usize::from(gb < host::AMBER_FREE_GB) + usize::from(gb < cfg.limits.min_free_gb)];
+        let (min, n) = (cfg.limits.min_free_gb, usize::from);
+        let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
         let d = format!("{gb:.0} GB free · worktrees {wt:.1} GB");
         rows.push(row("disk", t, d, "herdsman clean --yes"));
     }

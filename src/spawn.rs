@@ -636,7 +636,7 @@ fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) 
         if busy.len() >= f.serial_max.unwrap_or(1) {
             return refused(
                 "SERIAL_BUSY",
-                format!("serial {}; retry after it merges", busy.join(", ")),
+                format!("serial {}; retry after they merge", busy.join(", ")),
             );
         }
     }

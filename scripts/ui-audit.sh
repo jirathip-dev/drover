@@ -27,8 +27,10 @@ run() { # url, extra args
   return "$rc"
 }
 fail=0
-for v in queue queue-open queue-change queue-drive lanes sheet sheet-parked sheet-other sheet-drag host events herd1 herd2 herd-night herd-night-storm herd-scroll queue-scroll toast; do
-  url="http://127.0.0.1:$port/index.html?audit=$v"
+# #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
+for v in queue queue-open queue-change queue-drive lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked events herd1 herd2 herd-night herd-night-storm herd-scroll queue-scroll toast; do
+  dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}
+  url="http://127.0.0.1:$port/${dir}index.html?audit=$view"
   run "$url" --screenshot="$shots/$v.png" >/dev/null || fail=1
   run "$url&check=1" --dump-dom > "$shots/$v.html" || fail=1
   if ! python3 - "$shots/$v.html" "$v" <<'EOF'
