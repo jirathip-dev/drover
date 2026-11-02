@@ -127,7 +127,7 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
     let zeta = &page[at("zeta")..at("alpha")];
     assert!(zeta.contains("<span class=\"tag r\">! 1 need you</span>"), "{zeta}");
     assert!(
-        zeta.find("<span>#5</span>") < zeta.find("<span>#4</span>"),
+        zeta.find(">#5</a>") < zeta.find(">#4</a>"),
         "needs-you row first: {zeta}"
     );
     assert!(zeta.contains("<span class=r>needs-human</span>"));

@@ -101,6 +101,24 @@ pub fn cached_pr(ctx: &Ctx, fleet: &str, issue: u64) -> Value {
     load::<Value>(&cache_path(ctx, "pr", fleet, issue)).map_or(Value::Null, |c| c["pr"].clone())
 }
 
+/// #169: the latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
+pub fn run(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) {
+    let p = cache_path(ctx, "run", fleet, issue);
+    if load::<Value>(&p).is_some_and(|c| fresh(&c, now)) {
+        return;
+    }
+    let a = [
+        "run", "list", "-R", &f.repo, "--branch", branch, "--limit", "1", "--json", "url",
+    ];
+    let url = json(r, "gh", &a).ok().map(|v| v[0]["url"].clone());
+    let _ = store(&p, &json!({"ts": now, "url": url}));
+}
+
+/// The cached latest run url for the issue, if any; never calls `gh`.
+pub fn cached_run(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
+    load::<Value>(&cache_path(ctx, "run", fleet, issue)).and_then(|c| c["url"].as_str().map(String::from))
+}
+
 /// Numbers of the fleet's closed issues: one `gh issue list` per fleet, fresh for 60 s.
 pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Vec<u64>> {
     let p = cache_path(ctx, "closed", fleet, 0);

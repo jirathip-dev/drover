@@ -83,10 +83,12 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains(
         "<div class=\"fc k-a\" data-s=\"serial\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
     ));
-    assert!(page.contains("<details class=\"q\" data-q><summary><span>#1</span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-b=99><summary><span>#7</span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-s=\"db\"><summary><span>#8</span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"serial\"><summary><span>#22</span>"));
+    assert!(page.contains(
+        "<details class=\"q\" data-q><summary><span><a href=\"https://github.com/acme/app/issues/1\">#1</a></span>"
+    ));
+    assert!(page.contains("<details class=\"q\" data-q data-b=99><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-s=\"db\"><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"serial\"><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
     // Change 1 of the approval: the card no longer repeats `#n state · age`; the lane stays.
     assert!(!page.contains("<p>#1 impl"), "{page}");
     assert!(page.contains("<p>acme-impl-1</p>"));
