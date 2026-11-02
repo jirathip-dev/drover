@@ -406,13 +406,22 @@ pub fn clean(
         };
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
-        let keep = if host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty() {
+        let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
+        let keep = if live {
+            Some("live agent".to_string())
+        } else {
             if yes {
-                freed += purge(r, out, Path::new(wt))?;
+                freed += purge(r, cfg, &e.fleet, out, Path::new(wt))?;
             }
             dirty(r, Path::new(wt))
-        } else {
-            Some("live agent".to_string())
+        };
+        let keep = match keep {
+            Some(why) if !yes && !live && lane.is_none() => {
+                writeln!(out, "would save {wt} to wip/ ({why}), then remove it")?;
+                continue;
+            }
+            Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, r, out, &events, e, wt)?,
+            k => k,
         };
         if let Some(reason) = keep {
             if lane.is_some() {
@@ -473,10 +482,12 @@ pub fn clean(
 }
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist"];
-/// #103: delete a lane's build folders, even when the worktree stays; the bytes freed. One git does not ignore stays.
-fn purge(r: &dyn Runner, out: &mut dyn Write, wt: &Path) -> Result<u64> {
+/// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes
+/// freed. One git does not ignore stays.
+pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path) -> Result<u64> {
     let mut freed = 0;
-    for d in BUILD_DIRS {
+    let more = cfg.fleet.get(fleet).map_or(&[][..], |f| &f.build_dirs);
+    for d in BUILD_DIRS.iter().copied().chain(more.iter().map(String::as_str)) {
         let dir = wt.join(d);
         if !dir.is_dir() {
             continue;
@@ -491,6 +502,126 @@ fn purge(r: &dyn Runner, out: &mut dyn Write, wt: &Path) -> Result<u64> {
         }
     }
     Ok(freed)
+}
+
+/// #164: a merged or closed lane's unsaved work goes to `wip/<agent>-<date>`, the remote sha read back, so the
+/// worktree can go (`None`); a secret in it keeps the worktree, `wip-blocked` once (to the phone): the reason.
+fn save(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    events: &[Event],
+    e: &Event,
+    wt: &str,
+) -> Result<Option<String>> {
+    let agent = e.str("agent").unwrap_or_default();
+    let w = wip_branch(ctx, r, agent);
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
+    let sha = match snapshot(r, wt, &w, "wip: auto-saved by herdsman") {
+        Err(Snap::Secret(hit)) => {
+            let why = format!("unsaved work has a secret ({hit})");
+            let d = json!({"key": wt, "agent": agent, "reason": format!("{wt}: {why}; kept")});
+            fire(ctx, cfg, out, events, (&e.fleet, e.issue), "wip-blocked", d)?;
+            return Ok(Some(why));
+        }
+        Err(Snap::Failed(err) | Snap::Push(err)) => return Ok(Some(format!("wip save failed: {err:#}"))),
+        Ok(()) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
+    };
+    let remote = git(&["ls-remote", "origin", &format!("refs/heads/{w}")])?;
+    if remote.split_whitespace().next() != Some(sha.as_str()) {
+        return Ok(Some(format!("{w} reads back `{}`, not {sha}", remote.trim())));
+    }
+    writeln!(out, "saved {wt} to {w} @ {sha:.7}")?;
+    let d = json!({"agent": agent, "branch": w, "sha": sha});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, e.issue, "wip-saved", d))?;
+    Ok(None)
+}
+
+/// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the
+/// Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
+pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let mut total = du(&ctx.worktrees);
+    let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
+    if over(total) {
+        let (events, agents) = (read(&ctx.state)?, host::agents(r)?);
+        let states = fold(&events);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
+            .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
+            .filter_map(|e| Some((e, e.str("worktree")?)))
+            .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
+            .filter(|(e, _)| {
+                !agents
+                    .iter()
+                    .any(|a| a["name"].as_str() == e.str("agent") && a["agent_status"] == "working")
+            })
+            .map(|(e, w)| {
+                (
+                    e.issue
+                        .and_then(|n| states.get(&(e.fleet.clone(), n)))
+                        .map_or(e.ts, |s| s.last_ts),
+                    e,
+                    w,
+                )
+            })
+            .collect();
+        lanes.sort_by_key(|l| l.0);
+        for (_, e, wt) in lanes {
+            if !over(total) {
+                break;
+            }
+            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+            if bytes > 0 {
+                total = total.saturating_sub(bytes);
+                writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
+                let d = json!({"agent": e.str("agent"), "bytes": bytes});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, &e.fleet, e.issue, "budget-freed", d),
+                )?;
+            }
+        }
+    }
+    Ok(std::fs::write(
+        ctx.state.with_file_name("worktrees.bytes"),
+        total.to_string(),
+    )?)
+}
+
+#[allow(clippy::cast_precision_loss)] // GB to one decimal
+fn gb(bytes: u64) -> f64 {
+    bytes as f64 / 1_073_741_824.0
+}
+
+/// The last `budget` walk's worktree total in GB.
+pub fn worktree_gb(ctx: &Ctx) -> Option<f64> {
+    let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.bytes")).ok()?;
+    Some(gb(s.trim().parse().ok()?))
+}
+
+/// #164: folders under the worktree root that no configured fleet's repo owns.
+pub fn orphan_dirs(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
+    let ours: Vec<&str> = cfg.fleet.values().map(crate::config::Fleet::repo_name).collect();
+    let all = std::fs::read_dir(&ctx.worktrees).into_iter().flatten().flatten();
+    all.map(|d| d.path())
+        .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| ours.iter().any(|o| n == *o)))
+        .collect()
+}
+
+/// `orphan <path> <size>` per orphan folder; removed only with `remove`. The count.
+pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Result<usize> {
+    let found = orphan_dirs(ctx, cfg);
+    for p in &found {
+        if remove {
+            std::fs::remove_dir_all(p).with_context(|| format!("removing {}", p.display()))?;
+            writeln!(out, "removed orphan {}", p.display())?;
+        } else {
+            writeln!(out, "orphan {} {:.1} GB", p.display(), gb(du(p)))?;
+        }
+    }
+    Ok(found.len())
 }
 
 /// #138: the lane's rolling transcript goes with it.
@@ -613,17 +744,7 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
         }
         None => (0, 0),
     };
-    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M");
-    let wip = (dirty + ahead > 0).then(|| {
-        format!(
-            "wip/{agent}-{}",
-            if stamp.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                stamp
-            } else {
-                ctx.now.to_string()
-            }
-        )
-    });
+    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         gh::pr(
             ctx,
@@ -651,61 +772,22 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
-        let undo = |e: anyhow::Error| {
-            let _ = git(&["reset", "-q"]);
-            crate::gate::refused(
-                "SNAPSHOT_FAILED",
-                format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
-            )
-        };
-        let snap = || -> Result<String> {
-            git(&["add", "-A"])?;
-            git(&[&["reset", "-q", "--"][..], OWN_FILES].concat())?;
-            Ok(git(&["diff", "--cached"])? + &git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?)
-        };
-        let diff = match snap() {
-            Ok(d) => d,
-            Err(e) => return undo(e),
-        };
-        // The first added hunk line (a file header runs `diff --git` → `@@`) with a secret, as `file:line: masked`.
-        let mut head = false;
-        let mut file = "";
-        let mut n = 0;
-        let mut hit = None;
-        for l in diff.lines() {
-            head = (head || l.starts_with("diff --git ")) && !l.starts_with("@@");
-            if let Some((_, h)) = l.strip_prefix("@@ ").and_then(|h| h.split_once('+')) {
-                n = h.split([',', ' ']).next().and_then(|s| s.parse().ok()).unwrap_or(1);
-            } else if head {
-                file = l.strip_prefix("+++ b/").unwrap_or(file);
-            } else if let Some(a) = l.strip_prefix('+').filter(|_| hit.is_none()) {
-                // Mask every secret on the line, not only the first.
-                let mut m = a.trim().to_owned();
-                while let Some(v) = crate::lanes::secret(&m) {
-                    m = m.replace(v, "•••");
-                }
-                if m != a.trim() {
-                    hit = Some(format!("{file}:{n}: {m}"));
-                }
+        match snapshot(r, wt.unwrap_or_default(), w, "wip: kill snapshot") {
+            Err(Snap::Failed(e)) => {
+                return crate::gate::refused(
+                    "SNAPSHOT_FAILED",
+                    format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
+                )
             }
-            if !head && l.starts_with(['+', ' ']) {
-                n += 1;
+            Err(Snap::Secret(hit)) => {
+                return crate::gate::refused(
+                    "SECRET_IN_WIP",
+                    format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
+                )
             }
+            Err(Snap::Push(e)) => return Err(e),
+            Ok(()) => {}
         }
-        if let Some(hit) = hit {
-            let _ = git(&["reset", "-q"]);
-            return crate::gate::refused(
-                "SECRET_IN_WIP",
-                format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
-            );
-        }
-        if dirty > 0 {
-            if let Err(e) = git(&["commit", "-q", "--no-verify", "-m", "wip: kill snapshot"]) {
-                return undo(e);
-            }
-        }
-        git(&["push", "origin", &format!("HEAD:refs/heads/{w}")])?;
     }
     herdr::close(r, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
@@ -720,4 +802,74 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
         "killed {agent}{}",
         wip.map_or(String::new(), |w| format!(": work pushed to {w}"))
     )?)
+}
+
+/// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
+fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
+    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M");
+    let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
+    format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() })
+}
+
+/// Why a wip snapshot stopped: git failed (index restored), a secret in the diff (index restored), or the push.
+enum Snap {
+    Failed(anyhow::Error),
+    Secret(String),
+    Push(anyhow::Error),
+}
+
+/// Stage all but `OWN_FILES`, scan the staged and unpushed diff for a secret (#96, the first as `file:line: masked`),
+/// commit any uncommitted change with `msg` and push HEAD to `w`.
+fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(), Snap> {
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
+    // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
+    let undo = |e: anyhow::Error| {
+        let _ = git(&["reset", "-q"]);
+        Snap::Failed(e)
+    };
+    let mut commit = false;
+    let mut snap = || -> Result<(String, String)> {
+        commit = changes(&git(&["status", "--porcelain"])?) > 0;
+        git(&["add", "-A"])?;
+        git(&[&["reset", "-q", "--"][..], OWN_FILES].concat())?;
+        Ok((
+            git(&["diff", "--cached"])?,
+            git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?,
+        ))
+    };
+    let (staged, log) = snap().map_err(undo)?;
+    // The first added hunk line (a file header runs `diff --git` → `@@`) with a secret, as `file:line: masked`.
+    let mut head = false;
+    let mut file = "";
+    let mut n = 0;
+    let mut hit = None;
+    for l in staged.lines().chain(log.lines()) {
+        head = (head || l.starts_with("diff --git ")) && !l.starts_with("@@");
+        if let Some((_, h)) = l.strip_prefix("@@ ").and_then(|h| h.split_once('+')) {
+            n = h.split([',', ' ']).next().and_then(|s| s.parse().ok()).unwrap_or(1);
+        } else if head {
+            file = l.strip_prefix("+++ b/").unwrap_or(file);
+        } else if let Some(a) = l.strip_prefix('+').filter(|_| hit.is_none()) {
+            // Mask every secret on the line, not only the first.
+            let mut m = a.trim().to_owned();
+            while let Some(v) = crate::lanes::secret(&m) {
+                m = m.replace(v, "•••");
+            }
+            if m != a.trim() {
+                hit = Some(format!("{file}:{n}: {m}"));
+            }
+        }
+        if !head && l.starts_with(['+', ' ']) {
+            n += 1;
+        }
+    }
+    if let Some(hit) = hit {
+        let _ = git(&["reset", "-q"]);
+        return Err(Snap::Secret(hit));
+    }
+    if commit {
+        git(&["commit", "-q", "--no-verify", "-m", msg]).map_err(undo)?;
+    }
+    git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
+    Ok(())
 }

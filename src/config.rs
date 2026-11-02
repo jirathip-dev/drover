@@ -129,6 +129,9 @@ pub struct Fleet {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub clone_node_modules: bool,
+    /// #164: build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
+    #[serde(default)]
+    pub build_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -175,6 +178,8 @@ pub struct Limits {
     pub swapout_rate: f64,
     /// `herdsman spawn` refuses `DISK_LOW` under this many GB free on `/`.
     pub min_free_gb: f64,
+    /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
+    pub worktree_budget_gb: f64,
     /// Default reasoning effort for roles that set none.
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
@@ -190,6 +195,7 @@ impl Default for Limits {
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
+            worktree_budget_gb: 25.0,
             effort: None,
             ask_default_minutes: 30,
         }
@@ -226,6 +232,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "ask-waiting",
     "decision-undelivered",
     "state-write-failed",
+    "wip-blocked",
 ];
 
 impl Notify {

@@ -79,6 +79,12 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only:
             lock.display()
         )?);
     }
+    // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
+    if only.is_none() {
+        if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+            writeln!(out, "budget: {e:#}")?;
+        }
+    }
     let mine = |(n, f): &(&String, &crate::config::Fleet)| f.driven() && only.is_none_or(|o| o == n.as_str());
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
@@ -146,8 +152,11 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, "impl"])?;
-        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "ALL_CAPPED"));
-        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "CAP" | "ALL_CAPPED")) {
+        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "ALL_CAPPED"));
+        if matches!(
+            code,
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "CAP" | "ALL_CAPPED")
+        ) {
             break;
         }
     }

@@ -99,6 +99,15 @@ pub fn verdict(
     }
     // #128: the verdict is the reviewer's only work: remove its worktree and close its pane, or keep a dirty one.
     let events = read(&ctx.state)?;
+    // #164: a PASS at the head leaves the builder waiting for merge: its build folders go (a fix round rebuilds).
+    let is_impl = |e: &&Event| pass && e.is("spawn", fleet, issue) && e.str("role") == Some("impl");
+    if let Some(b) = events.iter().rfind(is_impl) {
+        let wt = Path::new(b.str("worktree").unwrap_or_default());
+        let working = |a: &serde_json::Value| a["name"].as_str() == b.str("agent") && a["agent_status"] == "working";
+        if wt.is_dir() && herdr::agents(r).is_ok_and(|a| !a.iter().any(working)) {
+            check::purge(r, cfg, fleet, out, wt)?;
+        }
+    }
     let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && e.str("role") == Some("rev");
     let rev = events.iter().rfind(is_rev);
     let Some((e, wt)) = rev.and_then(|e| Some((e, e.str("worktree").filter(|w| Path::new(w).exists())?))) else {
@@ -113,6 +122,8 @@ pub fn verdict(
     if busy {
         return Ok(());
     }
+    // #164: its build folders go now, even when a dirty worktree stays.
+    check::purge(r, cfg, fleet, out, Path::new(wt))?;
     let ws = e.str("workspace").unwrap_or_default();
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),

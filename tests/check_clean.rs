@@ -256,7 +256,12 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         dry.contains(&format!("would remove {a}")) && dry.contains(&format!("would remove {b}")),
         "{dry}"
     );
-    assert!(dry.contains(&format!("keep {unpushed}: 2 unpushed commit(s)")), "{dry}");
+    assert!(
+        dry.contains(&format!(
+            "would save {unpushed} to wip/ (2 unpushed commit(s)), then remove it"
+        )),
+        "{dry}"
+    );
     assert!(dry.contains(&format!("keep {live}: live agent")), "{dry}");
     assert!(!dry.contains(&open), "unmerged lanes are not candidates: {dry}");
     assert!(
@@ -399,7 +404,9 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
         "{dry}"
     );
     assert!(
-        dry.contains(&format!("keep {user_s}: 1 uncommitted change(s)")),
+        dry.contains(&format!(
+            "would save {user_s} to wip/ (1 uncommitted change(s)), then remove it"
+        )),
         "{dry}"
     );
 
@@ -411,12 +418,15 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
         "loop continues past the failure: {done}"
     );
     assert!(!ours.exists(), "fleet's own files no longer block removal");
-    assert!(
-        user.join("notes.txt").exists() && user.join(".brief.md").exists(),
-        "unknown dirt is never touched"
-    );
+    // #164: unknown dirt is never dropped: it is saved to wip/ first (tests/disk.rs), then the worktree goes.
+    assert!(!user.exists(), "{done}");
+    let wip = std::process::Command::new("git")
+        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-13-1000000:notes.txt"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&wip.stdout), "x");
     assert!(locked.exists(), "the failed candidate is left in place");
-    assert_eq!(kinds(&c, "clean"), 1);
+    assert_eq!(kinds(&c, "clean"), 2);
 }
 
 #[test]
@@ -452,7 +462,12 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         dry.contains(&format!("would remove {done} (pane w21:p1, sendmeter#21 issue closed)")),
         "{dry}"
     );
-    assert!(dry.contains(&format!("keep {unpushed}: 1 unpushed commit(s)")), "{dry}");
+    assert!(
+        dry.contains(&format!(
+            "would save {unpushed} to wip/ (1 unpushed commit(s)), then remove it"
+        )),
+        "{dry}"
+    );
     assert!(!dry.contains(&open), "open issues are not candidates: {dry}");
     assert_eq!(r0.count("gh "), 1, "one closed-issue read per fleet, not per lane");
     assert!(

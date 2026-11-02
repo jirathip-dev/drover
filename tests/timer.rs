@@ -257,6 +257,9 @@ fn services_rows_go_green_amber_and_red() {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);
     stamp("drive-sendmeter.last", 60);
+    let fleet_disk =
+        |gb: u64| std::fs::write(c.state.with_file_name("worktrees.bytes"), (gb << 30).to_string()).unwrap();
+    fleet_disk(3);
     let df = |gb: u64| {
         format!(
             "Filesystem 1K-blocks Used Available\n/dev/disk1 1 1 {}\n",
@@ -265,25 +268,38 @@ fn services_rows_go_green_amber_and_red() {
     };
     let green = host(Fake::default())
         .reply("lsof ", "herdsman 1 u LISTEN\n")
-        .reply("df -k /", &df(200))
-        .reply("du -sk", "3145728\t/w\n");
+        .reply("df -k /", &df(200));
     let all = rows(&c, &green);
     let names: Vec<_> = all.iter().map(|r| r.0.as_str()).collect();
     assert_eq!(
         names,
-        ["board", "tick", "drive sendmeter", "phone alerts", "herdr", "disk"]
+        [
+            "board",
+            "tick",
+            "drive sendmeter",
+            "phone alerts",
+            "herdr",
+            "disk",
+            "fleet disk"
+        ]
     );
     for (item, tone, detail, _) in &all {
         let want = if item == "phone alerts" { "a" } else { "g" }; // no webpush notifier
         assert_eq!(*tone, want, "{item}: {detail}");
     }
     assert_eq!(all[1].2, "ran 60s ago");
-    assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB");
+    assert_eq!(all[5].2, "200 GB free");
+    assert_eq!(
+        all[6].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB",
+        "#164: from drive's walk, against the budget"
+    );
 
     stamp("check.at", 700);
     let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(15));
     let all = rows(&c, &amber);
+    fleet_disk(21);
     assert_eq!((all[1].1, all[5].1), ("a", "a"), "{all:?}");
+    assert_eq!(rows(&c, &amber)[6].1, "a", "over 80 % of the budget");
 
     append(
         &c.state,
@@ -297,10 +313,12 @@ fn services_rows_go_green_amber_and_red() {
     )
     .unwrap();
     stamp("drive-sendmeter.last", 1000);
+    fleet_disk(26);
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(tones, ["r", "r", "r", "a", "r", "r"], "{all:?}");
+    assert_eq!(tones, ["r", "r", "r", "a", "r", "r", "r"], "{all:?}");
+    assert_eq!(all[6].2, "▕██████████▏ 26.0 / 25 GB");
     assert_eq!(all[1].2, "failed: herdr: gone");
     assert_eq!(
         (all[0].3.as_str(), all[5].3.as_str()),

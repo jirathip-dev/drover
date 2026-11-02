@@ -151,6 +151,17 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         herdr::status(r).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
         crate::check::check(ctx, cfg, r, out)?;
+        // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
+        let at = ctx.state.with_file_name("clean.at");
+        let last = std::fs::read_to_string(&at)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok());
+        if last.is_none_or(|t| ctx.now >= t + 3600) {
+            std::fs::write(&at, ctx.now.to_string())?;
+            if let Err(e) = crate::check::clean(ctx, cfg, r, out, None, (None, None), true) {
+                writeln!(out, "clean: {e:#}")?;
+            }
+        }
         drive::drive(ctx, cfg, r, out, None)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
@@ -316,13 +327,17 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
     rows.push(row(herdr::BIN, t, d, herdr::BIN));
     if let Some(gb) = host::free_gb(r) {
-        // The worktree total by `du -sk` (not #103's `check::du` walk): the page reads it through its 60 s cache.
-        let du = ok(r, "du", &["-sk", &ctx.worktrees.to_string_lossy()]).unwrap_or_default();
-        let kb = du.split_whitespace().next().and_then(|k| k.parse::<f64>().ok());
-        let wt = kb.unwrap_or(0.0) / 1_048_576.0;
         let t = ["g", "a", "r"][usize::from(gb < host::AMBER_FREE_GB) + usize::from(gb < cfg.limits.min_free_gb)];
-        let d = format!("{gb:.0} GB free · worktrees {wt:.1} GB");
-        rows.push(row("disk", t, d, "herdsman clean --yes"));
+        rows.push(row("disk", t, format!("{gb:.0} GB free"), "herdsman clean --yes"));
     }
+    // #164: the worktree total from drive's last walk, against the budget; amber from 80 %, red over (DISK_BUDGET).
+    let budget = cfg.limits.worktree_budget_gb;
+    let (t, d) = crate::check::worktree_gb(ctx).map_or(("a", "not measured yet (drive's next pass)".into()), |gb| {
+        let full = |i: &u8| f64::from(*i) < (gb / budget * 10.0).round();
+        let bar: String = (0..10).map(|i| if full(&i) { '█' } else { '░' }).collect();
+        let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
+        (t, format!("▕{bar}▏ {gb:.1} / {budget} GB"))
+    });
+    rows.push(row("fleet disk", t, d, "herdsman clean --yes"));
     rows
 }

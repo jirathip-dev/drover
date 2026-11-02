@@ -306,7 +306,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 }
 
 /// Form ops only a paired device may POST.
-const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park"];
+const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park", "orphans"];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
@@ -976,6 +976,10 @@ impl<'a> Server<'a> {
                 )?;
                 format!("#{n}: {op}")
             }
+            "orphans" => {
+                let n = crate::check::orphans(ctx, &Config::load(&ctx.config)?, &mut out, true)?;
+                format!("removed {n} orphan folder(s)")
+            }
             "unpair" => {
                 let mut all = devices::load(ctx);
                 all.retain(|d| d.hash != g("hash"));
@@ -1598,6 +1602,12 @@ impl<'a> Server<'a> {
                 let fix = (t == "r").then(|| format!(" → {}", esc(&fix)));
                 let (item, detail, fix) = (esc(&item), esc(&detail), fix.unwrap_or_default());
                 h += &format!("<p class=kv>{item} · <b class={t}>{detail}</b>{fix}</p>");
+            }
+            // #164: folders of no fleet under the worktree root go only from here (paired) or `clean --orphans --yes`.
+            let n = crate::check::orphan_dirs(ctx, c).len();
+            if n > 0 && self.addr.is_some() {
+                let (hid, s) = (hidden("orphans", "", &mtime(ctx)), if n == 1 { "" } else { "s" });
+                h += &format!("<form method=post>{hid}<button data-confirm=\"Remove {n} orphan folder{s} under the worktree root?\">remove orphans</button> <span class=m>{n} folder{s} of no fleet</span></form>");
             }
         }
         if let Some(c) = cfg.filter(|c| !c.accounts.names.is_empty()) {

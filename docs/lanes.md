@@ -12,7 +12,8 @@ herdsman spawn app 12 impl            # worktree + pane + brief + verified kick
 herdsman spawn app 12 rev             # after the implementer pushed
 herdsman verdict app 12 PASS --sha <head> --file <rev worktree>/verdict.md
 herdsman merge app 12                 # exact-head PASS + green CI + round limit
-herdsman clean --yes                  # reclaim merged or closed-issue lanes
+herdsman clean --yes                  # reclaim merged or closed-issue lanes (the tick runs it hourly)
+herdsman clean --orphans --yes        # also remove folders under the worktree root of no fleet
 ```
 
 ## Spawn
@@ -25,6 +26,8 @@ herdsman clean --yes                  # reclaim merged or closed-issue lanes
   frees the build folders (`target/`, `node_modules/`, `.next/`, `dist/`) of merged or closed lanes,
   even kept ones (never a live lane's, never one git tracks), and reports the bytes freed (approximate: a
   hard-linked file counts once per link).
+- `DISK_BUDGET`: worktrees over `[limits] worktree_budget_gb` (default 25 GB) by drive's last walk, after it freed the idlest
+  lanes' build folders. A lane's build folders also go at its verdict (reviewer) or PASS (builder).
 - `LANE_LIVE`: a herdr agent is live in the worktree, or the log has an unfinished lane.
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `herdsman help --agent`.
