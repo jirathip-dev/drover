@@ -1064,7 +1064,8 @@ impl<'a> Server<'a> {
                 format!("answered {}", g("id"))
             }
             "drive" => {
-                crate::drive::drive(ctx, &Config::load(&ctx.config)?, self.r, &mut out, Some(fleet), true)?;
+                let cfg = Config::load(&ctx.config)?;
+                crate::drive::drive(ctx, &cfg, self.r, &mut out, Some(fleet), true, false)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             // #130: a needs-human card's buttons.

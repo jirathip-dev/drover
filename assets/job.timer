@@ -1,6 +1,6 @@
 [Timer]
 OnActiveSec=0
-OnUnitActiveSec=300
+OnUnitActiveSec={secs}
 
 [Install]
 WantedBy=timers.target

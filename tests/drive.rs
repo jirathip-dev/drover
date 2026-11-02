@@ -658,7 +658,10 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
         let s = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
         assert_eq!((s.rounds, s.updates), (3, u32::try_from(k - 1).unwrap()));
         let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
-        assert!(out.contains("conflict: PR #100 conflicts with staging"), "{out}");
+        assert!(
+            out.contains("PASS · conflicts with staging · catching up next pass (≤ 5 min)"),
+            "{out}"
+        );
         assert!(
             out.contains("herdsman spawn sendmeter 12 impl --supersede --update"),
             "{out}"
@@ -695,7 +698,10 @@ fn a_behind_pr_after_pass_is_updated_the_same_way() {
         .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "MERGEABLE", "BEHIND"))
         .reply("git -C", "");
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
-    assert!(out.contains("conflict: PR #100 is behind staging"), "{out}");
+    assert!(
+        out.contains("PASS · behind staging · catching up next pass (≤ 5 min)"),
+        "{out}"
+    );
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
     assert_eq!(state(&c), "fix(1)+u1");
@@ -1061,7 +1067,7 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
     let mut out = vec![];
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     // The second pass is a manual press and prints nothing (a repeat), but its record still lists the refusal.
-    herdsman::drive::drive(&c, &cfg, &busy(), &mut out, Some("sendmeter"), true).unwrap();
+    herdsman::drive::drive(&c, &cfg, &busy(), &mut out, Some("sendmeter"), true, false).unwrap();
     let p = passes(&c);
     assert_eq!(p.len(), 2, "{p:?}");
     assert_eq!((p[0].str("by"), p[1].str("by")), (Some("auto"), Some("manual")));
@@ -1120,7 +1126,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     assert!(herdsman::drive::running(&c, "sendmeter"));
     let (f, mut out) = (fake(NO_AGENTS).reply("git -C", ""), vec![]);
     let r = Other(&f, &c, 0.into());
-    herdsman::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true).unwrap();
+    herdsman::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true, false).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert_eq!(
         out,
@@ -1137,7 +1143,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     // Bounded: a pass still running after 120 s leaves the press with a pointer to the line.
     std::fs::write(&lock, "").unwrap();
     let mut out = vec![];
-    herdsman::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true).unwrap();
+    herdsman::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true, false).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
         "drive: still driving · result will appear here\n"
@@ -1267,6 +1273,129 @@ fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
     assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
     assert!(out.contains("alpha #5 start: REFUSED HOST_BUSY"), "{out}");
     assert_eq!(state(&c), "review(1)");
+}
+
+/// #212: `herdsman drive --fast` (output, `driven` steps logged by it).
+fn fast(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+    let before = read(&c.state).unwrap().len();
+    let (code, out) = run(c, r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    let new = read(&c.state).unwrap().split_off(before);
+    let steps = new.iter().filter(|e| e.kind == "driven");
+    (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
+}
+
+/// #212: the fast step merges a PASS + green issue past a live slow pass's lock, and starts no lane.
+#[test]
+fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
+    let c = setup("drive-fast-merge");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
+    std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
+    let lock = c.state.parent().unwrap().join("drive.lock");
+    std::fs::write(&lock, "4242").unwrap();
+    let head = sha("abc");
+    let r = fake(NO_AGENTS)
+        .reply("kill -0 4242", "")
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
+        .reply("git -C", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    // An issue whose own lock a live pass holds is skipped.
+    let issue = c.state.parent().unwrap().join("drive-sendmeter-12.lock");
+    std::fs::write(&issue, "4242").unwrap();
+    assert_eq!(fast(&c, &r).1, Vec::<String>::new());
+    std::fs::remove_file(&issue).unwrap();
+    let (out, steps) = fast(&c, &r);
+    assert_eq!(steps, ["verdict", "merge"], "{out}");
+    assert_eq!(state(&c), "merged");
+    assert!(!r.called("herdr agent start") && !r.called("git -C /tmp/does-not-matter/sendmeter fetch"));
+    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "4242", "the slow lock stays");
+    assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
+    assert!(!issue.exists(), "the issue lock is released");
+}
+
+/// #212: a ready PASS's card from the cached PR the fast step refreshes: stale says when it was checked, then fresh.
+#[test]
+fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
+    let c = setup("drive-fast-cache");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let check =
+        |n: &str, st: &str, con: &str| json!({"__typename": "CheckRun", "name": n, "status": st, "conclusion": con});
+    let view = |checks: Vec<serde_json::Value>| {
+        json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks})
+            .to_string()
+    };
+    let card = || {
+        let ws = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
+    };
+    // Cached ten minutes ago: three of five green.
+    let mut five: Vec<_> = (0..3)
+        .map(|i| check(&format!("c{i}"), "COMPLETED", "SUCCESS"))
+        .collect();
+    five.extend((3..5).map(|i| check(&format!("c{i}"), "IN_PROGRESS", "")));
+    let old = Fake::default().reply("gh pr view issue-12", &view(five.clone()));
+    herdsman::gh::pr(&c, &old, f, ("sendmeter", 12), "issue-12", c.now - 600).unwrap();
+    assert_eq!(card().what, "PASS · CI running 3/5 · checked 10m ago");
+    // The fast step reads it afresh: one red check.
+    five[4] = check("lint", "COMPLETED", "FAILURE");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &view(five))
+        .reply("git -C", "");
+    fast(&c, &r);
+    assert_eq!(herdsman::gh::cached_at(&c, "sendmeter", 12), Some(c.now));
+    assert_eq!((card().who, card().what.as_str()), ("ci", "PASS · CI red: lint"));
+    assert!(!r.called("gh run view"), "a red CI's fix round is the slow step's");
+    // All green: merging within a minute.
+    let green: Vec<_> = (0..5)
+        .map(|i| check(&format!("c{i}"), "COMPLETED", "SUCCESS"))
+        .collect();
+    let now = Fake::default().reply("gh pr view issue-12", &view(green));
+    herdsman::gh::pr(&c, &now, f, ("sendmeter", 12), "issue-12", c.now + 60).unwrap();
+    assert_eq!(card().what, "PASS · CI green · merging within 1 min");
+}
+
+/// #212: a review start the host refused says so on the card, in plain words.
+#[test]
+fn a_refused_review_start_shows_waiting_for_a_reviewer_slot() {
+    let c = setup("drive-rev-slot");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    let r = Fake {
+        replies: fake(&agents(&[(
+            "sendmeter-impl-12",
+            "idle",
+            &wt.to_string_lossy(),
+            "w9:p1",
+        )]))
+        .reply("gh pr view issue-12", &pr(&head, "pending"))
+        .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
+        .reply("git -C", "")
+        .replies,
+        ..Default::default()
+    }
+    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(out.contains("waiting for a reviewer slot: Mac busy ("), "{out}");
 }
 
 // --- #214: conflicts get their update lane, catch-ups every pass, a lost reviewer is replaced, no silent block ---
