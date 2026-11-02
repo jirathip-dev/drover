@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
+use crate::waiting::Waiting;
 use crate::{gh, host, queue, waiting, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -87,8 +88,8 @@ pub fn summary(fleet: &str, out: &str) -> String {
 const PAST: [&str; 3] = ["started", "merged", "reviewed"];
 
 thread_local! {
-    /// #166: this fleet's actions in the running pass, a silent repeat too: its `drive-pass` record.
-    static ACTS: RefCell<Vec<Value>> = const { RefCell::new(vec![]) };
+    /// #166: each fleet's actions in the running pass, a silent repeat too: its `drive-pass` record.
+    static ACTS: RefCell<BTreeMap<String, Vec<Value>>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -102,6 +103,7 @@ fn words(code: Code, step: &str, result: &str) -> String {
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
+        Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
         Some("LANE_LIVE") => "a lane is already on it".into(),
         Some("ROUND_LIMIT" | "UPDATE_LIMIT") => "out of rounds: needs you".into(),
         Some("EXIT" | "ERROR") => format!("failed: {result}"),
@@ -213,16 +215,34 @@ pub fn drive(
         )?);
     };
     let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
+    let fleets: Vec<&str> = cfg.fleet.iter().filter(mine).map(|(n, _)| n.as_str()).collect();
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
-    for (name, _) in cfg.fleet.iter().filter(mine) {
-        ACTS.with_borrow_mut(Vec::clear);
-        let p = pass(ctx, cfg, r, out, name, start);
-        if let Err(e) = &p {
-            let w = format!("failed: {e:#}");
-            ACTS.with_borrow_mut(|a| a.push(json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": w})));
+    ACTS.with_borrow_mut(BTreeMap::clear);
+    let mut fail = |name: &str, e: anyhow::Error| {
+        let w = format!("failed: {e:#}");
+        let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": w});
+        ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
+        res = Err(e);
+    };
+    // #182: every fleet's due steps (reviews first) before any fleet starts new work.
+    let mut due = vec![];
+    for name in &fleets {
+        match pass(ctx, cfg, r, out, name) {
+            Ok(go) => {
+                start &= go;
+                due.push(*name);
+            }
+            Err(e) => fail(name, e),
         }
-        res = res.and(p.map(|more| start = more));
+    }
+    for name in due {
+        match starts(ctx, cfg, r, out, name, start) {
+            Ok(go) => start = go,
+            Err(e) => fail(name, e),
+        }
+    }
+    for name in fleets {
         let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
         // #166: one `drive-pass` per fleet and pass, manual or automatic: the board's result line.
         let end = crate::now();
@@ -230,28 +250,33 @@ pub fn drive(
             if manual { "manual" } else { "auto" },
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": ACTS.take()});
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res
 }
 
-/// One fleet: each item's due step, then start every startable queued issue in order, then clean merged lanes.
-/// Each spawn samples the host afresh; a refused item is skipped, `CAP` ends starts, `HOST_BUSY`/`ALL_CAPPED` all fleets'.
-fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
+/// One fleet: each item's due step, reviews first. Each spawn samples the host afresh; false when a spawn met a
+/// busy host or full disk, so no fleet starts new work this pass.
+fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
     let events = read(&ctx.state)?;
     let agents = host::agents(r)?;
     let f = cfg.fleet(fleet)?;
     let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
+    if handoff(ctx, cfg, out, fleet, &events, &waits)? {
+        waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
+    }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
-    waits.sort_by_key(|(s, _)| conflicts.contains_key(&s.issue));
+    let rev = |w: &Waiting| w.next_cmd.as_deref().and_then(|c| c.split(' ').nth(4)) == Some("rev");
+    waits.sort_by_key(|(s, w)| (!rev(w), conflicts.contains_key(&s.issue)));
+    let mut go = true;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
-        let red = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "failed";
+        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         let n = s.issue.to_string();
         // #149: an unmarked open PR touching a serial path is marked serial here, not refused at merge.
         if pr["state"] == "OPEN" && !f.serial_paths.is_empty() && !queue::serial(&events, fleet).contains(&s.issue) {
@@ -282,13 +307,30 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
                 ("spawn", _) => "respawn",
                 (v, _) => v,
             };
-            let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            if step == "merge" && code.is_none() {
+            let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
+            // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
+            // starts only now, so that one waits for the next pass).
+            let mut merge = step == "merge";
+            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && f.merge_label.is_none();
+            if step == "verdict" && code.is_none() && args[3] == "PASS" && green {
+                merge = true;
+                code = act(
+                    ctx,
+                    cfg,
+                    r,
+                    out,
+                    &events,
+                    (fleet, Some(s.issue), "merge"),
+                    &["merge", fleet, &n],
+                )?;
+            }
+            if merge && code.is_none() {
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
                     writeln!(out, "{fleet} auto-update: {e:#}")?;
                 }
             }
-        } else if s.state == "ready" && red {
+        } else if s.state == "ready" && ci == "failed" {
             // Red CI after a PASS is a FAIL at the same head (no new round), the failed checks as the finding.
             let head = pr["headRefOid"].as_str().unwrap_or_default();
             let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
@@ -298,6 +340,48 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
         }
     }
+    Ok(go)
+}
+
+/// #182: an impl/fix lane idle ≥ 2 min whose open PR head moved past its last review or handoff, CI done there: the
+/// PR hands the head off (`pushed`, via pr) though the lane never did, and its review is due. True if one was logged.
+fn handoff(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    fleet: &str,
+    ev: &[Event],
+    waits: &[(IssueState, Waiting)],
+) -> Result<bool> {
+    let f = cfg.fleet(fleet)?;
+    let mut any = false;
+    for (s, w) in waits
+        .iter()
+        .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
+    {
+        let pr = gh::cached_pr(ctx, fleet, s.issue);
+        let head = pr["headRefOid"].as_str().unwrap_or_default();
+        let handed = ev
+            .iter()
+            .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
+        let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
+        let done = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) != "pending";
+        let idle = w.who == "none" && ctx.now >= w.since + 120;
+        if !(idle && building && done && pr["state"] == "OPEN") || head.is_empty() || handed || s.reviewed(head) {
+            continue;
+        }
+        writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
+        let d = json!({"sha": head, "via": "pr"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), "pushed", d))?;
+        any = true;
+    }
+    Ok(any)
+}
+
+/// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
+/// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets' (false).
+fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
+    let events = read(&ctx.state)?;
     let mut go = start;
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
@@ -452,7 +536,9 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     };
     let w = words(code, step, &result);
     ACTS.with_borrow_mut(|a| {
-        a.push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w}));
+        a.entry(fleet.into())
+            .or_default()
+            .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w}));
     });
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
