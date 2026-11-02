@@ -90,8 +90,10 @@ read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`
 ### Denied commands (#216)
 
 The hook also refuses every `deny_commands` entry run as a command word: in a pipeline, after `&&`
-or `;`, inside `$( )`, through `sh|bash|zsh -c`, `env`, `sudo`, `exec`, `xargs`, after `VAR=…`, or by
-full path (`/usr/local/bin/docker`). An entry is a command word (`"docker"`) or a command plus
+or `;`, inside `$( )`, through `sh|bash|zsh -c`, `env`, `sudo`, `exec`, `xargs`, `nice`, `timeout`,
+`eval`, `then`/`do`/`{`, past their flags (`sudo -u root`), after `VAR=…`, or by full path
+(`/usr/local/bin/docker`). Matching is lexical and best-effort: `D=docker; $D ps`, `ssh h docker ps`
+or `open /Applications/Docker.app` pass. An entry is a command word (`"docker"`) or a command plus
 subcommand prefix (`"supabase start"`, `"git push --force"`); an entry ending in `=` (`"DOCKER_HOST="`)
 refuses that assignment. `{ cmd = "…", why = "…" }` makes `why` the whole message; a bare entry says
 ``REFUSED NO_COMMAND: lanes never run `<cmd>` ``. The same word as an argument (`grep docker file`) passes.
@@ -107,8 +109,9 @@ sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the 
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `herdsman hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,
-`*.zsh`, `justfile`, `Makefile`, `package.json`; not `.github/workflows`, where CI may use Docker)
-running a denied command. A dsh lane can still run one directly.
+`*.zsh`, `justfile` and `Makefile` lines that start with the command, e.g. recipe lines; not
+`package.json` scripts, nor `.github/workflows`, where CI may use Docker) running a denied command. A dsh
+lane can still run one directly.
 
 ## Drive
 

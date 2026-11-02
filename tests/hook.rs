@@ -409,6 +409,15 @@ fn container_commands_are_denied_as_command_words() {
             format!("cat x | {c} | tee y"),
             format!("cargo test; {c}"),
             format!("echo $({c})"),
+            format!("sudo -u root {c}"),
+            format!("sudo -n {c}"),
+            format!("env -u X {c}"),
+            format!("nice -n 5 {c}"),
+            format!("timeout 5 {c}"),
+            format!("if true; then {c}; fi"),
+            format!("{{ {c}; }}"),
+            format!("eval \"{c}\""),
+            format!("\\{c}"),
         ] {
             assert_eq!(bash(&cmd).as_deref(), Some(NO_CONTAINERS), "{cmd}");
         }
@@ -418,6 +427,9 @@ fn container_commands_are_denied_as_command_words() {
         "env DOCKER_HOST=tcp://h:2375 make",
         "open -a Docker",
         "open -a OrbStack",
+        "open -a Docker.app",
+        "export DOCKER_HOST=tcp://h:2375",
+        "supabase --debug start",
     ] {
         assert_eq!(bash(cmd).as_deref(), Some(NO_CONTAINERS), "{cmd}");
     }

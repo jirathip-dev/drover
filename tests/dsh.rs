@@ -305,7 +305,7 @@ fn pre_push_refuses_scripts_that_start_containers() {
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("REFUSED NO_CONTAINERS"), "{out}");
     assert!(
-        scanned.contains("*.sh") && scanned.contains(":!.github/workflows"),
+        scanned.contains("*.sh") && scanned.contains("*.zsh") && scanned.contains(":!.github/workflows"),
         "{scanned}"
     );
     assert_eq!(
@@ -314,6 +314,15 @@ fn pre_push_refuses_scripts_that_start_containers() {
         "removed lines pass"
     );
     assert_eq!(push("+++ b/justfile\n+\tsupabase migration new x\n").0, 0);
+    assert_eq!(
+        push("+++ b/Makefile\n+db:\n+\tdocker run -d pg\n").0,
+        1,
+        "a recipe line"
+    );
+    assert!(
+        !scanned.contains("package.json"),
+        "JSON scripts are not command lines: {scanned}"
+    );
 }
 
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {

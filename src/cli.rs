@@ -936,15 +936,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     // #216: no added script line may run a `deny_commands` entry (CI workflows may use Docker).
     let deny = deny_list(ctx);
     for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
-        let specs = [
-            "*.sh",
-            "*.bash",
-            "*.zsh",
-            "*justfile",
-            "*Justfile",
-            "*Makefile",
-            "*package.json",
-        ];
+        let specs = ["*.sh", "*.bash", "*.zsh", "*justfile", "*Justfile", "*Makefile"];
         let mut args = vec!["log", "-p", "--format=", sha, "--not", "--remotes", "--"];
         args.extend(specs.iter().chain(&[":!.github/workflows"]));
         let diff = runner::ok(r, "git", &args).unwrap_or_default();

@@ -95,32 +95,48 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     None
 }
 
-/// Words that run the next word as a command (`sh -c`, `sudo`, `env`, …); `-flags` and `VAR=…` after them are skipped.
+/// Words that run the next word as a command (`sh -c`, `sudo`, `env`, `then`, …); `-flags`, `VAR=…` and numbers
+/// after them are skipped.
 const WRAPPERS: &[&str] = &[
-    "env", "sudo", "exec", "command", "nohup", "time", "xargs", "sh", "bash", "zsh",
+    "env", "sudo", "exec", "command", "nohup", "time", "xargs", "sh", "bash", "zsh", "nice", "timeout", "eval",
+    "export", "if", "then", "else", "do", "while", "until", "{", "!",
 ];
+/// Wrapper flags that may take a value (`sudo -u root`, `env -u X`, `xargs -n 1`); `sudo -n docker` still denies.
+const VALUE_FLAGS: &[&str] = &["-u", "-g", "-C", "-n", "-U", "-D", "-S", "-P", "-r", "-T"];
 
 /// #216: the first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past
 /// wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment.
+/// Best-effort lexical matching: `D=docker; $D ps` or `ssh h docker ps` pass.
 pub fn denied<'a>(cmd: &str, deny: &'a [Deny]) -> Option<&'a Deny> {
     cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
         let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
         let mut i = 0;
-        while let Some(w) = t
-            .get(i)
-            .filter(|w| w.contains('=') || w.starts_with('-') || WRAPPERS.contains(w))
-        {
+        while let Some(w) = t.get(i).filter(|w| {
+            w.contains('=')
+                || w.starts_with(['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
+                || WRAPPERS.contains(w)
+        }) {
             if let Some(d) = deny.iter().find(|d| d.cmd().ends_with('=') && w.starts_with(d.cmd())) {
                 return Some(d);
             }
-            i += 1;
+            let next = t.get(i + 1).map(|n| word(n));
+            let value = VALUE_FLAGS.contains(w) && !deny.iter().any(|d| d.cmd().split_whitespace().next() == next);
+            i += if value { 2 } else { 1 };
         }
         let (first, rest) = t.get(i..)?.split_first()?;
+        let first = Some(word(first));
         deny.iter().find(|d| {
             let mut e = d.cmd().split_whitespace();
-            e.next() == first.rsplit('/').next() && e.enumerate().all(|(j, w)| rest.get(j) == Some(&w))
+            // Subcommand words match in order, past flags (`supabase --debug start`); `Docker.app` is `Docker`.
+            let mut r = rest.iter().map(|w| w.trim_end_matches(".app"));
+            e.next() == first && e.all(|w| r.find(|x| *x == w || !x.starts_with('-')) == Some(w))
         })
     })
+}
+
+/// A command word's name: `\docker` and `/usr/local/bin/docker` are `docker`.
+fn word(w: &str) -> &str {
+    w.trim_start_matches('\\').rsplit('/').next().unwrap_or(w)
 }
 
 fn gh(t: &[&str]) -> Option<String> {
