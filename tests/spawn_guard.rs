@@ -1,5 +1,5 @@
 //! M2 spawn gates: host load (HOST_BUSY), duplicate guard (LANE_LIVE,
-//! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the orch lane.
+//! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the NO_ORCH refusal (#155).
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -301,38 +301,28 @@ fn hermes_kick_retries_after_dropped_first_prompt() {
     assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], true);
 }
 
-// --- orch lane ---
+// --- #155: no orch lane ---
 
 #[test]
-fn orch_lane_spawns_without_issue() {
-    let d = tmpdir("orch");
-    let c = ctx(&d, CONFIG);
-    let r = happy(&c, NO_AGENTS);
-    let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "-", "orch"]);
-    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
-    assert!(r.called("herdr workspace create --cwd /tmp/does-not-matter/sendmeter --label sendmeter-orch"));
-    assert!(r.called("herdr agent start sendmeter-orch --kind hermes --pane w9:p1 --timeout 90000 -- -p fleet-orch"));
-    assert!(!r.called("gh issue view") && !r.called("herdr worktree"));
-    let brief = std::fs::read_to_string(c.state.parent().unwrap().join("orch-sendmeter.md")).unwrap();
-    assert!(
-        brief.contains("# ROLE: ORCHESTRATOR") && brief.contains("integration branch: `staging`"),
-        "{brief}"
-    );
-    let ev = read(&c.state).unwrap();
-    let s = ev.iter().find(|e| e.kind == "spawn").unwrap();
-    assert_eq!((s.issue, s.str("role")), (None, Some("orch")));
-    // A second orch while the first is live: LANE_LIVE.
-    let r = happy(&c, &agents(&[("sendmeter-orch", "idle", "/x", "w9:p1")]));
-    let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "-", "orch"]);
-    assert_eq!(exit, 3, "{out}");
-    assert!(out.contains("REFUSED LANE_LIVE"), "{out}");
-    // orch takes no issue; impl needs one.
+fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
+    let c = ctx(&tmpdir("no-orch"), CONFIG);
+    for issue in ["-", "12"] {
+        let r = happy(&c, NO_AGENTS);
+        let (exit, out) = run(&c, &r, &["spawn", "sendmeter", issue, "orch"]);
+        assert_eq!(exit, 3, "{out}");
+        assert_eq!(
+            out.trim(),
+            "REFUSED NO_ORCH: herdsman drives fleets itself; see herdsman timer"
+        );
+        assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
+    }
+    assert!(read(&c.state).unwrap_or_default().is_empty());
     assert_eq!(
-        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "12", "orch"]).0,
+        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "-", "impl"]).0,
         1
     );
     assert_eq!(
-        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "-", "impl"]).0,
+        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "12", "boss"]).0,
         1
     );
 }

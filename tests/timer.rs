@@ -6,7 +6,6 @@ use serde_json::json;
 use std::path::Path;
 
 const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
-const DRIVEN: &str = "integration = \"staging\"\ndriver = \"herdsman\"";
 const MAC: bool = cfg!(target_os = "macos");
 
 fn host(r: Fake) -> Fake {
@@ -105,10 +104,7 @@ fn install_loads_and_prints_the_command() {
 
 #[test]
 fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
-    let c = ctx(
-        &tmpdir("timer-tick"),
-        &CONFIG.replace("integration = \"staging\"", DRIVEN),
-    );
+    let c = ctx(&tmpdir("timer-tick"), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // Memory pressure critical: the start is refused HOST_BUSY; the tick still exits 0.
     let r = host(Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n")).reply("git -C", "");
@@ -249,10 +245,7 @@ fn rows(c: &herdsman::Ctx, r: &Fake) -> Vec<(String, &'static str, String, Strin
 
 #[test]
 fn services_rows_go_green_amber_and_red() {
-    let c = ctx(
-        &tmpdir("timer-svc"),
-        &CONFIG.replace("integration = \"staging\"", DRIVEN),
-    );
+    let c = ctx(&tmpdir("timer-svc"), CONFIG);
     let stamp = |w: &str, ago: u64| std::fs::write(c.state.with_file_name(w), (c.now - ago).to_string()).unwrap();
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);
@@ -265,8 +258,12 @@ fn services_rows_go_green_amber_and_red() {
     };
     let green = host(Fake::default())
         .reply("lsof ", "herdsman 1 u LISTEN\n")
-        .reply("df -k /", &df(200))
-        .reply("du -sk", "3145728\t/w\n");
+        .reply("df -k /", &df(200));
+    std::fs::write(
+        c.state.with_file_name("worktrees.du"),
+        format!("3221225472 {}", c.now - 240),
+    )
+    .unwrap();
     let all = rows(&c, &green);
     let names: Vec<_> = all.iter().map(|r| r.0.as_str()).collect();
     assert_eq!(
@@ -278,7 +275,7 @@ fn services_rows_go_green_amber_and_red() {
         assert_eq!(*tone, want, "{item}: {detail}");
     }
     assert_eq!(all[1].2, "ran 60s ago");
-    assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB");
+    assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB · 4m ago");
 
     stamp("check.at", 700);
     let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(12));
@@ -313,7 +310,37 @@ fn services_rows_go_green_amber_and_red() {
         String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
     assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
     assert!(
+        page.contains("floor 10 GB · worktrees 3.0 GB · 4m ago</span>"),
+        "{page}"
+    );
+    assert!(
         page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
         "{page}"
     );
+}
+
+/// #160: a 10 s `du` never reaches a request: the page and the roles fragment answer at once; `check` stores the total.
+#[test]
+fn slow_du_never_blocks_the_board() {
+    struct SlowDu(Fake);
+    impl herdsman::runner::Runner for SlowDu {
+        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+            if prog == "du" {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+            self.0.run(prog, args)
+        }
+    }
+    let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
+    let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    for path in ["/", "/frag?id=roles&fleet=sendmeter"] {
+        let t = std::time::Instant::now();
+        let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), c.now);
+        assert!(t.elapsed().as_millis() < 500, "{path} took {:?}", t.elapsed());
+        assert!(String::from_utf8_lossy(&res).starts_with("HTTP/1.1 200"), "{path}");
+    }
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    assert!(du.ends_with(&format!(" {}", c.now)), "{du}");
 }

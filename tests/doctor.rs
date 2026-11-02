@@ -16,7 +16,6 @@ fn config(d: &Path, harness: &str) -> String {
 repo = "o/demo"
 local = "{local}"
 integration = "staging"
-driver = "herdsman"
 
 [fleet.demo.role.impl]
 harness = "{harness}"
@@ -158,6 +157,25 @@ fn all_good_exits_zero_and_never_writes() {
     assert_eq!(code, 0, "{json}");
     let rows: Vec<String> = serde_json::from_str(&json).unwrap();
     assert_eq!(rows.join("\n") + "\n", out);
+
+    // #155: a leftover `driver` key is ignored; doctor notes it with a `!` (no exit 1).
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        text.replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\ndriver = \"herdsman\"",
+        ),
+    )
+    .unwrap();
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let want = "! fleet.demo.driver — ignored: drive runs every fleet (#155) → remove the key";
+    assert_eq!(
+        out.lines().filter(|l| l.contains("driver")).collect::<Vec<_>>(),
+        [want],
+        "{out}"
+    );
 }
 
 #[test]

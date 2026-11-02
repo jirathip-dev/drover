@@ -13,7 +13,7 @@ pub struct Lane {
     /// Agent name, or the workspace label for an unnamed agent outside any fleet.
     pub name: String,
     pub issue: Option<u64>,
-    /// orch | impl | rev | design, or `other` when herdsman did not spawn it.
+    /// impl | rev | design, or `other` when herdsman did not spawn it.
     pub role: String,
     pub harness: String,
     pub model: Option<String>,
