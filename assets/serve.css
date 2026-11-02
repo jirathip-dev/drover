@@ -231,25 +231,28 @@ details.q[open]{padding-bottom:var(--s2)}
 .grp[data-t=r]>summary{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent)}
 .grp:is([data-t=a],[data-t=r])>summary :is(.dt,.gs){color:inherit}
 .grp[open]{padding-bottom:var(--s2)}
-/* A row: label (9ch) · gauge (15ch) · value; a row without a gauge spans the last two; meta and fix lines go under. */
-.gr{display:grid;grid-template-columns:9ch 15ch minmax(0,1fr);gap:0 1ch;align-items:baseline;margin:0;padding:var(--s1) 0;border:0}
+/* #183: every row is one grid, label | value | age: the label column is the longest label (`--kw`, set per group, at
+   most 11ch), a value wraps inside its own column; a divider between rows, the first one as far under the header. */
+.gr,.rw>summary{display:grid;grid-template-columns:var(--kw,9ch) minmax(0,1fr) auto;gap:0 1ch;align-items:baseline}
+.gr{margin:0;padding:var(--s1) 0;border:0}
+.grp>summary+*{margin-top:var(--s1)}.grp>:is(.gr,.rw,form)+:is(.gr,.rw,form){border-top:1px solid var(--line)}
 .gr>.k,.rw>summary>.k{color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gr>:is(.w,.x,.mt){grid-column:2/-1}.fx{display:block}
+.gr>:is(.w,.x){grid-column:2/-1}
 .grp .mt{font-size:var(--fs-meta);color:var(--mute)}
 /* The gauge: ▕ + 12 cells + ▏ (disk: its floor tick ┃) in the mono font, ▶ past the limit; filled cells and edges take
-   the status colour, empty ░ cells the muted one. */
-.bar{white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
+   the status colour, empty ░ cells the muted one; a 15ch box at least, so wider fallback glyphs grow it, never spill. */
+.bar{display:inline-block;min-width:15ch;white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
 .bar i{font-style:normal;color:var(--mute)}
 /* A command chip never breaks inside; the whole chip wraps to the next line. */
 .grp code{white-space:nowrap;color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit;overflow-wrap:normal}
 /* A row that opens (a raw line, the accounts): the whole row is the 44 px tap target, the caret on it alone. The raw
    line shows under it, 11 px, wrapping, on the panel colour. */
 .rw{border:0}
-.rw>summary{grid-template-columns:9ch minmax(0,1fr) auto;gap:0 1ch;align-items:baseline;align-content:center;padding:var(--s1) 0}
+.rw>summary{align-content:center;padding:var(--s1) 0}
 .rw>summary>.x{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.rw>summary>.t{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
-.rw>pre{margin:0 0 var(--s2) 10ch;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
-.rw>.sub{margin:0 0 var(--s2) 10ch}.rw>.sub>p{margin:0;padding:var(--s1) 0}
+.rw>summary>.t{align-self:start;line-height:calc(var(--fs) * 1.5);font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
+.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.rw>.sub{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch)}.rw>.sub>p{margin:0;padding:var(--s1) 0}
 .grp form.role{border-top:0}
 /* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
    The line is 28 px controls in 8 px padding: 44 px tall, the rings inside it. */

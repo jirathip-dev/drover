@@ -26,6 +26,21 @@
     probe.remove();
     if (on.length !== 1) early.push(`${on.length} active tabs, not 1`);
     else if (getComputedStyle(on[0].firstElementChild).backgroundColor !== accent) early.push(`the active tab's fill is ${getComputedStyle(on[0].firstElementChild).backgroundColor}, not the accent ${accent}`);
+    // #183: every Host label is whole on one line, ≥ 1ch before its value, and every value starts at one x (groups
+    // opened for the measure, then put back).
+    const gs = [...$$('#host>.grp')], was = gs.map(g => g.open), xs = new Map();
+    gs.forEach(g => { g.open = true; });
+    for (const k of $$('#host .k')) {
+      const g = document.createRange(), v = k.nextElementSibling, ch = k.parentNode.appendChild(Object.assign(document.createElement('i'), { style: 'position:absolute;width:1ch' }));
+      g.selectNodeContents(k);
+      const lines = new Set([...g.getClientRects()].map(r => Math.round(r.top))).size, end = g.getBoundingClientRect().right, x = v.getBoundingClientRect().left, w = ch.getBoundingClientRect().width;
+      ch.remove();
+      if (lines !== 1 || k.scrollWidth > k.clientWidth) early.push(`Host label "${k.textContent}": ${lines} lines, ${k.scrollWidth}px of text in ${k.clientWidth}px`);
+      if (x - end < w - 0.5) early.push(`Host label "${k.textContent}": its value ${(x - end).toFixed(1)}px after it, under 1ch (${w.toFixed(1)}px)`);
+      xs.set(k.textContent, Math.round(x));
+    }
+    if (new Set(xs.values()).size > 1) early.push(`Host values start at different x: ${[...xs].map(([k, x]) => `${k} ${x}`).join(', ')}`);
+    gs.forEach((g, i) => { g.open = was[i]; });
   };
   // #173: a fleet's [config] sheet, scrolled to its Pipeline group.
   const pipe = async fleet => {
