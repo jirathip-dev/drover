@@ -308,6 +308,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             emit(&ctx.state, cfg, ev)?;
         }
     }
+    // #160: the worktree total (bytes, when) for the Services disk row; `serve` never walks or runs `du`.
+    let _ = std::fs::write(
+        ctx.state.with_file_name("worktrees.du"),
+        format!("{} {}", du(&ctx.worktrees), ctx.now),
+    );
     Ok(())
 }
 

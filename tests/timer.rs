@@ -265,8 +265,12 @@ fn services_rows_go_green_amber_and_red() {
     };
     let green = host(Fake::default())
         .reply("lsof ", "herdsman 1 u LISTEN\n")
-        .reply("df -k /", &df(200))
-        .reply("du -sk", "3145728\t/w\n");
+        .reply("df -k /", &df(200));
+    std::fs::write(
+        c.state.with_file_name("worktrees.du"),
+        format!("3221225472 {}", c.now - 240),
+    )
+    .unwrap();
     let all = rows(&c, &green);
     let names: Vec<_> = all.iter().map(|r| r.0.as_str()).collect();
     assert_eq!(
@@ -278,7 +282,7 @@ fn services_rows_go_green_amber_and_red() {
         assert_eq!(*tone, want, "{item}: {detail}");
     }
     assert_eq!(all[1].2, "ran 60s ago");
-    assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB");
+    assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB · 4m ago");
 
     stamp("check.at", 700);
     let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(15));
@@ -316,4 +320,30 @@ fn services_rows_go_green_amber_and_red() {
         page.contains("tick · <b class=r>failed: herdr: gone</b> → herdsman timer install"),
         "{page}"
     );
+}
+
+/// #160: a 10 s `du` never reaches a request: the page and the roles fragment answer at once; `check` stores the total.
+#[test]
+fn slow_du_never_blocks_the_board() {
+    struct SlowDu(Fake);
+    impl herdsman::runner::Runner for SlowDu {
+        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+            if prog == "du" {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+            self.0.run(prog, args)
+        }
+    }
+    let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
+    let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    for path in ["/", "/frag?id=roles&fleet=sendmeter"] {
+        let t = std::time::Instant::now();
+        let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), c.now);
+        assert!(t.elapsed().as_millis() < 500, "{path} took {:?}", t.elapsed());
+        assert!(String::from_utf8_lossy(&res).starts_with("HTTP/1.1 200"), "{path}");
+    }
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    assert!(du.ends_with(&format!(" {}", c.now)), "{du}");
 }
