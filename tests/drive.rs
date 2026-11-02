@@ -13,13 +13,7 @@ fn sha(p: &str) -> String {
 }
 
 fn setup(name: &str) -> herdsman::Ctx {
-    ctx(
-        &tmpdir(name),
-        &CONFIG.replace(
-            "integration = \"staging\"",
-            "integration = \"staging\"\ndriver = \"herdsman\"",
-        ),
-    )
+    ctx(&tmpdir(name), CONFIG)
 }
 
 fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
@@ -403,7 +397,7 @@ fn clean_reclaims_merged_lanes() {
 }
 
 #[test]
-fn paused_fleets_orch_driven_fleets_and_host_busy_are_no_ops() {
+fn paused_fleets_and_host_busy_are_no_ops() {
     let c = setup("drive-paused");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
@@ -414,14 +408,6 @@ fn paused_fleets_orch_driven_fleets_and_host_busy_are_no_ops() {
         herdsman::drive::last_pass(&c, "sendmeter"),
         None,
         "a paused fleet had no pass"
-    );
-    let orch = ctx(&tmpdir("drive-orch"), CONFIG);
-    assert_eq!(run(&orch, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    idle(&orch, &r);
-    assert_eq!(
-        run(&orch, &r, &["drive", "sendmeter"]),
-        (0, String::new()),
-        "an orch fleet is not driven"
     );
 
     let c = setup("drive-busy");
@@ -733,7 +719,7 @@ fn fanout(name: &str, extra: &str, ns: &[&str]) -> herdsman::Ctx {
         &tmpdir(name),
         &CONFIG.replace(
             "integration = \"staging\"",
-            &format!("integration = \"staging\"\ndriver = \"herdsman\"\n{extra}"),
+            &format!("integration = \"staging\"\n{extra}"),
         ),
     );
     let add = [&["queue", "sendmeter", "add"][..], ns].concat();
@@ -930,7 +916,7 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
     let dir = tmpdir("drive-label");
     let cfg = CONFIG.replace(
         "integration = \"staging\"",
-        "integration = \"staging\"\ndriver = \"herdsman\"\nmerge_label = \"merge-ready\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
     );
     let c = ctx(&dir, &cfg);
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");

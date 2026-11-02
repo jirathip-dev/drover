@@ -11,10 +11,6 @@ repo = "jirathip-dev/sendmeter"
 local = "/tmp/does-not-matter/sendmeter"
 integration = "staging"   # never main
 
-[fleet.sendmeter.role.orch]
-harness = "hermes"
-profile = "fleet-orch"
-
 [fleet.sendmeter.role.impl]
 harness  =  "hermes"    # toggled in tests
 profile = "fleet-impl"

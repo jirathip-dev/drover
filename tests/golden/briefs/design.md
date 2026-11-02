@@ -2,7 +2,7 @@
 
 # ROLE: DESIGNER
 
-The owner runs you directly; no orchestrator spawns or steers you.
+The owner runs you directly; no other agent spawns or steers you.
 
 ## Safety
 
