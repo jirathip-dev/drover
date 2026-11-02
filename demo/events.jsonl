@@ -48,3 +48,4 @@
 {"ts":1793424000,"fleet":"acme-api","issue":22,"type":"verdict","verdict":"FAIL","sha":"2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d","round":3,"body":"FAIL\n\nblocking: src/openapi.rs:41 the spec omits the /v1/orders cursor params\n"}
 {"ts":1793426000,"fleet":"acme-api","issue":22,"type":"verdict","verdict":"PASS","sha":"2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b","round":4,"body":"PASS\n\nnon-blocking: docs/api.md could link the spec\n"}
 {"ts":1793426100,"fleet":"acme-api","issue":22,"type":"needs-human","code":"ROUND_LIMIT","reason":"review rounds ran out (4/3)"}
+{"ts":1793429550,"fleet":"docs","type":"drive-pass","by":"auto","started":1793429550,"ended":1793429556,"at":"07:41","actions":[{"issue":10,"step":"start","outcome":"waiting","code":"HOST_BUSY","words":"Mac busy (load/cpu 4.60 > 2.5)"},{"issue":9,"step":"review","outcome":"waiting","code":"CI_NOT_GREEN","words":"waiting for CI"}]}
