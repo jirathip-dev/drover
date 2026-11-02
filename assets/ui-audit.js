@@ -56,6 +56,18 @@
   const VIEWS = {
     queue: () => tab('queue'),
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
+    // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
+    'queue-lanes': () => {
+      tab('queue');
+      const d = [...$$('#queue details.q')].find(d => d.querySelector('summary a')?.textContent === '#38');
+      if (!d) return early.push('no acme-web #38 row in the demo');
+      d.open = true;
+      d.scrollIntoView();
+      const ls = [...d.querySelectorAll('.qls>.ql')];
+      if (ls.length !== 3) early.push(`#38 lists ${ls.length} lanes, not 3`);
+      for (const l of ls) if (l.getBoundingClientRect().height !== 44 || getComputedStyle(l).textOverflow !== 'ellipsis') early.push(`lane "${l.textContent}": ${l.getBoundingClientRect().height}px, not one 44 px line with an ellipsis`);
+      if (ls.some(l => l.textContent.includes(' gone ') && l.matches('a'))) early.push('a gone lane is a link');
+    },
     // #139: the demo's acme-web #46 row, its ask decided by default, re-answered through [change] (3 long choices),
     // opened and moved to the top (a scrolled view shoots blank).
     'queue-change': () => {
@@ -290,7 +302,7 @@
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
   const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
-  const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
+  const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
   const seen = e => e.checkVisibility({ visibilityProperty: true });

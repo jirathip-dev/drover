@@ -762,6 +762,9 @@ setInterval(() => $$('.ask .cd').forEach(c => {
 document.addEventListener('click', async e => {
   if (e.target.closest('.qhelp')) return legend();
   if (e.target.closest('.cfg')) return config(e.target.closest('.cfg'));
+  // #205: a lane in an open Queue card opens its Lanes sheet in place; closing returns to the card.
+  const q = e.target.closest('a.ql'), ql = q && laneOf(q.dataset.agent);
+  if (q) { e.preventDefault(); return ql && open(ql); }
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
   if (b.classList.contains('lr')) return open(b.parentNode);
