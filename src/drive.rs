@@ -107,6 +107,9 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let red = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "failed";
         let n = s.issue.to_string();
+        if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
+            writeln!(out, "{fleet} #{n} label: {e:#}")?;
+        }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
         if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
