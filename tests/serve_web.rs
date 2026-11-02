@@ -956,11 +956,11 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
 fn pair_request_carries_the_optional_approve_hint() {
     let js = include_str!("../assets/serve.js");
     assert!(
-        js.contains("`Approve on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')"),
+        js.contains("`Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')"),
         "the Mac line, hint after ` · `"
     );
     assert!(
-        js.contains("el('p', 'm', `Approve"),
+        js.contains("el('p', 'm', `Waiting"),
         "`el` sets textContent: the hint is never HTML"
     );
     let request = |c: &herdsman::Ctx| {
