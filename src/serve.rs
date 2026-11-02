@@ -1066,7 +1066,7 @@ impl<'a> Server<'a> {
                     + &self.lanes_tab(ctx, cfg.as_ref(), &events, &st, paired),
             ),
             ("host", self.host_tab(ctx, cfg.as_ref(), &events)),
-            ("events", events_tab(ctx, cfg.as_ref(), &events, &st, all)),
+            ("events", events_tab(ctx, cfg.as_ref(), &events, all)),
         ])
     }
 
@@ -1074,7 +1074,7 @@ impl<'a> Server<'a> {
     fn part(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         let (events, cfg) = (read(&ctx.state).ok()?, Config::load(&ctx.config).ok());
         match q.get("id")?.as_str() {
-            "events" => Some(events_tab(ctx, cfg.as_ref(), &events, &fold(&events), false)),
+            "events" => Some(events_tab(ctx, cfg.as_ref(), &events, false)),
             "roles" => {
                 let (c, f) = (cfg?, q.get("fleet")?);
                 Some(roles(&c, f, c.fleet.get(f)?, self.addr.is_some(), &mtime(ctx)))
@@ -1175,7 +1175,7 @@ impl<'a> Server<'a> {
                     };
                     format!("PASS at {sha:.7}{stale} · {line} · {m}")
                 }
-                _ => format!("FAIL: {fail}"),
+                _ => format!("FAIL: {fail} · {line}"),
             };
             let merge = format!("<button name=op value=override data-confirm=\"Merge #{n} past the round limit?\">merge anyway</button>");
             let (merge, hid) = (if ok { merge.as_str() } else { "" }, hidden("", f, &mt));
@@ -1334,6 +1334,11 @@ impl<'a> Server<'a> {
                     s.unwrap_or_default()
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
+                let gh = format!(
+                    "<span><a href=\"https://github.com/{}/issues/{n}\">#{n}</a></span>",
+                    esc(&fc.repo)
+                );
+                let row = row.replacen(&format!("<span>#{n}</span>"), &gh, 1);
                 body += &match titles(ctx, f, n) {
                     Some(t) => row.replacen("</summary>", &format!("<span class=tl>{}</span></summary>", esc(&t)), 1),
                     None => row,
@@ -1889,18 +1894,33 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     Ok(())
 }
 
-/// `PR #11 · CI ✓ · rev PASS r1`, from the cached `herdsman pr` read only (never calls `gh`).
+/// #169: `[issue] [PR #M] [checks]` wherever an issue shows, from the caches only: `checks` is the PR's checks
+/// page, else the issue branch's latest run (`gh::run`, read by the tick), else none.
+fn links(ctx: &Ctx, repo: &str, fleet: &str, issue: u64, pr: Option<u64>) -> String {
+    let (gh, a) = (format!("https://github.com/{}", esc(repo)), |u: &str, t: &str| {
+        format!("[<a href=\"{u}\">{t}</a>]")
+    });
+    let mut l = vec![a(&format!("{gh}/issues/{issue}"), "issue")];
+    if let Some(m) = pr {
+        l.push(a(&format!("{gh}/pull/{m}"), &format!("PR #{m}")));
+        l.push(a(&format!("{gh}/pull/{m}/checks"), "checks"));
+    } else if let Some(u) = gh::cached_run(ctx, fleet, issue) {
+        l.push(a(&esc(&u), "checks"));
+    }
+    l.join(" ")
+}
+
+/// `[issue] [PR #11] [checks] · CI ✓ · rev PASS r1`, from the cached `herdsman pr` read only (never calls `gh`).
 fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> String {
     let pr = gh::cached_pr(ctx, fleet, issue);
-    let mut parts = vec![];
+    let n = pr["number"].as_u64();
+    let mut parts: Vec<String> = fc.map(|c| links(ctx, &c.repo, fleet, issue, n)).into_iter().collect();
     if pr.is_null() {
         parts.push("no PR read yet".to_string());
     } else {
-        let n = pr["number"].as_u64().unwrap_or_default();
-        parts.push(match fc {
-            Some(c) => format!("<a href=\"https://github.com/{}/pull/{n}\">PR #{n}</a>", esc(&c.repo)),
-            None => format!("PR #{n}"),
-        });
+        if fc.is_none() {
+            parts.push(format!("PR #{}", n.unwrap_or_default()));
+        }
         let ci = gh::ci(&gh::required(
             &pr["statusCheckRollup"],
             fc.map(|c| c.required_checks.as_slice()).unwrap_or_default(),
@@ -2005,7 +2025,7 @@ fn role_form(cfg: &Config, fleet: &str, role: &str, r: &Role, rw: bool, mt: &str
 /// Noise folded into one count per run of consecutive events unless `all`.
 const NOISE: &[&str] = &["clean", "notify-failed"];
 
-fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, all: bool) -> String {
+fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], all: bool) -> String {
     let repo = |fleet: &str| cfg.and_then(|c| c.fleet.get(fleet)).map(|f| f.repo.clone());
     let mut h = String::from("<h2><span>Last 50 events</span></h2>");
     let (mut rows, mut it) = (0, events.iter().rev().peekable());
@@ -2025,19 +2045,19 @@ fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, al
             );
             continue;
         }
-        let mut links = vec![];
-        if let (Some(r), Some(n)) = (repo(&e.fleet), e.issue) {
-            links.push(format!("<a href=\"https://github.com/{r}/issues/{n}\">issue</a>"));
-            if let Some(pr) = e.data.get("pr").map(|p| p.to_string().trim_matches('"').to_string()) {
-                links.push(format!("<a href=\"https://github.com/{r}/pull/{}\">PR</a>", esc(&pr)));
-            }
-            if let Some(b) = st.get(&(e.fleet.clone(), n)).and_then(|s| s.branch.as_deref()) {
-                links.push(format!(
-                    "<a href=\"https://github.com/{r}/actions?query=branch%3A{}\">runs</a>",
-                    esc(b)
-                ));
-            }
-        }
+        let gl = repo(&e.fleet).zip(e.issue).map_or(String::new(), |(r, n)| {
+            let pr = e
+                .data
+                .get("pr")
+                .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()));
+            links(
+                ctx,
+                &r,
+                &e.fleet,
+                n,
+                pr.or_else(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64()),
+            )
+        });
         let via = if e.str("via") == Some("web") {
             " <span class=m>(web)</span>"
         } else {
@@ -2047,7 +2067,7 @@ fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, al
             "<p class=ev><span class=m>{}</span> {}{via} {}</p>",
             age(ctx.now.saturating_sub(e.ts)),
             esc(&plain(e)),
-            links.join(" ")
+            gl
         );
     }
     if !all {

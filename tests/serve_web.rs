@@ -389,7 +389,7 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = get(&s, "/");
     assert!(
-        page.contains("pull/34\">PR #34</a> · CI <span class=g>✓</span>"),
+        page.contains("pull/34\">PR #34</a>] [<a href=\"https://github.com/jirathip-dev/sendmeter/pull/34/checks\">checks</a>] · CI <span class=g>✓</span>"),
         "{page}"
     );
     assert!(!r.called("gh"), "no gh call per page load: {:?}", r.calls.borrow());
@@ -647,7 +647,7 @@ fn page_fits_390px_without_horizontal_scroll() {
                 .contains("overflow-wrap:anywhere")
     );
     assert!(
-        html.contains("<details class=\"q\" data-q><summary><span>#12</span>"),
+        html.contains("<details class=\"q\" data-q><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"),
         "rows are details"
     );
     assert!(
@@ -768,12 +768,21 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "<details class=paused><summary><span>synergy · <span class=r>paused</span> · 1 lane (dead)</span></summary>"
     ));
     let syn = &queue[queue.find("class=paused").unwrap()..];
-    assert!(syn.contains("<span>#1039</span><span class=r>dead</span>"), "{syn}");
-    let dead_row = &syn[syn.find("<span>#1039</span>").unwrap()..];
+    assert!(
+        syn.contains(
+            "<span><a href=\"https://github.com/o/synergy-apps/issues/1039\">#1039</a></span><span class=r>dead</span>"
+        ),
+        "{syn}"
+    );
+    let dead_row = &syn[syn
+        .find("<span><a href=\"https://github.com/o/synergy-apps/issues/1039\">#1039</a></span>")
+        .unwrap()..];
     let dead_row = &dead_row[..dead_row.find("</details>").unwrap()];
     assert!(!dead_row.contains("<button"), "no action on a dead lane: {dead_row}");
     assert!(
-        queue.contains("<span>#17</span><span class=a>impl</span>"),
+        queue.contains(
+            "<a href=\"https://github.com/jirathip-dev/sendmeter/issues/17\">#17</a></span><span class=a>impl</span>"
+        ),
         "live lane stays impl"
     );
     assert!(
