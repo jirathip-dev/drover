@@ -41,6 +41,32 @@ herdsman was called `fleet` (#27). Only `herdsman migrate` moves `~/.config/flee
 hint on stderr (`hook` stays silent). Lanes export `HERDSMAN_LANE`; `FLEET_LANE` still arms
 the hook for one release, and `HERDSMAN_LANE` wins when both are set.
 
+## Module map
+
+Every module under `src/`, one job each. External tools go through one seam: `runner` (any program), `herdr` (every
+herdr argv) and `gh` (cached GitHub reads).
+
+| Module | Job |
+|---|---|
+| `cli` | clap CLI, `help --agent`, dispatch |
+| `lib` | `Ctx` (paths, clock); `ask`, `answer`, `asks` |
+| `config` | fleet.toml: load, validate, in-place edits that keep every other byte |
+| `events` | the append-only log, the state fold, notifiers |
+| `pipeline` | a fleet's stages and where each outcome goes ([pipeline.md](pipeline.md)) |
+| `queue` | `queue`, `next`, `board` |
+| `drive`, `timer` | one pass of the loop; the jobs that run it (`setup`, `timer`, `tick`) and the Services rows |
+| `spawn`, `harness/*` | `spawn`, `adopt`, `profiles sync`; one file per harness (claude, hermes, dsh) |
+| `gate` | `verdict` and `merge` |
+| `check` | `check` alerts, `clean`, `stop`, `kill`, `close`, the worktree budget |
+| `waiting` | what an idle lane waits on (`waiting`) |
+| `host`, `hosts` | host-load admission and live agents; multi-host placement ([hosts.md](hosts.md)) |
+| `access`, `usage` | a lane's account and MCP servers; account and provider usage (`accounts`) |
+| `hook` | the lanes' pre-tool hook |
+| `overlap` | conflict preview between open branches, `cap-check` |
+| `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |
+| `doctor`, `protection` | read-only host and branch-protection checks |
+| `runner`, `herdr`, `gh` | the seams to external programs |
+
 ## Code rules
 
 - **Format:** rustfmt with `max_width = 120` (`rustfmt.toml`); CI runs `cargo fmt --check`. The formatter decides

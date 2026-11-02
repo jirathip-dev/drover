@@ -115,10 +115,8 @@ lane can still run one directly.
 
 ## Drive
 
-Every fleet is driven by herdsman itself (#155: no orchestrator lane; `spawn <fleet> - orch` refuses
-`NO_ORCH`, and a leftover `driver` key is ignored, noted by `herdsman doctor`). `herdsman drive [fleet]`
-does one pass, from cron after `herdsman check` ([setup.md](setup.md)) or the board's **Drive now**
-(paired devices only). Per issue, at most one step a pass, through the same gates as the CLI:
+Every fleet is driven by herdsman itself. `herdsman drive [fleet]` does one pass, from cron after `herdsman check`
+([setup.md](setup.md)) or the board's **Drive now** (paired devices only). Per issue, at most one step a pass, through the same gates as the CLI:
 
 | State | Step |
 | --- | --- |

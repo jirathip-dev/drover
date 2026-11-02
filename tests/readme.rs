@@ -31,7 +31,35 @@ fn doc_files() -> Vec<PathBuf> {
 #[test]
 fn readme_is_short() {
     let n = readme().lines().count();
-    assert!(n <= 90, "README.md has {n} lines");
+    assert!(n <= 150, "README.md has {n} lines"); // #156: about 150 at most
+}
+
+/// #156: every command the README names (table and quick start) is in `herdsman help --agent`.
+#[test]
+fn readme_commands_are_in_help_agent() {
+    let help = Command::new(BIN).args(["help", "--agent"]).output().unwrap();
+    let help = String::from_utf8(help.stdout).unwrap();
+    let text = readme();
+    let table = text.lines().filter(|l| l.starts_with("| `"));
+    let cells = table.flat_map(|row| row[2..].split(" | ").next().unwrap().split(" / "));
+    let mut cmds: Vec<&str> = cells
+        .map(|c| c.trim_matches('`').split_whitespace().next().unwrap())
+        .collect();
+    cmds.extend(
+        text.lines()
+            .filter_map(|l| l.strip_prefix("herdsman ")?.split_whitespace().next()),
+    );
+    assert!(cmds.len() >= 20, "{cmds:?}");
+    for cmd in cmds {
+        let named = |l: &&str| {
+            l.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .any(|w| w == cmd)
+        };
+        assert!(
+            help.lines().filter(|l| l.contains("herdsman ")).any(|l| named(&l)),
+            "README names `{cmd}`, not in herdsman help --agent"
+        );
+    }
 }
 
 #[test]
@@ -115,10 +143,12 @@ fn quick_start_runs_as_written() {
         }
         c
     };
-    // `cargo install` is what built BIN; `serve` blocks, so it runs on its own below.
+    // `cargo install` is what built BIN; `serve` blocks, so it runs on its own below; `timer install` would load a
+    // real launchd/systemd job on this host.
     let script: String = block
         .lines()
         .filter(|l| !l.starts_with("cargo install") && !l.starts_with("herdsman serve"))
+        .filter(|l| !l.starts_with("herdsman timer"))
         .map(|l| format!("{l}\n"))
         .collect();
     let out = cmd("sh").args(["-e", "-c", &script]).output().unwrap();
