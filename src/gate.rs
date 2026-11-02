@@ -275,6 +275,38 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
+/// #198: the merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a
+/// facts line. Returns (subject, body, whether the summary was there).
+pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
+    let title = pr["title"].as_str().unwrap_or_default().trim();
+    let strip = |open: &str, close: char| {
+        let t = title.strip_prefix(open)?;
+        let rest = t.trim_start_matches(|c: char| c.is_ascii_digit());
+        (rest.len() < t.len()).then_some(rest)?.strip_prefix(close)
+    };
+    let title = strip("[#", ']').or_else(|| strip("#", ':')).unwrap_or(title).trim();
+    let num = pr["number"].as_u64().unwrap_or_default();
+    let human: Vec<&str> = (pr["body"].as_str().unwrap_or_default().lines())
+        .skip_while(|l| !l.trim().eq_ignore_ascii_case("## For humans"))
+        .skip(1)
+        .take_while(|l| !l.starts_with('#'))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let files = pr["files"].as_array().into_iter().flatten();
+    let src: i64 = (files.filter(|x| x["path"].as_str().is_some_and(|p| p.starts_with("src/"))))
+        .map(|x| x["additions"].as_i64().unwrap_or(0) - x["deletions"].as_i64().unwrap_or(0))
+        .sum();
+    let s = if rounds == 1 { "" } else { "s" };
+    let facts = format!("Closes #{issue} · {rounds} review round{s} · src {src:+} · PASS {sha:.7}");
+    let body = if human.is_empty() {
+        facts
+    } else {
+        format!("{}\n\n{facts}", human.join("\n"))
+    };
+    (format!("{title} (#{num})"), body, !human.is_empty())
+}
+
 /// `over` (`--owner-override`, #130) lifts only `ROUND_LIMIT`.
 pub fn merge(
     ctx: &Ctx,
@@ -354,20 +386,27 @@ pub fn merge(
         }
     };
     gh::forget_pr(ctx, fleet, issue);
-    ok(
-        r,
-        "gh",
-        &[
-            "pr",
-            "merge",
-            &num,
-            "-R",
-            &f.repo,
-            "--merge",
-            "--match-head-commit",
-            &head,
-        ],
-    )?;
+    let view = ["pr", "view", &num, "-R", &f.repo, "--json", "number,title,body,files"];
+    let info = json(r, "gh", &view).unwrap_or_else(|_| pr.clone());
+    let (subject, body, human) = merge_message(&info, issue, st.as_ref().map_or(0, |s| s.rounds), &head);
+    if !human {
+        let d = json!({"pr": num});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "no-human-summary", d),
+        )?;
+    }
+    let m = [
+        "--merge",
+        "--match-head-commit",
+        &head,
+        "--subject",
+        &subject,
+        "--body",
+        &body,
+    ];
+    ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     let mc = json(r, "gh", &["pr", "view", &num, "-R", &f.repo, "--json", "mergeCommit"])?;
     let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
