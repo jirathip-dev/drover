@@ -244,6 +244,23 @@ fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
     })
 }
 
+/// #199: the asking client's address. Behind `tailscale serve` every peer is loopback: then the forwarded address (the
+/// proxy appends it last) or the tailnet login; those headers count from a loopback peer only.
+fn client(head: &str) -> &str {
+    let peer = header(head, "x-peer").unwrap_or_default();
+    let fwd = header(head, "x-forwarded-for")
+        .and_then(|f| f.rsplit(',').next())
+        .map(str::trim);
+    let fwd = fwd
+        .or_else(|| header(head, "tailscale-user-login"))
+        .filter(|f| !f.is_empty());
+    peer.parse::<std::net::IpAddr>()
+        .is_ok_and(|p| p.is_loopback())
+        .then_some(fwd)
+        .flatten()
+        .unwrap_or(peer)
+}
+
 /// `application/x-www-form-urlencoded` (also the query string) into a map.
 fn form(s: &str) -> BTreeMap<String, String> {
     let dec = |v: &str| {
@@ -758,13 +775,20 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            ("POST", "/pair/request") => match devices::request(ctx, &kind(head), header(head, "x-peer").unwrap_or_default()) {
+            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out.
+            ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
+                .and_then(|()| devices::request(ctx, &kind(head), client(head)))
+            {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
                     ("200 OK", "text/plain", format!("{code}\n{}\n", hint.replace("{code}", &code)).into_bytes())
                 }
-                Ok(None) => ("429 Too Many Requests", "text/plain", text("3 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Err(e) => fail(e),
+            },
+            ("POST", "/pair/cancel") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default()) {
+                Ok(()) => ("200 OK", "text/plain", text("pairing request cancelled\n")),
                 Err(e) => fail(e),
             },
             ("POST", "/pair/claim") => match self.device(ctx, head) {
@@ -1130,6 +1154,12 @@ impl<'a> Server<'a> {
             if root.is_empty() { " data-root=\"\"" } else { "" },
             if demo { " data-demo=1" } else { "" }
         );
+        // #199: iOS keeps Safari's and the home-screen app's cookies apart.
+        let msg = if !paired && !self.pairb().is_empty() && devices::load(ctx).iter().any(|d| d.code.is_none()) {
+            msg + "<p class=m>Safari and the home-screen app pair separately</p>"
+        } else {
+            msg
+        };
         let msg = if demo {
             "<p class=\"msg a\">Demo with fake data. Install herdsman to run your own.</p>".to_string()
         } else {

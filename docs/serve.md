@@ -93,10 +93,13 @@ phone** (header, blocked cards, the sheet) POSTs `/pair/request`, which shows a 
 an HttpOnly, Secure, SameSite=Strict `hd=` cookie with a random token for 10 minutes. The token pairs
 nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
 use; `serve pending` lists requests). The approval is logged, so the waiting page's live Events frag
-changes and the page POSTs `/pair/claim`, which keeps the same cookie for a year. At most 3 requests
-are open, 2 per peer address, and a new code never repeats an open one. Only the token's SHA-256 is kept, in `<state>/serve/devices.json`
+changes and the page POSTs `/pair/claim`, which keeps the same cookie for a year. At most 4 requests
+are open, 2 per peer address (behind `tailscale serve`, a loopback peer, the `X-Forwarded-For` address or
+`Tailscale-User-Login`; trusted from loopback only), and a new code never repeats an open one. A re-tap of
+Pair replaces the browser's own open request, and the panel's `[cancel]` (`/pair/cancel`) drops it. Only the token's SHA-256 is kept, in `<state>/serve/devices.json`
 (0600); the Host tab's ALERTS group lists paired devices with a Remove button.
-The panel reads `Approve on the Mac: herdsman serve approve <code>`. An optional `[serve] approve_hint`
+The panel reads `Waiting for approval on the Mac: herdsman serve approve <code>`. An unpaired page,
+while any device is paired, adds "Safari and the home-screen app pair separately" (iOS keeps their cookies apart). An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.
 `approve_hint = "or send 'pair {code}' to the owner"`; `/pair/request` returns it as a second line and
 the page sets it as text, never HTML.
