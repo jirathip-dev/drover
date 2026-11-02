@@ -110,9 +110,10 @@ pub fn waiting_on(
     }
     let handed = |h: &str| events.iter().any(|e| e.is("pushed", f, n) && e.str("sha") == Some(h));
     // #102: a PASSed PR conflicting with / behind integration gets an update lane; its pushed head is reviewed first.
+    let checks = gh::required(&pr["statusCheckRollup"], req);
     let how = match (pr["mergeable"].as_str(), pr["mergeStateStatus"].as_str()) {
         (Some("CONFLICTING"), _) => "conflicts with",
-        (_, Some("BEHIND")) => "is behind",
+        (_, Some("BEHIND")) => "behind",
         _ => "",
     };
     // #148: a PASSed item blocked by CI, mergeability or host load is retried as ready on every pass.
@@ -150,11 +151,8 @@ pub fn waiting_on(
             )
         }
         "ready" if !how.is_empty() => {
-            let what = format!(
-                "conflict: PR #{} {how} {}",
-                pr["number"],
-                pr["baseRefName"].as_str().unwrap_or("?")
-            );
+            let base = pr["baseRefName"].as_str().unwrap_or("?");
+            let what = format!("PASS · {how} {base} · catching up next pass (≤ 5 min)");
             let b = to(gate, "conflict");
             w(
                 "drive",
@@ -163,10 +161,22 @@ pub fn waiting_on(
                 cmd("spawn", &format!(" {b} --supersede --update")),
             )
         }
-        "ready" if gh::ci(&gh::required(&pr["statusCheckRollup"], req)) == "green" => {
-            w("drive", "PASS + green, waiting for merge", s.last_ts, cmd("merge", ""))
+        // #212: CI read live by the fast step, which merges a green PASS within a minute.
+        "ready" if gh::ci(&checks) == "green" => w(
+            "drive",
+            "PASS · CI green · merging within 1 min",
+            s.last_ts,
+            cmd("merge", ""),
+        ),
+        "ready" => {
+            let all = checks.as_array().map(Vec::as_slice).unwrap_or_default();
+            let n = all.iter().filter(|c| gh::check_state(c) == "green").count();
+            let what = match all.iter().find(|c| gh::check_state(c) == "failed") {
+                Some(c) => format!("PASS · CI red: {}", gh::check_name(c)),
+                None => format!("PASS · CI running {n}/{}", all.len()),
+            };
+            w("ci", &what, s.last_ts, None)
         }
-        "ready" => w("ci", "waiting for CI", s.last_ts, None),
         "stale" => w(
             "drive",
             "no verdict for the PR head: review again",
@@ -192,12 +202,11 @@ pub fn waiting_on(
                         head.unwrap_or_default().0
                     )
                 });
-                w(
-                    "drive",
-                    "verdict written, waiting for drive to record it",
-                    s.last_ts,
-                    next,
-                )
+                let what = match next {
+                    Some(_) => "review done · recording within 1 min",
+                    None => "verdict written, waiting for drive to record it",
+                };
+                w("drive", what, s.last_ts, next)
             }
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },
@@ -222,11 +231,19 @@ pub fn waiting_on(
         "impl" | "fix"
             if !pushed.is_empty() && !s.reviewed(pushed) && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
         {
-            let what = format!(
+            let mut what = format!(
                 "pushed {}{}, waiting for drive to spawn review",
                 if s.rounds > 0 { "fix " } else { "" },
                 &pushed[..7.min(pushed.len())]
             );
+            // #212: drive's last try at this review was refused: say why in plain words.
+            let tried = events.iter().rfind(|e| e.is("driven", f, n));
+            let refused =
+                |e: &&Event| e.str("step") == Some("review") && !matches!(e.str("code"), None | Some("EXIT" | "ERROR"));
+            if let Some(e) = tried.filter(refused) {
+                let why = crate::drive::words(e.str("code"), "review", e.str("result").unwrap_or_default());
+                what = format!("waiting for a reviewer slot: {why}");
+            }
             w(
                 "drive",
                 &what,
@@ -371,6 +388,11 @@ pub fn scan(
             w.what = format!("PASS, PR lacks label `{l}`, so the full CI has not run");
         }
         w.what = w.what.replace("for drive", "for drive (next pass ≤ 5 min)");
+        // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
+        let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
+        if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {
+            w.what += &format!(" · checked {} ago", age(ctx.now - t));
+        }
         // #83: a paused fleet's lane with no pane and a clean, pushed worktree is parked until `resume`.
         let safe = || wt.is_some_and(|wt| crate::spawn::dirty(r, std::path::Path::new(wt)).is_none());
         if f.paused

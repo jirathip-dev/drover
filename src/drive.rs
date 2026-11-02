@@ -93,7 +93,7 @@ thread_local! {
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
-fn words(code: Code, step: &str, result: &str) -> String {
+pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
     let why = result.split_once(": ").map_or(result, |p| p.1);
     let why = why.split("; retry later").next().unwrap_or(why);
     match code {
@@ -191,7 +191,8 @@ fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &Path, only: Optio
     Ok(())
 }
 
-/// One pass over every fleet (or `only`), under `<state dir>/drive.lock`; `manual`: a press.
+/// One pass over every fleet (or `only`), under `<state dir>/drive.lock`; `manual`: a press. #212 `fast`: verdicts
+/// and merges only, PRs read afresh, under `drive-fast.lock`, so a slow pass starting lanes never holds it up.
 pub fn drive(
     ctx: &Ctx,
     cfg: &Config,
@@ -199,11 +200,15 @@ pub fn drive(
     out: &mut dyn Write,
     only: Option<&str>,
     manual: bool,
+    fast: bool,
 ) -> Result<()> {
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
-    let _ = std::fs::write(ctx.state.with_file_name("drive.at"), ctx.now.to_string());
-    let lock = state_dir(ctx).join("drive.lock");
+    let i = usize::from(fast);
+    gh::FORCE.set(fast);
+    let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
+    let _ = std::fs::write(stamp, ctx.now.to_string());
+    let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
     let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
         if manual {
             return wait(ctx, r, out, &lock, only);
@@ -234,7 +239,7 @@ pub fn drive(
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
     for name in &fleets {
-        match pass(ctx, cfg, r, out, name) {
+        match pass(ctx, cfg, r, out, name, fast) {
             Ok(go) => {
                 start &= go;
                 due.push(*name);
@@ -242,38 +247,44 @@ pub fn drive(
             Err(e) => fail(name, e),
         }
     }
-    for name in due {
+    for name in due.into_iter().filter(|_| !fast) {
         match starts(ctx, cfg, r, out, name, start) {
             Ok(go) => start = go,
             Err(e) => fail(name, e),
         }
     }
     for name in fleets {
-        let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+        let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
+        if !fast {
+            let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+        } else if acts.is_empty() {
+            continue; // a fast step that did nothing logs no pass
+        }
         // #166: one `drive-pass` per fleet and pass, manual or automatic: the board's result line.
         let end = crate::now();
         let (by, at) = (
-            if manual { "manual" } else { "auto" },
+            ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default()});
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res
 }
 
 /// One fleet: each item's due step, reviews first. Each spawn samples the host afresh; false when a spawn met a
-/// busy host or full disk, so no fleet starts new work this pass.
-fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
+/// busy host or full disk, so no fleet starts new work this pass. `fast`: verdicts and merges only (#212).
+fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, fast: bool) -> Result<bool> {
+    let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
     let agents = host::agents(r)?;
-    let f = cfg.fleet(fleet)?;
     let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
-    if handoff(ctx, cfg, out, fleet, &events, &waits)? {
+    if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
-    let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
+    let preview = || crate::overlap::preview(ctx, cfg, r, fleet, &events).ok();
+    let conflicts = (!fast).then(preview).flatten().unwrap_or_default();
     // #173: a review is a spawn of any check stage's role, not only `rev`.
     let rev = |w: &Waiting| {
         w.next_cmd
@@ -293,6 +304,9 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
+        // #212: the fast and slow steps never act on one issue at once.
+        let lock = state_dir(ctx).join(format!("drive-{fleet}-{}.lock", s.issue));
+        let Some(_mine) = take(r, &lock, fleet) else { continue };
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         let n = s.issue.to_string();
@@ -325,6 +339,9 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
                 ("spawn", _) => "respawn",
                 (v, _) => v,
             };
+            if fast && !matches!(step, "verdict" | "merge") {
+                continue;
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
@@ -352,10 +369,10 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
                 };
             }
             // #214: a merge that conflicts (known before, or failed on it) gets its `--update` lane instead.
-            if merge && conflicted(fleet, code) {
+            if merge && !fast && conflicted(fleet, code) {
                 let code = update_lane(ctx, cfg, r, out, &events, fleet, s.issue)?;
                 go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
-            } else if merge && code.is_none() {
+            } else if merge && !fast && code.is_none() {
                 updated = true;
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
                     writeln!(out, "{fleet} auto-update: {e:#}")?;
@@ -366,7 +383,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             writeln!(out, "{fleet} #{n} no-action: {}", w.what)?;
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
-        } else if s.state == "ready" && ci == "failed" {
+        } else if !fast && s.state == "ready" && ci == "failed" {
             // Red CI after a PASS is a FAIL at the same head (no new round), the failed checks as the finding.
             let head = pr["headRefOid"].as_str().unwrap_or_default();
             let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
@@ -376,8 +393,8 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
         }
     }
-    // #214: clean catch-ups run every pass, not only after a merge.
-    if !updated {
+    // #214: clean catch-ups run every slow pass, not only after a merge.
+    if !updated && !fast {
         if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
             writeln!(out, "{fleet} auto-update: {e:#}")?;
         }

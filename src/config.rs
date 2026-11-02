@@ -205,6 +205,9 @@ pub struct Limits {
     pub ask_default_minutes: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
+    /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
+    pub fast_secs: u64,
+    pub slow_secs: u64,
 }
 
 impl Default for Limits {
@@ -221,6 +224,8 @@ impl Default for Limits {
             effort: None,
             ask_default_minutes: 30,
             idle_reap_minutes: 10,
+            fast_secs: 60,
+            slow_secs: 300,
         }
     }
 }

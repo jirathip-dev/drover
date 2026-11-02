@@ -183,15 +183,15 @@ fn every_case_has_its_who_what_and_next_command() {
         (
             4,
             "drive",
-            "PASS + green, waiting for merge",
+            "PASS · CI green · merging within 1 min",
             t + 20,
             s("merge sendmeter 4"),
         ),
-        (5, "ci", "waiting for CI", t + 20, None),
+        (5, "ci", "PASS · CI running 0/1", t + 20, None),
         (
             6,
             "drive",
-            "verdict written, waiting for drive (next pass ≤ 5 min) to record it",
+            "review done · recording within 1 min",
             t + 10,
             s(&format!(
                 "verdict sendmeter 6 PASS --sha {} --file {}",
@@ -377,11 +377,8 @@ fn idle_lanes_render_their_reason() {
             "a",
             "idle · review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round (24m)",
         ),
-        ("a", "idle · PASS + green, waiting for merge (24m)"),
-        (
-            "a",
-            "idle · verdict written, waiting for drive (next pass ≤ 5 min) to record it (24m)",
-        ),
+        ("a", "idle · PASS · CI green · merging within 1 min (24m)"),
+        ("a", "idle · review done · recording within 1 min (24m)"),
         ("a", "idle · idle without pushing (check the pane) (25m)"),
         ("m", "idle · nothing to do (merged): clean me (24m)"),
     ] {
