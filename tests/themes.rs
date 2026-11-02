@@ -42,7 +42,8 @@ fn default_theme_is_farm() {
         get(&c, &r, "/theme/scene.svg").starts_with("HTTP/1.1 404 "),
         "farm draws its scene in herd.js"
     );
-    assert!(get(&c, &r, "/").contains("<p class=kv>theme <b>farm</b></p>"));
+    assert!(get(&c, &r, "/")
+        .contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>"));
 }
 
 #[test]
@@ -51,7 +52,8 @@ fn lookup_is_user_then_built_in_then_farm() {
     let (c, r) = server(Some("kitchen"), &[]);
     assert_eq!(body(&get(&c, &r, "/theme/theme.json")), KITCHEN);
     assert_eq!(body(&get(&c, &r, "/theme/scene.svg")), KITCHEN_SCENE);
-    assert!(get(&c, &r, "/").contains("<p class=kv>theme <b>kitchen</b></p>"));
+    assert!(get(&c, &r, "/")
+        .contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>"));
     // A user theme named like a built-in wins, file by file; what it lacks is the built-in's.
     let own = r#"{"poses":{"working":"w"}}"#;
     let (c, r) = server(Some("kitchen"), &[("kitchen", "theme.json", own)]);
@@ -85,7 +87,9 @@ fn invalid_theme_json_falls_back_to_farm_with_a_host_warning() {
         assert_eq!(body(&get(&c, &r, "/theme/theme.json")), FARM, "{name}");
         assert_eq!(body(&get(&c, &r, "/theme/sprites.svg")), FARM_SPRITES, "{name}");
         let page = get(&c, &r, "/");
-        let warn = format!("<p class=kv>theme <b class=a>farm</b>: `{name}` has no valid theme.json</p>");
+        let warn = format!(
+            "<p class=gr data-t=a><span class=k>theme</span><span class=w><b class=a>farm</b> <span class=mt>`{name}` has no valid theme.json</span></span></p>"
+        );
         assert_eq!(page.matches(&warn).count(), 1, "{name}: one warning row");
     }
 }
