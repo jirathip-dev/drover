@@ -14,7 +14,17 @@ const WORDS: [&str; 7] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 8] = [
+const EXCEPTIONS: [(&str, &str, &str); 10] = [
+    (
+        "assets/deny_commands.toml",
+        "or ask the conductor.",
+        "#216: the owner's verbatim NO_CONTAINERS message",
+    ),
+    (
+        "docs/lanes.md",
+        "or ask the conductor.",
+        "#216: quotes the owner's verbatim NO_CONTAINERS message",
+    ),
     (
         "assets/herd.js",
         "jirathip-dev/corral",

@@ -1,4 +1,5 @@
 //! Claude `PreToolUse` / Hermes `pre_tool_call` hook: the tool guard of `herdsman help --agent`.
+use crate::config::Deny;
 use serde_json::{json, Value};
 
 pub struct Policy {
@@ -7,6 +8,8 @@ pub struct Policy {
     pub paths: Vec<String>,
     /// Reviewer lane: read-only (no edits but `verdict.md`, no commits, no pushes).
     pub reviewer: bool,
+    /// #216: the fleet's `deny_commands`.
+    pub deny: Vec<Deny>,
 }
 
 /// Claude and Hermes file-writing tools.
@@ -61,6 +64,9 @@ fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if let Some(d) = denied(cmd, &p.deny) {
+        return Some(d.reason());
+    }
     let seg_breaks: &[char] = &[';', '|', '&', '\n', '(', ')', '`'];
     for seg in cmd.split(seg_breaks) {
         let toks: Vec<String> = seg
@@ -87,6 +93,34 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// Words that run the next word as a command (`sh -c`, `sudo`, `env`, …); `-flags` and `VAR=…` after them are skipped.
+const WRAPPERS: &[&str] = &[
+    "env", "sudo", "exec", "command", "nohup", "time", "xargs", "sh", "bash", "zsh",
+];
+
+/// #216: the first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past
+/// wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment.
+pub fn denied<'a>(cmd: &str, deny: &'a [Deny]) -> Option<&'a Deny> {
+    cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
+        let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
+        let mut i = 0;
+        while let Some(w) = t
+            .get(i)
+            .filter(|w| w.contains('=') || w.starts_with('-') || WRAPPERS.contains(w))
+        {
+            if let Some(d) = deny.iter().find(|d| d.cmd().ends_with('=') && w.starts_with(d.cmd())) {
+                return Some(d);
+            }
+            i += 1;
+        }
+        let (first, rest) = t.get(i..)?.split_first()?;
+        deny.iter().find(|d| {
+            let mut e = d.cmd().split_whitespace();
+            e.next() == first.rsplit('/').next() && e.enumerate().all(|(j, w)| rest.get(j) == Some(&w))
+        })
+    })
 }
 
 fn gh(t: &[&str]) -> Option<String> {

@@ -2411,6 +2411,10 @@ fn config_sheet(
         ),
         ("serial paths", list(&fc.serial_paths)),
         (
+            "deny commands",
+            list(&fc.deny(l).iter().map(|d| d.cmd().to_string()).collect::<Vec<_>>()),
+        ),
+        (
             "serial",
             format!(
                 "{} at a time · label 🔒{}",
@@ -2559,6 +2563,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
             true,
         ),
         "lane-dead" => ("✗", "r", format!("lane gone{r}"), true),
+        "hook-denied" => ("!", "a", format!("hook denied · {}", s("rule")), false),
         "blocked" | "driven" => {
             let mut b = e.clone();
             b.data.entry("result").or_insert_with(|| e.data["reason"].clone());

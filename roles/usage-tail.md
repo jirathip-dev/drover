@@ -49,6 +49,7 @@ UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any vis
 Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
 `gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and Hermes
 profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. `herdsman spawn … design` is owner-only: denied from every lane; never in verdict or merge.
+The hook also refuses `deny_commands` (default: containers: docker, colima, orb, podman, `supabase start`… → `REFUSED NO_CONTAINERS`).
 Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` exports the first uncapped one as `CLAUDE_CODE_OAUTH_TOKEN`;
 an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. MCP: only the role's `mcp` (default none).
 
