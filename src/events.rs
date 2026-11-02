@@ -258,6 +258,7 @@ pub const PASSIVE: &[&str] = &[
     "lane-kept",
     "decision-redelivered",
     "labelled",
+    "build-cloned",
     "unlabelled",
 ];
 

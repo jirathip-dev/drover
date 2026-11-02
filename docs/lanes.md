@@ -31,8 +31,13 @@ herdsman clean --yes                  # reclaim merged or closed-issue lanes
 A fleet's `env` table is exported into every lane's shell. Share one build cache per fleet instead of
 one per lane, e.g. `[fleet.herdsman.env] CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman"` (cargo's
 lock makes it safe; lanes queue on it). Node fleets: pnpm's store is already shared; for npm set
-`npm_config_cache`. `clone_node_modules = true` APFS-clones (`cp -cR`) the local checkout's
-`node_modules` into a new lane when `package-lock.json` and `pnpm-lock.yaml` match.
+`npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
+folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
+for `target`, `package-lock.json` and `pnpm-lock.yaml` for any other folder. It runs once the lane has
+started and logs `build-cloned {dirs, secs, errors}`. With no clone available (another volume; Linux
+without reflinks) it skips and logs the error, never a full copy. A clone costs about 0 disk until
+written, though `du` and the Host disk row still count it at full size. `clone_node_modules = true` is
+the old spelling of `clone_build = ["node_modules"]`, kept for one release.
 
 `herdsman close <agent>` closes the pane of a herdr agent that is not a herdsman lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`

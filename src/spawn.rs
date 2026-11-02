@@ -311,10 +311,41 @@ pub fn changes(st: &str) -> usize {
 }
 
 /// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
-pub fn lockfiles_match(local: &Path, wt: &Path) -> bool {
-    let locks = ["package-lock.json", "pnpm-lock.yaml"];
+pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     let read = |dir: &Path, l: &str| std::fs::read(dir.join(l)).ok();
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
+}
+
+/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, else the package ones);
+/// the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within
+/// one; elsewhere `--reflink=always` fails instead.
+pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+    let (t, mut done, mut errs) = (std::time::Instant::now(), vec![], vec![]);
+    for d in dirs {
+        let locks: &[&str] = if d == "target" {
+            &["Cargo.lock"]
+        } else {
+            &["package-lock.json", "pnpm-lock.yaml"]
+        };
+        let src = local.join(d);
+        if !src.is_dir() || !lockfiles_match(locks, local, wt) {
+            continue;
+        }
+        let (src, dst) = (src.to_string_lossy(), wt.to_string_lossy());
+        let res = match cfg!(target_os = "macos") {
+            true if dev(local) != dev(wt) => Err(anyhow::anyhow!("another volume, no clone")),
+            true => ok(r, "cp", &["-cR", &src, &dst]),
+            false => ok(r, "cp", &["-R", "--reflink=always", &src, &dst]),
+        };
+        match res {
+            Ok(_) => done.push(d),
+            Err(e) => errs.push(format!("{d}: {e:#}")),
+        }
+    }
+    let secs = t.elapsed().as_secs();
+    (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
@@ -468,6 +499,7 @@ pub fn spawn(
     }
 
     let local = f.local_path().to_string_lossy().into_owned();
+    let reopen = p.worktree.exists();
     let mut sha = None;
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, r, f, fleet, issue, true)?;
@@ -477,13 +509,7 @@ pub fn spawn(
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
         let open = herdr::worktree_open_argv(&local, &wt);
-        let reopen = p.worktree.exists();
         let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
-        if f.clone_node_modules && !reopen && lockfiles_match(&f.local_path(), &p.worktree) {
-            if let Err(e) = ok(r, "cp", &["-cR", &format!("{local}/node_modules"), &wt]) {
-                eprintln!("clone_node_modules: {e:#}");
-            }
-        }
         if role == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
@@ -555,6 +581,19 @@ pub fn spawn(
         d["sha"] = json!(h);
     }
     event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
+
+    // #185: after the lane starts, so the clone never delays it; a failure is logged and the spawn stands.
+    let dirs: Vec<String> = f
+        .clone_build
+        .iter()
+        .cloned()
+        .chain(f.clone_node_modules.then(|| "node_modules".into()))
+        .collect();
+    if !reopen {
+        if let Some(d) = clone_build(r, &dirs, &f.local_path(), &p.worktree) {
+            event("build-cloned", d)?;
+        }
+    }
     let confirmed = kicked?;
     // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
     if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {

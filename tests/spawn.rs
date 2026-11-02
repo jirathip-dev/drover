@@ -2,7 +2,7 @@
 mod common;
 use common::*;
 use herdsman::events::{fold, read};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn plan(c: &herdsman::Ctx, r: &Fake, role: &str) -> Value {
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", role, "--dry-run", "--json"]);
@@ -112,7 +112,7 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     let (local, wt) = (d.join("local"), d.join("wt"));
     std::fs::create_dir_all(&local).unwrap();
     std::fs::create_dir_all(&wt).unwrap();
-    let m = || herdsman::spawn::lockfiles_match(&local, &wt);
+    let m = || herdsman::spawn::lockfiles_match(&["package-lock.json", "pnpm-lock.yaml"], &local, &wt);
     assert!(!m(), "no lockfile anywhere is no match");
     std::fs::write(local.join("package-lock.json"), "a").unwrap();
     assert!(!m(), "missing in the lane");
@@ -122,6 +122,78 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     assert!(!m(), "a lockfile only the lane has");
     std::fs::write(local.join("pnpm-lock.yaml"), "c").unwrap();
     assert!(!m(), "differing lockfiles");
+}
+
+/// #185: `clone_build` clones `target` on a matching `Cargo.lock` only; a failed clone is logged, never retried as a copy.
+#[test]
+fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
+    let d = tmpdir("clone-build");
+    let (local, wt) = (d.join("local"), d.join("wt"));
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    std::fs::write(wt.join("Cargo.lock"), "b").unwrap();
+    let dirs = ["target".to_string(), "node_modules".into()];
+    let clone = |r: &Fake| herdsman::spawn::clone_build(r, &dirs, &local, &wt);
+    let r = Fake::default().reply("cp ", "");
+    assert_eq!(clone(&r), None, "mismatch: no clone");
+    assert!(!r.called("cp "));
+    std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
+    let d = clone(&r).unwrap();
+    assert_eq!((d["dirs"].clone(), d["errors"].clone()), (json!(["target"]), json!([])));
+    let calls = r.calls.borrow();
+    assert_eq!(calls.len(), 1, "node_modules has no lockfile: {calls:?}");
+    assert!(calls[0].ends_with(&format!(" {} {}", local.join("target").display(), wt.display())));
+    let flag = if cfg!(target_os = "macos") {
+        "cp -cR "
+    } else {
+        "cp -R --reflink=always "
+    };
+    assert!(calls[0].starts_with(flag), "{}", calls[0]);
+    let d = clone(&Fake::default()).unwrap();
+    assert_eq!(d["dirs"], json!([]));
+    assert!(d["errors"][0].as_str().unwrap().starts_with("target: "), "{d}");
+}
+
+/// #185: a reopened worktree keeps its own build folders.
+#[test]
+fn reopen_spawn_clones_no_build_folder() {
+    let d = tmpdir("clone-reopen");
+    let local = d.join("local");
+    let cfg = CONFIG
+        .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
+        .replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\nclone_build = [\"target\"]",
+        );
+    let c = ctx(&d, &cfg);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree open",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run", "{}")
+        .reply("herdr agent start", "{}")
+        .reply("herdr pane send-keys w9:p1 Enter", "{}")
+        .reply("cp ", "");
+    run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!r.called("cp "));
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "spawn") && !ev.iter().any(|e| e.kind == "build-cloned"));
 }
 
 #[test]
