@@ -19,14 +19,29 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SW: &str = include_str!("../assets/sw.js");
+macro_rules! th {
+    ($f:literal, $t:expr) => {
+        (
+            concat!("themes/", $f),
+            $t,
+            include_bytes!(concat!("../assets/themes/", $f)),
+        )
+    };
+}
 /// #57: served under `/a/<VER>/` as immutable (the SW precaches them); the page links them.
 const ASSETS: &[(&str, &str, &[u8])] = &[
     ("serve.css", "text/css", include_bytes!("../assets/serve.css")),
     ("herd.css", "text/css", include_bytes!("../assets/herd.css")),
     ("serve.js", "text/javascript", include_bytes!("../assets/serve.js")),
     ("herd.js", "text/javascript", include_bytes!("../assets/herd.js")),
-    ("horses.svg", "image/svg+xml", include_bytes!("../assets/horses.svg")),
+    // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
+    th!("farm/sprites.svg", SVG),
+    th!("farm/theme.json", JSON),
+    th!("kitchen/sprites.svg", SVG),
+    th!("kitchen/theme.json", JSON),
+    th!("kitchen/scene.svg", SVG),
 ];
+const SVG: &str = "image/svg+xml";
 /// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
@@ -41,7 +56,7 @@ const FILES: &[(&str, &str, &[u8])] = &[
 /// FNV-1a over the assets at build time: their `/a/<hash8>/` path.
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
-    while k < 5 {
+    while k < ASSETS.len() {
         let b = ASSETS[k].2;
         while i < b.len() {
             h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
@@ -702,6 +717,10 @@ impl<'a> Server<'a> {
                 let weather = form(query).get("weather").filter(|_| loopback).cloned();
                 self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, j.to_string().into_bytes()))
             }
+            ("GET", p) if p.starts_with("/theme/") => match THEME.iter().find(|f| p == format!("/theme/{f}")) {
+                Some(f) => theme(ctx, f).0.map_or(("404 Not Found", "text/plain", text("not in this theme\n")), |b| ("200 OK", if f.ends_with("json") { JSON } else { SVG }, b)),
+                None => ("404 Not Found", "text/plain", text("not a theme file\n")),
+            },
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
                 let a = ASSETS.iter().find(|a| p == format!("/a/{VER:08x}/{}", a.0)).inspect(|_| cache = "public, max-age=31536000, immutable");
@@ -1659,6 +1678,17 @@ impl<'a> Server<'a> {
                 &format!("<b class={t}>{}</b>{}", esc(d), fix[usize::from(*t != "g")]),
             );
         }
+        // #172: the Herd's theme; amber when its theme.json is invalid (farm shows).
+        let (_, name, ok) = theme(ctx, "theme.json");
+        let bad = format!(
+            "<b class=a>farm</b> <span class=mt>`{}` has no valid theme.json</span>",
+            esc(&name)
+        );
+        s += &if ok {
+            kv("theme", "g", &format!("<b>{}</b>", esc(&name)))
+        } else {
+            kv("theme", "a", &bad)
+        };
         if let Some(c) = cfg.filter(|c| !c.accounts.names.is_empty()) {
             let capped = |a: &&String| crate::access::capped_until(c, events, a, ctx.now).is_some();
             let all = c.accounts.names.len();
@@ -1861,6 +1891,31 @@ impl Runner for Canned {
     fn sleep(&self, _: u64) {}
 }
 
+/// #172: the files a theme folder may hold; `/theme/<file>` serves nothing else.
+const THEME: [&str; 3] = ["sprites.svg", "theme.json", "scene.svg"];
+/// The active theme's `file` (`<config dir>/themes/<name>/`, then the built-in `<name>`, then farm's), the theme's
+/// name and whether its theme.json parses; it does not (or no such theme) → farm.
+fn theme(ctx: &Ctx, file: &str) -> (Option<Vec<u8>>, String, bool) {
+    let name = Config::load(&ctx.config)
+        .ok()
+        .and_then(|c| c.serve.theme)
+        .unwrap_or_else(|| "farm".into());
+    let get = |n: &str, f: &str| {
+        let own = ctx.config.with_file_name("themes").join(n).join(f);
+        let built = ASSETS
+            .iter()
+            .find(|a| a.0 == format!("themes/{n}/{f}"))
+            .map(|a| a.2.to_vec());
+        (!n.contains(['/', '\\', '.']))
+            .then(|| std::fs::read(own).ok())
+            .flatten()
+            .or(built)
+    };
+    let ok = get(&name, "theme.json").is_some_and(|j| serde_json::from_slice::<serde_json::Map<_, _>>(&j).is_ok());
+    let n = if ok { name.as_str() } else { "farm" };
+    (get(n, file).or_else(|| get("farm", file)), name, ok)
+}
+
 /// `serve --export <dir> [--demo]` (#39, docs/serve.md): the page and its files as static files with relative URLs.
 pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> Result<()> {
     let canned = if demo {
@@ -1900,7 +1955,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         page
     };
     std::fs::create_dir_all(dir.join("lane"))?;
-    std::fs::create_dir_all(dir.join(&v))?;
+    std::fs::create_dir_all(dir.join("theme"))?;
     let files = [
         ("index.html", page.as_bytes()),
         ("herd.json", herd.as_bytes()),
@@ -1912,7 +1967,13 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         .chain(FILES.iter().map(|f| (f.0.to_string(), f.2)))
         .chain(ASSETS.iter().map(|a| (v.clone() + a.0, a.2)))
     {
+        std::fs::create_dir_all(dir.join(&name).with_file_name(""))?;
         std::fs::write(dir.join(name), body)?;
+    }
+    for f in THEME {
+        theme(ctx, f)
+            .0
+            .map_or(Ok(()), |b| std::fs::write(dir.join("theme").join(f), b))?;
     }
     let (cfg, st) = (Config::load(&ctx.config)?, fold(&events));
     for l in s

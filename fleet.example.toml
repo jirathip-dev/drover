@@ -7,6 +7,7 @@ allowed_hosts = ["<mac>.<tailnet>.ts.net"]   # `tailscale serve` proxies the pag
 # approve_hint = "or send 'pair {code}' to the owner"   # appended to the pairing panel's Mac line
 # tailscale_https_port = 8443   # `herdsman setup` runs `tailscale serve --bg --https=<port> http://<addr>`
 # launchd_label = "dev.herdsman.serve"   # the board job `herdsman setup` writes (or adopts)
+# theme = "kitchen"   # the Herd's theme: farm (default), kitchen or <config dir>/themes/<name>/ (docs/serve.md)
 
 [fleet.api]
 repo = "acme/api"

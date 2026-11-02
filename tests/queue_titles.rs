@@ -121,7 +121,7 @@ const page = (status, body) => async () => ({ ok: status === 200, status, body, 
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
     assert_eq!(
         String::from_utf8_lossy(&o.stdout).trim(),
-        r#"[502,0,"DOWN",200,"v1",200,"v1",200,"v2",5]"#,
+        r#"[502,0,"DOWN",200,"v1",200,"v1",200,"v2",6]"#,
         "{}",
         String::from_utf8_lossy(&o.stderr)
     );

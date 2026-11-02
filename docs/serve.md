@@ -19,11 +19,11 @@ Speed (#57): a background thread samples the host every 10 s (the 2 s `vm_stat` 
 so a request never waits on it. Requests share the watcher's cache of `herdr pane read` and the
 per-issue `git log`; the watcher re-reads at a third of a request's ttl, so a request finds them warm. The icons and
 manifest are `public, max-age=86400`. The page is HTML only (`no-store`); its scripts, styles and horses are
-`/a/<hash8>/serve.js`, `serve.css`, `herd.js`, `herd.css` and `horses.svg` (`<hash8>` is FNV-1a over
+`/a/<hash8>/serve.js`, `serve.css`, `herd.js`, `herd.css` and the built-in themes (`themes/…`; `<hash8>` is FNV-1a over
 their content at build time) with `cache-control: public, max-age=31536000, immutable`, precached by
 the service worker. The SW serves the page stale-while-revalidate: the cached copy paints at once (the
 dot amber) and the live stream's first `?frag=all` fills it in (green). In horse mode a Lanes avatar shows its
-glyph until herd.js has built the horse symbols from `horses.svg`.
+glyph until herd.js has built the horse symbols from the theme's `sprites.svg`.
 
 Page size (#60): `GET /` leaves out what the first paint does not show. A fleet's `roles` row is empty
 until opened; opening it reads `GET /frag?id=roles&fleet=<fleet>` (the model/effort forms; kept across
@@ -188,6 +188,27 @@ Day 07:00–19:00, re-checked every minute and on resume. Night is Corral's nigh
 Milky Way drifting as one at 0.7 pt/s, the moon fixed at (306, 56) (above the strip's crop on a short screen),
 clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog compose with it. Debug:
 `/?light=auto|day|night`.
+
+### Themes (#172)
+
+The Herd's look is data, no code: a theme is one folder `themes/<name>/` holding
+
+- `theme.json`: `poses` (the sprite id for `working`, `idle`, `done`, `blocked`), `glyphs` (the label's mark per
+  lane state: `working`, `idle`, `unknown`, `parked`, `done`, `blocked`, `dead`), `words` (label overrides:
+  `horses`, `herd`, `ranch`, e.g. `{"horses": "chefs", "herd": "kitchen line"}`) and optional `scene`:
+  `weather: false` (no clouds, rain or fog) and `palette` (CSS custom properties set on the Herd, e.g. `--sky1`,
+  `--sky2`, `--pa`: the pasture's background);
+- `sprites.svg`: one `<g id=…>` per pose, drawn in a 132 × 100 box; coats are the CSS vars `--c`, `--d`, `--m`,
+  `--b` (one per lane name); a `.leg` group swings with the trot, `var(--m)` fills skew in a storm;
+- optionally `scene.svg`: the strip's background, `viewBox="0 0 390 320"` (the strip shows its lower part).
+
+Built in: `farm` (the horses and the ranch drawn by herd.js) and `kitchen` (pixel chefs at a counter). Your own go
+in `<config dir>/themes/<name>/` (next to fleet.toml); one named like a built-in wins, file by file. Pick one per
+board with `[serve] theme = "<name>"` (default `farm`); the Host tab shows it. A pose, glyph or word the theme
+lacks is farm's; an invalid or missing theme.json means farm, with an amber `theme` row on the Host tab.
+`serve` serves the active theme's three files at `/theme/sprites.svg`, `/theme/theme.json` and
+`/theme/scene.svg` and nothing else under `/theme/`; `--export` writes them to `theme/`. Debug (demo only):
+`?theme=<built-in>` and `?nopose=<pose>`.
 
 ## Alerts (web push)
 

@@ -88,7 +88,13 @@ function scene() {
   return `<svg class=rs viewBox="0 0 390 320" preserveAspectRatio="xMidYMax slice" aria-hidden=true>${s}</svg>`;
 }
 
-// Corral's horses (#30's port, horses.svg next to this script) as <use> symbols, shared with the Lanes
+// #172 themes (docs/serve.md): the active theme's files at `theme/` (`herdsman serve`; the demo takes `?theme=<built-in>`
+// and `?nopose=<pose>`), farm's next to this script: a pose, glyph or word the theme lacks is farm's.
+const A = document.currentScript.src.replace(/herd\.js$/, ''), TH = DEMO && DBG.get('theme') ? `${A}themes/${DBG.get('theme')}/` : R + 'theme/';
+const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
+let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '';
+const w = k => T.words[k] || k;
+// The theme's pose sprites (Corral's horses, #30's port, in farm) as <use> symbols hp1..hp4, shared with the Lanes
 // avatars: legs rotate by the inherited `--gait`, manes skew by `--mane` (storm), so instances need no per-leaf DOM.
 const defs = document.createElementNS(NS, 'svg');
 defs.setAttribute('class', 'hdefs');
@@ -97,14 +103,17 @@ defs.innerHTML = '<defs><linearGradient id=hgr gradientUnits=userSpaceOnUse x1=0
   '<linearGradient id=hwd gradientUnits=userSpaceOnUse x1=0 y1=0 x2=195 y2=500><stop offset=0 stop-color="#ffeeab" stop-opacity=".03"/><stop offset=1 stop-color="#ffeeab" stop-opacity="0"/></linearGradient>' +
   '<linearGradient id=hwn gradientUnits=userSpaceOnUse x1=390 y1=0 x2=195 y2=500><stop offset=0 stop-color="#bbcfe4" stop-opacity=".03"/><stop offset=1 stop-color="#bbcfe4" stop-opacity="0"/></linearGradient>' +
   '<filter id=hmw x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation=6 /></filter></defs>';
-fetch(document.currentScript.src.replace(/herd\.js$/, 'horses.svg')).then(r => r.text()).then(t => {
-const src = document.createElementNS(NS, 'svg');
-src.innerHTML = t;
-src.querySelectorAll('g.horse').forEach((g, k) => {
-  const s = document.createElementNS(NS, 'symbol');
+Promise.all([`${A}themes/farm/`, TH].flatMap(d => [got(d + 'sprites.svg'), got(d + 'theme.json', 1)]).concat(got(TH + 'scene.svg'))).then(([fs, fj, ts, tj, sc]) => {
+const svg = t => { const e = document.createElementNS(NS, 'svg'); e.innerHTML = t; return e; }, farm = svg(fs), own = svg(ts);
+if (DEMO && DBG.get('nopose')) delete (tj.poses || {})[DBG.get('nopose')];
+T = Object.fromEntries(Object.keys(T).map(k => [k, Object.assign({}, fj[k], tj[k])]));
+const sprite = (src, id) => id && src.querySelector('#' + CSS.escape(id));
+['working', 'idle', 'done', 'blocked'].forEach((pose, k) => {
+  const g = (sprite(own, (tj.poses || {})[pose]) || sprite(farm, fj.poses[pose])).cloneNode(true), s = document.createElementNS(NS, 'symbol');
   s.id = 'hp' + (k + 1);
   s.setAttribute('viewBox', '0 0 132 100');
-  s.append(g.cloneNode(true));
+  g.removeAttribute('id');
+  s.append(g);
   s.querySelectorAll('.leg').forEach(l => {
     const a = l.style.getPropertyValue('--a') || '0deg', sign = /leg-(nf|fh)/.test(l.getAttribute('class')) ? 1 : -1;
     l.setAttribute('style', `transform-box:fill-box;transform-origin:50% 0;transform:rotate(calc(${a} + ${sign} * var(--gait, 0deg)))`);
@@ -112,6 +121,13 @@ src.querySelectorAll('g.horse').forEach((g, k) => {
   s.querySelectorAll('[fill="var(--m)"],[stroke="var(--m)"]').forEach(m => m.setAttribute('style', 'transform-box:fill-box;transform-origin:100% 100%;transform:skewX(var(--mane, 0deg))'));
   defs.append(s);
 });
+Object.entries(T.scene.palette || {}).forEach(([k, v]) => H.style.setProperty(k, v));
+$('#herd-on').setAttribute('aria-label', w('herd') + ' mode');
+$('.hx').setAttribute('aria-label', `close ${w('herd')} mode`);
+// A theme's own scene or no weather: the pages are rebuilt with it (farm's stay as drawn).
+if (sc || T.scene.weather === false) { SC = sc.replace(/<svg\b/, '<svg class=rs preserveAspectRatio="xMidYMax slice" aria-hidden=true'); pages.forEach(p => p.remove()); pages.clear(); placed = false; }
+draw();
+ranch();
 B.classList.add('hz');
 }).catch(() => {});
 
@@ -123,14 +139,13 @@ B.prepend(defs);
 $('#herd-on').innerHTML = '<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hp2"/></svg>';
 const pages = new Map();
 const POSE = { working: 1, idle: 2, unknown: 2, parked: 2, done: 3, blocked: 4, dead: 4 };
-const MARK = { working: '○', idle: '◦', unknown: '?', parked: '◦', done: '✓', blocked: '!', dead: '✗' };
 const BANDS = [['working', ['working']], ['idle', ['idle', 'unknown', 'parked']], ['done', ['done']], ['blocked/dead', ['blocked', 'dead']]];
 let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
 function horse(l, k) {
   return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(l.coat)}"><use href="#hp${POSE[l.state] || 2}"/></svg>` +
-    `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${MARK[l.state] || '?'} ${hx(l.shown)}</i>${l.age ? ' · ' + hx(l.age) : ''}</span></span></button>`;
+    `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(l.shown)}</i>${l.age ? ' · ' + hx(l.age) : ''}</span></span></button>`;
 }
 const queued = q => `<button type=button class=hqh data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hp2"/></svg>` +
   `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
@@ -190,14 +205,14 @@ function patch(hb, lanes, queue) {
   }
   drop.forEach(b => b.remove());
   const e = hb.querySelector(':scope > .empty');
-  if (at) { if (e) e.remove(); } else if (!e) hb.append(tpl('<p class=empty>no horses here</p>'));
+  if (at) { if (e) e.remove(); } else if (!e) hb.append(tpl(`<p class=empty>no ${w('horses')} here</p>`));
 }
 
 function page(key) {
   const p = document.createElement('section');
   p.className = 'hp';
   p.innerHTML = `<div class=hs><p><b></b> <span class=n></span> <span class=dots></span></p><p class=sum></p></div><div class=hn></div>
-<div class=hr><div class=hc>${clouds()}</div>${scene()}<div class=fog></div></div><div class=hb></div>`;
+<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${SC || scene()}<div class=fog></div></div><div class=hb></div>`;
   p._trees = [...p.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
   p._cel = p.querySelector('.cel');
   p._grass = [...p.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
@@ -264,10 +279,11 @@ new MutationObserver(needs).observe($('#needs'), { childList: true, subtree: tru
 // memory pressure = fog. Reduced motion keeps the tint only.
 function weather(h) {
   wind = Math.min(1, Math.max(0, (h.load || 0) / (h.limit || 1)));
-  storm = !!h.gate;
+  const wx = T.scene.weather !== false; // #172: a theme's `scene.weather: false` keeps the scene clear
+  storm = wx && !!h.gate;
   H.classList.toggle('storm', storm);
-  H.classList.toggle('fog1', h.pressure === 'warn');
-  H.classList.toggle('fog2', h.pressure === 'critical');
+  H.classList.toggle('fog1', wx && h.pressure === 'warn');
+  H.classList.toggle('fog2', wx && h.pressure === 'critical');
   H.classList.toggle('gust', wind >= 0.5);
   if (!storm || still.matches) H.style.setProperty('--mane', '0deg');
   cap.textContent = `load ${h.load == null ? '?' : h.load.toFixed(2)} · mem ${h.pressure || '?'} · swap ${h.swapouts == null ? '?' : Math.round(h.swapouts)}`;
@@ -300,7 +316,7 @@ function frame(ms) {
   if (p) {
     for (const [g, a, l] of p._trees) g.setAttribute('transform', `translate(${f1(sway(t, a, WIND.canopy * l * m))} ${f1(sway(t, a + 1.9, 0.5 * l * m))})`);
     for (const [g, x, y] of p._grass) { const b = bend(t, x, WIND.grass * m) / 10; g.setAttribute('transform', `matrix(1 0 ${-b.toFixed(3)} 1 ${(b * y).toFixed(2)} 0)`); }
-    if (H.classList.contains('night')) p._cel.setAttribute('transform', `translate(${cel.toFixed(2)} 0)`);
+    if (H.classList.contains('night') && p._cel) p._cel.setAttribute('transform', `translate(${cel.toFixed(2)} 0)`);
     p.querySelector('.hc').style.transform = `translateX(${((drift - 780) * (p._k || 1)).toFixed(1)}px)`;
     // Working horses trot (diagonal leg pairs, Corral's 0.4 s stride) and roam a little.
     p._walk.forEach((s, i) => {
@@ -353,7 +369,7 @@ function ranch() {
   const n = nightAt(light, new Date());
   H.classList.toggle('night', n);
   lb.textContent = ICON[light];
-  lb.setAttribute('aria-label', `ranch light: ${light}${light === 'auto' ? ` (${n ? 'night' : 'day'} now)` : ''}`);
+  lb.setAttribute('aria-label', `${w('ranch')} light: ${light}${light === 'auto' ? ` (${n ? 'night' : 'day'} now)` : ''}`);
 }
 lb.onclick = () => { light = LIGHTS[(LIGHTS.indexOf(light) + 1) % 3]; put('herd-light', light); ranch(); };
 ranch();

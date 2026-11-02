@@ -26,7 +26,7 @@ const EXCEPTIONS: [(&str, &str, &str); 8] = [
         "MIT notice of the ported Corral code",
     ),
     (
-        "assets/horses.svg",
+        "assets/themes/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "MIT notice of the ported Corral horses",
     ),

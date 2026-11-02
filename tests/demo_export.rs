@@ -111,9 +111,15 @@ fn demo_page_is_inert_and_relative() {
         .unwrap()
         .unwrap()
         .path();
-    let page = ["serve.css", "herd.css", "serve.js", "herd.js", "horses.svg"]
-        .iter()
-        .fold(html.clone(), |p, f| p + &std::fs::read_to_string(v.join(f)).unwrap());
+    let page = [
+        "serve.css",
+        "herd.css",
+        "serve.js",
+        "herd.js",
+        "themes/farm/sprites.svg",
+    ]
+    .iter()
+    .fold(html.clone(), |p, f| p + &std::fs::read_to_string(v.join(f)).unwrap());
     assert!(html.contains(&format!(
         "<script src=a/{}/serve.js>",
         v.file_name().unwrap().to_string_lossy()
