@@ -1,7 +1,7 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
 use crate::access;
 use crate::config::Config;
-use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState, PASSIVE};
+use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
 use crate::runner::{ok, Runner};
@@ -195,97 +195,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             json!({"key": subs, "reason": why}),
         )?;
     }
-    // #46: an item waiting > 5 min on an idle orch prompts it once per (issue, head, state); 10 min on, `orch-stuck`.
-    let waits = crate::waiting::scan(ctx, cfg, r, &events, agents.as_deref().unwrap_or_default(), true);
-    for (s, w) in waits.iter().filter(|(s, w)| {
-        w.who == "orch" && s.lane.as_ref() == Some(&w.lane) && ctx.now.saturating_sub(w.since) > 300 && agents.is_some()
-    }) {
-        let Some(next) = &w.next_cmd else { continue };
-        let (orch, key) = (format!("{}-orch", s.fleet), format!("{}:{}", s.last_ts, w.what));
-        let line = format!("#{} {} {} ago: run {next}", s.issue, w.what, age(ctx.now - w.since));
-        let at = (s.fleet.as_str(), Some(s.issue));
-        match events
-            .iter()
-            .find(|e| e.is("orch-nudged", &s.fleet, s.issue) && e.str("key") == Some(&key))
-        {
-            Some(e) if ctx.now.saturating_sub(e.ts) > 600 => fire(
-                ctx,
-                cfg,
-                out,
-                &events,
-                at,
-                "orch-stuck",
-                json!({"key": key, "reason": format!("still waiting: {line}")}),
-            )?,
-            Some(_) => {}
-            None => {
-                // The pane as herdr shows it now; logged before the Enter, so a failed Enter never types the line twice.
-                let a = agents.iter().flatten().find(|a| {
-                    a["name"] == orch.as_str() && matches!(a["agent_status"].as_str(), Some("idle" | "done"))
-                });
-                let Some(pane) = a.and_then(|a| a["pane_id"].as_str()).or_else(|| {
-                    last_spawn(&events, &orch)
-                        .and_then(|e| e.str("pane"))
-                        .filter(|_| a.is_some())
-                }) else {
-                    continue;
-                };
-                if herdr::prompt(r, &orch, &line).is_ok() {
-                    fire(
-                        ctx,
-                        cfg,
-                        out,
-                        &events,
-                        at,
-                        "orch-nudged",
-                        json!({"key": key, "reason": line}),
-                    )?;
-                    let _ = herdr::keys(r, pane, "Enter"); // unsent: `orch-stuck` follows
-                }
-            }
-        }
-    }
-    // An idle orch with startable work and no open ask is holding silently.
-    for fleet in cfg
-        .fleet
-        .iter()
-        .filter(|(n, f)| !f.paused && !open.iter().any(|a| a.fleet == **n))
-        .map(|f| f.0)
-    {
-        let orch = agents.iter().flatten().find(|a| a["name"] == format!("{fleet}-orch"));
-        let last = events
-            .iter()
-            .filter(|e| e.fleet == *fleet && !PASSIVE.contains(&e.kind.as_str()))
-            .map(|e| e.ts)
-            .max()
-            .unwrap_or(0);
-        let idle = ctx.now.saturating_sub(last);
-        if idle <= 15 * 60 || !orch.is_some_and(|a| matches!(a["agent_status"].as_str(), Some("idle" | "done"))) {
-            continue;
-        }
-        let (code, n) = crate::queue::next(&events, fleet);
-        let ready = || {
-            fold(&events)
-                .into_values()
-                .find(|s| s.fleet == *fleet && s.state == "ready" && mergeable(ctx, r, cfg, s).is_some())
-        };
-        let Some(what) = (code == 0)
-            .then(|| format!("#{n} startable"))
-            .or_else(|| ready().map(|s| format!("#{} ready to merge", s.issue)))
-        else {
-            continue;
-        };
-        let why = format!("{what}, orch idle {}, no ask", age(idle));
-        fire(
-            ctx,
-            cfg,
-            out,
-            &events,
-            (fleet, None),
-            "orch-holding",
-            json!({"key": last.to_string(), "reason": why}),
-        )?;
-    }
     // DeepSeek under `warn_below`: once per crossing (a recovery logs `provider-ok`).
     if let Some(Ok((b, low))) = crate::usage::deepseek(ctx, cfg, r) {
         let last = events
@@ -308,6 +217,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             emit(&ctx.state, cfg, ev)?;
         }
     }
+    // #160: the worktree total (bytes, when) for the Services disk row; `serve` never walks or runs `du`.
+    let _ = std::fs::write(
+        ctx.state.with_file_name("worktrees.du"),
+        format!("{} {}", du(&ctx.worktrees), ctx.now),
+    );
     Ok(())
 }
 
@@ -585,8 +499,8 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     Ok(std::fs::write(
-        ctx.state.with_file_name("worktrees.bytes"),
-        total.to_string(),
+        ctx.state.with_file_name("worktrees.du"),
+        format!("{total} {}", ctx.now),
     )?)
 }
 
@@ -595,10 +509,15 @@ fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1_073_741_824.0
 }
 
-/// The last `budget` walk's worktree total in GB.
+/// The last walk's worktree total in GB (`check`'s or `budget`'s, both stamp `worktrees.du`) and when.
+pub fn worktree_du(ctx: &Ctx) -> Option<(f64, Option<u64>)> {
+    let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).ok()?;
+    let mut n = s.split_whitespace();
+    Some((gb(n.next()?.parse().ok()?), n.next().and_then(|t| t.parse().ok())))
+}
+
 pub fn worktree_gb(ctx: &Ctx) -> Option<f64> {
-    let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.bytes")).ok()?;
-    Some(gb(s.trim().parse().ok()?))
+    worktree_du(ctx).map(|d| d.0)
 }
 
 /// #164: folders under the worktree root that no configured fleet's repo owns.
@@ -724,13 +643,13 @@ pub fn close(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent
 
 /// `herdsman kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to
 /// `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes.
-/// The worktree is kept; an orch's checkout is the owner's and never snapshotted.
+/// The worktree is kept.
 pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str, yes: bool) -> Result<()> {
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent)?;
     let role = e.str("role").unwrap_or_default();
     let st = e.issue.and_then(|n| fold(&events).remove(&(e.fleet.clone(), n)));
-    let wt = e.str("worktree").filter(|w| role != "orch" && Path::new(w).exists());
+    let wt = e.str("worktree").filter(|w| Path::new(w).exists());
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt.unwrap_or_default()][..], a].concat());
     let (dirty, ahead) = match wt {
         Some(_) => {

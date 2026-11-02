@@ -48,15 +48,13 @@ UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any vis
 
 Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
 `gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and Hermes
-profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. `herdsman spawn … design` is owner-only: denied from every lane, orch included; never in verdict or merge.
+profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. `herdsman spawn … design` is owner-only: denied from every lane; never in verdict or merge.
 Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` exports the first uncapped one as `CLAUDE_CODE_OAUTH_TOKEN`;
 an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. MCP: only the role's `mcp` (default none).
 
 ## Events
 
-`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `account-capped` (limit banner), `orch-holding` (orch idle >15 min,
-startable work, no open ask), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `orch-nudged` (an item waiting on an idle
-orch >5 min: its pane gets the exact next command, once per issue, head and state), then `orch-stuck` 10 min later; `herdsman merge` emits
+`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `account-capped` (limit banner), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `herdsman merge` emits
 `evidence-missing` (issue left open) if the evidence comment fails twice. Notifiers get one plain line, or raw event JSON with `format = "json"`. A fleet's own `[[fleet.<name>.notify]]` (same fields)
 replaces the global `[[notify]]` for its events; `notify_global = true` in `[fleet.<name>]` sends to both.
 Owner-only: `herdsman pause|resume <fleet>` (PAUSED), `herdsman drive`, `herdsman setup|timer|tick` (the 5-minute job), `herdsman doctor` (host check) and `herdsman serve`, the phone page (its writes log `"via":"web"`).

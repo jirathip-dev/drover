@@ -304,20 +304,16 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let mut rows = vec![row("board", t, d, "herdsman setup")];
     let (t, d) = tick_row(ctx, &events);
     rows.push(row("tick", t, d, FIX));
-    let agents = host::agents(r).unwrap_or_default();
     for (name, f) in &cfg.fleet {
         let item = format!("drive {name}");
-        let orch = agents.iter().find(|a| a["name"] == format!("{name}-orch").as_str());
-        let orch = orch.and_then(|a| a["agent_status"].as_str());
         let last = drive::last_pass(ctx, name);
         let did = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
         let did = did.and_then(|e| e.str("result")).unwrap_or("nothing yet");
         let driven = format!("herdsman · last pass {} · {did}", ago(ctx.now, last));
-        let orched = format!("orch · {}", orch.unwrap_or("not running"));
-        rows.push(match () {
-            () if f.paused => row(&item, "a", "paused".into(), ""),
-            () if f.driven() => row(&item, tone(ctx.now, last), driven, FIX),
-            () => row(&item, ["a", "g"][usize::from(orch.is_some())], orched, ""),
+        rows.push(if f.paused {
+            row(&item, "a", "paused".into(), "")
+        } else {
+            row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
     let (t, d) = phone(ctx, Some(cfg), &events);
@@ -332,13 +328,15 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
         let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
         rows.push(row("disk", t, format!("{gb:.0} GB free"), "herdsman clean --yes"));
     }
-    // #164: the worktree total from drive's last walk, against the budget; amber from 80 %, red over (DISK_BUDGET).
+    // #164: the worktree total from the last walk (#160: never a `du` here), against the budget; amber from 80 %,
+    // red over (DISK_BUDGET).
     let budget = cfg.limits.worktree_budget_gb;
-    let (t, d) = crate::check::worktree_gb(ctx).map_or(("a", "not measured yet (drive's next pass)".into()), |gb| {
+    let du = crate::check::worktree_du(ctx);
+    let (t, d) = du.map_or(("a", "not measured yet".into()), |(gb, at)| {
         let full = |i: &u8| f64::from(*i) < (gb / budget * 10.0).round();
         let bar: String = (0..10).map(|i| if full(&i) { '█' } else { '░' }).collect();
         let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
-        (t, format!("▕{bar}▏ {gb:.1} / {budget} GB"))
+        (t, format!("▕{bar}▏ {gb:.1} / {budget} GB · {}", ago(ctx.now, at)))
     });
     rows.push(row("fleet disk", t, d, "herdsman clean --yes"));
     rows

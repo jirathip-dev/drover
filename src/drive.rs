@@ -1,4 +1,4 @@
-//! #92 `herdsman drive`: one pass of the orch's loop, no AI; each action logs a passive `driven` event.
+//! #92 `herdsman drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
 use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -155,7 +155,7 @@ fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &Path, only: Optio
     Ok(())
 }
 
-/// One pass over every `driver = "herdsman"` fleet (or `only`), under `<state dir>/drive.lock`; `manual`: a press.
+/// One pass over every fleet (or `only`), under `<state dir>/drive.lock`; `manual`: a press.
 pub fn drive(
     ctx: &Ctx,
     cfg: &Config,
@@ -195,10 +195,10 @@ pub fn drive(
             writeln!(out, "budget: {e:#}")?;
         }
     }
-    let mine = |(n, f): &(&String, &crate::config::Fleet)| f.driven() && only.is_none_or(|o| o == n.as_str());
+    let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
-    for (name, _) in cfg.fleet.iter().filter(mine).filter(|(_, f)| !f.paused) {
+    for (name, _) in cfg.fleet.iter().filter(mine) {
         ACTS.with_borrow_mut(Vec::clear);
         let p = pass(ctx, cfg, r, out, name, start);
         if let Err(e) = &p {
@@ -255,8 +255,8 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
         if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
-        } else if w.who == "orch" {
-            // `waiting` names the orch's exact next command; drive runs it instead.
+        } else if w.who == "drive" {
+            // `waiting` names the exact next command; drive runs it.
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {

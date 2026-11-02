@@ -42,7 +42,7 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
 | `pause` / `resume` | hold a fleet: `next` offers nothing, impl/rev spawns refuse `PAUSED` |
 | `queue` / `next` | ordered work queue; the first issue ready to start |
 | `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
-| `check` / `ask` / `answer` / `asks` | alerts (stall, dead lane, unmerged ready, silent orch hold); ask for a decision, answer it |
+| `check` / `ask` / `answer` / `asks` | alerts (stall, dead lane, unmerged ready, waiting ask); ask for a decision, answer it |
 | `clean` / `stop` / `kill` / `close` | reclaim merged or closed lanes; Esc an agent; close its pane, unpushed work to `wip/` first (dry runs unless `--yes`); close a non-lane agent's pane |
 | `set` / `profiles` | switch a role's harness or model; write per-role folders and hooks |
 | `accounts` | Claude accounts: cap, usage, lane-hours, lanes; DeepSeek balance ([docs](docs/providers.md)) |

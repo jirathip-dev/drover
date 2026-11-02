@@ -515,7 +515,8 @@ fn vector_horses_keep_a_coat_per_name() {
         w.contains("class=\"av g working\"") && w.contains("<use href=#hp1 />"),
         "{w}"
     );
-    let horses = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/horses.svg")).unwrap();
+    let horses =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/farm/sprites.svg")).unwrap();
     assert!(
         horses
             .lines()

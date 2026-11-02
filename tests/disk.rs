@@ -136,14 +136,14 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         (freed[0].str("agent"), freed[0].data["bytes"].as_u64()),
         (Some("sendmeter-impl-8"), Some(1000))
     );
-    let stamp = || std::fs::read_to_string(c.state.with_file_name("worktrees.bytes")).unwrap();
-    assert_eq!(stamp(), "2000");
+    let stamp = || std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    assert_eq!(stamp(), format!("2000 {}", c.now));
 
     // 500 bytes: #7 goes too, the working #9 keeps 1000 → still over.
     let c = ctx(&d, &cfg(500.0 / 1_073_741_824.0));
     run_budget(&c);
     assert!(!o.exists() && b.exists());
-    assert_eq!(stamp(), "1000");
+    assert_eq!(stamp(), format!("1000 {}", c.now));
     let r = Fake::default().reply("herdr agent list", NO_AGENTS).reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
     assert_eq!(code, 3, "{out}");
@@ -185,7 +185,9 @@ fn drive_refuses_starts_over_budget() {
 /// The tick's `clean --yes` sweep runs once an hour (a merged lane's worktree goes), not only after a merge.
 #[test]
 fn the_hourly_sweep_runs_once_per_hour() {
-    let mut c = ctx(&tmpdir("disk-hourly"), CONFIG);
+    // Paused: drive's own after-merge `clean` (#155: every unpaused fleet gets a pass) would sweep too.
+    let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
+    let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
     let merged = |c: &herdsman::Ctx, n: u64| {
         ev(
             c,

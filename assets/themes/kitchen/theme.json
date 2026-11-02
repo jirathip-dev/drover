@@ -1,0 +1,6 @@
+{
+  "poses": { "working": "chef-working", "idle": "chef-idle", "done": "chef-done", "blocked": "chef-blocked" },
+  "glyphs": { "working": "♨", "idle": "·", "unknown": "?", "parked": "·", "done": "✓", "blocked": "!", "dead": "✗" },
+  "words": { "horse": "chef", "horses": "chefs", "herd": "kitchen line", "ranch": "kitchen", "barn": "kitchen" },
+  "scene": { "weather": false, "palette": { "--sky1": "#efe6d2", "--sky2": "#e9dcc3", "--pa": "linear-gradient(#6b5a4a,#4a3c32 40vh,#3a2f28)" } }
+}

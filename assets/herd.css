@@ -20,7 +20,7 @@
 .hpages{display:flex;height:100%;overflow:auto hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none}
 .hpages::-webkit-scrollbar{display:none}
 .hp{flex:0 0 100%;height:100%;overflow:hidden auto;scroll-snap-align:start;scroll-snap-stop:always;scroll-behavior:smooth;overscroll-behavior-y:contain;
-  background:linear-gradient(#a9b06c,#7f8f50 40vh,#4c6340);padding-bottom:calc(2 * var(--ctl) + env(safe-area-inset-bottom))}
+  background:var(--pa,linear-gradient(#a9b06c,#7f8f50 40vh,#4c6340));padding-bottom:calc(2 * var(--ctl) + env(safe-area-inset-bottom))}
 /* The strip: one 28 px dark bar, `[A]` `[×]` inside it on the right; the counts share its line when they fit, else wrap to an 11 px second line in the same bar. */
 #herd .hx,#herd .hlt{position:fixed;z-index:3;top:env(safe-area-inset-top);right:var(--s2)}
 #herd .hlt{right:calc(var(--s2) + var(--hit))}
