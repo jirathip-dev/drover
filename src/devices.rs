@@ -84,7 +84,7 @@ pub fn pending(ctx: &Ctx) -> Vec<Device> {
         .collect()
 }
 
-/// A pairing request: (its code, unique among the open ones; the `hd=` token for the asking browser alone); None while 3 are open, 2 from `ip`, or on a code clash.
+/// A pairing request: (its code, unique among the open ones; the `hd=` token for the asking browser alone); None while 4 are open (#199: two phones behind one proxy), 2 from `ip`, or on a code clash.
 pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, String)>> {
     let (mut all, b, token) = (
         load(ctx),
@@ -97,7 +97,7 @@ pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, Strin
         format!("{:06}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]) % 1_000_000),
         sha256(token.as_bytes()),
     );
-    if open.len() >= 3
+    if open.len() >= 4
         || open.iter().filter(|d| d.ip == ip).count() >= 2
         || open.iter().any(|d| d.code.as_ref() == Some(&code))
     {
@@ -151,9 +151,29 @@ fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
 
+/// The `hd=` token's hash in a `Cookie` header.
+fn token(cookie: &str) -> Option<String> {
+    Some(sha256(
+        cookie.split(';').find_map(|c| c.trim().strip_prefix("hd="))?.as_bytes(),
+    ))
+}
+
+/// #199: drop this browser's open pairing request (its `hd=` cookie), on a Pair re-tap or `[cancel]`; a paired device stays.
+pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
+    let (Some(tok), mut all) = (token(cookie), load(ctx)) else {
+        return Ok(());
+    };
+    let n = all.len();
+    all.retain(|d| d.code.is_none() || !same(&d.hash, &tok));
+    if all.len() < n {
+        store(ctx, &all)?;
+    }
+    Ok(())
+}
+
 /// The paired (approved) device whose token the `Cookie` header carries (`hd=`); marks it used at most hourly (#122).
 pub fn find(ctx: &Ctx, cookie: &str) -> Option<Device> {
-    let tok = sha256(cookie.split(';').find_map(|c| c.trim().strip_prefix("hd="))?.as_bytes());
+    let tok = token(cookie)?;
     let mut all = load(ctx);
     let i = all.iter().position(|d| d.code.is_none() && same(&d.hash, &tok))?;
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
