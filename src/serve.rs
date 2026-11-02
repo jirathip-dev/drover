@@ -1040,6 +1040,10 @@ impl<'a> Server<'a> {
                 )?;
                 format!("#{n}: {op}")
             }
+            "reap" => format!(
+                "reaped {} leftover process(es)",
+                crate::check::reap_dead(ctx, self.r, None)?
+            ),
             "unpair" => {
                 let mut all = devices::load(ctx);
                 all.retain(|d| d.hash != g("hash"));
@@ -1674,6 +1678,24 @@ impl<'a> Server<'a> {
             let val =
                 format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
             m += &hrow("disk", t, &(bar + &val), "", "");
+        }
+        // #186: processes still running in worktrees no herdr agent runs in; `[reap]` TERMs, then KILLs them.
+        let dead = herdr::agents(r)
+            .map(|a| crate::check::dead_lanes(events, &a))
+            .unwrap_or_default();
+        let left = host::procs_in(r, &dead.into_iter().map(|d| d.2).collect::<Vec<_>>());
+        if !left.is_empty() {
+            let pids = left.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",");
+            let kb: f64 = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids]).map_or(0.0, |s| {
+                s.split_whitespace().filter_map(|k| k.parse::<f64>().ok()).sum()
+            });
+            let n = left.len();
+            let btn = format!("<form method=post>{}<button data-confirm=\"TERM, then KILL, {n} leftover process(es)?\">reap</button></form>", hidden("reap", "", &mtime(ctx)));
+            let val = format!(
+                "<b class=a>{n} running</b> <span class=mt>{:.0} MB · in closed lanes' worktrees</span>{btn}",
+                kb / 1024.0
+            );
+            m += &kv("leftovers", "a", &val);
         }
         m += &match (cfg, host::admit(&hs, lim)) {
             (None, _) => String::new(),

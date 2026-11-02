@@ -467,6 +467,8 @@ pub fn spawn(
                 herdr::close(r, pane)?;
             }
         }
+        // #186: and whatever the old lane left running in the worktree.
+        crate::check::reaped(ctx, r, fleet, Some(issue), &[p.worktree.clone()])?;
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         event(
             "supersede",

@@ -404,7 +404,11 @@ pub fn needs_human(
             }
             crate::events::append(&ctx.state, &ev("round-extended"))?;
         }
-        _ => crate::events::append(&ctx.state, &ev("parked"))?,
+        _ => {
+            crate::events::append(&ctx.state, &ev("parked"))?;
+            // #186: what the parked lane left running goes (an unreadable herdr reaps nothing).
+            let _ = check::reap_dead(ctx, r, Some((fleet, n)));
+        }
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())

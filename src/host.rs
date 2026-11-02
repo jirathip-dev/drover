@@ -1,10 +1,10 @@
 //! Host-load gate for `herdsman spawn` (an unreadable signal admits) and the live-agent view.
 use crate::config::Limits;
 pub use crate::herdr::agents;
-use crate::runner::{ok, Runner};
+use crate::runner::{argv, ok, Runner};
 use anyhow::Result;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Live agents named `name` or running inside `dir`.
 pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value> {
@@ -127,4 +127,53 @@ pub fn admit(h: &Host, l: &Limits) -> Result<(), String> {
     } else {
         Err(why.join("; "))
     }
+}
+
+/// #186: never signalled, wherever they run (the cwd rule already spares the board, `tick` and the user's shells).
+const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];
+
+/// #186: (pid, command) of each process whose cwd (`lsof`) is inside one of `dirs`, bar `SPARE`, us and our parent.
+pub fn procs_in(r: &dyn Runner, dirs: &[PathBuf]) -> Vec<(String, String)> {
+    let s = r
+        .run("lsof", &argv(&["-n", "-d", "cwd", "-Fpcn"]))
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let us = [std::process::id(), std::os::unix::process::parent_id()].map(|p| p.to_string());
+    let (mut pid, mut cmd, mut v) = ("", "", vec![]);
+    for l in s.lines() {
+        let (k, x) = l.split_at(l.len().min(1));
+        match k {
+            "p" => pid = x,
+            "c" => cmd = x,
+            "n" if dirs.iter().any(|d| Path::new(x).starts_with(d))
+                && !us.contains(&pid.to_string())
+                && !SPARE.contains(&cmd) =>
+            {
+                v.push((pid.to_string(), cmd.to_string()));
+            }
+            _ => {}
+        }
+    }
+    v
+}
+
+/// #186: TERM every process in `dirs`, wait 5 s, then KILL those still there; the commands signalled.
+pub fn reap(r: &dyn Runner, dirs: &[PathBuf]) -> Vec<String> {
+    let first = procs_in(r, dirs);
+    let kill = |sig: &str, ps: &[(String, String)]| {
+        let args: Vec<String> = std::iter::once(sig.to_string())
+            .chain(ps.iter().map(|p| p.0.clone()))
+            .collect();
+        let _ = r.run("kill", &args);
+    };
+    if first.is_empty() {
+        return vec![];
+    }
+    kill("-TERM", &first);
+    r.sleep(5);
+    let left: Vec<_> = procs_in(r, dirs).into_iter().filter(|p| first.contains(p)).collect();
+    if !left.is_empty() {
+        kill("-KILL", &left);
+    }
+    first.into_iter().map(|p| p.1).collect()
 }

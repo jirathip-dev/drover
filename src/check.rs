@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Head sha of an open PR that passes every merge gate, if any.
 fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<String> {
@@ -323,6 +323,7 @@ pub fn clean(
         let keep = if host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty() {
             if yes {
                 freed += purge(r, out, Path::new(wt))?;
+                reaped(ctx, r, &e.fleet, Some(n), &[wt.into()])?;
             }
             dirty(r, Path::new(wt))
         } else {
@@ -384,6 +385,42 @@ pub fn clean(
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
     Ok(())
+}
+
+/// #186: TERM/KILL what still runs in `wts` (`host::reap`); logs `lane-reaped` when anything was.
+pub fn reaped(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: Option<u64>, wts: &[PathBuf]) -> Result<usize> {
+    let names = host::reap(r, wts);
+    if !names.is_empty() {
+        let d = json!({"killed": names.len(), "names": names}); // the issue is the event's own
+        crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;
+    }
+    Ok(names.len())
+}
+
+/// #186: (fleet, issue, worktree) of each logged lane's worktree (newest spawn) that exists with no herdr agent in it.
+pub fn dead_lanes(events: &[Event], agents: &[serde_json::Value]) -> Vec<(String, Option<u64>, PathBuf)> {
+    let mut seen = std::collections::BTreeSet::new();
+    let dead = |e: &Event, wt: &Path| host::live_in(agents, e.str("agent").unwrap_or_default(), wt).is_empty();
+    events
+        .iter()
+        .rev()
+        .filter(|e| e.kind == "spawn")
+        .filter_map(|e| Some((e, PathBuf::from(e.str("worktree")?))))
+        .filter(|(e, wt)| wt.exists() && seen.insert(wt.clone()) && dead(e, wt))
+        .map(|(e, wt)| (e.fleet.clone(), e.issue, wt))
+        .collect()
+}
+
+/// #186: reap the leftovers of every dead lane (`only` one issue's, when given); the processes signalled.
+pub fn reap_dead(ctx: &Ctx, r: &dyn Runner, only: Option<(&str, u64)>) -> Result<usize> {
+    let agents = herdr::agents(r).context("cannot list herdr agents; refusing to reap blind")?;
+    let mut n = 0;
+    for (f, i, wt) in dead_lanes(&read(&ctx.state)?, &agents) {
+        if only.is_none_or(|(of, oi)| of == f && Some(oi) == i) {
+            n += reaped(ctx, r, &f, i, &[wt])?;
+        }
+    }
+    Ok(n)
 }
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist"];
