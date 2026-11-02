@@ -60,6 +60,8 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
+# env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
+# port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]
