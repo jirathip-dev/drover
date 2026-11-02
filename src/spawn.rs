@@ -536,7 +536,7 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let open = herdr::worktree_open_argv(&local, &wt);
+        let open = herdr::worktree_open_argv(&local, &wt, &p.agent);
         let reopen = on.exists(&p.worktree);
         let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
         if f.clone_node_modules && !reopen && on.machine.is_none() && lockfiles_match(&f.local_path(), &p.worktree) {
@@ -579,6 +579,7 @@ pub fn spawn(
     let ws = created["result"]["workspace"]["workspace_id"]
         .as_str()
         .context("herdr: no workspace_id")?;
+    herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
     let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
