@@ -1500,3 +1500,24 @@ fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
 }
+
+/// #217 review round 2: `extend --no-spawn` leaves the live lane alone; no drive pass supersedes it for the round.
+#[test]
+fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
+    let c = setup("drive-extend-no-spawn");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    let live = agents(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy(), "w9:p1")]);
+    let r = fake(&live)
+        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+        .reply("git -C", "");
+    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12", "--no-spawn"]);
+    assert_eq!(code, 0, "{out}");
+    let (out, steps) = drive(&c, &r);
+    assert!(!steps.iter().any(|s| s == "fix"), "{out}");
+    assert!(
+        !r.called("herdr agent start sendmeter-impl-12") && !r.called("herdr pane close"),
+        "{:?}",
+        r.calls.borrow()
+    );
+}

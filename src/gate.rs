@@ -486,7 +486,8 @@ pub fn needs_human(
             // Under drive.lock: a pass meanwhile would start the same round; a running pass leaves it to the next.
             let held = crate::drive::hold(ctx, r, fleet);
             if state == "needs-human" {
-                crate::events::append(&ctx.state, &ev("round-extended"))?;
+                let d = json!({"by": by, "spawn": spawn});
+                crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
             }
             if spawn && held.is_none() {
                 writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;

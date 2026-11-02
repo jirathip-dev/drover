@@ -205,7 +205,13 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     let c = fixture("nh-pending", "FAIL");
     append(
         &c.state,
-        &Event::new(40, "sendmeter", Some(12), "round-extended", json!({"by": "owner"})),
+        &Event::new(
+            40,
+            "sendmeter",
+            Some(12),
+            "round-extended",
+            json!({"by": "owner", "spawn": true}),
+        ),
     )
     .unwrap();
     let r = runner();

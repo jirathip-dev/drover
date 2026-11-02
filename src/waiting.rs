@@ -35,13 +35,14 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded but has no lane yet (logs before #217 wrote `round-extended` after its spawn).
+/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none).
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
-    let mut mine = events
+    let last = events
         .iter()
         .rev()
-        .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    s.last_event == "extend-failed" || s.last_event == "round-extended" && mine.nth(1).is_none_or(|e| e.kind != "spawn")
+        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
+    s.last_event == "extend-failed"
+        || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 
 /// Pure: the issue's wait reason. `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
@@ -210,7 +211,7 @@ pub fn waiting_on(
             }
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },
-        // #217: an extra round recorded but not spawned (`extend --no-spawn`, `extend-failed`) is due the same way.
+        // #217: an extra round whose lane never started (a failed or deferred spawn) is due the same way.
         "fix" if s.last_event == "verdict" || unspawned(events, s) => {
             // The FAIL's stage: a check's FAIL, or a gate's CI red (logs before #173 name none: `rev`).
             let v = events.iter().rev().find(|e| e.is("verdict", f, n));
