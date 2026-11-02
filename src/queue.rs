@@ -146,11 +146,9 @@ pub fn serial_use(events: &[Event], st: &States, fleet: &str, cfg: Option<&crate
     let f = cfg
         .and_then(|c| c.fleet.get(fleet))
         .filter(|f| !f.serial_paths.is_empty())?;
-    Some(format!(
-        "serial {}/{}",
-        serial_in_flight(events, st, fleet).len(),
-        f.serial_max.unwrap_or(1)
-    ))
+    let (n, max) = (serial_in_flight(events, st, fleet).len(), f.serial_max.unwrap_or(1));
+    let over = if n > max { " (over: auto-marked)" } else { "" }; // #232: serial-auto marks issues already in flight
+    Some(format!("serial {n}/{max}{over}"))
 }
 
 /// The queue as shown: merged issues drop out; a blocker counts until it is merged.

@@ -134,6 +134,33 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
     assert_eq!(exit, 0, "allowed once #1 merged: {out}");
 }
 
+/// #232: an issue already holding a serial slot is never refused SERIAL_BUSY for its own lanes, even over-full.
+#[test]
+fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
+    let d = tmpdir("serial-over");
+    let c = ctx(&d, &config(SERIAL));
+    let add = ["queue", "sendmeter", "add", "1", "3", "--serial"];
+    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
+    assert_eq!(spawn(&c, 1, "impl").0, 0);
+    // #2 was already in flight when drive marked it serial: 2/1.
+    spawned(&c, 2, "impl");
+    log(&c, 2, "serial-auto", json!({"path": "supabase/migrations/x.sql"}));
+    let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
+    assert!(
+        status.contains("sendmeter: serial 2/1 (over: auto-marked)\n"),
+        "{status}"
+    );
+    let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
+    assert!(board.contains(", serial 2/1 (over"), "{board}"); // the board cuts at 60 cols
+    for n in [1, 2] {
+        let argv = ["spawn", "sendmeter", &n.to_string(), "impl", "--supersede"];
+        let (exit, out) = run(&c, &happy(NO_AGENTS), &argv);
+        assert_eq!(exit, 0, "#{n}'s own fix lane is admitted: {out}");
+    }
+    refused(&c, 3, "impl", "SERIAL_BUSY");
+}
+
 // --- SERIAL_UNMARKED ---
 
 fn merge_fake(files: &str) -> Fake {

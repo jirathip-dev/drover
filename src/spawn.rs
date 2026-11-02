@@ -742,19 +742,20 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
     (!logged).then(|| pane.into())
 }
 
-/// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight) and CAP (`max_impl` / `max_rev`).
+/// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).
 fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
     if role == "impl" && crate::queue::serial(events, fleet).contains(&issue) {
-        let busy = crate::queue::serial_in_flight(events, &st, fleet)
+        let in_flight = crate::queue::serial_in_flight(events, &st, fleet);
+        // #232: an issue already in flight holds its slot; only one entering the serial set needs a free one.
+        let holds = in_flight.iter().any(|s| s.issue == issue);
+        let busy: Vec<_> = in_flight
             .into_iter()
-            .filter(|s| s.issue != issue);
-        let busy: Vec<_> = busy
             .map(|s| format!("#{} is unmerged ({})", s.issue, s.state))
             .collect();
-        if busy.len() >= f.serial_max.unwrap_or(1) {
+        if !holds && busy.len() >= f.serial_max.unwrap_or(1) {
             return refused(
                 "SERIAL_BUSY",
                 format!("serial {}; retry after they merge", busy.join(", ")),
