@@ -9,20 +9,23 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const TICK: &str = "dev.herdsman.tick";
+/// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
+pub const FAST: &str = "dev.herdsman.fast";
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
 const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
 
-/// The job's files (path, content) for launchd (`mac`) or systemd: `argv` every 5 min (`every`) or kept alive,
+/// The job's files (path, content) for launchd (`mac`) or systemd: `argv` every `every` seconds or kept alive (0),
 /// with an explicit PATH, both streams to `<state>/tick.log` (or `serve.log`).
-pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: bool, mac: bool) -> Vec<(PathBuf, String)> {
-    let log = ctx.state.with_file_name(if every { "tick.log" } else { "serve.log" });
-    let (log, i) = (log.to_string_lossy(), usize::from(every));
+pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac: bool) -> Vec<(PathBuf, String)> {
+    let (i, secs) = (usize::from(every > 0), every.to_string());
+    let log = ctx.state.with_file_name(["serve.log", "tick.log"][i]);
+    let log = log.to_string_lossy();
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
-        let when = ["KeepAlive</key><true/>", "StartInterval</key><integer>300</integer>"][i];
+        let when = ["KeepAlive</key><true/>", "StartInterval</key><integer>{secs}</integer>"][i];
         let dest = format!("Library/LaunchAgents/{label}.plist");
         (strings, when, include_str!("../assets/job.plist"), dest)
     } else {
@@ -31,10 +34,10 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: bool, mac
         (argv.join(" "), when, include_str!("../assets/job.service"), dest)
     };
     let kv = [("{label}", label), ("{args}", &cmd), ("{path}", path), ("{log}", &log)];
-    let fill = |s: String, (k, v): &(&str, &str)| s.replace(k, v);
+    let fill = |s: String, (k, v): &(&str, &str)| s.replace(k, v).replace("{secs}", &secs);
     let text = kv.iter().fold(template.replace("{when}", when), fill);
     let timer = ctx.home.join(format!(".config/systemd/user/{label}.timer"));
-    let timer = (every && !mac).then(|| (timer, include_str!("../assets/job.timer").into()));
+    let timer = (every > 0 && !mac).then(|| (timer, include_str!("../assets/job.timer").replace("{secs}", &secs)));
     std::iter::once((ctx.home.join(dest), text)).chain(timer).collect()
 }
 
@@ -42,7 +45,7 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: bool, mac
 fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     if MAC {
         let uid = std::fs::metadata(&ctx.home).map_or(0, |m| m.uid());
-        let (t, plist) = (format!("gui/{uid}/{label}"), files(ctx, label, &[], "", every, true));
+        let (t, plist) = (format!("gui/{uid}/{label}"), files(ctx, label, &[], "", 0, true));
         let load = format!("launchctl bootstrap gui/{uid} {}", plist[0].0.display());
         return [format!("launchctl print {t}"), load, format!("launchctl bootout {t}")];
     }
@@ -78,9 +81,10 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
-    let (every, exe) = (args[0] == "tick", ctx.exe.as_str());
+    let (every, exe) = (args[0] != "serve", ctx.exe.as_str());
+    let secs = [0, cfg.limits.slow_secs, cfg.limits.fast_secs][usize::from(every) + usize::from(args[0] == "drive")];
     let cmd: Vec<&str> = std::iter::once(exe).chain(args.iter().copied()).collect();
-    let files = files(ctx, label, &cmd, &path(ctx, cfg, r), every, MAC);
+    let files = files(ctx, label, &cmd, &path(ctx, cfg, r), secs, MAC);
     let [probe, up, down] = ctl(ctx, label, every);
     let live = load && exec(r, &probe).is_ok();
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);
@@ -108,18 +112,21 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
 /// `herdsman timer install|remove|status`.
 pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: (&str, &str, bool)) -> Result<i32> {
     let (action, label, load) = cmd;
+    let both = [(label, &["tick"][..]), (FAST, &["drive", "--fast"])];
     let line = match action {
-        "install" => install(ctx, cfg, r, label, &["tick"], load),
-        "remove" => {
-            let _ = exec(r, &ctl(ctx, label, true)[2]);
-            let files = files(ctx, label, &[], "", true, MAC);
-            let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
-            if gone > 0 {
-                format!("✓ removed {label}")
-            } else {
-                format!("= no {label} job")
-            }
-        }
+        "install" => both.map(|(l, args)| install(ctx, cfg, r, l, args, load)).join("\n"),
+        "remove" => both
+            .map(|(label, _)| {
+                let _ = exec(r, &ctl(ctx, label, true)[2]);
+                let files = files(ctx, label, &[], "", 1, MAC);
+                let gone = files.iter().filter(|f| std::fs::remove_file(&f.0).is_ok()).count();
+                if gone > 0 {
+                    format!("✓ removed {label}")
+                } else {
+                    format!("= no {label} job")
+                }
+            })
+            .join("\n"),
         _ => {
             let on = ["not loaded", "loaded"][usize::from(exec(r, &ctl(ctx, label, true)[0]).is_ok())];
             let (_, detail) = tick_row(ctx, &read(&ctx.state)?);
@@ -127,7 +134,7 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
         }
     };
     writeln!(out, "{line}")?;
-    Ok(i32::from(line.starts_with('✗')))
+    Ok(i32::from(line.contains('✗')))
 }
 
 /// Log `kind` for `item` and notify, at most once an hour per item.
@@ -163,7 +170,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
                 writeln!(out, "clean: {e:#}")?;
             }
         }
-        drive::drive(ctx, cfg, r, out, None, false)
+        drive::drive(ctx, cfg, r, out, None, false, false)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {
@@ -230,7 +237,8 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
         Ok(()) => "✓ profiles synced".into(),
     };
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
-    writeln!(out, "{}", [tick, board, tailscale, sync].join("\n"))?;
+    let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
+    writeln!(out, "{}", [tick, fast, board, tailscale, sync].join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false)
 }
 

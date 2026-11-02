@@ -112,6 +112,8 @@ min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
+fast_secs = 60       # `herdsman timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
+slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

@@ -21,15 +21,23 @@ pub(crate) fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> Path
         .join(format!("{kind}-{fleet}-{issue}.json"))
 }
 
-/// A `{"ts": …}` cache entry younger than `PR_TTL` at `now`.
+// #212: the fast step reads every PR afresh, so a minute's launchd jitter never leaves a card 2 min old.
+thread_local!(pub static FORCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+/// A `{"ts": …}` cache entry younger than `PR_TTL` at `now` (never, while `FORCE` is set).
 fn fresh(c: &Value, now: u64) -> bool {
     let ts = c["ts"].as_u64().unwrap_or(0);
-    now >= ts && now - ts < PR_TTL
+    !FORCE.get() && now >= ts && now - ts < PR_TTL
 }
 
 pub(crate) fn store(p: &Path, v: &Value) -> Result<()> {
     std::fs::create_dir_all(p.parent().unwrap_or(p))?;
     crate::config::write_atomic(p, &v.to_string())
+}
+
+/// #212: when the cached PR read was taken (the fast step refreshes it each minute).
+pub fn cached_at(ctx: &Ctx, fleet: &str, issue: u64) -> Option<u64> {
+    load::<Value>(&cache_path(ctx, "pr", fleet, issue))?["ts"].as_u64()
 }
 
 /// The cached spec, if any; never calls GitHub (dry runs).
@@ -199,7 +207,7 @@ pub fn check_state(c: &Value) -> &'static str {
     }
 }
 
-fn check_name(c: &Value) -> &str {
+pub fn check_name(c: &Value) -> &str {
     c["name"].as_str().or(c["context"].as_str()).unwrap_or("?")
 }
 
