@@ -59,8 +59,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     }
 }
 
-/// #103: free GB on `/` (`df -k`, when readable); a disk row is amber under this, red under `min_free_gb` (`DISK_LOW`).
-pub const AMBER_FREE_GB: f64 = 20.0;
+/// #103: free GB on `/` (`df -k`, when readable); a disk row is amber within 25 % of `min_free_gb`, red under it (#141).
 pub fn free_gb(r: &dyn Runner) -> Option<f64> {
     let s = stdout(r, "df", &["-k", "/"])?;
     Some(s.lines().nth(1)?.split_whitespace().nth(3)?.parse::<f64>().ok()? / 1_048_576.0)

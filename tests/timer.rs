@@ -274,7 +274,7 @@ fn services_rows_go_green_amber_and_red() {
     assert_eq!(all[5].2, "200 GB free · worktrees 3.0 GB");
 
     stamp("check.at", 700);
-    let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(15));
+    let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(12));
     let all = rows(&c, &amber);
     assert_eq!((all[1].1, all[5].1), ("a", "a"), "{all:?}");
 
@@ -300,13 +300,13 @@ fn services_rows_go_green_amber_and_red() {
         ("herdsman setup", "herdsman clean --yes")
     );
 
-    // The page: a Services block with the fix on red.
+    // The page: a SERVICES group with what clears a problem under it.
     let s = herdsman::serve::Server::new(&c, &red, Some("127.0.0.1:7777".into()));
     let page =
         String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
-    assert!(page.contains("<h2>Services</h2>"), "{page}");
+    assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
     assert!(
-        page.contains("tick · <b class=r>failed: herdr: gone</b> → herdsman timer install"),
+        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b><span class=\"mt fx\">→ herdsman timer install</span>"),
         "{page}"
     );
 }

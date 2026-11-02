@@ -150,7 +150,7 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
         "Host tab lists the device"
     );
     assert!(
-        page.contains("<p class=kv>off: no webpush notifier</p>"),
+        page.contains("<span class=k>push</span><span class=w><b class=a>off: no webpush notifier</b>"),
         "Host row: off"
     );
     assert!(
@@ -367,8 +367,11 @@ const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example
 fn host(s: &Server, now: u64) -> String {
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), now)).into_owned();
-    let row = page.split("<h2>Alerts</h2><p class=kv>").nth(1).expect("Alerts row");
-    row[..row.find("</p>").unwrap()].to_string()
+    let row = page
+        .split("<span class=k>push</span><span class=w><b class=")
+        .nth(1)
+        .expect("ALERTS push row");
+    row[row.find('>').unwrap() + 1..row.find("</b>").unwrap()].to_string()
 }
 
 #[test]

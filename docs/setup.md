@@ -90,8 +90,8 @@ no Hermes needed.
   `/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin` (`sysctl` and `vm_stat` live in `/usr/sbin`).
 - Both streams go to `~/.local/state/herdsman/tick.log`; the tick empties it past 1 MB.
 - A refusal (`HOST_BUSY`, …) is logged and the tick exits 0. A real error (config, herdr missing)
-  logs `tick-failed`, which notifiers send at most once an hour. A red row in the Host tab's Services
-  block sends one `service-red` an hour too.
+  logs `tick-failed`, which notifiers send at most once an hour. A red row in the Host tab's SERVICES
+  group sends one `service-red` an hour too.
 
 `herdsman timer status` prints loaded or not and the last tick. Undo: `herdsman timer remove`
 (unloads it and deletes its files). Check it worked: `herdsman doctor` shows `✓ timer` and a
@@ -247,7 +247,7 @@ device cookie only goes to the browser that tapped Pair, so someone else who see
 can't use it. The log records `pair-request` and `pair-approve` with the device label, never
 the code or the token. `herdsman serve pair` now only prints these steps.
 
-Check it worked: the Host tab lists the phone under Paired devices.
+Check it worked: the Host tab lists the phone under ALERTS.
 
 ## 7. Web push
 
