@@ -313,13 +313,20 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
     rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
-        // The worktree total by `du -sk` (not #103's `check::du` walk): the page reads it through its 60 s cache.
-        let du = ok(r, "du", &["-sk", &ctx.worktrees.to_string_lossy()]).unwrap_or_default();
-        let kb = du.split_whitespace().next().and_then(|k| k.parse::<f64>().ok());
-        let wt = kb.unwrap_or(0.0) / 1_048_576.0;
+        // #160: the worktree total `check` stored (bytes, when); never a `du` on the request path.
+        let du = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).unwrap_or_default();
+        let mut n = du.split_whitespace();
+        let (b, at) = (
+            n.next().and_then(|b| b.parse::<f64>().ok()),
+            n.next().and_then(|t| t.parse().ok()),
+        );
+        let wt = match b {
+            Some(b) => format!("worktrees {:.1} GB · {}", b / 1_073_741_824.0, ago(ctx.now, at)),
+            _ => "worktrees not measured yet".into(),
+        };
         let (min, n) = (cfg.limits.min_free_gb, usize::from);
         let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
-        let d = format!("{gb:.0} GB free · worktrees {wt:.1} GB");
+        let d = format!("{gb:.0} GB free · {wt}");
         rows.push(row("disk", t, d, "herdsman clean --yes"));
     }
     rows
