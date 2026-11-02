@@ -93,7 +93,7 @@ function frag(id, html) {
 // until the group's status changes.
 const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
-const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx')).map(n => n.textContent).join('').trim();
+const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
 const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
 function groups() {
@@ -288,8 +288,33 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
+// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
+let EF = null;
+try { EF = JSON.parse(get('events:filter')); } catch (e) {}
+if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
+function evf(root) {
+  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
+  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
+  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
+  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
+  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
+  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
+  root.querySelectorAll('.eg').forEach(g => {
+    const n = g.querySelectorAll('.er:not([hidden])').length;
+    g.hidden = !n;
+    g.querySelector('h3>span+span').textContent = n;
+  });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
+  if (!b) return;
+  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
+  put('events:filter', JSON.stringify(EF));
+  evf(document);
+});
 function tidy(root) {
   graph(root);
+  evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;

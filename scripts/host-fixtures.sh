@@ -28,6 +28,8 @@ else:
 with open(f"{d}/events.jsonl", "a") as f:
     f.write(json.dumps({"ts": ts - 420, "fleet": "docs", "issue": 10, "type": "driven", **d_}) + "\n")
 toml = open(f"{d}/fleet.toml").read().replace("[fleet.docs]\n", '[fleet.docs]\nserial_label = "database"\n')
+# #183: a paused fleet with an 11-char name, the longest label the Host tab's label column fits.
+toml += '\n[fleet.acme-mobile]\nrepo = "acme-example/acme-mobile"\nlocal = "/srv/acme/acme-mobile"\nintegration = "staging"\npaused = true\n'
 open(f"{d}/fleet.toml", "w").write(toml + '\n[[notify]]\ntype = "webpush"\nsub = "mailto:demo@example.com"\n')
 import os
 os.makedirs(f"{d}/webpush", exist_ok=True)
