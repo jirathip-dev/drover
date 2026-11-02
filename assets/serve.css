@@ -333,18 +333,18 @@ body:not(.unf) .ask.lt{display:none}
 .pl.pn{padding-left:1ch;white-space:normal}
 .nl{grid-column:2;display:flex;gap:var(--s2);padding-left:1ch;white-space:nowrap;overflow:hidden}
 .nl>i{position:relative;left:.5ch}
-/* Rails. .ex: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
+/* Rails. .ea: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
    .ey: the rail itself, middle of its first row to middle of its last. */
-.ex::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
-.ex.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;font-size:var(--fs);line-height:1;color:var(--mute)}
+.ea::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
+.ea.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;font-size:var(--fs);line-height:1;color:var(--mute)}
 .ey::before{content:"";position:absolute;left:50%;top:calc(var(--ln) / 2);bottom:calc(var(--ln) / 2);border-left:1px solid var(--mute)}
-.ex.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
-.ex.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
+.ea.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
+.ea.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
 .ey.l::before{border-left:2px dashed var(--r)}
 .ek{z-index:1}.ek::before{content:"";position:absolute;inset:15% 0;background:var(--bg)}
 /* A loop target's header names the rail that joins it. */
 .nb>.lp{margin-left:auto;font-size:var(--fs-meta);color:var(--mute)}.nb>.tag~.lp{margin-left:0}
-.ex{z-index:2}
+.ea{z-index:2}
 /* The pipeline group: a status line, the graph, the source; side by side when there is room for both. */
 .pp .pv{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
 .pp .pw2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:0 var(--s4);align-items:start}
@@ -369,3 +369,28 @@ body:not(.unf) .ask.lt{display:none}
 .pt.dn{color:var(--fg)}
 .pt.on{--kc:var(--mute);color:var(--fg);border-color:var(--kc);background:color-mix(in srgb,var(--kc) 16%,transparent)}
 .pt.on.kb{--kc:var(--a)}.pt.on.kc{--kc:var(--p)}.pt.on.kg{--kc:var(--c)}
+/* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: unfilled per #58, accent text
+   and underline, a fleet chip in its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
+.fd{display:inline-block;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fk,transparent);flex:none}
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s3) var(--s2) var(--s1)}
+.chips button[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
+.chips .fc2>span{display:inline-flex;align-items:center;gap:.6ch}
+.chips .fc2[aria-pressed=true]{color:var(--fk);box-shadow:inset 0 -2px var(--fk)}
+.es{margin:var(--s1) 0 var(--s2);font-size:var(--fs-meta)}
+.eg>h3{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;justify-content:space-between;margin:0;
+  padding:var(--s1) 0;background:var(--bg);border-bottom:1px solid var(--line);font-size:var(--fs-meta);font-weight:400;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.eg>h3>span+span{letter-spacing:0}
+details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;gap:var(--s2);padding:var(--s1) 0}
+.kg{font-style:normal;font-weight:700;text-align:center}
+.er .n{white-space:nowrap;overflow:hidden}
+.er .sm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.er .ag{font-size:var(--fs-meta);color:var(--mute);text-align:right;white-space:nowrap}
+.er:not(.imp) .sm{color:var(--mute)}
+.er[open] .sm{display:block}
+.ex{padding:0 0 var(--s2) calc(2ch + 3 * var(--s2))}
+.lk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin:var(--s2) 0;min-height:var(--ctl)}
+.lk>.m{font-size:var(--fs-meta)}
+.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
+.fl2 li{padding:calc(var(--s1) / 2) 0}

@@ -288,8 +288,33 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
+// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
+let EF = null;
+try { EF = JSON.parse(get('events:filter')); } catch (e) {}
+if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
+function evf(root) {
+  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
+  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
+  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
+  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
+  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
+  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
+  root.querySelectorAll('.eg').forEach(g => {
+    const n = g.querySelectorAll('.er:not([hidden])').length;
+    g.hidden = !n;
+    g.querySelector('h3>span+span').textContent = n;
+  });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
+  if (!b) return;
+  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
+  put('events:filter', JSON.stringify(EF));
+  evf(document);
+});
 function tidy(root) {
   graph(root);
+  evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;
@@ -947,12 +972,12 @@ function pgraph(d) {
   spans.sort((a, b) => (a[2] - a[1]) - (b[2] - b[1]));
   spans.forEach(([t, lo, hi], c) => {
     const col = c + 3, hd = heads[t] ?? 1;
-    h += `<i class=ey ${area(lo, col, hi + 1, col + 1)}></i><i class="ex in" ${area(hd, 3, hd + 1, col + 1)}></i>`;
-    h += rails[t].map(r => `<i class=ex ${area(r, 3, r + 1, col + 1)}></i>`).join('');
+    h += `<i class=ey ${area(lo, col, hi + 1, col + 1)}></i><i class="ea in" ${area(hd, 3, hd + 1, col + 1)}></i>`;
+    h += rails[t].map(r => `<i class=ea ${area(r, 3, r + 1, col + 1)}></i>`).join('');
   });
   if (park.length) {
-    h += `<i class="ey l" ${area(Math.min(...park), 1, pr + 1, 2)}></i><i class="ex l in" ${area(pr, 1, pr + 1, 2)}></i>`;
-    h += park.map(r => `<i class="ex l" ${area(r, 1, r + 1, 2)}></i>`).join('');
+    h += `<i class="ey l" ${area(Math.min(...park), 1, pr + 1, 2)}></i><i class="ea l in" ${area(pr, 1, pr + 1, 2)}></i>`;
+    h += park.map(r => `<i class="ea l" ${area(r, 1, r + 1, 2)}></i>`).join('');
     h += `<i class=ek ${area(mr, 1, mr + 1, 2)}></i>`; // a gap where the park rail passes merge: never merge → park
   }
   const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
