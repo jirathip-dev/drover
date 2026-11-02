@@ -666,7 +666,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref())?,
+                Cmd::Drive { fleet } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false)?,
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let all = crate::waiting::scan(
                         ctx,

@@ -162,7 +162,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
                 writeln!(out, "clean: {e:#}")?;
             }
         }
-        drive::drive(ctx, cfg, r, out, None)
+        drive::drive(ctx, cfg, r, out, None, false)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {
