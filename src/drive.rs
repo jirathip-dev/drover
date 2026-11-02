@@ -268,7 +268,13 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
-    let rev = |w: &Waiting| w.next_cmd.as_deref().and_then(|c| c.split(' ').nth(4)) == Some("rev");
+    // #173: a review is a spawn of any check stage's role, not only `rev`.
+    let rev = |w: &Waiting| {
+        w.next_cmd
+            .as_deref()
+            .and_then(|c| c.split(' ').nth(4))
+            .is_some_and(|r| f.family(r) == "rev")
+    };
     waits.sort_by_key(|(s, w)| (!rev(w), conflicts.contains_key(&s.issue)));
     let mut go = true;
     for (s, w) in waits
@@ -301,7 +307,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
-                ("spawn", Some("rev")) => "review",
+                ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
                 ("spawn", _) if cmd.ends_with("--supersede") => "fix",
                 ("spawn", _) => "respawn",
@@ -381,11 +387,11 @@ fn handoff(
 /// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
 /// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets' (false).
 fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
-    let events = read(&ctx.state)?;
+    let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
     let mut go = start;
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, "impl"])?;
+        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
         go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));
         if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "CAP" | "ALL_CAPPED")) {
             break;
@@ -448,7 +454,12 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
         let res = if !clean && s.state == "ready" {
-            let args = ["spawn", fleet, &n, "impl", "--supersede", "--update"];
+            let p = f.flow();
+            let b = p
+                .next(p.gate(), "conflict")
+                .and_then(|t| p.role(t.0))
+                .unwrap_or(p.start());
+            let args = ["spawn", fleet, &n, b, "--supersede", "--update"];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "conflict"), &args).map(drop)
         } else if clean && to != from {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {

@@ -4,7 +4,6 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const ROLES: [&str; 3] = ["impl", "rev", "design"];
 /// #162: the accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
 pub const COLORS: [&str; 5] = ["l", "p", "c", "g", "a"];
 
@@ -135,6 +134,11 @@ pub struct Fleet {
     pub clone_node_modules: bool,
     /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
+    /// #173: `[fleet.<n>.pipeline]`; `Config::parse` fills in the built-in one when absent.
+    pub pipeline: Option<crate::pipeline::Pipeline>,
+    /// #173: the pipeline's broken rules: every command but `serve`/`doctor`/`status` refuses `BAD_PIPELINE`.
+    #[serde(skip)]
+    pub bad: Vec<crate::pipeline::Problem>,
     /// #162: the Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
     pub color: Option<String>,
 }
@@ -153,6 +157,8 @@ pub struct Role {
     /// MCP servers (by `.mcp.json` name) the lane gets; none by default.
     #[serde(default)]
     pub mcp: Vec<String>,
+    /// #173: a file appended to the role's kind prompt (`roles/impl.md` for a build, `roles/rev.md` for a check).
+    pub prompt: Option<String>,
 }
 
 impl Role {
@@ -279,6 +285,28 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
+        let mut c = c;
+        for (name, f) in &mut c.fleet {
+            let mut p = f
+                .pipeline
+                .take()
+                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits));
+            // Each stage's line is its `[[fleet.<n>.pipeline.stage]]` header's, in order.
+            let head = format!("[[fleet.{name}.pipeline.stage]]");
+            let lines = text
+                .lines()
+                .enumerate()
+                .filter(|l| l.1.split_whitespace().collect::<String>() == head);
+            for (s, (i, _)) in p.stage.iter_mut().zip(lines) {
+                s.line = i + 1;
+            }
+            // A gate without its own rounds takes `[limits] update_rounds`.
+            for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
+                g.rounds = Some(c.limits.update_rounds);
+            }
+            f.bad = p.validate(name, &f.role);
+            f.pipeline = Some(p);
+        }
         for (name, f) in &c.fleet {
             if !(1..=8).contains(&f.serial_label().chars().count()) {
                 bail!("fleet.{name}.serial_label: must be 1 to 8 characters");
@@ -290,8 +318,8 @@ impl Config {
                 bail!("fleet.{name}.notify: cmd must not be empty");
             }
             for (role, r) in &f.role {
-                if !ROLES.contains(&role.as_str()) {
-                    bail!("fleet.{name}.role.{role}: role must be one of {ROLES:?}");
+                if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                    bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
                 if !crate::harness::NAMES.contains(&r.harness.as_str()) {
                     bail!(
@@ -334,12 +362,39 @@ impl Config {
         all.filter(|n| n.webpush()).find_map(|n| n.sub.as_deref())
     }
 
+    /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).
     pub fn fleet(&self, name: &str) -> Result<&Fleet> {
-        self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))
+        let f = self.fleet.get(name).ok_or_else(|| anyhow!("unknown fleet '{name}'"))?;
+        match f.bad.as_slice() {
+            [] => Ok(f),
+            bad => {
+                let rules: Vec<String> = bad.iter().map(|p| format!("\n  {:<12} {}", p.rule, p.msg)).collect();
+                let n = bad.len();
+                let why = format!(
+                    "fleet {name}: {n} error(s) in [fleet.{name}.pipeline]{}",
+                    rules.concat()
+                );
+                crate::gate::refused("BAD_PIPELINE", why)
+            }
+        }
     }
 }
 
 impl Fleet {
+    /// #173: the fleet's pipeline (the built-in one unless fleet.toml has its own).
+    pub fn flow(&self) -> &crate::pipeline::Pipeline {
+        self.pipeline
+            .as_ref()
+            .expect("Config::parse resolves every fleet's pipeline")
+    }
+    /// The prompt family a role's lane gets: `rev` for a check role, `design`, else `impl` (a build).
+    pub fn family(&self, role: &str) -> &'static str {
+        match role {
+            "design" => "design",
+            r if self.flow().is_check(r) => "rev",
+            _ => "impl",
+        }
+    }
     /// #162: the card colour: `color`, else `sha256(name)[0] % 5` over `COLORS` (the horse coats' hash).
     pub fn color(&self, name: &str) -> &str {
         self.color.as_deref().unwrap_or_else(|| {

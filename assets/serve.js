@@ -607,6 +607,7 @@ async function config(b) {
   $('.hd b').textContent = f + ' · config';
   const top = $('.top');
   top.innerHTML = h;
+  top.querySelectorAll('[data-pipe]').forEach(pipeline); // #173
   top.scrollTop = 0;
   tidy(top);
   top.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
@@ -904,3 +905,85 @@ addEventListener('touchend', () => {
 // #114: iOS Safari ignores user-scalable=no for pinch.
 addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register(R + 'sw.js').catch(() => {});
+// #173: a fleet's Pipeline group, drawn from its `data-pipe` (serve.rs): the validity line or the broken rules (each
+// with its fleet.toml line), the graph, the legend, the pipeline as fleet.toml text (docs/design/pipeline).
+function pipeline(sec) {
+  const d = JSON.parse(sec.dataset.pipe), S = d.stages, n = d.bad.length;
+  const hint = n ? `<b class=r>BAD_PIPELINE · ${n} error${n === 1 ? '' : 's'}</b>` : d.builtin ? 'built-in · edit fleet.toml' : `fleet.toml:${S[0]?.line ?? 0}`;
+  let h = `<h3>Pipeline<span>${hint}</span></h3>`;
+  if (n) {
+    const li = d.bad.map(b => `<li><b class=r>${b.rule}</b>${esc(b.msg)}<span class=at>fleet.toml:${b.line}</span></li>`).join('');
+    h += `<div class=pe><p>Nothing moves for ${esc(d.fleet)} until fleet.toml is fixed: <span class=qn>drive, spawn, verdict and merge</span> refuse <span class=r>BAD_PIPELINE</span>. Lanes already running keep working. Other fleets are not affected.</p><ol>${li}</ol></div>`;
+  } else {
+    const both = d.checks.length > 1 ? ` · merge needs a PASS from ${d.checks.join(' and ')} at the same head` : '';
+    h += `<p class=pv><span class=g>✓ valid</span> · ${S.length} stages (${esc(S.map(s => s.name).join(', '))}) · every stage reachable, every path ends, every loop has a limit${esc(both)}</p>`;
+  }
+  const head = d.builtin ? `# Built-in: herdsman runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
+  const toml = S.map(s => `\n[[fleet.${d.fleet}.pipeline.stage]]\nname = "${s.name}"\nkind = "${s.kind}"\n${s.role ? `role = "${s.role}"\n` : ''}${s.rounds != null ? `rounds = ${s.rounds}\n` : ''}next = { ${Object.entries(s.next).map(([o, t]) => `${o} = "${t}"`).join(', ')} }\n`).join('');
+  const what = d.builtin ? 'the built-in pipeline' : `[fleet.${d.fleet}.pipeline]`;
+  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
+  sec.innerHTML = h + `<div class=pw2><div>${pgraph(d)}<p class=lg>${lg}</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · ${esc(what)}</span></summary><pre>${esc((head + toml).trim())}</pre></details></div>`;
+}
+// One grid row per text line (`--ln` tall), so a rail meets each line at its middle: column 1 the park rail, 2 the
+// boxes, then one rail per loop target, the shortest span innermost. An outcome off the spine leaves its box on a rail.
+function pgraph(d) {
+  const S = d.stages, base = t => t.split(':')[0], main = k => k === 'build' ? 'push' : k === 'check' ? 'PASS' : 'ok';
+  const W = { PASS: '<b class=g>PASS</b>', ok: '<b class=g>ok</b>', FAIL: '<b class=r>FAIL</b>', ci_red: '<b class=r>CI red</b>', conflict: '<b class=a>conflict</b>' };
+  const word = o => W[o] ?? `<b>${esc(o)}</b>`, K = { build: 'b', check: 'c', gate: 'g' }, G = { b: '▲', c: '◆', g: '◫', x: '!' };
+  const spine = i => S[i + 1]?.name ?? 'merge', off = (i, o, t) => !(o === main(S[i].kind) && t === spine(i));
+  const loops = S.flatMap((s, i) => Object.entries(s.next).filter(([o, t]) => off(i, o, t)).map(([, t]) => base(t)));
+  const reach = [S[0]?.name ?? '', ...S.flatMap(s => Object.values(s.next).map(base))];
+  const rails = {}, park = [], heads = {};
+  let h = '', row = 0;
+  const put = (cls, inner) => { h += `<p class="${cls}" style="grid-row:${++row}">${inner}</p>`; return row; };
+  put('nl st', `<i class=kd>○</i><b>queued</b><span class=m>${d.queued} waiting</span>`);
+  put('pl', '<b>start</b><span>if unblocked · serial slot · host room</span>');
+  S.forEach((s, i) => {
+    const errs = d.bad.filter(b => b.stage === s.name), dead = !reach.includes(s.name), k = K[s.kind] ?? 'x';
+    const tag = (s.here ? `<span class="tag m">${s.here} here</span>` : '') + (loops.includes(s.name) ? `<span class=lp>↺ ${esc(s.name)}</span>` : '');
+    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · herdsman' : esc(s.kind)}</span>${tag}`]];
+    const ci = d.required.length ? d.required.join(' + ') : 'green', from = d.checks.length > 1 ? `from ${d.checks.join(' + ')} ` : '';
+    const dt = esc(s.role ? `role ${s.role} · ${s.run ?? 'not defined'}` : `CI ${ci} · PASS ${from}at head · serial · mergeable`);
+    lines.push([`<span class=dt title="${dt}">${dt}</span>`]);
+    for (const b of errs) { const t = esc(`${b.rule}: ${b.msg}`); lines.push([`<span class="dt r" title="${t}">✗ ${t}</span>`]); }
+    for (const [o, t] of Object.entries(s.next).filter(([o, t]) => off(i, o, t))) {
+      const up = t.endsWith(':update'), to = up ? base(t) : t;
+      const what = to === 'park' ? 'park' : up ? `update in ${to}` : ['FAIL', 'ci_red', 'conflict'].includes(o) ? `fix in ${to}` : to;
+      const lim = ['FAIL', 'conflict'].includes(o) && s.rounds != null ? ` · ≤${s.rounds} rounds, then park` : o === 'ci_red' ? ` · ${s.loop}'s rounds` : '';
+      const tt = esc(what + lim);
+      lines.push([`<span title="${tt}">${word(o)} → ${tt}</span>`, to]);
+    }
+    if (s.rounds != null && (s.kind === 'check' || (s.next.conflict ?? '').endsWith(':update'))) lines.push(['<span><b>out of rounds</b> → park</span>', 'park']);
+    const last = lines.length - 1;
+    lines.forEach(([inner, rail], j) => {
+      const edge = j === 0 ? (last ? ' t' : ' t b') : j === last ? ' b' : '';
+      const r = put('nb' + edge + (rail === 'park' ? ' po l' : rail ? ' po' : '') + (dead ? ' dead' : errs.length ? ' bad' : ''), inner);
+      if (rail === 'park') park.push(r); else if (rail) (rails[rail] ??= []).push(r);
+      if (!j) heads[s.name] = r;
+    });
+    const o = main(s.kind), sp = spine(i);
+    const why = o === 'push' ? 'a new head' : o === 'PASS' ? (i && S[i - 1].kind === 'check' ? 'at the same head' : 'at the exact head') : '';
+    if (s.next[o] === sp) put('pl', `${word(o)}<span>${why}</span>`);
+    else put('pl no', reach.includes(sp) ? '' : `<span class=r>✗ nothing leads to ${esc(sp)}</span>`);
+  });
+  const gone = reach.includes('merge') ? '' : ' dead';
+  const mr = put(`nb t b end${gone}`, `<i class="kd m">✓</i><b>merge</b><span class=m>into ${esc(d.into)}${gone && ' · unreachable'}</span>`);
+  put('nl', '');
+  const pr = put('nb t b end', `<i class="kd x">!</i><b>park</b><span class=m>needs you</span><span class="tag m">${d.parked} here</span>`);
+  put('pl pn', '<span>on its card: one more round, or park for good</span>');
+  const area = (a, b, c, e) => `style="grid-area:${a}/${b}/${c}/${e}"`;
+  const spans = Object.keys(rails).sort().map(t => { const all = [...rails[t], heads[t] ?? 1]; return [t, Math.min(...all), Math.max(...all)]; });
+  spans.sort((a, b) => (a[2] - a[1]) - (b[2] - b[1]));
+  spans.forEach(([t, lo, hi], c) => {
+    const col = c + 3, hd = heads[t] ?? 1;
+    h += `<i class=ey ${area(lo, col, hi + 1, col + 1)}></i><i class="ea in" ${area(hd, 3, hd + 1, col + 1)}></i>`;
+    h += rails[t].map(r => `<i class=ea ${area(r, 3, r + 1, col + 1)}></i>`).join('');
+  });
+  if (park.length) {
+    h += `<i class="ey l" ${area(Math.min(...park), 1, pr + 1, 2)}></i><i class="ea l in" ${area(pr, 1, pr + 1, 2)}></i>`;
+    h += park.map(r => `<i class="ea l" ${area(r, 1, r + 1, 2)}></i>`).join('');
+    h += `<i class=ek ${area(mr, 1, mr + 1, 2)}></i>`; // a gap where the park rail passes merge: never merge → park
+  }
+  const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
+  return `<div class=pg role=img aria-label="${esc(d.fleet)} pipeline: ${esc(S.map(s => s.name).join(', '))}" style="grid-template-columns:2ch minmax(0,1fr)${rep};grid-template-rows:repeat(${row},var(--ln))">${h}</div>`;
+}

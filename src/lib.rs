@@ -27,6 +27,7 @@ pub mod hook;
 pub mod host;
 pub mod lanes;
 pub mod overlap;
+pub mod pipeline;
 pub mod protection;
 pub mod queue;
 pub mod runner;

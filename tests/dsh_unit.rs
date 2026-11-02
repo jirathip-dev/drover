@@ -36,6 +36,8 @@ fn kick_with_non_ascii_path_does_not_panic() {
     let p = Plan {
         agent: "a".into(),
         role: "rev".into(),
+        stage: "rev".into(),
+        family: "rev",
         harness: "dsh".into(),
         profile: s(),
         model: None,

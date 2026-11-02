@@ -28,7 +28,7 @@ run() { # url, extra args
 }
 fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
-for v in queue queue-open queue-change queue-drive queue-result config lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked events herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
+for v in queue queue-open queue-change queue-drive queue-result config lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
   dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}
   url="http://127.0.0.1:$port/${dir}index.html?audit=$view"
   case $v in herd-kitchen) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172
