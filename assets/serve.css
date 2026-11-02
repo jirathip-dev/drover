@@ -260,15 +260,14 @@ body:not(.unf) .ask.lt{display:none}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
 /* #166: a driven fleet's result line under its header; a tap lists each action in plain words, a tap on one its code. */
 .dp summary{display:flex}.dp ul{margin:0;padding-left:var(--s4);color:var(--fg)}.dp code{font-size:var(--fs-meta)}
-/* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: the accent fill, a fleet
-   chip its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
+/* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: unfilled per #58, accent text
+   and underline, a fleet chip in its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
 .k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
 .fd{display:inline-block;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fk,transparent);flex:none}
 .chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s3) var(--s2) var(--s1)}
-.chips button[aria-pressed=true]{background:var(--l);color:var(--bg)}
+.chips button[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
 .chips .fc2>span{display:inline-flex;align-items:center;gap:.6ch}
-.chips .fc2[aria-pressed=true]{background:var(--fk)}
-.chips .fc2[aria-pressed=true] .fd{background:var(--bg)}
+.chips .fc2[aria-pressed=true]{color:var(--fk);box-shadow:inset 0 -2px var(--fk)}
 .es{margin:var(--s1) 0 var(--s2);font-size:var(--fs-meta)}
 .eg>h3{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;justify-content:space-between;margin:0;
   padding:var(--s1) 0;background:var(--bg);border-bottom:1px solid var(--line);font-size:var(--fs-meta);font-weight:400;

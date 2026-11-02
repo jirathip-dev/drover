@@ -307,7 +307,11 @@ function evf(root) {
   root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
   root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
   root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
-  root.querySelectorAll('.eg').forEach(g => g.hidden = !g.querySelector('.er:not([hidden])'));
+  root.querySelectorAll('.eg').forEach(g => {
+    const n = g.querySelectorAll('.er:not([hidden])').length;
+    g.hidden = !n;
+    g.querySelector('h3>span+span').textContent = n;
+  });
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
