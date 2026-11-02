@@ -202,6 +202,11 @@ pub fn scan(
             lane: Some(lane.clone()),
             ..s
         };
+        let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
+        // #169: no PR yet: the issue branch's latest run backs the `checks` link (the tick reads it, never a request).
+        if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
+            gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
+        }
         if busy(&lane) {
             let who = if s.lanes.get("rev") == Some(&lane) {
                 "reviewer"
@@ -228,7 +233,6 @@ pub fn scan(
             }));
             continue;
         }
-        let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
         let pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
             (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).unwrap_or_default(),
