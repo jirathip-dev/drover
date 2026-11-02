@@ -484,8 +484,8 @@ fn inputs_are_16px_and_zoom_is_off() {
     let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
         .into_owned();
     assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    // #166: the sheet locks the page with overflow alone; a position:fixed body repainted iOS black on close.
-    assert!(css.contains(".lock,.lock body{overflow:hidden") && !css.contains(".lock body{position:fixed"));
+    // #166/#200: no root style toggles with the sheet (a position:fixed body, then overflow, repainted iOS on close).
+    assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
     assert!(include_str!("../assets/serve.js").contains("visualViewport"));
 }
 
