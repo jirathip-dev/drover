@@ -170,9 +170,9 @@
       close();
       await frame();
       const slide = getComputedStyle(sh).transitionDuration;
-      if (S.hidden || !S.matches('.out') || aim() < sh.offsetHeight - 1 || slide !== '0.2s') dragged.push(`a frame after close: hidden ${S.hidden}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
+      if (!shown() || !S.matches('.shut') || aim() < sh.offsetHeight - 1 || slide !== '0.2s') dragged.push(`a frame after close: shown ${shown()}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
       await wait();
-      if (!S.hidden) dragged.push('300 ms after close the sheet is still shown');
+      if (shown()) dragged.push('300 ms after close the sheet is still shown');
       if (!DBG.get('check')) { open($('.lane')); S.classList.add('drag'); snap('half'); } // the screenshot: the sheet at half, unanimated
     },
     host: async () => { // the live Host tab's [enable alerts] (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
