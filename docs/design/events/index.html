@@ -1,0 +1,1139 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Events tab mockup</title>
+<!-- #170 design mockup: the Events tab in the board's theme. serve.css is the board's, unchanged; the rules below are
+     the only additions (existing tokens only) and move to serve.css in phase 2. Data: the real event log read at
+     2026-11-02 08:15, fleet names neutralised (atlas, relay), paths and ids masked. Generated, then committed as is.
+     Static apart from the chips: `#all` opens the all view, `#fold` the noise-fold before/after. -->
+<link rel=stylesheet href=../../../assets/serve.css>
+<style>
+/* Mockup only: one page per hash. */
+body:not(.fold) #fold,body.fold #events{display:none}
+
+/* ---- proposed for serve.css (#170) ---- */
+/* #162's fleet colour --fk, one accent token per fleet (red is left out: it means "needs you"). */
+.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fd{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--fk,transparent);flex:none}
+/* The chips: the board's 28 px bracket controls (44 px rings, 16 px apart). [all]/[important] pick one; fleet chips
+   narrow to those fleets (none pressed: every fleet). Pressed is #141's pressed key: the accent fill, dark text; a
+   fleet chip fills with its own colour. Kept per phone in localStorage (`events:filter`). */
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s3) var(--s2) var(--s1)}
+.chips button[aria-pressed=true]{background:var(--l);color:var(--bg)}
+.chips .fc2>span{display:inline-flex;align-items:center;gap:.6ch}
+.chips .fc2[aria-pressed=true]{background:var(--fk)}
+.chips .fc2[aria-pressed=true] .fd{background:var(--bg)}
+.es{margin:var(--s1) 0 var(--s2);font-size:var(--fs-meta)}
+/* Time groups (now, 5m, 1h, earlier today, yesterday): a small sticky header under the page header, the name left and
+   the row count right. It sticks inside its group, so the next group's header takes over. */
+.eg>h3{position:sticky;top:calc(var(--hit) + var(--s1) + 1px);z-index:1;display:flex;justify-content:space-between;margin:0;
+  padding:var(--s1) 0;background:var(--bg);border-bottom:1px solid var(--line);font-size:var(--fs-meta);font-weight:400;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.eg>h3>span+span{letter-spacing:0}
+/* A row: kind glyph · fleet dot · #N (a link; the rest of the row opens it) · plain words (2 lines at most) · age.
+   44 px tall, so the whole row is a tap target. The glyph takes the kind's colour from the ANSI tokens (.t-*). */
+details.er>summary{grid-template-columns:2ch 8px 6ch minmax(0,1fr) auto;gap:var(--s2);padding:var(--s1) 0}
+.kg{font-style:normal;font-weight:700;text-align:center}
+.er .n{white-space:nowrap;overflow:hidden}
+.er .sm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.er .ag{font-size:var(--fs-meta);color:var(--mute);text-align:right;white-space:nowrap}
+/* In [all], routine rows step back to muted text; the ones [important] keeps stay at full weight. */
+.er:not(.imp) .sm{color:var(--mute)}
+.er[open] .sm{display:block}
+/* Open: [#N] [PR #M] [checks] (#169's links) as bracket links, the exact time, and the raw event (11 px, wraps). */
+.ex{padding:0 0 var(--s2) calc(2ch + 8px + 2 * var(--s2))}
+.lk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin:var(--s2) 0;min-height:var(--ctl)}
+.lk>.m{font-size:var(--fs-meta)}
+.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
+.fl2 li{padding:2px 0}
+/* A bracket link: the board's control, as an <a> (phase 2: add `.bl` to the button selector in serve.css). */
+.bl{position:relative;display:inline-flex;align-items:center;height:var(--ctl);padding:0 1ch;color:var(--l);text-decoration:none;white-space:nowrap}
+.bl::before{content:"[";position:absolute;left:0}
+.bl::after{content:"]";position:absolute;inset:calc(-1 * var(--s2));display:flex;align-items:center;justify-content:flex-end;padding-right:var(--s2)}
+.bl:active{background:var(--l);color:var(--bg)}
+/* Mockup only: the before/after page for the noise fold. */
+#fold h2{color:var(--mute)}
+#fold .ev{font-size:var(--fs)}
+</style></head>
+<body data-mode=glyph data-ts=0><header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i>
+<button id=rf type=button aria-label=refresh><i>↻</i></button><button id=herd-on type=button aria-label="herd mode">🐎</button></header>
+<main>
+<section id=events>
+<div class=chips role=group aria-label="filter events"><button type=button data-k=all aria-pressed=false><span>all</span></button><button type=button data-k=imp aria-pressed=true><span>important</span></button><button type=button class="fc2 k-l" data-fl=herdsman aria-pressed=false><span><i class=fd></i>herdsman</span></button><button type=button class="fc2 k-a" data-fl=atlas aria-pressed=false><span><i class=fd></i>atlas</span></button><button type=button class="fc2 k-a" data-fl=relay aria-pressed=false><span><i class=fd></i>relay</span></button></div>
+<p class="m es" data-v=imp>50 important rows · back to yesterday 22:07 · <a href="?all=1">all events, unfolded</a></p>
+<p class="m es" data-v=all hidden>last 50 rows · back to 5m 07:57 · <a href="?all=1">all events, unfolded</a></p>
+<div data-v=imp><div class=eg><h3><span>now</span><span>4</span></h3><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2782">#2782</a><span class=sm>review PASS · round 4</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2782"><span>#2782</span></a><span class=m>08:11:02 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2782,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (34 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2782&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2782-r4/verdict.md&quot;,
+ &quot;round&quot;: 4,
+ &quot;sha&quot;: &quot;24b73d7fc34fbb29b9ee5786e08fea724a967f06&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2684">#2684</a><span class=sm>review PASS · round 4</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2684"><span>#2684</span></a><span class=m>08:11:02 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2684,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (31 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2684&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2684-r5/verdict.md&quot;,
+ &quot;round&quot;: 4,
+ &quot;sha&quot;: &quot;4026e713f186725da6e016be80aae562af3f12c0&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" open data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>merged into staging · PR #161</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/161"><span>PR #161</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/161/checks"><span>checks</span></a><span class=m>08:11:02 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;51d8483b1eb57b3aa5fcc304b5f289d4a9ac10a3&quot;,
+ &quot;pr&quot;: &quot;161&quot;,
+ &quot;verdict_sha&quot;: &quot;965091f9d15f787c6308e71c61020cf7f62c8f1d&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/149">#149</a><span class=sm>review PASS · round 1</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/149"><span>#149</span></a><span class=m>08:11:02 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 149,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-149&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-149-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;0d1357f5a0db86e7dded041eb8156d17b3cc3513&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details></div><div class=eg><h3><span>5m</span><span>10</span></h3><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/160">#160</a><span class=sm>failed · herdr: agent name cannot change while startup is pending</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/160"><span>#160</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 160,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 160 impl&quot;,
+ &quot;code&quot;: &quot;ERROR&quot;,
+ &quot;result&quot;: &quot;error: herdr agent rename w6N5:p1 herdsman-impl-160 failed (1): {\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;agent_launch_pending\&quot;,\&quot;message\&quot;:\&quot;agent name cannot change while startup is pe…&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>review PASS · round 1</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:05:50 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (32 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-154&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-154-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;965091f9d15f787c6308e71c61020cf7f62c8f1d&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>merged into staging · PR #158</span><span class=ag>10m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/158"><span>PR #158</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/158/checks"><span>checks</span></a><span class=m>08:04:28 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793581468,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;f54bdebc9dce72b9617a433c8592ec11425914ea&quot;,
+ &quot;pr&quot;: &quot;158&quot;,
+ &quot;verdict_sha&quot;: &quot;34dd605eda43a66fbcd8a5876b59f4d9850ff6e0&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/165">#165</a><span class=sm>failed · herdr: agent target pane is not an available shell</span><span class=ag>17m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/165"><span>#165</span></a><span class=m>07:57:29 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581049,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 165,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 165 impl&quot;,
+ &quot;code&quot;: &quot;ERROR&quot;,
+ &quot;result&quot;: &quot;error: herdr agent start failed: {\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;agent_pane_busy\&quot;,\&quot;message\&quot;:\&quot;agent target pane w6N4:p1 is not an available shell\&quot;},\&quot;id\&quot;:\&quot;cli:agent:start\&quot;}&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>review PASS · round 2</span><span class=ag>17m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><span class=m>07:57:29 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581049,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (24 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-150&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-150-r2/verdict.md&quot;,
+ &quot;round&quot;: 2,
+ &quot;sha&quot;: &quot;34dd605eda43a66fbcd8a5876b59f4d9850ff6e0&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-r">!</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2910">#2910</a><span class=sm>still waiting on you · q53 for 35m</span><span class=ag>34m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2910"><span>#2910</span></a><span class=m>07:40:27 · atlas · ask-waiting</span></p><pre>{
+ &quot;ts&quot;: 1793580027,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2910,
+ &quot;type&quot;: &quot;ask-waiting&quot;,
+ &quot;key&quot;: &quot;q53&quot;,
+ &quot;reason&quot;: &quot;q53 unanswered for 35m: How should the lane get read-only evidence from production?&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-a">⊘</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>waiting · no PASS for its head yet</span><span class=ag>38m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><span class=m>07:36:48 · herdsman · blocked</span></p><pre>{
+ &quot;ts&quot;: 1793579808,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;blocked&quot;,
+ &quot;code&quot;: &quot;STALE_VERDICT&quot;,
+ &quot;reason&quot;: &quot;no verdict for head 34dd605eda43a66fbcd8a5876b59f4d9850ff6e0; re-review the current head&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/151">#151</a><span class=sm>merged into staging · PR #163</span><span class=ag>39m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/151"><span>#151</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/163"><span>PR #163</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/163/checks"><span>checks</span></a><span class=m>07:35:10 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793579710,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 151,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;9e8fc8666fc8dd6f046b34b22f2d77a584de8569&quot;,
+ &quot;pr&quot;: &quot;163&quot;,
+ &quot;verdict_sha&quot;: &quot;1a1d6a9a201753acf5fbac9b32835558ab2a3c83&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-a">⊘</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>waiting · no PASS for its head yet</span><span class=ag>40m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><span class=m>07:34:01 · herdsman · blocked</span></p><pre>{
+ &quot;ts&quot;: 1793579641,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;blocked&quot;,
+ &quot;code&quot;: &quot;STALE_VERDICT&quot;,
+ &quot;reason&quot;: &quot;no verdict for head 34dd605eda43a66fbcd8a5876b59f4d9850ff6e0; re-review the current head&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/151">#151</a><span class=sm>review PASS · round 1</span><span class=ag>40m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/151"><span>#151</span></a><span class=m>07:34:01 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793579641,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 151,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (19 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-151&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-151-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;1a1d6a9a201753acf5fbac9b32835558ab2a3c83&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details></div><div class=eg><h3><span>1h</span><span>9</span></h3><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>review PASS · round 1</span><span class=ag>64m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><span class=m>07:10:31 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793578231,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (26 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-150&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-150-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;cee1b72e1f22c5de232a1838448430db9ee867fd&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/148">#148</a><span class=sm>merged into staging · PR #153</span><span class=ag>64m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/148"><span>#148</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/153"><span>PR #153</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/153/checks"><span>checks</span></a><span class=m>07:10:31 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793578231,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 148,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;5633737008fe853954838a5defd7c674c1d7b993&quot;,
+ &quot;pr&quot;: &quot;153&quot;,
+ &quot;verdict_sha&quot;: &quot;670d6d157c53a5e4cdca451baccd7b754947aefd&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-r">!</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2910">#2910</a><span class=sm>asks you (q53) · How should the lane get read-only evidence from production?</span><span class=ag>70m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2910"><span>#2910</span></a><span class=m>07:04:57 · atlas · needs-decision</span></p><pre>{
+ &quot;ts&quot;: 1793577897,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2910,
+ &quot;type&quot;: &quot;needs-decision&quot;,
+ &quot;agent&quot;: &quot;atlas-impl-2910&quot;,
+ &quot;id&quot;: &quot;q53&quot;,
+ &quot;kind&quot;: &quot;owner&quot;,
+ &quot;options&quot;: [
+  &quot;You run the queries and hand the lane a file&quot;,
+  &quot;Give the lane a read-only token&quot;,
+  &quot;Ship without the production columns&quot;
+ ],
+ &quot;question&quot;: &quot;How should the lane get read-only evidence from production?&quot;,
+ &quot;recommend&quot;: 3
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2893">#2893</a><span class=sm>review PASS · round 1</span><span class=ag>74m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2893"><span>#2893</span></a><span class=m>07:00:27 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793577627,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2893,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (28 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2893&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2893-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;59539cd3c7e1041490b928af6c20cc94d5938039&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-r">✗</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2622">#2622</a><span class=sm>review FAIL · round 1</span><span class=ag>74m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2622"><span>#2622</span></a><span class=m>07:00:27 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793577627,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2622,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;FAIL … (59 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2622&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2622-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;72bc25a8fb16c7d08cca132d64b63421fdbede78&quot;,
+ &quot;verdict&quot;: &quot;FAIL&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/147">#147</a><span class=sm>merged into staging · PR #152</span><span class=ag>74m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/147"><span>#147</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/152"><span>PR #152</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/152/checks"><span>checks</span></a><span class=m>07:00:27 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793577627,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 147,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;f60997bddb59338a30e1a4429e3fe946f824ff9d&quot;,
+ &quot;pr&quot;: &quot;152&quot;,
+ &quot;verdict_sha&quot;: &quot;32afbfe6afe8f7f4a3b0857c1685541c9839c832&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/148">#148</a><span class=sm>review PASS · round 1</span><span class=ag>88m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/148"><span>#148</span></a><span class=m>06:46:59 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793576819,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 148,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (14 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-148&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-148-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;1711dcef9d911aaea66dd7f121d0465569318ffd&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/147">#147</a><span class=sm>review PASS · round 1</span><span class=ag>88m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/147"><span>#147</span></a><span class=m>06:46:59 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793576819,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 147,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (13 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-147&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-147-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;32afbfe6afe8f7f4a3b0857c1685541c9839c832&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2755">#2755</a><span class=sm>merged into staging · PR #2902</span><span class=ag>113m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2755"><span>#2755</span></a><a class=bl href="https://github.com/example/atlas/pull/2902"><span>PR #2902</span></a><a class=bl href="https://github.com/example/atlas/pull/2902/checks"><span>checks</span></a><span class=m>06:21:01 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793575261,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2755,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;1dc3bece1fcf81d69ec0515282f09032b7aca328&quot;,
+ &quot;pr&quot;: &quot;2902&quot;,
+ &quot;verdict_sha&quot;: &quot;dbc521f4fcfec517d5c213663068a71d0ea8fe41&quot;
+}</pre></div></details></div><div class=eg><h3><span>earlier today</span><span>11</span></h3><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-r">!</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2665">#2665</a><span class=sm>asks you (q52) · Which daily reports count once the plan has ended?</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2665"><span>#2665</span></a><span class=m>06:11:31 · atlas · needs-decision</span></p><pre>{
+ &quot;ts&quot;: 1793574691,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2665,
+ &quot;type&quot;: &quot;needs-decision&quot;,
+ &quot;agent&quot;: &quot;atlas-orch&quot;,
+ &quot;id&quot;: &quot;q52&quot;,
+ &quot;kind&quot;: &quot;owner&quot;,
+ &quot;options&quot;: [
+  &quot;Count every report up to the as-of date&quot;,
+  &quot;Count them only after the plan is extended&quot;,
+  &quot;Keep ignoring them&quot;
+ ],
+ &quot;question&quot;: &quot;Which daily reports count once the plan has ended?&quot;,
+ &quot;recommend&quot;: 1
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2821">#2821</a><span class=sm>merged into staging · PR #2905</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2821"><span>#2821</span></a><a class=bl href="https://github.com/example/atlas/pull/2905"><span>PR #2905</span></a><a class=bl href="https://github.com/example/atlas/pull/2905/checks"><span>checks</span></a><span class=m>06:11:08 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793574668,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2821,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;5bac740b863b2204ebf0a34e25d60a8188571df9&quot;,
+ &quot;pr&quot;: &quot;2905&quot;,
+ &quot;verdict_sha&quot;: &quot;c3be0089f90f133a082b0472c91083604aef3f00&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-a">⊘</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2821">#2821</a><span class=sm>held · touches the database but wasn&#x27;t queued --serial</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2821"><span>#2821</span></a><span class=m>06:09:45 · atlas · blocked</span></p><pre>{
+ &quot;ts&quot;: 1793574585,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2821,
+ &quot;type&quot;: &quot;blocked&quot;,
+ &quot;code&quot;: &quot;SERIAL_UNMARKED&quot;,
+ &quot;reason&quot;: &quot;PR touches serial path db/migrations/20261101202900_‹name›.sql; queue #2821 with `--serial` first&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2666">#2666</a><span class=sm>merged into staging · PR #2906</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2666"><span>#2666</span></a><a class=bl href="https://github.com/example/atlas/pull/2906"><span>PR #2906</span></a><a class=bl href="https://github.com/example/atlas/pull/2906/checks"><span>checks</span></a><span class=m>06:09:45 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793574585,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2666,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;4d4740de48c8228d21df04e1d5b0058266b19a12&quot;,
+ &quot;pr&quot;: &quot;2906&quot;,
+ &quot;verdict_sha&quot;: &quot;f666211013ac2687f89e21a172c33e76b692133d&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2646">#2646</a><span class=sm>merged into staging · PR #2908</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2646"><span>#2646</span></a><a class=bl href="https://github.com/example/atlas/pull/2908"><span>PR #2908</span></a><a class=bl href="https://github.com/example/atlas/pull/2908/checks"><span>checks</span></a><span class=m>06:09:45 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793574585,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2646,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;6d086bd6ec3e1b8725e901c11be9f261354ec35d&quot;,
+ &quot;pr&quot;: &quot;2908&quot;,
+ &quot;verdict_sha&quot;: &quot;f57a3d0d2bc7bb2893fc972ed4f1d61a54f2b5c6&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2900">#2900</a><span class=sm>merged into staging · PR #2907</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2900"><span>#2900</span></a><a class=bl href="https://github.com/example/atlas/pull/2907"><span>PR #2907</span></a><a class=bl href="https://github.com/example/atlas/pull/2907/checks"><span>checks</span></a><span class=m>06:03:38 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793574218,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2900,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;b88b6e682e438faebf1b0db9fc87beb23dbbdf61&quot;,
+ &quot;pr&quot;: &quot;2907&quot;,
+ &quot;verdict_sha&quot;: &quot;0409ab2d2c929eb0fcdd3bf95d76cdf0be1c60b0&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/141">#141</a><span class=sm>asks you (q51) · #141 src/ lands at about +100 net (budget +60; q50 cap 10510 = staging 10446 + …</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/141"><span>#141</span></a><span class=m>05:59:04 · herdsman · needs-decision</span></p><pre>{
+ &quot;ts&quot;: 1793573944,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 141,
+ &quot;type&quot;: &quot;needs-decision&quot;,
+ &quot;agent&quot;: &quot;herdsman-impl-141&quot;,
+ &quot;id&quot;: &quot;q51&quot;,
+ &quot;kind&quot;: &quot;owner&quot;,
+ &quot;options&quot;: [
+  &quot;Raise line_cap to 10550 in this PR (src +104)&quot;,
+  &quot;Move the WORDS table to assets/host-words.txt via include_str! (src ~+86, cap 10535); the table stays one file&quot;,
+  &quot;Cut scope: keep refusals raw in FLEETS (no table), plain words in a follow-up issue&quot;
+ ],
+ &quot;question&quot;: &quot;herdsman-impl-141: #141 src/ lands at about +100 net (budget +60; q50 cap 10510 = staging 10446 + 64). Already trimmed. What&#x27;s left is the feature: the plain-l…&quot;,
+ &quot;recommend&quot;: 1
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/147">#147</a><span class=sm>failed · herdr: agent name cannot change while startup is pending</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/147"><span>#147</span></a><span class=m>05:52:53 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793573573,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 147,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 147 impl&quot;,
+ &quot;code&quot;: &quot;ERROR&quot;,
+ &quot;result&quot;: &quot;error: herdr agent rename w6M8:p1 herdsman-impl-147 failed (1): {\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;agent_launch_pending\&quot;,\&quot;message\&quot;:\&quot;agent name cannot change while startup is pe…&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/141">#141</a><span class=sm>asks you (q50) · origin/staging 037cc02 already fails cap-check: src/ 10446 lines vs line_cap 10…</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/141"><span>#141</span></a><span class=m>05:47:51 · herdsman · needs-decision</span></p><pre>{
+ &quot;ts&quot;: 1793573271,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 141,
+ &quot;type&quot;: &quot;needs-decision&quot;,
+ &quot;agent&quot;: &quot;herdsman-impl-141&quot;,
+ &quot;id&quot;: &quot;q50&quot;,
+ &quot;kind&quot;: &quot;owner&quot;,
+ &quot;options&quot;: [
+  &quot;Raise line_cap to 10510 in this PR&quot;,
+  &quot;Raise only to 10446 (staging fix); #141 must fit by trimming elsewhere&quot;,
+  &quot;Hold: cap is handled in another issue&quot;
+ ],
+ &quot;question&quot;: &quot;herdsman-impl-141: origin/staging 037cc02 already fails cap-check: src/ 10446 lines vs line_cap 10400 in ci/cap.toml (after #138/#140/#143 merges). #141&#x27;s budg…&quot;,
+ &quot;recommend&quot;: 1
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/143">#143</a><span class=sm>merged into staging · PR #144</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/143"><span>#143</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/144"><span>PR #144</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/144/checks"><span>checks</span></a><span class=m>05:45:39 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793573139,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 143,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;037cc02b5a79574f8c23dd842a685e12d173d352&quot;,
+ &quot;pr&quot;: &quot;144&quot;,
+ &quot;verdict_sha&quot;: &quot;73d10f4414e99ac56b7dd8f8a47df9cae23831ee&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/140">#140</a><span class=sm>merged into staging · PR #142</span><span class=ag>2h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/140"><span>#140</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/142"><span>PR #142</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/142/checks"><span>checks</span></a><span class=m>05:45:25 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793573125,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 140,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;dde590a918b927b4fb2f8226f7ec9bd098db78ac&quot;,
+ &quot;pr&quot;: &quot;142&quot;,
+ &quot;verdict_sha&quot;: &quot;3c20954d70ef24733748906984336e5c0a64db56&quot;
+}</pre></div></details></div><div class=eg><h3><span>yesterday</span><span>16</span></h3><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2646">#2646</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2646"><span>#2646</span></a><span class=m>22:53:05 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793548385,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2646,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2646&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2646-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;f57a3d0d2bc7bb2893fc972ed4f1d61a54f2b5c6&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/138">#138</a><span class=sm>merged into staging · PR #146</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/138"><span>#138</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/146"><span>PR #146</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/146/checks"><span>checks</span></a><span class=m>22:53:05 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793548385,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 138,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;9d582d10d833c741405f5a212e7a878d7cb0cfc0&quot;,
+ &quot;pr&quot;: &quot;146&quot;,
+ &quot;verdict_sha&quot;: &quot;5eef682287dcdbe8c057d33999baadb23140f51e&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/138">#138</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/138"><span>#138</span></a><span class=m>22:47:37 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793548057,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 138,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-138&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-138-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;5eef682287dcdbe8c057d33999baadb23140f51e&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-a">⊘</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/143">#143</a><span class=sm>waiting · CI not green yet</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/143"><span>#143</span></a><span class=m>22:38:31 · herdsman · blocked</span></p><pre>{
+ &quot;ts&quot;: 1793547511,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 143,
+ &quot;type&quot;: &quot;blocked&quot;,
+ &quot;code&quot;: &quot;CI_NOT_GREEN&quot;,
+ &quot;reason&quot;: &quot;no checks reported at 73d10f4414e99ac56b7dd8f8a47df9cae23831ee&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-a">⊘</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/140">#140</a><span class=sm>waiting · CI not green yet</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/140"><span>#140</span></a><span class=m>22:38:31 · herdsman · blocked</span></p><pre>{
+ &quot;ts&quot;: 1793547511,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 140,
+ &quot;type&quot;: &quot;blocked&quot;,
+ &quot;code&quot;: &quot;CI_NOT_GREEN&quot;,
+ &quot;reason&quot;: &quot;no checks reported at 3c20954d70ef24733748906984336e5c0a64db56&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/139">#139</a><span class=sm>merged into staging · PR #145</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/139"><span>#139</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/145"><span>PR #145</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/145/checks"><span>checks</span></a><span class=m>22:38:31 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793547511,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 139,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;695b765417dca4a1ac4284128b22f289e86271d7&quot;,
+ &quot;pr&quot;: &quot;145&quot;,
+ &quot;verdict_sha&quot;: &quot;6ea24400fa3c8406aa6d318f414bfce9647dd5cc&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/143">#143</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/143"><span>#143</span></a><span class=m>22:32:57 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793547177,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 143,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (22 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-143&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-143-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;ae7d57fe15687c995db3dcde07beb73c45a18d12&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/140">#140</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/140"><span>#140</span></a><span class=m>22:32:57 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793547177,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 140,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-140&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-140-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;f286b41b40ab2ec80a5153d436baf6a1a4478080&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/139">#139</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/139"><span>#139</span></a><span class=m>22:32:57 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793547177,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 139,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-139&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-139-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;6ea24400fa3c8406aa6d318f414bfce9647dd5cc&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/141">#141</a><span class=sm>still waiting on you · q49 for 31m</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/141"><span>#141</span></a><span class=m>22:30:17 · herdsman · ask-waiting</span></p><pre>{
+ &quot;ts&quot;: 1793547017,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 141,
+ &quot;type&quot;: &quot;ask-waiting&quot;,
+ &quot;key&quot;: &quot;q49&quot;,
+ &quot;reason&quot;: &quot;q49 unanswered for 31m: herdsman-impl-141: phase 2 needs the design approved first. Mockup is on origin/design-141 (docs/design/host-tab, README + 390/1440 PNG…&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2900">#2900</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2900"><span>#2900</span></a><span class=m>22:19:46 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793546386,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2900,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (59 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2900&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2900-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;0409ab2d2c929eb0fcdd3bf95d76cdf0be1c60b0&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2891">#2891</a><span class=sm>merged into staging · PR #2899</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2891"><span>#2891</span></a><a class=bl href="https://github.com/example/atlas/pull/2899"><span>PR #2899</span></a><a class=bl href="https://github.com/example/atlas/pull/2899/checks"><span>checks</span></a><span class=m>22:19:46 · atlas · merged</span></p><pre>{
+ &quot;ts&quot;: 1793546386,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2891,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;98df97220fb3122be91802d1ecf17d58feeafb46&quot;,
+ &quot;pr&quot;: &quot;2899&quot;,
+ &quot;verdict_sha&quot;: &quot;0777b0e6c995f904023ab2c1e5c2496ece48d55b&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2755">#2755</a><span class=sm>review PASS · round 1</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2755"><span>#2755</span></a><span class=m>22:19:46 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793546386,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2755,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (86 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2755&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2755-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;dbc521f4fcfec517d5c213663068a71d0ea8fe41&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2666">#2666</a><span class=sm>review PASS · round 3</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2666"><span>#2666</span></a><span class=m>22:19:46 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793546386,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2666,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (32 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2666&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2666-r3/verdict.md&quot;,
+ &quot;round&quot;: 3,
+ &quot;sha&quot;: &quot;f666211013ac2687f89e21a172c33e76b692133d&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/140">#140</a><span class=sm>started · prompt not confirmed yet</span><span class=ag>9h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/140"><span>#140</span></a><span class=m>22:19:46 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793546386,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 140,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 140 rev --supersede&quot;,
+ &quot;code&quot;: &quot;EXIT&quot;,
+ &quot;result&quot;: &quot;exit 4: \&quot;herdsman-rev-140-r1\&quot; [\&quot;claude\&quot; \&quot;fleet-rev\&quot;] \&quot;rev-140-r1\&quot; @ \&quot;~/.herdr/worktrees/herdsman/rev-140-r1\&quot;&quot;,
+ &quot;step&quot;: &quot;review&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2821">#2821</a><span class=sm>review PASS · round 2</span><span class=ag>10h</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2821"><span>#2821</span></a><span class=m>22:07:07 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793545627,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2821,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (42 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2821&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2821-r2/verdict.md&quot;,
+ &quot;round&quot;: 2,
+ &quot;sha&quot;: &quot;c3be0089f90f133a082b0472c91083604aef3f00&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details></div></div>
+<div data-v=all hidden><div class=eg><h3><span>now</span><span>24</span></h3><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/170">#170</a><span class=sm>design started</span><span class=ag>2m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/170"><span>#170</span></a><span class=m>08:12:31 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581951,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 170,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-design-170&quot;,
+ &quot;branch&quot;: &quot;design-170&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: &quot;high&quot;,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6NA:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-design&quot;,
+ &quot;role&quot;: &quot;design&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6NA&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/design-170&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>queue · added #169</span><span class=ag>2m</span></summary><div class=ex><p class=lk><span class=m>08:12:31 · herdsman · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581951,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;issues&quot;: [
+  169
+ ],
+ &quot;op&quot;: &quot;add&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>queue · added #162</span><span class=ag>3m</span></summary><div class=ex><p class=lk><span class=m>08:11:48 · herdsman · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581908,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;issues&quot;: [
+  162
+ ],
+ &quot;op&quot;: &quot;add&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-a">⊘</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2663">#2663</a><span class=sm>held ×4 · the Mac is busy (load/cpu 3.09 over 2.5)</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2663"><span>#2663</span></a><span class=m>08:11:02 · atlas · driven</span></p><p class=m>also #2911 #2910 #2909, same pass, same reason</p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2663,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn atlas 2663 impl&quot;,
+ &quot;code&quot;: &quot;HOST_BUSY&quot;,
+ &quot;result&quot;: &quot;REFUSED HOST_BUSY: load/cpu 3.09 &gt; 2.5; retry later or pass --force&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2782">#2782</a><span class=sm>drive · recorded the verdict</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2782"><span>#2782</span></a><span class=m>08:11:02 · atlas · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2782,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman verdict atlas 2782 PASS --sha 24b73d7fc34fbb29b9ee5786e08fea724a967f06 --file ~/.herdr/worktrees/atlas-app/rev-2782-r4/verdict.md&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;recorded PASS for atlas#2782 @ 24b73d7fc34fbb29b9ee5786e08fea724a967f06 (round 4/3)&quot;,
+ &quot;step&quot;: &quot;verdict&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2782">#2782</a><span class=sm>lane closed · verdict recorded</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2782"><span>#2782</span></a><span class=m>08:11:02 · atlas · lane-closed</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2782,
+ &quot;type&quot;: &quot;lane-closed&quot;,
+ &quot;agent&quot;: &quot;atlas-rev-2782-r4&quot;,
+ &quot;reason&quot;: &quot;verdict recorded&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2782">#2782</a><span class=sm>review PASS · round 4</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2782"><span>#2782</span></a><span class=m>08:11:02 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2782,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (34 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2782&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2782-r4/verdict.md&quot;,
+ &quot;round&quot;: 4,
+ &quot;sha&quot;: &quot;24b73d7fc34fbb29b9ee5786e08fea724a967f06&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2684">#2684</a><span class=sm>drive · recorded the verdict</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2684"><span>#2684</span></a><span class=m>08:11:02 · atlas · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2684,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman verdict atlas 2684 PASS --sha 4026e713f186725da6e016be80aae562af3f12c0 --file ~/.herdr/worktrees/atlas-app/rev-2684-r5/verdict.md&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;recorded PASS for atlas#2684 @ 4026e713f186725da6e016be80aae562af3f12c0 (round 4/3)&quot;,
+ &quot;step&quot;: &quot;verdict&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2684">#2684</a><span class=sm>lane closed · verdict recorded</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2684"><span>#2684</span></a><span class=m>08:11:02 · atlas · lane-closed</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2684,
+ &quot;type&quot;: &quot;lane-closed&quot;,
+ &quot;agent&quot;: &quot;atlas-rev-2684-r5&quot;,
+ &quot;reason&quot;: &quot;verdict recorded&quot;
+}</pre></div></details><details class="er k-a imp" data-f="atlas"><summary><i class="kg t-g">✓</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2684">#2684</a><span class=sm>review PASS · round 4</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2684"><span>#2684</span></a><span class=m>08:11:02 · atlas · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2684,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (31 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-2684&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2684-r5/verdict.md&quot;,
+ &quot;round&quot;: 4,
+ &quot;sha&quot;: &quot;4026e713f186725da6e016be80aae562af3f12c0&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-a">⊘</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2665">#2665</a><span class=sm>held · the Mac is busy (load/cpu 2.51 over 2.5)</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2665"><span>#2665</span></a><span class=m>08:11:02 · atlas · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2665,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn atlas 2665 rev&quot;,
+ &quot;code&quot;: &quot;HOST_BUSY&quot;,
+ &quot;result&quot;: &quot;REFUSED HOST_BUSY: load/cpu 2.51 &gt; 2.5; retry later or pass --force&quot;,
+ &quot;step&quot;: &quot;review&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2622">#2622</a><span class=sm>drive · started review</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2622"><span>#2622</span></a><span class=m>08:11:02 · atlas · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2622,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn atlas 2622 rev&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;atlas-rev-2622-r2\&quot; [\&quot;claude\&quot; \&quot;fleet-rev\&quot;] \&quot;rev-2622-r2\&quot; @ \&quot;~/.herdr/worktrees/atlas-app/rev-2622-r2\&quot;&quot;,
+ &quot;step&quot;: &quot;review&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-l">▸</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2622">#2622</a><span class=sm>review round 2 started</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2622"><span>#2622</span></a><span class=m>08:11:02 · atlas · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2622,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: &quot;C&quot;,
+ &quot;agent&quot;: &quot;atlas-rev-2622-r2&quot;,
+ &quot;branch&quot;: &quot;rev-2622-r2&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: &quot;high&quot;,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-sonnet-5-5&quot;,
+ &quot;pane&quot;: &quot;w6NB:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-rev&quot;,
+ &quot;role&quot;: &quot;rev&quot;,
+ &quot;sha&quot;: &quot;cac99fb6b15f0f6f8212620da617ef2c7e0e395f&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6NB&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/atlas-app/rev-2622-r2&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/155">#155</a><span class=sm>drive · started impl</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/155"><span>#155</span></a><span class=m>08:11:02 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 155,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 155 impl&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-impl-155\&quot; [\&quot;claude\&quot; \&quot;fleet-impl\&quot;] \&quot;issue-155\&quot; @ \&quot;~/.herdr/worktrees/herdsman/issue-155\&quot;&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/155">#155</a><span class=sm>impl started</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/155"><span>#155</span></a><span class=m>08:11:02 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 155,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-impl-155&quot;,
+ &quot;branch&quot;: &quot;issue-155&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N9:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-impl&quot;,
+ &quot;role&quot;: &quot;impl&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N9&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-155&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/166">#166</a><span class=sm>drive · started impl</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/166"><span>#166</span></a><span class=m>08:11:02 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 166,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 166 impl&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-impl-166\&quot; [\&quot;claude\&quot; \&quot;fleet-impl\&quot;] \&quot;issue-166\&quot; @ \&quot;~/.herdr/worktrees/herdsman/issue-166\&quot;&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/166">#166</a><span class=sm>impl started</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/166"><span>#166</span></a><span class=m>08:11:02 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 166,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-impl-166&quot;,
+ &quot;branch&quot;: &quot;issue-166&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N8:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-impl&quot;,
+ &quot;role&quot;: &quot;impl&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N8&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-166&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>drive · merged</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:11:02 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman merge herdsman 154&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;Merged via `herdsman merge`: PR #161 → `staging` @ `51d8483b1eb57b3aa5fcc304b5f289d4a9ac10a3`&quot;,
+ &quot;step&quot;: &quot;merge&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>lane cleaned (merged)</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:11:02 · herdsman · clean</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;clean&quot;,
+ &quot;pane&quot;: &quot;w6MK:p1&quot;,
+ &quot;why&quot;: &quot;merged&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-154&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">↗</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>alert sent to 1 phone</span><span class=ag>3m</span></summary><div class=ex><p class=lk><span class=m>08:11:02 · herdsman · push-sent</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;push-sent&quot;,
+ &quot;devices&quot;: 1
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>merged into staging · PR #161</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/161"><span>PR #161</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/161/checks"><span>checks</span></a><span class=m>08:11:02 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;51d8483b1eb57b3aa5fcc304b5f289d4a9ac10a3&quot;,
+ &quot;pr&quot;: &quot;161&quot;,
+ &quot;verdict_sha&quot;: &quot;965091f9d15f787c6308e71c61020cf7f62c8f1d&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/149">#149</a><span class=sm>drive · recorded the verdict</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/149"><span>#149</span></a><span class=m>08:11:02 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 149,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman verdict herdsman 149 PASS --sha 0d1357f5a0db86e7dded041eb8156d17b3cc3513 --file ~/.herdr/worktrees/herdsman/rev-149-r1/verdict.md&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;recorded PASS for herdsman#149 @ 0d1357f5a0db86e7dded041eb8156d17b3cc3513 (round 1/3)&quot;,
+ &quot;step&quot;: &quot;verdict&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/149">#149</a><span class=sm>lane closed · verdict recorded</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/149"><span>#149</span></a><span class=m>08:11:02 · herdsman · lane-closed</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 149,
+ &quot;type&quot;: &quot;lane-closed&quot;,
+ &quot;agent&quot;: &quot;herdsman-rev-149-r1&quot;,
+ &quot;reason&quot;: &quot;verdict recorded&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/149">#149</a><span class=sm>review PASS · round 1</span><span class=ag>3m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/149"><span>#149</span></a><span class=m>08:11:02 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581862,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 149,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (25 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-149&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-149-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;0d1357f5a0db86e7dded041eb8156d17b3cc3513&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details></div><div class=eg><h3><span>5m</span><span>26</span></h3><details class="er k-l" data-f="herdsman"><summary><i class="kg t-a">⊘</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/166">#166</a><span class=sm>held · the Mac is busy (load/cpu 2.62 over 2.5)</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/166"><span>#166</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 166,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 166 impl&quot;,
+ &quot;code&quot;: &quot;HOST_BUSY&quot;,
+ &quot;result&quot;: &quot;REFUSED HOST_BUSY: load/cpu 2.62 &gt; 2.5; retry later or pass --force&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/164">#164</a><span class=sm>drive · started impl</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/164"><span>#164</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 164,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 164 impl&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-impl-164\&quot; [\&quot;claude\&quot; \&quot;fleet-impl\&quot;] \&quot;issue-164\&quot; @ \&quot;~/.herdr/worktrees/herdsman/issue-164\&quot;&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/164">#164</a><span class=sm>impl started</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/164"><span>#164</span></a><span class=m>08:05:50 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 164,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-impl-164&quot;,
+ &quot;branch&quot;: &quot;issue-164&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N7:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-impl&quot;,
+ &quot;role&quot;: &quot;impl&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N7&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-164&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/160">#160</a><span class=sm>failed · herdr: agent name cannot change while startup is pending</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/160"><span>#160</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 160,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 160 impl&quot;,
+ &quot;code&quot;: &quot;ERROR&quot;,
+ &quot;result&quot;: &quot;error: herdr agent rename w6N5:p1 herdsman-impl-160 failed (1): {\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;agent_launch_pending\&quot;,\&quot;message\&quot;:\&quot;agent name cannot change while startup is pe…&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/165">#165</a><span class=sm>drive · started impl</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/165"><span>#165</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 165,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 165 impl&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-impl-165\&quot; [\&quot;claude\&quot; \&quot;fleet-impl\&quot;] \&quot;issue-165\&quot; @ \&quot;~/.herdr/worktrees/herdsman/issue-165\&quot;&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/165">#165</a><span class=sm>impl started</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/165"><span>#165</span></a><span class=m>08:05:50 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 165,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-impl-165&quot;,
+ &quot;branch&quot;: &quot;issue-165&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N4:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-impl&quot;,
+ &quot;role&quot;: &quot;impl&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N4&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-165&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/168">#168</a><span class=sm>drive · started impl</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/168"><span>#168</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 168,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 168 impl&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-impl-168\&quot; [\&quot;claude\&quot; \&quot;fleet-impl\&quot;] \&quot;issue-168\&quot; @ \&quot;~/.herdr/worktrees/herdsman/issue-168\&quot;&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/168">#168</a><span class=sm>impl started</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/168"><span>#168</span></a><span class=m>08:05:50 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 168,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-impl-168&quot;,
+ &quot;branch&quot;: &quot;issue-168&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-opus-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N6:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-impl&quot;,
+ &quot;role&quot;: &quot;impl&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N6&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-168&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>drive · recorded the verdict</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:05:50 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman verdict herdsman 154 PASS --sha 965091f9d15f787c6308e71c61020cf7f62c8f1d --file ~/.herdr/worktrees/herdsman/rev-154-r1/verdict.md&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;recorded PASS for herdsman#154 @ 965091f9d15f787c6308e71c61020cf7f62c8f1d (round 1/3)&quot;,
+ &quot;step&quot;: &quot;verdict&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>lane closed · verdict recorded</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:05:50 · herdsman · lane-closed</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;lane-closed&quot;,
+ &quot;agent&quot;: &quot;herdsman-rev-154-r1&quot;,
+ &quot;reason&quot;: &quot;verdict recorded&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>review PASS · round 1</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>08:05:50 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (32 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-154&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-154-r1/verdict.md&quot;,
+ &quot;round&quot;: 1,
+ &quot;sha&quot;: &quot;965091f9d15f787c6308e71c61020cf7f62c8f1d&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-a">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/149">#149</a><span class=sm>conflict ahead with staging · drive.rs, drive.rs</span><span class=ag>9m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/149"><span>#149</span></a><span class=m>08:05:50 · herdsman · conflict-predicted</span></p><pre>{
+ &quot;ts&quot;: 1793581550,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 149,
+ &quot;type&quot;: &quot;conflict-predicted&quot;,
+ &quot;files&quot;: [
+  &quot;src/drive.rs&quot;,
+  &quot;tests/drive.rs&quot;
+ ],
+ &quot;heads&quot;: &quot;f54bdebc9dce72b9617a433c8592ec11425914ea 0d1357f5a0db86e7dded041eb8156d17b3cc3513&quot;,
+ &quot;other&quot;: 0
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>queue · moved #168 to the top</span><span class=ag>9m</span></summary><div class=ex><p class=lk><span class=m>08:05:15 · herdsman · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581515,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;issues&quot;: [
+  168
+ ],
+ &quot;op&quot;: &quot;mv&quot;,
+ &quot;top&quot;: true
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>queue · added #168</span><span class=ag>9m</span></summary><div class=ex><p class=lk><span class=m>08:05:15 · herdsman · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581515,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;issues&quot;: [
+  168
+ ],
+ &quot;op&quot;: &quot;add&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>lane cleaned (merged)</span><span class=ag>10m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><span class=m>08:04:28 · herdsman · clean</span></p><pre>{
+ &quot;ts&quot;: 1793581468,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;clean&quot;,
+ &quot;pane&quot;: &quot;w6MG:p1&quot;,
+ &quot;why&quot;: &quot;merged&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/issue-150&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">↗</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>alert sent to 1 phone</span><span class=ag>10m</span></summary><div class=ex><p class=lk><span class=m>08:04:28 · herdsman · push-sent</span></p><pre>{
+ &quot;ts&quot;: 1793581468,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;type&quot;: &quot;push-sent&quot;,
+ &quot;devices&quot;: 1
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/150">#150</a><span class=sm>merged into staging · PR #158</span><span class=ag>10m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/150"><span>#150</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/158"><span>PR #158</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/158/checks"><span>checks</span></a><span class=m>08:04:28 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793581468,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 150,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;f54bdebc9dce72b9617a433c8592ec11425914ea&quot;,
+ &quot;pr&quot;: &quot;158&quot;,
+ &quot;verdict_sha&quot;: &quot;34dd605eda43a66fbcd8a5876b59f4d9850ff6e0&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-a">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/160">#160</a><span class=sm>lane not in the log · spawn adopts it</span><span class=ag>10m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/160"><span>#160</span></a><span class=m>08:04:16 · herdsman · orphan-lane</span></p><pre>{
+ &quot;ts&quot;: 1793581456,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 160,
+ &quot;type&quot;: &quot;orphan-lane&quot;,
+ &quot;key&quot;: &quot;herdsman-impl-160&quot;,
+ &quot;reason&quot;: &quot;herdr agent herdsman-impl-160 has no spawn event; spawn adopts it&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">↗</i><i class=fd title=atlas></i><span class=n></span><span class=sm>alert sent to 1 phone</span><span class=ag>10m</span></summary><div class=ex><p class=lk><span class=m>08:04:16 · atlas · push-sent</span></p><pre>{
+ &quot;ts&quot;: 1793581456,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;type&quot;: &quot;push-sent&quot;,
+ &quot;devices&quot;: 1
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-a">!</i><i class=fd title=atlas></i><a class=n href="https://github.com/example/atlas/issues/2622">#2622</a><span class=sm>stalled · no event for 35m in fix(1)</span><span class=ag>10m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/example/atlas/issues/2622"><span>#2622</span></a><span class=m>08:04:16 · atlas · stall</span></p><pre>{
+ &quot;ts&quot;: 1793581456,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;issue&quot;: 2622,
+ &quot;type&quot;: &quot;stall&quot;,
+ &quot;key&quot;: &quot;1793579310:atlas-impl-2622&quot;,
+ &quot;reason&quot;: &quot;no event for 35m in fix(1); impl lane atlas-impl-2622 is done&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><span class=n></span><span class=sm>queue · moved #2728 before #2756</span><span class=ag>15m</span></summary><div class=ex><p class=lk><span class=m>07:59:29 · atlas · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581169,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;before&quot;: 2756,
+ &quot;issues&quot;: [
+  2728
+ ],
+ &quot;op&quot;: &quot;mv&quot;
+}</pre></div></details><details class="er k-a" data-f="atlas"><summary><i class="kg t-m">·</i><i class=fd title=atlas></i><span class=n></span><span class=sm>queue · added #2728 (serial)</span><span class=ag>15m</span></summary><div class=ex><p class=lk><span class=m>07:59:29 · atlas · queue</span></p><pre>{
+ &quot;ts&quot;: 1793581169,
+ &quot;fleet&quot;: &quot;atlas&quot;,
+ &quot;type&quot;: &quot;queue&quot;,
+ &quot;issues&quot;: [
+  2728
+ ],
+ &quot;op&quot;: &quot;add&quot;,
+ &quot;serial&quot;: true
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-a">!</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/141">#141</a><span class=sm>lane not in the log · spawn adopts it</span><span class=ag>16m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/141"><span>#141</span></a><span class=m>07:58:15 · herdsman · orphan-lane</span></p><pre>{
+ &quot;ts&quot;: 1793581095,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 141,
+ &quot;type&quot;: &quot;orphan-lane&quot;,
+ &quot;key&quot;: &quot;herdsman-rev-141-r1&quot;,
+ &quot;reason&quot;: &quot;herdr agent herdsman-rev-141-r1 has no spawn event; spawn adopts it&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/165">#165</a><span class=sm>failed · herdr: agent target pane is not an available shell</span><span class=ag>17m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/165"><span>#165</span></a><span class=m>07:57:29 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581049,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 165,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 165 impl&quot;,
+ &quot;code&quot;: &quot;ERROR&quot;,
+ &quot;result&quot;: &quot;error: herdr agent start failed: {\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;agent_pane_busy\&quot;,\&quot;message\&quot;:\&quot;agent target pane w6N4:p1 is not an available shell\&quot;},\&quot;id\&quot;:\&quot;cli:agent:start\&quot;}&quot;,
+ &quot;step&quot;: &quot;start&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>drive · started review</span><span class=ag>17m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>07:57:29 · herdsman · driven</span></p><pre>{
+ &quot;ts&quot;: 1793581049,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;driven&quot;,
+ &quot;cmd&quot;: &quot;herdsman spawn herdsman 154 rev&quot;,
+ &quot;code&quot;: null,
+ &quot;result&quot;: &quot;\&quot;herdsman-rev-154-r1\&quot; [\&quot;claude\&quot; \&quot;fleet-rev\&quot;] \&quot;rev-154-r1\&quot; @ \&quot;~/.herdr/worktrees/herdsman/rev-154-r1\&quot;&quot;,
+ &quot;step&quot;: &quot;review&quot;
+}</pre></div></details><details class="er k-l" data-f="herdsman"><summary><i class="kg t-l">▸</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/154">#154</a><span class=sm>review round 1 started</span><span class=ag>17m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/154"><span>#154</span></a><span class=m>07:57:29 · herdsman · spawn</span></p><pre>{
+ &quot;ts&quot;: 1793581049,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 154,
+ &quot;type&quot;: &quot;spawn&quot;,
+ &quot;account&quot;: null,
+ &quot;agent&quot;: &quot;herdsman-rev-154-r1&quot;,
+ &quot;branch&quot;: &quot;rev-154-r1&quot;,
+ &quot;confirmed&quot;: true,
+ &quot;effort&quot;: null,
+ &quot;error&quot;: null,
+ &quot;harness&quot;: &quot;claude&quot;,
+ &quot;model&quot;: &quot;claude-sonnet-5-5&quot;,
+ &quot;pane&quot;: &quot;w6N3:p1&quot;,
+ &quot;profile&quot;: &quot;fleet-rev&quot;,
+ &quot;role&quot;: &quot;rev&quot;,
+ &quot;sha&quot;: &quot;965091f9d15f787c6308e71c61020cf7f62c8f1d&quot;,
+ &quot;update&quot;: false,
+ &quot;workspace&quot;: &quot;w6N3&quot;,
+ &quot;worktree&quot;: &quot;~/.herdr/worktrees/herdsman/rev-154-r1&quot;
+}</pre></div></details></div></div>
+</section>
+<section id=fold>
+<h2><span>Today: the fold hides a failed alert</span></h2>
+<p class=ev><span class=m>2m · 5 × clean / notify-failed</span></p><p class=ev><span class=m>2m</span> herdsman #42 merged → staging 5c2d52d (PR #44) <a href=#>issue</a> <a href=#>PR</a> <a href=#>runs</a></p><p class=ev><span class=m>2m</span> herdsman #42 verdict <a href=#>issue</a> <a href=#>runs</a></p>
+<h2><span>Proposed ([all]): clean folds alone, the failure keeps its row</span></h2>
+<div class=eg><h3><span>now</span><span>4</span></h3><details class="er k-l" data-f="herdsman"><summary><i class="kg t-m">·</i><i class=fd title=herdsman></i><span class=n></span><span class=sm>clean ×4 · lanes cleaned</span><span class=ag>2m</span></summary><div class=ex><ul class=fl2><li><span class=m>2m</span> herdsman #42 <span class=m>lane cleaned (done)</span></li><li><span class=m>2m</span> herdsman #42 <span class=m>lane cleaned (done)</span></li><li><span class=m>2m</span> herdsman #42 <span class=m>lane cleaned (done)</span></li><li><span class=m>2m</span> herdsman #42 <span class=m>lane cleaned (done)</span></li></ul></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-r">✗</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/42">#42</a><span class=sm>alert failed · the merged alert timed out after 15s</span><span class=ag>2m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/42"><span>#42</span></a><span class=m>10:53:25 · herdsman · notify-failed</span></p><pre>{
+ &quot;ts&quot;: 1793418805,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 42,
+ &quot;type&quot;: &quot;notify-failed&quot;,
+ &quot;cmd&quot;: &quot;env -u HERMES_HOME hermes -p conductor send -q -t telegram:‹chat›&quot;,
+ &quot;error&quot;: &quot;timed out after 15s&quot;,
+ &quot;event&quot;: &quot;merged&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/42">#42</a><span class=sm>merged into staging · PR #44</span><span class=ag>2m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/42"><span>#42</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/44"><span>PR #44</span></a><a class=bl href="https://github.com/jirathip-dev/herdsman/pull/44/checks"><span>checks</span></a><span class=m>10:53:25 · herdsman · merged</span></p><pre>{
+ &quot;ts&quot;: 1793418805,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 42,
+ &quot;type&quot;: &quot;merged&quot;,
+ &quot;into&quot;: &quot;staging&quot;,
+ &quot;merge_sha&quot;: &quot;5c2d52decfd36ea9da8c6608c4f4faacc3a86cda&quot;,
+ &quot;pr&quot;: &quot;44&quot;,
+ &quot;verdict_sha&quot;: &quot;cd399131763b18fa7c3fc08081799bc41acd6790&quot;
+}</pre></div></details><details class="er k-l imp" data-f="herdsman"><summary><i class="kg t-g">✓</i><i class=fd title=herdsman></i><a class=n href="https://github.com/jirathip-dev/herdsman/issues/42">#42</a><span class=sm>review PASS · round 3</span><span class=ag>2m</span></summary><div class=ex><p class=lk><a class=bl href="https://github.com/jirathip-dev/herdsman/issues/42"><span>#42</span></a><span class=m>10:53:24 · herdsman · verdict</span></p><pre>{
+ &quot;ts&quot;: 1793418804,
+ &quot;fleet&quot;: &quot;herdsman&quot;,
+ &quot;issue&quot;: 42,
+ &quot;type&quot;: &quot;verdict&quot;,
+ &quot;body&quot;: &quot;PASS … (55 more lines)&quot;,
+ &quot;branch&quot;: &quot;issue-42&quot;,
+ &quot;file&quot;: &quot;~/.herdr/worktrees/herdsman/rev-42-r3/verdict.md&quot;,
+ &quot;round&quot;: 3,
+ &quot;sha&quot;: &quot;cd399131763b18fa7c3fc08081799bc41acd6790&quot;,
+ &quot;verdict&quot;: &quot;PASS&quot;
+}</pre></div></details></div>
+<p class="m es">herdsman #42 on 2026-10-31 at 10:53, from the log: the merge's alert timed out and 4 lanes were cleaned in
+the same second. Today's fold reads <q>5 × clean / notify-failed</q>; the proposed fold keeps <q>clean ×4</q> and gives the
+failure its own red row, which [important] also shows.</p>
+</section>
+</main>
+<nav><a href=#queue>Queue</a><a href=#lanes>Lanes</a><a href=#host>Host</a><a href=#events class=on>Events</a></nav>
+<script>
+// Mockup only: the chips. Phase 2 does this in serve.js and keeps the choice in localStorage.
+const $$ = s => [...document.querySelectorAll(s)];
+let kind = location.hash === '#all' ? 'all' : 'imp';
+const fleets = new Set();
+function apply() {
+  document.body.classList.toggle('fold', location.hash === '#fold');
+  $$('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === kind));
+  $$('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', fleets.has(b.dataset.fl)));
+  $$('[data-v]').forEach(e => e.hidden = e.dataset.v !== kind);
+  $$('#events .er').forEach(r => r.hidden = fleets.size > 0 && !fleets.has(r.dataset.f));
+  $$('#events .eg').forEach(g => g.hidden = !g.querySelector('.er:not([hidden])'));
+}
+$$('.chips button').forEach(b => b.onclick = () => {
+  if (b.dataset.k) kind = b.dataset.k;
+  else fleets.has(b.dataset.fl) ? fleets.delete(b.dataset.fl) : fleets.add(b.dataset.fl);
+  apply();
+});
+addEventListener('hashchange', () => { kind = location.hash === '#all' ? 'all' : kind; apply(); });
+apply();
+</script>
+</body></html>
