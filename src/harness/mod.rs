@@ -33,7 +33,7 @@ pub trait Harness {
         Ok(())
     }
     /// Lane setup in the worktree before the harness starts.
-    fn prepare(&self, _ctx: &Ctx, _r: &dyn Runner, _p: &Plan) -> Result<()> {
+    fn prepare(&self, _ctx: &Ctx, _on: &crate::hosts::On, _p: &Plan) -> Result<()> {
         Ok(())
     }
     /// herdr argv that launches the harness in `pane`.

@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
+use crate::hosts::On;
 use crate::runner::{ok, Runner};
 use crate::spawn::{changes, dirty, OWN_FILES};
 use crate::Ctx;
@@ -24,9 +25,9 @@ fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<
 }
 
 /// `(url, prompt)` when the issue's latest amendment is missing from the lane's `.brief.md` (#101).
-fn amendment(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState, wt: &str) -> Option<(String, String)> {
-    let f = cfg.fleet(&s.fleet).ok()?;
-    let brief = std::fs::read_to_string(Path::new(wt).join(".brief.md")).ok()?;
+fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Option<(String, String)> {
+    let (f, r) = (cfg.fleet(&s.fleet).ok()?, on.r);
+    let brief = on.read(&Path::new(wt).join(".brief.md"))?;
     let spec = gh::spec(ctx, r, f, &s.fleet, s.issue, true).ok()?;
     let url = spec["amended"].as_str().filter(|u| !brief.contains(*u))?;
     let n = s.issue;
@@ -43,6 +44,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         .map_err(|e| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane checks"))
         .ok();
     let stall = cfg.limits.stall_minutes * 60;
+    // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
+    let remote = crate::hosts::survey(ctx, cfg, r, false);
     for name in cfg.fleet.keys() {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
     }
@@ -53,6 +56,12 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         if let (Some(agents), Some((role, lane))) = (&agents, s.active_lane()) {
             // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
             let spawned = last_spawn(&events, lane);
+            let r = &On::of(r, spawned);
+            let there = spawned.filter(|_| r.machine.is_some()).and_then(|e| e.str("host"));
+            let theirs = there.map(|h| remote.get(h).cloned().flatten());
+            let Some(agents) = theirs.as_ref().map_or(Some(agents), Option::as_ref) else {
+                continue;
+            };
             let pane = spawned.and_then(|e| e.str("pane"));
             let unnamed =
                 |a: &&serde_json::Value| a["name"].as_str().is_none_or(str::is_empty) && a["pane_id"].as_str() == pane;
@@ -264,15 +273,15 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     let events = read(&ctx.state)?;
     let mut seen = std::collections::BTreeSet::new();
     for e in events.iter().rev().filter(|e| e.is("spawn", fleet, issue)) {
-        let (Some(wt), Some(pane)) = (e.str("worktree"), e.str("pane")) else {
+        let (Some(wt), Some(pane), on) = (e.str("worktree"), e.str("pane"), On::of(r, Some(e))) else {
             continue;
         };
-        if e.str("role") == Some("design") || !seen.insert(wt) || !Path::new(wt).exists() {
+        if e.str("role") == Some("design") || !seen.insert(wt) || !on.exists(Path::new(wt)) {
             continue;
         }
-        match dirty(r, Path::new(wt)) {
+        match dirty(&on, Path::new(wt)) {
             Some(why) => writeln!(out, "keep pane {pane} ({wt}): {why}")?,
-            None => drop(herdr::close(r, pane)),
+            None => drop(herdr::close(&on, pane)),
         }
     }
     if seen.is_empty() {
@@ -294,7 +303,7 @@ pub fn clean(
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let states = fold(&events);
-    let agents = host::agents(r).context("cannot list herdr agents; refusing to clean blind")?;
+    let agents = crate::hosts::all_agents(cfg, r).context("cannot list herdr agents; refusing to clean blind")?;
     let mut seen = std::collections::BTreeSet::new();
     let mut failed = 0;
     let mut freed = 0;
@@ -311,7 +320,8 @@ pub fn clean(
         if issue.is_some_and(|i| i != n) || lane.is_some_and(|a| e.str("agent") != Some(a)) {
             continue;
         }
-        if !Path::new(wt).exists() || seen.contains(wt) {
+        let on = On::of(r, Some(e));
+        if seen.contains(wt) || !on.exists(Path::new(wt)) {
             continue;
         }
         let unsafe_lane =
@@ -338,17 +348,19 @@ pub fn clean(
             Some("live agent".to_string())
         } else {
             if yes {
-                reap(ctx, cfg, r, (&e.fleet, Some(n)), wt)?;
-                freed += purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+                reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
+                if on.machine.is_none() {
+                    freed += purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+                }
             }
-            dirty(r, Path::new(wt))
+            dirty(&on, Path::new(wt))
         };
         let keep = match keep {
             Some(why) if !yes && !live && lane.is_none() => {
                 writeln!(out, "would save {wt} to wip/ ({why}), then remove it")?;
                 continue;
             }
-            Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, r, out, &events, e, wt)?,
+            Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, &on, out, &events, e, wt)?,
             k => k,
         };
         if let Some(reason) = keep {
@@ -363,7 +375,7 @@ pub fn clean(
             continue;
         }
         if let Err(err) = remove(
-            r,
+            &on,
             cfg,
             &e.fleet,
             wt,
@@ -376,7 +388,7 @@ pub fn clean(
             continue;
         }
         if !pane.is_empty() {
-            let _ = herdr::close(r, pane);
+            let _ = herdr::close(&on, pane);
         }
         drop_log(ctx, e.str("agent"));
         writeln!(out, "removed {wt} ({}#{n} {why})", e.fleet)?;
@@ -436,7 +448,7 @@ pub fn leftovers(
     );
     let st = fold(&events);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
-        let (Some(wt), Some(n), agent) = (e.str("worktree"), e.issue, e.str("agent")) else {
+        let (Some(wt), Some(n), agent, None) = (e.str("worktree"), e.issue, e.str("agent"), e.str("machine")) else {
             continue;
         };
         let active = st
@@ -645,7 +657,7 @@ fn closed_issues<'a>(
 }
 
 /// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES`.
-pub fn remove(r: &dyn Runner, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<()> {
+pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<()> {
     if !ws.is_empty() && herdr::worktree_remove(r, ws)? {
         return Ok(());
     }
@@ -653,12 +665,13 @@ pub fn remove(r: &dyn Runner, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> 
         anyhow::bail!("{why}");
     }
     for f in OWN_FILES {
-        match std::fs::remove_file(Path::new(wt).join(f)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).context(format!("removing {f}")),
-            _ => {}
-        }
+        r.remove(&Path::new(wt).join(f)).context(format!("removing {f}"))?;
     }
-    let local = cfg.fleet(fleet)?.local_path().to_string_lossy().into_owned();
+    // #157: on another host the repo checkout's path is its own; git finds it from the worktree.
+    let local = match r.machine {
+        None => cfg.fleet(fleet)?.local_path().to_string_lossy().into_owned(),
+        Some(_) => wt.into(),
+    };
     ok(r, "git", &["-C", &local, "worktree", "remove", wt])?;
     Ok(())
 }
@@ -682,7 +695,7 @@ fn spawned<'a>(events: &'a [Event], agent: &str) -> Result<&'a Event> {
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent)?;
-    herdr::keys(r, e.str("pane").unwrap_or_default(), "Escape")?;
+    herdr::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;
     emit(
         &ctx.state,
         cfg,
@@ -714,8 +727,9 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     let e = spawned(&events, agent)?;
     let role = e.str("role").unwrap_or_default();
     let st = e.issue.and_then(|n| fold(&events).remove(&(e.fleet.clone(), n)));
-    let wt = e.str("worktree").filter(|w| Path::new(w).exists());
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt.unwrap_or_default()][..], a].concat());
+    let on = On::of(r, Some(e));
+    let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
+    let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt.unwrap_or_default()][..], a].concat());
     let (dirty, ahead) = match wt {
         Some(_) => {
             let st = git(&["status", "--porcelain"])?;
@@ -773,7 +787,7 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
             Ok(()) => {}
         }
     }
-    herdr::close(r, e.str("pane").unwrap_or_default())?;
+    herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
     let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "wip": wip});
     emit(

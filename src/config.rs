@@ -21,6 +21,23 @@ pub struct Config {
     pub models: Vec<String>,
     pub serve: Serve,
     pub providers: Providers,
+    /// #157: `[hosts.<name>]` lanes may run on (docs/hosts.md); none = this host only, as before.
+    pub hosts: BTreeMap<String, HostCfg>,
+}
+
+/// #157: one host: its herdr machine label (unset = this host), hand tags, worktree root, and whether new lanes go there.
+#[derive(Debug, Deserialize)]
+pub struct HostCfg {
+    pub machine: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub root: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// `[providers]`: API providers whose balance the Host tab shows (docs/providers.md).
@@ -147,6 +164,9 @@ pub struct Fleet {
     pub bad: Vec<crate::pipeline::Problem>,
     /// #162: the Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
     pub color: Option<String>,
+    /// #157: host tags every lane of this fleet needs (e.g. `xcode`).
+    #[serde(default)]
+    pub needs: Vec<String>,
     /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
     pub form_categories: Option<Vec<String>>,
     pub form_rounds: Option<u32>,
@@ -172,6 +192,9 @@ pub struct Role {
     pub mcp: Vec<String>,
     /// #173: a file appended to the role's kind prompt (`roles/impl.md` for a build, `roles/rev.md` for a check).
     pub prompt: Option<String>,
+    /// #157: host tags this role's lanes need besides the fleet's.
+    #[serde(default)]
+    pub needs: Vec<String>,
 }
 
 impl Role {

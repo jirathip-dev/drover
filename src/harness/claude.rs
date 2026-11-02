@@ -32,12 +32,11 @@ impl Harness for Claude {
     }
 
     /// The lane's MCP file: only the role's servers.
-    fn prepare(&self, _ctx: &Ctx, _r: &dyn Runner, p: &Plan) -> Result<()> {
-        std::fs::write(
+    fn prepare(&self, _ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
+        on.write(
             &p.mcp_file,
-            serde_json::to_string_pretty(&serde_json::json!({"mcpServers": p.mcp}))?,
-        )?;
-        Ok(())
+            &serde_json::to_string_pretty(&serde_json::json!({"mcpServers": p.mcp}))?,
+        )
     }
 
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {

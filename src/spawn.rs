@@ -135,6 +135,14 @@ impl Plan {
     pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
         harness::get(&self.harness).kick_cmds(self, pane)
     }
+
+    /// #157: the lane's files under `root` on its host.
+    fn at(&mut self, root: &Path, repo: &str) {
+        self.worktree = root.join(repo).join(&self.branch);
+        self.brief = self.worktree.join(".brief.md");
+        self.mcp_file = self.worktree.join(".mcp.lane.json");
+        self.kick = format!("Read {} and execute it fully.", self.brief.display());
+    }
 }
 
 /// Longest lane title, in chars.
@@ -437,6 +445,9 @@ pub struct Opts {
     /// Kill the live agent / unfinished lane in the way, then spawn (logged)
     #[arg(long)]
     pub supersede: bool,
+    /// Run the lane on this `[hosts.<name>]` (default: the least-busy enabled host whose tags cover the needs)
+    #[arg(long)]
+    pub host: Option<String>,
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
@@ -466,6 +477,17 @@ pub fn spawn(
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;
+    // #157: from here every call and file of the lane is on its host.
+    let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
+    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
+    let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
+    if let Some(pl) = &placed {
+        p.at(&pl.root, f.repo_name());
+        if pl.machine.is_some() {
+            p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
+        }
+    }
+    let home = |a: Vec<String>| crate::hosts::rehome(a, placed.as_ref().and_then(|pl| pl.home.as_deref()));
     let wt = p.worktree.to_string_lossy().into_owned();
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
@@ -514,7 +536,7 @@ pub fn spawn(
     let prior = events
         .iter()
         .rfind(|e| e.kind == "spawn" && e.str("worktree") == Some(&wt));
-    if p.worktree.exists() && prior.is_none() {
+    if on.exists(&p.worktree) && prior.is_none() {
         if let Some(why) = dirty(r, &p.worktree) {
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
         }
@@ -540,31 +562,24 @@ pub fn spawn(
         return refused("UPDATE_LIMIT", why);
     }
 
-    // Host-load gate, before anything is created.
-    let min = cfg.limits.min_free_gb;
-    if let Some(gb) = host::free_gb(r).filter(|g| *g < min) {
-        return refused("DISK_LOW", format!("{gb:.1} GB free < {min}; `herdsman clean --yes`"));
-    }
-    // #164: the last drive pass's worktree walk (drive frees the idlest lanes' build folders first).
+    // Host-load gate, before anything is created (#157: placement already looked at each host).
+    let refusal = match &placed {
+        Some(pl) => pl.refusal.clone(),
+        None => crate::hosts::gate(ctx, cfg, &on).1,
+    };
+    // #164: the last drive pass's walk of this host's worktrees (drive frees the idlest lanes' build folders first).
     let budget = cfg.limits.worktree_budget_gb;
-    if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| *g > budget) {
+    if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| on.machine.is_none() && *g > budget) {
         return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
     }
-    let mut hs = host::sample(r);
-    host::window(&ctx.state, &mut hs);
-    let mem = cfg.limits.min_free_mem_gb;
-    if let Some(gb) = hs.free_mem_gb.filter(|g| *g < mem) {
-        let why = format!("only {gb:.1} GB of memory free (floor {mem} GB); a lane needs about 0.5–1.5 GB");
-        return refused("MEM_LOW", format!("{why}; retry when a lane finishes"));
-    }
-    if let Err(why) = host::admit(&hs, &cfg.limits) {
-        if !o.force {
-            return refused("HOST_BUSY", format!("{why}; retry later or pass --force"));
-        }
-        event(
+    match refusal {
+        Some(("HOST_BUSY", why)) if o.force => event(
             "override",
             json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent}),
-        )?;
+        )?,
+        Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
+        Some((code, why)) => return refused(code, why),
+        None => {}
     }
     if o.supersede && !dup.is_empty() {
         for a in &live {
@@ -580,11 +595,16 @@ pub fn spawn(
         )?;
     }
 
-    let local = f.local_path().to_string_lossy().into_owned();
-    let reopen = p.worktree.exists();
+    let local = placed.as_ref().map_or_else(|| f.local_path(), |pl| pl.local.clone());
+    let local = local.to_string_lossy().into_owned();
+    let reopen = on.exists(&p.worktree);
     let mut sha = None;
     let (created, brief_text) = {
-        let iss = crate::gh::spec(ctx, r, f, fleet, issue, true)?;
+        let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
+        // #157: first use on a host: it clones the repo itself, with its own `gh` login.
+        if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
+            ok(r, "gh", &["repo", "clone", &f.repo, &local])?;
+        }
         ok(
             r,
             "git",
@@ -596,7 +616,7 @@ pub fn spawn(
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
                 ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
-                let _ = std::fs::remove_file(p.worktree.join("verdict.md"));
+                let _ = on.remove(&p.worktree.join("verdict.md"));
             }
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
@@ -628,23 +648,20 @@ pub fn spawn(
         .as_str()
         .context("herdr: no workspace_id")?;
     herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
-    if let Some(d) = p.brief.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(&p.brief, brief_text).context("writing the brief")?;
-    h.prepare(ctx, r, &p)?;
+    on.write(&p.brief, &brief_text).context("writing the brief")?;
+    h.prepare(ctx, &on, &p)?;
     let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
     pj = plan_json(ctx, f, &p);
-    herdr::ok(r, &p.lane_cmd(&pane))?;
-    let mut start = herdr::exec(r, &p.start_cmd(ctx, &pane))?;
+    herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+    let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
     if herdr::failed_with(&start, "agent_pane_busy") {
         let lane = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane));
         let closed = lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
         event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
         pane = herdr::free_pane(r, ws, &p.worktree, Some(&pane))?;
-        herdr::ok(r, &p.lane_cmd(&pane))?;
-        start = herdr::exec(r, &p.start_cmd(ctx, &pane))?;
+        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+        start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
@@ -675,7 +692,11 @@ pub fn spawn(
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
     dirs.sort();
     dirs.dedup();
-    let dirs = if reopen { &[][..] } else { &dirs[..] };
+    let dirs = if reopen || on.machine.is_some() {
+        &[][..]
+    } else {
+        &dirs[..]
+    };
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
         let res = (|| -> Result<bool> {
@@ -684,6 +705,10 @@ pub fn spawn(
             d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
+            if let Some(pl) = &placed {
+                d["host"] = json!(pl.name);
+                d["machine"] = json!(pl.machine);
+            }
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
                 d["sha"] = json!(h);
             }

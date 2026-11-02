@@ -10,9 +10,11 @@ pub struct Item {
     pub blocked_by: Option<u64>,
     /// `queue add --serial`: touches the fleet's `serial_paths`.
     pub serial: bool,
+    /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
+    pub needs: Vec<String>,
 }
 
-/// A queue change, as logged: `op` is add | mv | rm | block.
+/// A queue change, as logged: `op` is add | mv | rm | block | set (`needs`).
 pub fn op(op: &str, issues: &[u64], top: bool, before: Option<u64>, after: Option<u64>, on: Option<u64>) -> Value {
     let mut d = json!({"op": op, "issues": issues});
     for (k, v) in [("before", before), ("after", after), ("on", on)] {
@@ -57,12 +59,15 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     issue: n,
                     blocked_by: None,
                     serial,
+                    needs: needs(d),
                 })
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blocked_by = old.blocked_by;
                     m.serial |= old.serial;
+                    m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
+                    m.needs.dedup();
                 }
             }
             q.retain(|i| !issues.contains(&i.issue));
@@ -83,9 +88,25 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
             let i = pos(q, issues[0])?;
             q[i].blocked_by = Some(on);
         }
+        "set" => {
+            let i = pos(q, issues[0])?;
+            q[i].needs = needs(d);
+        }
         o => anyhow::bail!("unknown queue op `{o}`"),
     }
     Ok(())
+}
+
+/// #157: a change's `needs` tags.
+fn needs(d: &Value) -> Vec<String> {
+    let all = d["needs"].as_array().into_iter().flatten();
+    all.filter_map(|t| t.as_str().map(String::from)).collect()
+}
+
+/// #157: the queued issue's `needs` (its queue item's, merged ones included).
+pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
+    let q = replay(events, fleet).into_iter().find(|i| i.issue == issue);
+    q.map(|i| i.needs).unwrap_or_default()
 }
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
@@ -182,7 +203,7 @@ pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u
 
 pub fn ls_json(events: &[Event], fleet: &str) -> Value {
     let st = fold(events);
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(&st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": i.serial});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(&st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": i.serial, "needs": i.needs});
     Value::Array(view(events, &st, fleet).iter().enumerate().map(row).collect())
 }
 

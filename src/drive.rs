@@ -4,7 +4,7 @@ use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::waiting::Waiting;
-use crate::{gh, host, queue, waiting, Ctx};
+use crate::{gh, queue, waiting, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -283,7 +283,7 @@ pub fn drive(
 fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, fast: bool) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
-    let agents = host::agents(r)?;
+    let agents = crate::hosts::all_agents(cfg, r)?;
     let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
@@ -501,7 +501,10 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         e.issue
             .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(|s| s.state == "merged"))
     };
-    let left = |e: &&Event| e.str("worktree").is_some_and(|w| Path::new(w).exists());
+    let left = |e: &&Event| {
+        e.str("worktree")
+            .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
+    };
     if events
         .iter()
         .filter(|e| e.kind == "spawn" && e.fleet == fleet)
@@ -527,7 +530,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
         read(&ctx.state)?,
-        host::agents(r).unwrap_or_default(),
+        crate::hosts::all_agents(cfg, r).unwrap_or_default(),
     );
     let busy = |l: &str| ag.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     let open = |s: &IssueState| {

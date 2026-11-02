@@ -1,6 +1,7 @@
 //! The clap CLI, `herdsman help --agent` and dispatch to the modules.
 use crate::config::{home, Config};
 use crate::events::{emit, fold, read, status_line, Event};
+use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
     access, check, devices, gate, gh, harness, hook, migrate, pause, protection, queue, queue_change, serve, set,
@@ -166,6 +167,11 @@ enum Cmd {
     Next { fleet: String },
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
+    /// Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)
+    Hosts {
+        #[command(subcommand)]
+        cmd: Option<HostsCmd>,
+    },
     /// Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort
     Serve {
         #[command(subcommand)]
@@ -307,6 +313,9 @@ enum QueueCmd {
         /// They touch the fleet's serial_paths (DB migrations): serial_max (default 1) in flight at a time
         #[arg(long)]
         serial: bool,
+        /// Host tags their lanes need besides the fleet's (`docker,gpu`)
+        #[arg(long, value_delimiter = ',')]
+        needs: Vec<String>,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -324,6 +333,14 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
+    /// Replace a queued issue's `needs` host tags (`queue set 12 needs docker,gpu`; empty clears)
+    Set {
+        issue: u64,
+        #[arg(value_parser = ["needs"])]
+        key: String,
+        #[arg(value_delimiter = ',')]
+        tags: Vec<String>,
+    },
     /// Hold an issue until another one is merged
     Block {
         issue: u64,
@@ -362,6 +379,16 @@ enum AccountsCmd {
 }
 
 #[derive(Subcommand)]
+enum HostsCmd {
+    /// Probe every host's tags again (else hourly, by `check`)
+    Refresh,
+    /// Let new lanes go to this host again; logs `host-on`
+    On { name: String },
+    /// No new lanes on this host (its lanes finish there); still monitored; logs `host-off`
+    Off { name: String },
+}
+
+#[derive(Subcommand)]
 enum ProfilesCmd {
     /// Write ~/.config/herdsman/claude/<profile>/ (settings.json + hooks, role.md, fleet.md) and Hermes profiles' `hooks:` + hook approval
     Sync {
@@ -371,8 +398,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`).
-pub const HELP_AGENT_MAX: usize = 204;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`).
+pub const HELP_AGENT_MAX: usize = 218;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -489,13 +516,21 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
-                let waits = cfg.map(|c| {
-                    crate::waiting::scan(ctx, &c, r, &events, &crate::host::agents(r).unwrap_or_default(), false)
-                });
+                let waits = cfg
+                    .map(|c| crate::waiting::scan(ctx, &c, r, &events, &all_agents(&c, r).unwrap_or_default(), false));
+                // #157: a HOST column once fleet.toml has `[hosts]`.
+                let hosts = Config::load(&ctx.config).is_ok_and(|c| !c.hosts.is_empty());
+                let pad = [5, 63][usize::from(hosts)];
+                let c = |h: &str| format!(" {h:<10}").repeat(usize::from(hosts));
+                let head = c("HOST");
+                let host = |s: &crate::events::IssueState| {
+                    let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
+                    c(e.map_or("-", |e| e.str("host").unwrap_or("local")))
+                };
                 writeln!(
                     out,
-                    "{:<12} {:<6} {:<12} {:<24} {:<5} WAITING",
-                    "FLEET", "ISSUE", "STATE", "LANE", "AGE"
+                    "{:<12} {:<6} {:<12} {:<24} {:<5}{} WAITING",
+                    "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for s in rows {
                     let w = waits
@@ -508,7 +543,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             skip.map(|(c, why)| format!("skipped this pass: {c} ({why})"))
                         })
                         .unwrap_or_else(|| "-".into());
-                    writeln!(out, "{:<5} {w}", status_line(s, ctx.now))?;
+                    writeln!(out, "{:<pad$}{} {w}", status_line(s, ctx.now), host(s))?;
                 }
                 write!(out, "{}", serial.concat())?;
             }
@@ -610,6 +645,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["serial"] == true {
                     on += "  serial";
                 }
+                if r["needs"].as_array().is_some_and(|n| !n.is_empty()) {
+                    on += &format!("  needs {}", r["needs"].to_string().replace(['[', ']', '"'], ""));
+                }
                 let n = |k: &str| r[k].as_u64().unwrap_or_default();
                 writeln!(
                     out,
@@ -669,6 +707,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?;
                 }
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
+                Cmd::Hosts { cmd } => match cmd {
+                    None => crate::hosts::list(ctx, &cfg, r, out, false)?,
+                    Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
+                    Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
+                    Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
+                },
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
@@ -679,7 +723,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &cfg,
                         r,
                         &read(&ctx.state)?,
-                        &crate::host::agents(r).unwrap_or_default(),
+                        &all_agents(&cfg, r).unwrap_or_default(),
                         true,
                     );
                     let rows: Vec<_> = all
@@ -797,11 +841,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             top,
                             after,
                             serial,
+                            needs,
                         } => {
                             let mut d = queue::op("add", &issues, top, None, after, None);
                             if serial {
                                 d["serial"] = json!(true);
                             }
+                            if !needs.is_empty() {
+                                d["needs"] = json!(needs);
+                            }
+                            d
+                        }
+                        QueueCmd::Set { issue, tags, .. } => {
+                            let mut d = queue::op("set", &[issue], false, None, None, None);
+                            d["needs"] = json!(tags);
                             d
                         }
                         QueueCmd::Mv {

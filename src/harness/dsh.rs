@@ -66,8 +66,8 @@ impl Harness for Dsh {
         Ok(())
     }
 
-    fn prepare(&self, ctx: &Ctx, r: &dyn Runner, p: &Plan) -> Result<()> {
-        install_pre_push(r, &ctx.exe, &p.worktree, p.family)
+    fn prepare(&self, ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
+        install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
     /// herdr has no `dsh` kind: type the launch into the lane's shell.

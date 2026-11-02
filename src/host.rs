@@ -155,13 +155,19 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = stdout(r, "sysctl", &["-n", "vm.loadavg"])
         .and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
     let ncpu = stdout(r, "sysctl", &["-n", "hw.ncpu"]).and_then(|s| s.trim().parse::<f64>().ok());
+    // #157: a Linux host has no `vm_stat`: `/proc/loadavg`, `nproc` and `MemAvailable` (kB) instead.
+    let linux = |p: &str, a: &[&str]| b.is_empty().then(|| stdout(r, p, a)).flatten().unwrap_or_default();
+    let word = |s: String, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
+    let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
+    let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
+    let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| l / n);
     Host {
         pressure,
         swapout,
         swap_median: None,
         load_per_cpu,
-        free_mem_gb: mem_gb(&b),
+        free_mem_gb: mem_gb(&b).or_else(avail),
     }
 }
 
