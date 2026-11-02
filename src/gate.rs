@@ -83,21 +83,52 @@ pub fn verdict(
         _ => p.gate(),
     };
     let lp = p.loop_of(stage);
+    // #228: `FAIL (form-only)` with every blocker tagged a form category doesn't count, `form_rounds` times per issue.
+    let (used, of) = (st.as_ref().map_or(0, |s| s.form), f.form_rounds.unwrap_or_default());
+    let tagged = !pass && body.lines().next().is_some_and(|l| l.trim() == "FAIL (form-only)");
+    let demoted = if !tagged {
+        None
+    } else if !form_only(&body, f.form_categories.as_deref().unwrap_or_default()) {
+        Some("form-only-rejected")
+    } else {
+        (used >= of).then_some("form-rounds-exhausted")
+    };
+    if let Some(k) = demoted {
+        writeln!(out, "{k}: recorded as a plain FAIL")?;
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), k, json!({"sha": head})),
+        )?;
+    }
+    let form = tagged && demoted.is_none();
     let round = st.as_ref().map_or(1, |s| {
         let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == lp);
-        s.stage_rounds.get(lp).copied().unwrap_or_default() + u32::from(new)
+        s.stage_rounds.get(lp).copied().unwrap_or_default() + u32::from(new && !form)
     });
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
-        "stage": stage, "loop": lp});
+        "stage": stage, "loop": lp, "form_only": form});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, Some(issue), "verdict", data),
     )?;
     let limit = rounds(f, lp) + st.as_ref().map_or(0, |s| s.extra);
-    writeln!(out, "recorded {v} for {fleet}#{issue} @ {head} (round {round}/{limit})")?;
-    if !pass && round >= limit {
-        let d = json!({"reason": format!("review rounds ran out ({round}/{limit})"), "findings": body});
+    let (v, note) = if form {
+        ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
+    } else {
+        (v, String::new())
+    };
+    writeln!(
+        out,
+        "recorded {v} for {fleet}#{issue} @ {head} (round {round}/{limit}{note})"
+    )?;
+    if !pass && !form && round >= limit {
+        let of = match used {
+            0 => String::new(),
+            n => format!(", {n} form-only not counted"),
+        };
+        let d = json!({"reason": format!("review rounds ran out ({round}/{limit}{of})"), "findings": body});
         emit(
             &ctx.state,
             cfg,
@@ -214,6 +245,21 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
         .ok_or("no checks reported")?;
     let prefix = if required.is_empty() { "" } else { "required " };
     gh::not_green(&gh::required(rollup, required)).map_or(Ok(()), |m| Err(format!("{prefix}{m}")))
+}
+
+/// #228: every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one
+/// of `cats`; at least one blocker.
+#[doc(hidden)]
+pub fn form_only(body: &str, cats: &[String]) -> bool {
+    let blockers: Vec<String> = (body.lines().skip(1).map(str::to_lowercase))
+        .filter(|l| l.contains("blocking") && !l.contains("non-blocking"))
+        .collect();
+    let tag = |l: &str| {
+        let (_, rest) = l.split_once("blocking")?;
+        let rest = rest.trim_start_matches(['*', '_', ':', ' ']).strip_prefix('[')?;
+        rest.split_once(']').map(|t| t.0.trim().to_string())
+    };
+    !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
 }
 
 /// A check stage's review rounds (`[limits] review_rounds` in the built-in pipeline); unset: no limit.

@@ -167,6 +167,9 @@ pub struct Fleet {
     /// #157: host tags every lane of this fleet needs (e.g. `xcode`).
     #[serde(default)]
     pub needs: Vec<String>,
+    /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
+    pub form_categories: Option<Vec<String>>,
+    pub form_rounds: Option<u32>,
     /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
@@ -230,11 +233,16 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
+    pub idle_reap_minutes: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
     /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
     pub fast_secs: u64,
     pub slow_secs: u64,
+    /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
+    pub form_categories: Vec<String>,
+    pub form_rounds: u32,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -273,6 +281,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            idle_reap_minutes: 10,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
                 .ok()
@@ -280,6 +289,18 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
+            form_categories: [
+                "trailer",
+                "pr-body",
+                "stale-baseline",
+                "format",
+                "docs-fresh",
+                "migration-redate",
+                "infra",
+            ]
+            .map(String::from)
+            .into(),
+            form_rounds: 3,
         }
     }
 }
@@ -376,6 +397,9 @@ impl Config {
             for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
                 g.rounds = Some(c.limits.update_rounds);
             }
+            f.form_categories
+                .get_or_insert_with(|| c.limits.form_categories.clone());
+            f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.bad = p.validate(name, &f.role);
             f.pipeline = Some(p);
         }

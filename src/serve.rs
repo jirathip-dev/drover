@@ -1855,6 +1855,11 @@ impl<'a> Server<'a> {
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
+        // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
+        let top = host::top(r, &herdr::agents(r).unwrap_or_default()).join(" · ");
+        if !top.is_empty() {
+            m += &kv("top memory", "g", &esc(&top));
+        }
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let (min, o) = (lim.min_free_gb, if t == "r" { "▶ " } else { "" });
@@ -2319,6 +2324,10 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
     }
     if let Some((s, (_, v, _))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
         parts.push(format!("rev <span class={}>{}</span> r{}", tone(v), esc(v), s.rounds));
+        if v.ends_with(crate::events::FORM) {
+            let of = fc.and_then(|c| c.form_rounds).unwrap_or_default();
+            parts.push(format!("<span class=a>not counted · form {}/{of}</span>", s.form));
+        }
     }
     parts.join(" · ")
 }

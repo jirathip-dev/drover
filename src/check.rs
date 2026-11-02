@@ -108,6 +108,15 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     }
                 }
             }
+            // #223: a lane done/idle past `idle_reap_minutes` keeps its agent but not what the agent started.
+            let trim =
+                wt.filter(|_| matches!(status, Some("done" | "idle")) && idle > cfg.limits.idle_reap_minutes * 60);
+            let trimmed = trim.map(|wt| host::reap(r, Path::new(wt), true));
+            if let Some((killed, mb)) = trimmed.filter(|t| !t.0.is_empty()) {
+                let d = json!({"agent": lane, "killed": killed, "freed_mb": mb});
+                let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
+                emit(&ctx.state, cfg, e)?;
+            }
             if idle > stall && status != Some("working") && !parked {
                 let st = status.unwrap_or("gone");
                 hits.push((
@@ -414,7 +423,7 @@ pub fn clean(
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
 pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
-    let names = host::reap(r, Path::new(wt));
+    let names = host::reap(r, Path::new(wt), false).0;
     if !names.is_empty() {
         let d = json!({"worktree": wt, "killed": names.len(), "names": names});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;

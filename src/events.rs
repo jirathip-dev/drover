@@ -230,6 +230,8 @@ pub struct IssueState {
     pub check: Option<String>,
     pub build: Option<String>,
     pub stage_rounds: BTreeMap<String, u32>,
+    /// #228: `FAIL (form-only)` verdicts that did not count toward the rounds.
+    pub form: u32,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -273,10 +275,13 @@ pub const PASSIVE: &[&str] = &[
     "lane-closed",
     "lane-kept",
     "lane-reaped",
+    "lane-trimmed",
     "decision-redelivered",
     "labelled",
     "build-cloned",
     "unlabelled",
+    "form-only-rejected",
+    "form-rounds-exhausted",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
@@ -361,12 +366,13 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 s.state = match (rev, s.rounds) {
                     (true, _) => format!("review({}){u}", n + u32::from(!s.updating)),
                     (false, 0) => "impl".into(),
-                    (false, n) => format!("fix({n}){u}"),
+                    (false, n) => format!("fix({n}{}){u}", s.form_mark()),
                 };
             }
             "verdict" => {
                 let sha = e.str("sha").unwrap_or_default();
-                let v = e.str("verdict").unwrap_or_default().to_string();
+                let form = e.data.get("form_only") == Some(&Value::Bool(true));
+                let v = e.str("verdict").unwrap_or_default().to_string() + if form { FORM } else { "" };
                 // A round is a distinct reviewed sha; re-recording one does not burn another.
                 // #123: a PASSed update round is an update; a FAILed merge-only check is a normal round.
                 let new = u32::from(!s.reviewed(sha));
@@ -374,9 +380,11 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 let lp = e.str("loop").or(e.str("stage")).unwrap_or("rev").to_string();
                 let mine = |x: &(String, String, String)| x.0.eq_ignore_ascii_case(sha) && x.2 == lp;
                 let new_here = u32::from(!s.verdicts.iter().any(mine));
-                if !(s.updating && v == "PASS") {
+                // #228: a form-only FAIL starts a fix round but does not count toward the stage's rounds.
+                if !(form || s.updating && v == "PASS") {
                     *s.stage_rounds.entry(lp.clone()).or_default() += new_here;
                 }
+                s.form += new_here * u32::from(form);
                 *if s.updating && v == "PASS" {
                     &mut s.updates
                 } else {
@@ -387,7 +395,7 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 s.state = if v == "PASS" {
                     "ready".into()
                 } else {
-                    format!("fix({})", s.rounds)
+                    format!("fix({}{})", s.rounds, s.form_mark())
                 };
             }
             "merged" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
@@ -422,7 +430,19 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
     m
 }
 
+/// #228: a form-only FAIL's suffix in `IssueState::verdicts` (`FAIL (form-only)`).
+pub const FORM: &str = " (form-only)";
+
 impl IssueState {
+    /// #228: `·f` while the latest verdict is a form-only FAIL (`fix(2·f)`).
+    fn form_mark(&self) -> &'static str {
+        if self.verdicts.last().is_some_and(|v| v.1.ends_with(FORM)) {
+            "·f"
+        } else {
+            ""
+        }
+    }
+
     /// A verdict was already recorded for this sha.
     pub fn reviewed(&self, sha: &str) -> bool {
         self.verdicts.iter().any(|(s, ..)| s.eq_ignore_ascii_case(sha))

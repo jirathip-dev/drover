@@ -103,6 +103,9 @@ C = "CLAUDE_CODE_OAUTH_TOKEN_C"
 [limits]
 review_rounds = 3
 update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart from review_rounds
+# form_rounds = 3   # `FAIL (form-only)` verdicts per issue that don't count as a review round; then they do
+# form_categories = ["trailer", "pr-body", "stale-baseline", "format", "docs-fresh", "migration-redate", "infra"]
+#                   # a fleet's own `form_categories` / `form_rounds` replace these
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option

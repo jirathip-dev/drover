@@ -288,7 +288,8 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
         "rev" => format!(
             include_str!("../roles/brief-rev.md"),
             integration = integration,
-            worktree = p.worktree.display()
+            worktree = p.worktree.display(),
+            form = f.form_categories.as_deref().unwrap_or_default().join(", ")
         ),
         "design" => format!(
             include_str!("../roles/brief-design.md"),
