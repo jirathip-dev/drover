@@ -196,6 +196,75 @@ fn reopen_spawn_clones_no_build_folder() {
     assert!(ev.iter().any(|e| e.kind == "spawn") && !ev.iter().any(|e| e.kind == "build-cloned"));
 }
 
+/// `Fake`, plus `herdr worktree create` checks out `Cargo.lock` into the new lane like the real one.
+struct Checkout<'a>(&'a Fake, std::path::PathBuf);
+
+impl herdsman::runner::Runner for Checkout<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "herdr" && args.starts_with(&["worktree".into(), "create".into()]) {
+            std::fs::create_dir_all(&self.1).unwrap();
+            std::fs::write(self.1.join("Cargo.lock"), "a").unwrap();
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs)
+    }
+}
+
+/// #185: a fresh lane whose clone fails: the lane started first, the failure is logged, the spawn exits 0.
+#[test]
+fn failed_clone_is_logged_and_the_spawn_succeeds() {
+    let d = tmpdir("clone-fail");
+    let local = d.join("local");
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    let cfg = CONFIG
+        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
+        .replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\nclone_build = [\"target\"]",
+        );
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let f = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree create",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run", "{}")
+        .reply("herdr agent start", "{}")
+        .reply("herdr agent wait", "{}")
+        .once_err("cp ", 1, "clonefile failed");
+    let (code, out) = run(&c, &Checkout(&f, wt), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert_eq!(f.count("cp "), 1, "one clone attempt, never a fallback copy");
+    assert!(
+        f.index("herdr agent start") < f.index("cp "),
+        "the lane starts before the clone"
+    );
+    let ev = read(&c.state).unwrap();
+    let e = ev
+        .iter()
+        .find(|e| e.kind == "build-cloned")
+        .expect("build-cloned logged");
+    assert_eq!(e.data["dirs"], json!([]));
+    assert!(
+        e.data["errors"][0].as_str().unwrap().contains("clonefile failed"),
+        "{e:?}"
+    );
+    assert_eq!(fold(&ev)[&("sendmeter".to_string(), 12)].state, "impl");
+}
+
 #[test]
 fn hermes_role_dry_run_kicks_prompt_after_boot() {
     let d = tmpdir("spawn-hermes");
