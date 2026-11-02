@@ -182,6 +182,8 @@ pub struct Limits {
     pub min_free_gb: f64,
     /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
+    /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
+    pub min_free_mem_gb: f64,
     /// Default reasoning effort for roles that set none.
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
@@ -198,6 +200,7 @@ impl Default for Limits {
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
+            min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
         }

@@ -19,7 +19,7 @@ queued → impl → review(n) → fix(n) → ready → merged; plus blocked, nee
 - CI_NOT_GREEN: a check at the head sha is missing, pending or failed
 - BAD_SHA: verdict --sha is not 40 hex chars
 - STALE_SHA: verdict --sha is not the branch head
-- HOST_BUSY: spawn: memory pressure, swap-out or load/cpu over [limits]; --force overrides (logged). DISK_LOW: under [limits] min_free_gb free (default 10); `herdsman clean --yes`. DISK_BUDGET: worktrees over [limits] worktree_budget_gb (default 25) after drive freed the idlest lanes' build folders
+- HOST_BUSY: spawn: memory pressure, sustained swap-out (with pressure) or load/cpu over [limits]; --force overrides (logged). MEM_LOW: under [limits] min_free_mem_gb memory free (default 2). DISK_LOW: under [limits] min_free_gb free (default 10); `herdsman clean --yes`. DISK_BUDGET: worktrees over [limits] worktree_budget_gb (default 25) after drive freed the idlest lanes' build folders
 - LANE_LIVE: spawn: a herdr agent is live in the worktree, or the log has an unfinished lane for it; --supersede
 - WORKTREE_DIRTY: spawn: the worktree has unpushed or uncommitted work from no known lane; --supersede
 - MERGED: spawn/adopt: the issue is merged; a merged issue never reopens. NOT_NEEDS_HUMAN: extend/park: the issue is not needs-human (once per episode)
