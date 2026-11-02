@@ -196,7 +196,15 @@
       want('a changed card', '2 need you ▸later all', 1);
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
     },
-    events: () => tab('events'),
+    // #170 gate 2: [important] in all 5 time groups, a red glyph, its first row open; no fold holds clean and a failure.
+    events: () => {
+      tab('events');
+      const imp = $('#events [data-v=imp]'), gs = [...imp.querySelectorAll('.eg>h3>span:first-child')].map(s => s.textContent);
+      if (gs.join() !== 'now,5m,1h,earlier today,yesterday') early.push(`[important] groups: ${gs.join()}`);
+      if (!imp.querySelector('.er .kg.t-r')) early.push('no red glyph under [important]');
+      if ([...$$('#events .er')].some(r => /clean/.test(r.textContent) && /alert failed/.test(r.textContent))) early.push('a row holds clean and a failure');
+      imp.querySelector('.er').open = true;
+    },
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #71: Auto is night before 07:00 and from 19:00; [A] cycles auto → day → night, each stored; a fresh load of the

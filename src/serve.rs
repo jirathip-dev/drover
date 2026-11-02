@@ -1047,7 +1047,7 @@ impl<'a> Server<'a> {
                     + &self.lanes_tab(ctx, cfg.as_ref(), &events, &st, paired),
             ),
             ("host", self.host_tab(ctx, cfg.as_ref(), &events)),
-            ("events", events_tab(ctx, cfg.as_ref(), &events, all)),
+            ("events", events_tab(ctx, self.r, cfg.as_ref(), &events, all)),
         ])
     }
 
@@ -1055,7 +1055,7 @@ impl<'a> Server<'a> {
     fn part(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         let (events, cfg) = (read(&ctx.state).ok()?, Config::load(&ctx.config).ok());
         match q.get("id")?.as_str() {
-            "events" => Some(events_tab(ctx, cfg.as_ref(), &events, false)),
+            "events" => Some(events_tab(ctx, self.r, cfg.as_ref(), &events, false)),
             "roles" => {
                 let (c, f) = (cfg?, q.get("fleet")?);
                 Some(roles(&c, f, c.fleet.get(f)?, self.addr.is_some(), &mtime(ctx)))
@@ -2073,56 +2073,230 @@ fn role_form(cfg: &Config, fleet: &str, role: &str, r: &Role, rw: bool, mt: &str
     )
 }
 
-/// Noise folded into one count per run of consecutive events unless `all`.
-const NOISE: &[&str] = &["clean", "notify-failed"];
+/// #170: noise a run of folds into one `kind ×N` row (by kind, so a failure never shares a row with `clean`).
+const NOISE: &[(&str, &str)] = &[
+    ("clean", "lanes cleaned"),
+    ("push-sent", "alerts sent"),
+    ("notify-failed", "alerts that never arrived"),
+];
 
-fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], all: bool) -> String {
-    let repo = |fleet: &str| cfg.and_then(|c| c.fleet.get(fleet)).map(|f| f.repo.clone());
-    let mut h = String::from("<h2><span>Last 50 events</span></h2>");
-    let (mut rows, mut it) = (0, events.iter().rev().peekable());
-    while let Some(e) = it.next() {
-        if rows == 50 && !all {
-            break;
-        }
-        rows += 1;
-        if !all && NOISE.contains(&e.kind.as_str()) {
-            let mut n = 1;
-            while it.next_if(|x| NOISE.contains(&x.kind.as_str())).is_some() {
-                n += 1;
-            }
-            h += &format!(
-                "<p class=ev><span class=m>{} · {n} × clean / notify-failed</span></p>",
-                age(ctx.now.saturating_sub(e.ts))
+type Words = (&'static str, &'static str, String, bool);
+
+/// #170: an event as the Events tab says it: (glyph, tone, plain words, shown under `[important]`). `blocked` and
+/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (herdsman waiting for room).
+pub fn words(e: &Event, serial: &str) -> Words {
+    let s = |k: &str| e.str(k).unwrap_or_default();
+    let (r, round) = (
+        e.str("reason").map_or(String::new(), |r| format!(" · {r}")),
+        &e.data.get("round"),
+    );
+    let round = round.map_or(String::new(), |n| format!(" · round {n}"));
+    match e.kind.as_str() {
+        "merged" => ("✓", "g", format!("merged into {} · PR #{}", s("into"), s("pr")), true),
+        "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("review PASS{round}"), true),
+        "verdict" => ("✗", "r", format!("review FAIL{round}"), true),
+        "needs-human" => ("!", "r", format!("needs you{r}"), true),
+        "needs-decision" => ("!", "r", format!("asks you ({}) · {}", s("id"), s("question")), true),
+        "ask-waiting" => ("!", "r", format!("still waiting on you{r}"), true),
+        "notify-failed" => (
+            "✗",
+            "r",
+            format!("alert failed · the {} alert: {}", s("event"), s("error")),
+            true,
+        ),
+        "lane-dead" => ("✗", "r", format!("lane gone{r}"), true),
+        "blocked" | "driven" => {
+            let mut b = e.clone();
+            b.data.entry("result").or_insert_with(|| e.data["reason"].clone());
+            let (t, w, x) = in_words(&b, serial);
+            let txt = format!("{w} · {x}");
+            let hold = matches!(
+                e.str("code"),
+                Some("HOST_BUSY" | "SERIAL_BUSY" | "CAP" | "ALL_CAPPED" | "PAUSED")
             );
-            continue;
+            match (e.str("code"), t) {
+                (None, _) => ("·", "m", format!("drive · {txt}"), false),
+                (_, "r") if w == "needs you" => ("!", "r", txt, true),
+                (_, "r") => ("✗", "r", txt, true),
+                (_, "g") => ("▸", "l", txt, true),
+                _ => ("⊘", "a", txt, !hold),
+            }
         }
-        let gl = repo(&e.fleet).zip(e.issue).map_or(String::new(), |(r, n)| {
-            let pr = e
-                .data
-                .get("pr")
-                .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()));
-            links(
-                ctx,
-                &r,
-                &e.fleet,
-                n,
-                pr.or_else(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64()),
-            )
-        });
-        let via = if e.str("via") == Some("web") {
-            " <span class=m>(web)</span>"
-        } else {
-            ""
-        };
+        "spawn" => ("▸", "l", format!("{} started{round}", s("role")), false),
+        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.data["devices"]), false),
+        "clean" => ("·", "m", format!("lane cleaned ({})", s("why")), false),
+        "decision" => ("✓", "m", format!("you answered {} · {}", s("id"), s("choice")), false),
+        "override" => ("⊘", "m", format!("override{r}"), false),
+        "queue" => {
+            let n: Vec<String> = e.data["issues"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|n| format!("#{n}"))
+                .collect();
+            ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
+        }
+        k if [
+            "stall",
+            "orphan-lane",
+            "conflict-predicted",
+            "heads-up",
+            "ready-unmerged",
+        ]
+        .contains(&k)
+            || k.starts_with("orch-") =>
+        {
+            ("!", "a", format!("{k}{r}"), false)
+        }
+        k => ("·", "m", format!("{k}{r}"), false),
+    }
+}
+
+/// #170: chips `[all] [important] [● fleet]…` (serve.js keeps the choice per phone), then each view's last 50 rows
+/// (a fold is one row; `all`: every event, unfolded), newest first, under sticky time groups.
+fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event], all: bool) -> String {
+    let fc = |f: &str| cfg.and_then(|c| c.fleet.get(f));
+    let tz = crate::usage::date(r, ctx.now, "+%z")
+        .parse::<i64>()
+        .map_or(0, |z| z / 100 * 3600 + z % 100 * 60);
+    let local = |t: u64| t.cast_signed() + tz;
+    let day = |t: u64| local(t).div_euclid(86_400);
+    let group = |t: u64| match ctx.now.saturating_sub(t) {
+        a if a < 300 => "now".to_string(),
+        a if a < 3600 => "5m".into(),
+        a if a < 7200 => "1h".into(),
+        _ if day(t) == day(ctx.now) => "earlier today".into(),
+        _ if day(t) + 1 == day(ctx.now) => "yesterday".into(),
+        _ => crate::usage::date(r, t, "+%b %-d").to_lowercase(),
+    };
+    let mut order: Vec<&Event> = events.iter().rev().collect();
+    order.sort_by_key(|e| std::cmp::Reverse(e.ts));
+    let mut h = String::from("<div class=chips role=group aria-label=\"filter events\">");
+    for (k, l) in [("all", "all"), ("imp", "important")] {
         h += &format!(
-            "<p class=ev><span class=m>{}</span> {}{via} {}</p>",
-            age(ctx.now.saturating_sub(e.ts)),
-            esc(&plain(e)),
-            gl
+            "<button type=button data-k={k} aria-pressed={}><span>{l}</span></button>",
+            k == "imp"
         );
     }
-    if !all {
-        h += "<p><a href=\"?all=1\">all events, unfolded</a></p>";
+    for (name, f) in cfg.map(|c| &c.fleet).into_iter().flatten() {
+        let (n, k) = (esc(name), f.color(name));
+        h += &format!("<button type=button class=\"fc2 k-{k}\" data-fl=\"{n}\" aria-pressed=false><span><i class=fd></i>{n}</span></button>");
+    }
+    h += "</div>";
+    for (v, imp) in [("imp", true), ("all", false)] {
+        let mut rows: Vec<(Vec<&Event>, Words)> = vec![];
+        for e in &order {
+            let w = words(e, fc(&e.fleet).map_or("serial", |f| f.serial_label()));
+            if imp && !w.3 {
+                continue;
+            }
+            let noise = NOISE.iter().any(|n| n.0 == e.kind);
+            let same = |r: &&mut (Vec<&Event>, Words)| {
+                let p = r.0[0];
+                p.fleet == e.fleet
+                    && if noise {
+                        p.kind == e.kind
+                    } else {
+                        p.ts == e.ts && r.1 .2 == w.2
+                    }
+            };
+            if let Some(r) = rows.last_mut().filter(|r| !all && same(r)) {
+                r.0.push(e);
+                continue;
+            }
+            if rows.len() == 50 && !all {
+                break;
+            }
+            rows.push((vec![e], w));
+        }
+        let back = rows.last().map(|r| r.0[0].ts).map_or(String::new(), |t| {
+            let l = local(t).rem_euclid(86_400);
+            format!(" · back to {} {:02}:{:02}", group(t), l / 3600, l % 3600 / 60)
+        });
+        let more = if all {
+            ""
+        } else {
+            " · <a href=\"?all=1\">all events, unfolded</a>"
+        };
+        let what = if imp { "important rows" } else { "rows" };
+        h += &format!(
+            "<div data-v={v}{}><p class=\"m es\">{} {what}{back}{more}</p>",
+            [" hidden", ""][usize::from(imp)],
+            rows.len()
+        );
+        let mut i = 0;
+        while i < rows.len() {
+            let g = group(rows[i].0[0].ts);
+            let n = rows[i..].iter().take_while(|r| group(r.0[0].ts) == g).count();
+            h += &format!("<div class=eg><h3><span>{g}</span><span>{n}</span></h3>");
+            for (evs, (gl, t, w, imp)) in &rows[i..i + n] {
+                let e = evs[0];
+                let k = fc(&e.fleet).map_or(String::new(), |f| format!(" k-{}", f.color(&e.fleet)));
+                let num = match (fc(&e.fleet), e.issue) {
+                    (Some(f), Some(n)) => format!(
+                        "<a class=n href=\"https://github.com/{}/issues/{n}\">#{n}</a>",
+                        esc(&f.repo)
+                    ),
+                    (_, n) => format!("<span class=n>{}</span>", n.map_or(String::new(), |n| format!("#{n}"))),
+                };
+                let solo = evs.len() == 1 || e.issue.is_some() && evs.iter().all(|x| x.issue == e.issue);
+                let w = match NOISE.iter().find(|n| n.0 == e.kind) {
+                    Some((k, l)) if evs.len() > 1 => format!("{k} ×{} · {l}", evs.len()),
+                    _ if solo => w.clone(),
+                    _ => w.replacen(" · ", &format!(" ×{} · ", evs.len()), 1),
+                };
+                let pr = e
+                    .data
+                    .get("pr")
+                    .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()));
+                let gl2 = fc(&e.fleet).zip(e.issue).map_or(String::new(), |(f, n)| {
+                    let pr = pr.or_else(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64());
+                    format!("<span>{}</span>", links(ctx, &f.repo, &e.fleet, n, pr))
+                });
+                let l = local(e.ts).rem_euclid(86_400);
+                let at = format!(
+                    "{:02}:{:02}:{:02} · {} · {}",
+                    l / 3600,
+                    l % 3600 / 60,
+                    l % 60,
+                    esc(&e.fleet),
+                    esc(&e.kind)
+                );
+                let via = if e.str("via") == Some("web") { " (web)" } else { "" };
+                let body = if evs.len() > 1 {
+                    let li: String = evs.iter().map(|x| format!("<li>{}</li>", esc(&plain(x)))).collect();
+                    format!("<ul class=fl2>{li}</ul>")
+                } else {
+                    format!("<pre>{}</pre>", esc(&raw(e)))
+                };
+                h += &format!(
+                    "<details class=\"er{k}{}\" data-f=\"{}\"><summary><i class=\"kg t-{t}\">{gl}</i><i class=fd></i>{num}<span class=sm>{}{via}</span><span class=ag>{}</span></summary><div class=ex><p class=lk>{gl2}<span class=m>{at}</span></p>{body}</div></details>",
+                    [" imp", ""][usize::from(!imp)],
+                    esc(&e.fleet),
+                    esc(&w),
+                    age(ctx.now.saturating_sub(e.ts))
+                );
+            }
+            h += "</div>";
+            i += n;
+        }
+        h += "</div>";
     }
     h
+}
+
+/// #170: an event as pretty JSON, a multi-line string as its first line and `… (N more lines)`, 160 chars at most.
+fn raw(e: &Event) -> String {
+    let mut e = e.clone();
+    for x in e.data.values_mut() {
+        if let Some(s) = x.as_str().filter(|s| s.contains('\n') || s.chars().count() > 160) {
+            let n = s.lines().count().saturating_sub(1);
+            let one = s.lines().next().unwrap_or_default();
+            let mut t: String = one.chars().take(160).collect();
+            t += &[String::new(), "…".into()][usize::from(one.chars().count() > 160)];
+            t += &[String::new(), format!(" … ({n} more lines)")][usize::from(n > 0)];
+            *x = t.into();
+        }
+    }
+    serde_json::to_string_pretty(&e).unwrap_or_default()
 }

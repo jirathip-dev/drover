@@ -298,8 +298,27 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
+// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
+let EF = null;
+try { EF = JSON.parse(get('events:filter')); } catch (e) {}
+if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
+function evf(root) {
+  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
+  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
+  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
+  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
+  root.querySelectorAll('.eg').forEach(g => g.hidden = !g.querySelector('.er:not([hidden])'));
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
+  if (!b) return;
+  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
+  put('events:filter', JSON.stringify(EF));
+  evf(document);
+});
 function tidy(root) {
   graph(root);
+  evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;

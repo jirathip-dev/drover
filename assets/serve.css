@@ -260,3 +260,30 @@ body:not(.unf) .ask.lt{display:none}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
 /* #166: a driven fleet's result line under its header; a tap lists each action in plain words, a tap on one its code. */
 .dp summary{display:flex}.dp ul{margin:0;padding-left:var(--s4);color:var(--fg)}.dp code{font-size:var(--fs-meta)}
+/* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: the accent fill, a fleet
+   chip its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
+.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fd{display:inline-block;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fk,transparent);flex:none}
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s3) var(--s2) var(--s1)}
+.chips button[aria-pressed=true]{background:var(--l);color:var(--bg)}
+.chips .fc2>span{display:inline-flex;align-items:center;gap:.6ch}
+.chips .fc2[aria-pressed=true]{background:var(--fk)}
+.chips .fc2[aria-pressed=true] .fd{background:var(--bg)}
+.es{margin:var(--s1) 0 var(--s2);font-size:var(--fs-meta)}
+.eg>h3{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;justify-content:space-between;margin:0;
+  padding:var(--s1) 0;background:var(--bg);border-bottom:1px solid var(--line);font-size:var(--fs-meta);font-weight:400;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.eg>h3>span+span{letter-spacing:0}
+details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;gap:var(--s2);padding:var(--s1) 0}
+.kg{font-style:normal;font-weight:700;text-align:center}
+.er .n{white-space:nowrap;overflow:hidden}
+.er .sm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.er .ag{font-size:var(--fs-meta);color:var(--mute);text-align:right;white-space:nowrap}
+.er:not(.imp) .sm{color:var(--mute)}
+.er[open] .sm{display:block}
+.ex{padding:0 0 var(--s2) calc(2ch + 3 * var(--s2))}
+.lk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin:var(--s2) 0;min-height:var(--ctl)}
+.lk>.m{font-size:var(--fs-meta)}
+.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
+.fl2 li{padding:calc(var(--s1) / 2) 0}

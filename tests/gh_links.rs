@@ -75,8 +75,10 @@ fn a_reviewer_event_links_the_prs_checks_not_its_own_branch() {
         "/?all=1",
     );
     let ev = section(&page, "events");
-    // Newest first: the reviewer's spawn (branch rev-12-r1) is the first `#12 spawn` row.
-    let rev = ev.split("<p class=ev>").find(|l| l.contains("#12 spawn"));
+    // #170: the reviewer's spawn (branch rev-12-r1) is the `rev started` row of the `[all]` view.
+    let rev = ev
+        .split("<details class=\"er")
+        .find(|l| l.contains(">#12</a>") && l.contains("rev started"));
     let rev = rev.unwrap_or_else(|| panic!("no reviewer event: {ev}"));
     assert!(
         rev.contains(&format!("[<a href=\"{GH}/pull/33/checks\">checks</a>]")),
