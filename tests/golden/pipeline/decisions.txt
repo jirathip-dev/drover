@@ -1103,7 +1103,7 @@
 1102 atlas #2646 merged r1 u0 x0 | none None | none None | ok
 1103 atlas #2666 merged r3 u0 x0 | none None | none None | ok
 1104 atlas #2666 merged r3 u0 x0 | none None | none None | ok
-1105 atlas #2821 blocked r2 u0 x0 | none None | none None | ok
+1105 atlas #2821 blocked r2 u0 x0 | drive Some("herdsman spawn atlas 2821 rev --supersede") | drive Some("herdsman spawn atlas 2821 rev --supersede") | ok
 1106 atlas #2821 merged r2 u0 x0 | none None | none None | ok
 1107 atlas #2821 merged r2 u0 x0 | none None | none None | ok
 1108 atlas #2665 queued r0 u0 x0 | owner None | owner None | NO_VERDICT
@@ -1235,7 +1235,7 @@
 1234 atlas #2919 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2919 rev") | drive Some("herdsman spawn atlas 2919 rev") | NO_VERDICT
 1235 atlas #2684 fix(4) r4 u0 x1 | none None | drive Some("herdsman spawn atlas 2684 rev") | VERDICT_FAIL
 1236 atlas #2782 fix(4) r4 u0 x1 | none None | drive Some("herdsman spawn atlas 2782 rev") | VERDICT_FAIL
-1237 herdsman #141 review(3) r2 u0 x0 | drive Some("herdsman spawn herdsman 141 rev --supersede") | none None | VERDICT_FAIL
+1237 herdsman #141 review(3) r2 u0 x0 | drive Some("herdsman verdict herdsman 141 PASS --sha b6e4235eafc766ea3f4f600ec191511c76e7b1e6 --file /v.md") | none None | VERDICT_FAIL
 1238 herdsman #169 merged r1 u0 x0 | none None | none None | ok
 1239 herdsman #169 merged r1 u0 x0 | none None | none None | ok
 1240 herdsman #141 ready r3 u0 x0 | drive Some("herdsman merge herdsman 141") | drive Some("herdsman merge herdsman 141") | ok
