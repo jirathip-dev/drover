@@ -1407,3 +1407,63 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
         1
     );
 }
+
+/// Notes, at each command run, whether the log already holds `round-extended`.
+struct Spy<'a>(Fake, &'a herdsman::Ctx, std::sync::Mutex<Vec<bool>>);
+impl herdsman::runner::Runner for Spy<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let logged = read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
+        self.2.lock().unwrap().push(logged);
+        self.0.run(prog, args)
+    }
+}
+
+/// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
+/// with the reason, and the next drive pass starts the recorded round as its fix step.
+#[test]
+fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
+    let c = setup("drive-extend");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
+        ev(
+            &c,
+            ts,
+            "verdict",
+            json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
+        );
+    }
+    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    let base = || {
+        fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+            .reply("git -C", "")
+    };
+    let busy = Fake {
+        replies: base().replies,
+        ..Default::default()
+    }
+    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let spy = Spy(busy, &c, Default::default());
+    let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
+    assert!(code == 3 && out.contains("REFUSED HOST_BUSY"), "{out}");
+    let seen = spy.2.lock().unwrap().clone();
+    assert!(
+        !seen.is_empty() && seen.iter().all(|&l| l),
+        "a command ran before the decision: {seen:?}"
+    );
+    let all = read(&c.state).unwrap();
+    let failed = all
+        .iter()
+        .find(|e| e.kind == "extend-failed")
+        .expect("no extend-failed");
+    assert!(
+        failed.str("reason").unwrap().starts_with("REFUSED HOST_BUSY"),
+        "{failed:?}"
+    );
+    assert_eq!(state(&c), "fix(3)");
+
+    let r = base();
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["fix"], "{out}");
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+}

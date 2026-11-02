@@ -239,6 +239,16 @@
       want('a changed card', '2 need you ▸later all', 1);
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
     },
+    // #217 gate 2: a tapped [one more round]: the needs-human card is one muted pending line with no buttons, at the top.
+    'needs-pending': () => {
+      tab('queue');
+      const c = [...$$('#needs>.ask[data-n]')].find(c => /needs you/.test(c.textContent));
+      if (!c) return early.push('no needs-human card in the demo');
+      $('#needs').prepend(c);
+      pend(c, 'extend');
+      const p = $('#needs>.pend');
+      if (!p || p.querySelector('button,form') || p.textContent !== '⟳ one more round · starting a lane…') early.push(`pending card: ${p ? p.outerHTML : 'none'}`);
+    },
     // #170 gate 2: [important] in all 5 time groups, a red glyph, its first row open; no fold holds clean and a failure.
     events: () => {
       tab('events');
