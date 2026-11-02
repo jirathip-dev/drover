@@ -242,8 +242,8 @@ details.q[open]{padding-bottom:var(--s2)}
 .gr>:is(.w,.x){grid-column:2/-1}
 .grp .mt{font-size:var(--fs-meta);color:var(--mute)}
 /* The gauge: ▕ + 12 cells + ▏ (disk: its floor tick ┃) in the mono font, ▶ past the limit; filled cells and edges take
-   the status colour, empty ░ cells the muted one. */
-.bar{display:inline-block;width:14ch;white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
+   the status colour, empty ░ cells the muted one; a 15ch box at least, so wider fallback glyphs grow it, never spill. */
+.bar{display:inline-block;min-width:15ch;white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
 .bar i{font-style:normal;color:var(--mute)}
 /* A command chip never breaks inside; the whole chip wraps to the next line. */
 .grp code{white-space:nowrap;color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit;overflow-wrap:normal}
