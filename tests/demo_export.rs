@@ -171,7 +171,7 @@ fn demo_page_is_inert_and_relative() {
         "function connect() {\n  if (DEMO) return;",
         "if (DEMO) return herdPull();",
         "o.method === 'POST' ? Promise.reject",
-        "DEMO ? 'lane/' + encodeURIComponent(agent) + '.json'",
+        "DEMO ? 'lane/' + encodeURIComponent(a) + '.json'",
         "!B.dataset.ro && !DEMO) cleanable()",
     ] {
         assert!(page.contains(guard), "missing demo guard `{guard}`");
