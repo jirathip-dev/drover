@@ -65,9 +65,15 @@ pub fn verdict(
     let branch = branch_of(st.as_ref(), issue);
     let api = format!("repos/{}/branches/{}", f.repo, branch);
     let head = ok(r, "gh", &["api", &api, "--jq", ".commit.sha"])?.trim().to_string();
-    if !head.eq_ignore_ascii_case(sha) {
+    // #207: a head that merges `sha` with integration and adds nothing takes the verdict at `sha`; merge carries it.
+    let carried = || {
+        st.as_ref()
+            .is_some_and(|s| crate::overlap::carries(r, f, s, sha, &head))
+    };
+    if !head.eq_ignore_ascii_case(sha) && !carried() {
         return refused("STALE_SHA", format!("{branch} head is {head}, not {sha}"));
     }
+    let head = sha.to_ascii_lowercase();
     let v = if pass { "PASS" } else { "FAIL" };
     // #173: a review lane's verdict is its check stage's; any other (CI red while ready) is the gate's, and counts
     // against the rounds of the check its fix goes back to.

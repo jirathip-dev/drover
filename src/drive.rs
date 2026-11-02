@@ -275,7 +275,13 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             .and_then(|c| c.split(' ').nth(4))
             .is_some_and(|r| f.family(r) == "rev")
     };
-    waits.sort_by_key(|(s, w)| (!rev(w), conflicts.contains_key(&s.issue)));
+    // #207: every written verdict is recorded before any merge (and the auto-update after it) moves a head.
+    let verdict = |w: &Waiting| {
+        w.next_cmd
+            .as_deref()
+            .is_some_and(|c| c.starts_with("herdsman verdict "))
+    };
+    waits.sort_by_key(|(s, w)| (!verdict(w), !rev(w), conflicts.contains_key(&s.issue)));
     let mut go = true;
     for (s, w) in waits
         .iter()
@@ -425,8 +431,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     Ok(go)
 }
 
-/// #129: after a merge, merge integration into every other open ready / in-review PR whose lane isn't working, oldest
-/// PR first, in a scratch worktree. A clean merge is pushed (`auto-updated`); a ready PR's conflict gets an `--update` lane.
+/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in
+/// a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`); a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
@@ -439,7 +445,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")
     };
     let mut prs: Vec<(u64, IssueState)> = (fold(&events).into_values())
-        .filter(|s| s.fleet == fleet && (s.state == "ready" || s.state.starts_with("review")))
+        .filter(|s| s.fleet == fleet && s.state == "ready")
         .filter(|s| !s.lane.as_deref().is_some_and(busy))
         .filter_map(|s| Some((open(&s)?, s)))
         .collect();

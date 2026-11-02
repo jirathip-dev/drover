@@ -144,15 +144,11 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
 }
 
-#[test]
-fn gate_refuses_a_merge_head_that_adds_its_own_change() {
-    let (d, seed, c, _) = repos("au-impure");
-    lane(&c, &seed, 3, true);
-    commit(&seed, "c.txt", "c\n", "staging");
-    // A merge of integration with an extra edit folded in: not a pure update.
+/// Merge staging into origin's `issue-3` in a fresh clone, `extra` folded into b.txt (None: a pure merge); pushed.
+fn merge_staging(d: &Path, extra: Option<&str>) {
     let w = d.join("w");
     git(
-        &d,
+        d,
         &[
             "clone",
             "-q",
@@ -175,7 +171,9 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
             "origin/staging",
         ],
     );
-    std::fs::write(w.join("b.txt"), "sneaky\n").unwrap();
+    if let Some(text) = extra {
+        std::fs::write(w.join("b.txt"), text).unwrap();
+    }
     git(&w, &["add", "."]);
     git(
         &w,
@@ -190,6 +188,15 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
         ],
     );
     git(&w, &["push", "-q", "origin", "HEAD:issue-3"]);
+}
+
+#[test]
+fn gate_refuses_a_merge_head_that_adds_its_own_change() {
+    let (d, seed, c, _) = repos("au-impure");
+    lane(&c, &seed, 3, true);
+    commit(&seed, "c.txt", "c\n", "staging");
+    // A merge of integration with an extra edit folded in: not a pure update.
+    merge_staging(&d, Some("sneaky\n"));
     let h = head(&seed, "issue-3");
     let r = merger(3, &h);
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
@@ -409,4 +416,133 @@ fn cap_check_reads_the_limit_from_config() {
         !step.chars().any(|c| c.is_ascii_digit()),
         "ci.yml holds no cap number: {step}"
     );
+}
+
+/// #207: `n` in review, its reviewer spawned at `sha` and done (`PASS` in verdict.md, not recorded yet).
+fn reviewed(c: &herdsman::Ctx, n: u64, sha: &str) -> String {
+    let wt = c.worktrees.join(format!("rev-{n}"));
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join("verdict.md"), "PASS\nall good\n").unwrap();
+    let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "p9", "worktree": wt, "sha": sha});
+    append(&c.state, &Event::new(30, "sendmeter", Some(n), "spawn", d)).unwrap();
+    wt.join("verdict.md").display().to_string()
+}
+
+fn pending_pr(n: u64, head: &str) -> String {
+    green_pr(n, head)
+        .replace("COMPLETED", "IN_PROGRESS")
+        .replace(r#","conclusion":"SUCCESS""#, "")
+}
+
+#[test]
+fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
+    let (_d, seed, c, _) = repos("au-order");
+    lane(&c, &seed, 1, true);
+    lane(&c, &seed, 3, false);
+    let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
+    reviewed(&c, 3, &from);
+    commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-1 ", &green_pr(1, &h1))
+            .reply("gh pr view issue-3 ", &pending_pr(3, &from))
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &from)
+            .reply("gh pr merge", "")
+            .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
+            .reply("gh issue", "")
+            .reply("herdr", NO_AGENTS),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let at = |k: &str| {
+        ev.iter()
+            .position(|e| e.is(k, "sendmeter", 3))
+            .unwrap_or_else(|| panic!("{k}: {out}"))
+    };
+    assert!(at("verdict") < at("auto-updated"), "{out}");
+    assert_eq!(ev[at("verdict")].str("sha"), Some(from.as_str()));
+    assert_ne!(head(&seed, "issue-3"), from, "updated");
+}
+
+#[test]
+fn a_branch_in_review_is_not_updated() {
+    let (_d, seed, c, cfg) = repos("au-review");
+    lane(&c, &seed, 3, false);
+    let from = head(&seed, "issue-3");
+    reviewed(&c, 3, &from);
+    commit(&seed, "c.txt", "c\n", "staging");
+    // A reviewer still working, then one done whose verdict is not recorded yet.
+    let live = agents(&[("sendmeter-rev-3-r1", "working", "/wt", "p9")]);
+    for list in [live.as_str(), NO_AGENTS] {
+        let r = Mixed(Fake::default().reply("herdr", list));
+        herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+        assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
+    }
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
+}
+
+#[test]
+fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
+    let (d, seed, c, _) = repos("au-carry");
+    lane(&c, &seed, 3, false);
+    let x = head(&seed, "issue-3");
+    let file = reviewed(&c, 3, &x);
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let m = head(&seed, "issue-3");
+    // Drive records it at the reviewed sha (no auto-updated event: the merge was the lane's own).
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &green_pr(3, &m))
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
+            .reply("herdr", NO_AGENTS),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
+    let last = st.verdicts.last().map(|v| v.0.as_str());
+    assert_eq!((st.state.as_str(), last), ("ready", Some(x.as_str())), "{out}");
+    // The CLI takes it too, and the merge carries the PASS to the head: no re-review.
+    let (code, out) = run(
+        &c,
+        &r,
+        &["verdict", "sendmeter", "3", "PASS", "--sha", &x, "--file", &file],
+    );
+    assert_eq!(code, 0, "{out}");
+    let r = merger(3, &m);
+    let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.0.called(&format!(
+        "gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {m}"
+    )));
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
+    assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
+}
+
+#[test]
+fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
+    let (d, seed, c, _) = repos("au-no-carry");
+    lane(&c, &seed, 3, false);
+    let x = head(&seed, "issue-3");
+    let file = reviewed(&c, 3, &x);
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, Some("sneaky\n"));
+    let m = head(&seed, "issue-3");
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &pending_pr(3, &m))
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
+            .reply("herdr", NO_AGENTS),
+    );
+    let (code, out) = run(
+        &c,
+        &r,
+        &["verdict", "sendmeter", "3", "PASS", "--sha", &x, "--file", &file],
+    );
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED STALE_SHA"), "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    let want = format!("review was for {x:.7}, head moved to {m:.7} (not a clean merge): review again");
+    assert!(out.contains(&want), "{out}");
 }

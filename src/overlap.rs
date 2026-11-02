@@ -115,6 +115,13 @@ pub fn pure(r: &dyn Runner, f: &Fleet, s: &IssueState, h: &str) -> bool {
     git(r, &dir, &["fetch", "-q", "origin"]).is_ok() && pure_at(r, &dir, &format!("origin/{}", f.integration), s, h)
 }
 
+/// #207: `h` is a pure update of `x`, so a verdict at `x` (whatever it says) carries to `h`.
+pub fn carries(r: &dyn Runner, f: &Fleet, s: &IssueState, x: &str, h: &str) -> bool {
+    let mut s = s.clone();
+    s.verdicts.push((x.into(), "PASS".into(), String::new()));
+    pure(r, f, &s, h)
+}
+
 fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> bool {
     let Ok(p) = git(r, dir, &["rev-list", "--parents", "-n1", h]) else {
         return false;

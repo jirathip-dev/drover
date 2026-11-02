@@ -841,7 +841,8 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
         !r.called("sysctl")
             && page.contains("Cache-Control: no-store")
             && !page.contains("<style>")
-            && !page.contains("<script>")
+            && page.matches("<script>").count() == 1 // #206: the head's tab pick, before the first paint
+            && page.contains("<script>let t=location.hash")
     );
     let i = page.find("<script src=/a/").unwrap() + 15;
     let v = &page[i..i + 8];
