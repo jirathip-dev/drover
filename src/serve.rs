@@ -1707,17 +1707,14 @@ impl<'a> Server<'a> {
         // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
-            let orch = rows.iter().find(|s| s.0 == format!("drive {name}"));
-            let od = orch.map_or(String::new(), |o| o.2.replace("orch · ", ""));
             let (t, w, x) = match last {
                 _ if fc.paused => ("m", "paused", format!("`herdsman resume {name}` starts it again")),
-                Some(e) if fc.driven() => in_words(e, fc.serial_label()),
-                _ if fc.driven() => ("m", "nothing yet", String::new()),
-                _ => (orch.map_or("a", |o| o.1), "orch", od),
+                Some(e) => in_words(e, fc.serial_label()),
+                None => ("m", "nothing yet", String::new()),
             };
             let sep = [" · ", " "][usize::from(t == "g" || x.is_empty())];
             let val = format!("<span class=x><b class={t}>{w}</b>{sep}{}</span>", chips(&x));
-            let e = last.filter(|_| fc.driven() && !fc.paused);
+            let e = last.filter(|_| !fc.paused);
             let ago = e.map_or(String::new(), |e| age(ctx.now.saturating_sub(e.ts)));
             let raw = e
                 .and_then(|e| e.str("result"))
