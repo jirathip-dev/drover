@@ -996,13 +996,17 @@ impl<'a> Server<'a> {
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
         let (cfg, events) = (Config::load(&ctx.config).ok()?, read(&ctx.state).ok()?);
-        let l = self
-            .lanes(ctx.now, &cfg, &events, &fold(&events))?
-            .into_iter()
-            .find(|l| Some(&l.name) == q.get("agent"))?;
+        let agent = q.get("agent")?;
+        let ls = self.lanes(ctx.now, &cfg, &events, &fold(&events))?;
+        let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
+        // #218: a lane with no pane (herdr no longer lists it): its stored transcript, no live block.
+        let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
+            let all: Vec<String> = std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect();
+            let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
+            return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
+        };
         let screen = herdr::recent(&self.cached(ctx.now, 5), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
-        let file = lanes::log(&ctx.state, &l.name).filter(|_| self.export.is_none());
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
         let end = all.len().saturating_sub(before);
         let page = &all[end.saturating_sub(lines)..end];
@@ -1372,10 +1376,18 @@ impl<'a> Server<'a> {
                     .unwrap_or_default()
                     .to_string();
                 let chips = s.map_or(String::new(), |s| stage_line(fc, s, &head));
-                // #205: a lane herdr still lists opens its Lanes sheet (serve.js `.ql`); a gone one is muted text.
-                let link = |a: &str, text: String| match ls.iter().find(|l| l.name == a) {
-                    Some(_) => format!("<a href=#lanes class=\"ql nw el\" data-agent=\"{}\">{text}</a>", esc(a)),
-                    None => format!("<span class=\"ql nw el m\">{text}</span>"),
+                // #205: a lane herdr still lists opens its Lanes sheet (serve.js `.ql`); #218: a gone one its stored
+                // transcript (`data-gone`), else it is muted text.
+                let link = |a: &str, text: String| {
+                    let gone = !ls.iter().any(|l| l.name == a);
+                    if gone && !lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) {
+                        return format!("<span class=\"ql nw el m\">{text}</span>");
+                    }
+                    let g = if gone { " data-gone" } else { "" };
+                    format!(
+                        "<a href=#lanes class=\"ql nw el\" data-agent=\"{}\"{g}>{text}</a>",
+                        esc(a)
+                    )
                 };
                 let mut seen = BTreeSet::new();
                 let spawns = events.iter().rev().filter(|e| e.is("spawn", f, n));
@@ -1389,7 +1401,11 @@ impl<'a> Server<'a> {
                         );
                         link(
                             a,
-                            format!("<span class={tn}>{dot}</span> {} {st} {}", esc(a), ago(now, ts)),
+                            format!(
+                                "<span class={tn}>{dot}</span> <span class=qn>{}</span> <span class=qa>{st} {}</span>",
+                                esc(a),
+                                ago(now, ts)
+                            ),
                         )
                     })
                     .collect();

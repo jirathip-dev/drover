@@ -471,6 +471,34 @@ fn lane_pages_back_through_the_rolling_transcript() {
     assert!(r.called("herdr pane read w1:p2 --source recent --lines 200 --format ansi"));
 }
 
+/// #218: a lane herdr no longer lists reads back its stored transcript (the last page, no live block); none stored: 404.
+#[test]
+fn a_gone_lane_reads_its_stored_transcript() {
+    let (c, _) = lane("gone-transcript");
+    let r = Fake::default().reply("herdr agent list", &agents(&[]));
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "", T);
+    let get = || {
+        let res = String::from_utf8_lossy(&s.respond(
+            &format!("GET /lane?agent={LANE} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"),
+            T,
+        ))
+        .into_owned();
+        res
+    };
+    assert!(get().starts_with("HTTP/1.1 404"), "{}", get());
+    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, (0..250).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
+    let res = get();
+    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    let lines = j["lines"].as_array().unwrap();
+    assert_eq!(
+        (lines.len(), &lines[0], &lines[199], &j["live"], &j["more"]),
+        (200, &json!("  out 50"), &json!("  out 249"), &json!(0), &json!(true))
+    );
+}
+
 /// iOS zooms on focus under 16 px; the fix is the font size. #114: the page is app-like, so no pinch or double-tap zoom.
 #[test]
 fn inputs_are_16px_and_zoom_is_off() {
