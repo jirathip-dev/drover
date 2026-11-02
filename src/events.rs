@@ -259,6 +259,8 @@ pub const PASSIVE: &[&str] = &[
     "lane-closed",
     "lane-kept",
     "decision-redelivered",
+    "labelled",
+    "unlabelled",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
@@ -361,7 +363,13 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 };
             }
             "merged" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
-            "round-extended" => s.extra += 1,
+            "round-extended" => {
+                s.extra += 1;
+                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.
+                if s.state == "needs-human" {
+                    s.state = format!("fix({})", s.rounds);
+                }
+            }
             // #128: `clean` removes only merged or GitHub-closed lanes (logs before #128 carry no `why`).
             "clean" if e.str("why") != Some("merged") => s.state = "closed".into(),
             // Back to the state before the killed lane: queued / fix(n) for an impl, impl / fix(n) for a review.

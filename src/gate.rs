@@ -87,6 +87,16 @@ pub fn verdict(
         )?;
         writeln!(out, "round limit reached → needs-human")?;
     }
+    if pass && f.merge_label.is_some() {
+        // The label is retried by the next drive pass; the verdict stands either way.
+        gh::forget_pr(ctx, fleet, issue);
+        let pr = gh::pr(ctx, r, f, (fleet, issue), &branch, ctx.now)?;
+        if let Some(s) = issue_state(ctx, fleet, issue)? {
+            if let Err(e) = sync_label(ctx, cfg, r, out, &s, &pr) {
+                writeln!(out, "label: {e:#}")?;
+            }
+        }
+    }
     // #128: the verdict is the reviewer's only work: remove its worktree and close its pane, or keep a dirty one.
     let events = read(&ctx.state)?;
     let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && e.str("role") == Some("rev");
@@ -113,6 +123,54 @@ pub fn verdict(
     writeln!(out, "{kind} {}: {reason}", agent.unwrap_or_default())?;
     let d = json!({"agent": agent, "reason": reason});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))
+}
+
+/// A PASS stands at `head`: its own, or (#129) that of the head an auto-update chain started from.
+fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
+    let mut h = head;
+    loop {
+        if let Some((_, v)) = s.verdicts.iter().rev().find(|(x, _)| x.eq_ignore_ascii_case(h)) {
+            return v == "PASS";
+        }
+        let up = events
+            .iter()
+            .find(|e| e.is("auto-updated", &s.fleet, s.issue) && e.str("to") == Some(h));
+        match up.and_then(|e| e.str("from")) {
+            Some(from) if from != h => h = from,
+            _ => return false,
+        }
+    }
+}
+
+/// #150: keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once
+/// (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
+pub fn sync_label(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    s: &IssueState,
+    pr: &Value,
+) -> Result<()> {
+    let (fleet, f) = (s.fleet.as_str(), cfg.fleet(&s.fleet)?);
+    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let (Some(label), Some(num)) = (&f.merge_label, pr["number"].as_u64()) else {
+        return Ok(());
+    };
+    if s.done() || pr["state"] != "OPEN" || head.is_empty() {
+        return Ok(());
+    }
+    let (flag, kind) = match (passed(&read(&ctx.state)?, s, head), gh::has_label(pr, label)) {
+        (true, false) => ("--add-label", "labelled"),
+        (false, true) => ("--remove-label", "unlabelled"),
+        _ => return Ok(()),
+    };
+    let n = num.to_string();
+    ok(r, "gh", &["pr", "edit", &n, "-R", &f.repo, flag, label])?;
+    gh::forget_pr(ctx, fleet, s.issue);
+    writeln!(out, "{fleet} #{} {kind} PR #{n} `{label}` @ {head:.7}", s.issue)?;
+    let d = json!({"label": label, "pr": num, "sha": head});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))
 }
 
 #[doc(hidden)]
@@ -314,5 +372,40 @@ pub fn merge(
             root.display()
         )?;
     }
+    Ok(())
+}
+
+/// #130: a needs-human card's `override` / `extend` / `park`; #151: `herdsman extend|park` (`spawn: false` = `--no-spawn`).
+pub fn needs_human(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    op: &str,
+    (spawn, by): (bool, &str),
+) -> Result<()> {
+    // Only from needs-human: a stale card or a double tap never parks a merged issue or extends twice.
+    let state = issue_state(ctx, fleet, n)?.map(|s| s.state);
+    if state.as_deref() != Some("needs-human") {
+        let s = state.as_deref().unwrap_or("unknown");
+        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {s}, not needs-human"));
+    }
+    let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
+    match op {
+        "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
+        "extend" => {
+            if spawn {
+                let o = crate::spawn::Opts {
+                    supersede: true,
+                    ..Default::default()
+                };
+                crate::spawn::spawn(ctx, cfg, r, out, (fleet, Some(n), "impl"), &o)?;
+            }
+            crate::events::append(&ctx.state, &ev("round-extended"))?;
+        }
+        _ => crate::events::append(&ctx.state, &ev("parked"))?,
+    }
+    writeln!(out, "#{n}: {op}")?;
     Ok(())
 }

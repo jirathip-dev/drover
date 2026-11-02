@@ -476,3 +476,83 @@ fn round_extended_allows_exactly_one_more_round() {
     ext(&c);
     assert_refused(&c, &pr("staging", green()), "ROUND_LIMIT");
 }
+
+// --- #151: `herdsman extend` / `herdsman park` ---
+
+/// Three FAILed rounds of 3, then `needs-human`.
+fn needs_human(name: &str) -> (std::path::PathBuf, herdsman::Ctx) {
+    let (d, c) = setup(name, CONFIG, &OVER[..3]);
+    let e = Event::new(30, "sendmeter", Some(12), "needs-human", json!({"code": "ROUND_LIMIT"}));
+    append(&c.state, &e).unwrap();
+    (d, c)
+}
+
+fn st(c: &herdsman::Ctx) -> herdsman::events::IssueState {
+    fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].clone()
+}
+
+#[test]
+fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override() {
+    let (_d, c) = needs_human("cli-extend");
+    let r = pr("staging", green());
+    let (exit, out) = run(&c, &r, &["extend", "sendmeter", "12", "--no-spawn", "--by", "owner"]);
+    assert_eq!(exit, 0, "{out}");
+    assert_eq!((st(&c).extra, st(&c).state.as_str()), (1, "fix(3)"));
+    let all = read(&c.state).unwrap();
+    assert_eq!(
+        all.iter().filter(|e| e.kind == "spawn").count(),
+        1,
+        "--no-spawn spawns nothing"
+    );
+    assert!(r.calls.borrow().is_empty(), "no herdr/gh call: {:?}", r.calls.borrow());
+    let ext = all.iter().rfind(|e| e.kind == "round-extended").unwrap();
+    assert_eq!(ext.str("by"), Some("owner"));
+
+    for args in [
+        &["extend", "sendmeter", "12", "--no-spawn"][..],
+        &["extend", "sendmeter", "12"],
+        &["park", "sendmeter", "12"],
+    ] {
+        let (exit, out) = run(&c, &r, args);
+        assert!(exit == 3 && out.contains("REFUSED NOT_NEEDS_HUMAN"), "{args:?}: {out}");
+    }
+    assert_eq!(st(&c).extra, 1, "a repeat extends nothing");
+    assert!(r.calls.borrow().is_empty(), "a refused extend spawns nothing");
+
+    let e = Event::new(
+        40,
+        "sendmeter",
+        Some(12),
+        "verdict",
+        json!({"verdict": "PASS", "sha": HEAD}),
+    );
+    append(&c.state, &e).unwrap();
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "round 4 of 3+1 merges with no override: {out}");
+    assert!(r.called("gh pr merge 34"));
+    assert!(!out.contains("Owner override"), "{out}");
+}
+
+#[test]
+fn extend_and_park_refuse_outside_needs_human_and_park_clears_it() {
+    let (_d, c) = setup("cli-not-nh", CONFIG, &OVER[..1]);
+    let r = Fake::default();
+    for args in [&["extend", "sendmeter", "12"][..], &["park", "sendmeter", "12"]] {
+        let (exit, out) = run(&c, &r, args);
+        assert!(
+            exit == 3 && out.contains("REFUSED NOT_NEEDS_HUMAN: #12 is fix(1)"),
+            "{out}"
+        );
+    }
+    assert!(read(&c.state)
+        .unwrap()
+        .iter()
+        .all(|e| e.kind != "round-extended" && e.kind != "parked"));
+
+    let (_d, c) = needs_human("cli-park");
+    let (exit, out) = run(&c, &r, &["park", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert_eq!(st(&c).state, "parked");
+    let (exit, out) = run(&c, &r, &["park", "sendmeter", "12"]);
+    assert!(exit == 3 && out.contains("is parked, not needs-human"), "{out}");
+}
