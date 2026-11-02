@@ -1657,7 +1657,7 @@ impl<'a> Server<'a> {
             let budget = lim.worktree_budget_gb;
             let gb = crate::check::worktree_gb(ctx);
             let (t, bar, pct) = gauge(gb.unwrap_or(0.0) / budget, "▏");
-            let (t, o) = (if gb.is_none() { "a" } else { t }, if t == "r" { "▶ " } else { "" });
+            let o = if t == "r" { "▶ " } else { "" };
             let x = gb.map_or("?".into(), |gb| format!("{gb:.1}"));
             let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {budget} GB</span>{pct}</span>");
             m += &hrow("fleet disk", t, &(bar + &val), "", "");
