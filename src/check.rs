@@ -217,6 +217,10 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             emit(&ctx.state, cfg, ev)?;
         }
     }
+    // #186: processes left in closed lanes' worktrees.
+    if let Some(a) = &agents {
+        leftovers(ctx, cfg, r, a, true)?;
+    }
     // #160: the worktree total (bytes, when) for the Services disk row; `serve` never walks or runs `du`.
     let _ = std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
@@ -322,6 +326,7 @@ pub fn clean(
         let pane = e.str("pane").unwrap_or_default();
         let keep = if host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty() {
             if yes {
+                reap(ctx, cfg, r, (&e.fleet, Some(n)), wt)?;
                 freed += purge(r, out, Path::new(wt))?;
             }
             dirty(r, Path::new(wt))
@@ -384,6 +389,56 @@ pub fn clean(
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
     Ok(())
+}
+
+/// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
+pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
+    let names = host::reap(r, Path::new(wt));
+    if !names.is_empty() {
+        let d = json!({"worktree": wt, "killed": names.len(), "names": names});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;
+    }
+    Ok(names.len())
+}
+
+/// #186: the processes in worktrees of closed lanes (newest spawn not its issue's active lane, no live herdr agent
+/// there) as `(pid, command, cwd)`; with `yes` each such worktree is reaped.
+pub fn leftovers(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    agents: &[serde_json::Value],
+    yes: bool,
+) -> Result<Vec<(String, String, String)>> {
+    let (events, ps, mut seen, mut found) = (
+        read(&ctx.state)?,
+        host::cwds(r),
+        std::collections::BTreeSet::new(),
+        vec![],
+    );
+    let st = fold(&events);
+    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+        let (Some(wt), Some(n), agent) = (e.str("worktree"), e.issue, e.str("agent")) else {
+            continue;
+        };
+        let active = st
+            .get(&(e.fleet.clone(), n))
+            .and_then(IssueState::active_lane)
+            .is_some_and(|l| Some(l.1) == agent);
+        let here = host::inside(&ps, Path::new(wt));
+        if !seen.insert(wt)
+            || active
+            || here.is_empty()
+            || !host::live_in(agents, agent.unwrap_or("\0"), Path::new(wt)).is_empty()
+        {
+            continue;
+        }
+        if yes {
+            reap(ctx, cfg, r, (&e.fleet, Some(n)), wt)?;
+        }
+        found.extend(here);
+    }
+    Ok(found)
 }
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist"];

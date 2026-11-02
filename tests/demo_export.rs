@@ -76,12 +76,12 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         assert!(!sheet.contains(gone), "`{gone}` in the sheet: {sheet}");
     }
     assert!(sheet.contains("raising it one step."), "{sheet}");
-    // Herd: 3 repos plus Others, every lane state (#83: parked too), a 6-item queue with one blocked.
+    // Herd: 4 repos (#162: acme-ios is paused, no lanes) plus Others, every lane state (#83: parked too), a 6-item queue with one blocked.
     let h: Value = serde_json::from_str(&std::fs::read_to_string(site.join("herd.json")).unwrap()).unwrap();
     let fleets = h["fleets"].as_array().unwrap();
     assert_eq!(
         fleets.iter().map(|f| f["name"].as_str().unwrap()).collect::<Vec<_>>(),
-        ["acme-api", "acme-web", "docs"]
+        ["acme-api", "acme-ios", "acme-web", "docs"]
     );
     let all: Vec<&Value> = fleets
         .iter()
