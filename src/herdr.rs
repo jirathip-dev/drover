@@ -181,10 +181,6 @@ pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {
     ])
 }
 
-pub fn workspace_create_argv(local: &str, label: &str) -> Vec<String> {
-    argv(&["workspace", "create", "--cwd", local, "--label", label, "--no-focus"])
-}
-
 pub fn worktree_create_argv(local: &str, branch: &str, base: &str, path: &str, label: &str) -> Vec<String> {
     argv(&[
         "worktree",

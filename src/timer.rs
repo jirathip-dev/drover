@@ -292,20 +292,16 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let mut rows = vec![row("board", t, d, "herdsman setup")];
     let (t, d) = tick_row(ctx, &events);
     rows.push(row("tick", t, d, FIX));
-    let agents = host::agents(r).unwrap_or_default();
     for (name, f) in &cfg.fleet {
         let item = format!("drive {name}");
-        let orch = agents.iter().find(|a| a["name"] == format!("{name}-orch").as_str());
-        let orch = orch.and_then(|a| a["agent_status"].as_str());
         let last = drive::last_pass(ctx, name);
         let did = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
         let did = did.and_then(|e| e.str("result")).unwrap_or("nothing yet");
         let driven = format!("herdsman · last pass {} · {did}", ago(ctx.now, last));
-        let orched = format!("orch · {}", orch.unwrap_or("not running"));
-        rows.push(match () {
-            () if f.paused => row(&item, "a", "paused".into(), ""),
-            () if f.driven() => row(&item, tone(ctx.now, last), driven, FIX),
-            () => row(&item, ["a", "g"][usize::from(orch.is_some())], orched, ""),
+        rows.push(if f.paused {
+            row(&item, "a", "paused".into(), "")
+        } else {
+            row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
     let (t, d) = phone(ctx, Some(cfg), &events);

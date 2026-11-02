@@ -66,11 +66,7 @@ impl Harness for Dsh {
         Ok(())
     }
 
-    /// Issue lanes only: the orch lane runs in the fleet's main checkout.
     fn prepare(&self, ctx: &Ctx, r: &dyn Runner, p: &Plan) -> Result<()> {
-        if p.role == "orch" {
-            return Ok(());
-        }
         install_pre_push(r, &ctx.exe, &p.worktree, &p.role)
     }
 

@@ -440,10 +440,7 @@ fn agent_doc_and_roles_cover_m3() {
     ] {
         assert!(out.contains(w), "missing {w}");
     }
-    for (name, role) in [
-        ("orch", include_str!("../roles/orch.md")),
-        ("impl", include_str!("../roles/impl.md")),
-    ] {
+    for (name, role) in [("impl", include_str!("../roles/impl.md"))] {
         for l in role.lines().filter(|l| l.to_lowercase().contains("comment")) {
             assert!(
                 l.contains("Never comment") || l.contains("never comment") || l.contains("one closing comment"),
@@ -455,5 +452,4 @@ fn agent_doc_and_roles_cover_m3() {
             "{name}"
         );
     }
-    assert!(include_str!("../roles/orch.md").contains("herdsman next"));
 }

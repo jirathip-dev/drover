@@ -253,7 +253,7 @@ pub fn pause(ctx: &Ctx, out: &mut dyn Write, fleet: &str, paused: bool, via: Opt
 const OWNER_WORDS: &str = "main production prod prods secret secrets token tokens delete deleted deletes deleting \
     deletion spend spends spending spent cost costs costly dependency dependencies scope scopes";
 
-/// `herdsman ask`: log a `needs-decision` for the asking lane (`HERDSMAN_LANE`, else the orch), notify, print its id.
+/// `herdsman ask`: log a `needs-decision` for the asking lane (`HERDSMAN_LANE`, else none), notify, print its id.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
@@ -291,9 +291,7 @@ pub fn ask(
         )
     };
     let spawned = events.iter().rev().find(|e| e.kind == "spawn" && at(e) == lane);
-    let agent = spawned
-        .and_then(|e| e.str("agent"))
-        .map_or(format!("{fleet}-orch"), String::from);
+    let agent = spawned.and_then(|e| e.str("agent"));
     let d = json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": agent, "kind": kind});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "needs-decision", d))?;
     Ok(writeln!(out, "{id}")?)

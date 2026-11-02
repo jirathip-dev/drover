@@ -6,7 +6,6 @@ use serde_json::json;
 use std::path::Path;
 
 const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
-const DRIVEN: &str = "integration = \"staging\"\ndriver = \"herdsman\"";
 const MAC: bool = cfg!(target_os = "macos");
 
 fn host(r: Fake) -> Fake {
@@ -105,10 +104,7 @@ fn install_loads_and_prints_the_command() {
 
 #[test]
 fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
-    let c = ctx(
-        &tmpdir("timer-tick"),
-        &CONFIG.replace("integration = \"staging\"", DRIVEN),
-    );
+    let c = ctx(&tmpdir("timer-tick"), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // Memory pressure critical: the start is refused HOST_BUSY; the tick still exits 0.
     let r = host(Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n")).reply("git -C", "");
@@ -249,10 +245,7 @@ fn rows(c: &herdsman::Ctx, r: &Fake) -> Vec<(String, &'static str, String, Strin
 
 #[test]
 fn services_rows_go_green_amber_and_red() {
-    let c = ctx(
-        &tmpdir("timer-svc"),
-        &CONFIG.replace("integration = \"staging\"", DRIVEN),
-    );
+    let c = ctx(&tmpdir("timer-svc"), CONFIG);
     let stamp = |w: &str, ago: u64| std::fs::write(c.state.with_file_name(w), (c.now - ago).to_string()).unwrap();
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);

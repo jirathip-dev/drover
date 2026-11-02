@@ -51,7 +51,7 @@ split into fleet subgroups (alphabetical, Others last), newest-changed first. A 
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
 when work is at risk. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
-PR #n)`; once resumed, the usual `pushed <sha>, waiting for orch to spawn review` applies. Tapping a lane
+PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
 56 px handle, or from the conversation's top; snaps to 50 %, 78 % or full by position and flick; below 50 %, a
 down flick, the backdrop or Esc slide it closed) with
@@ -202,7 +202,7 @@ tailnet-only.
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, orch-stuck, ask-waiting
+# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, decision-undelivered, state-write-failed
 ```
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to the Telegram notifier, which is

@@ -405,11 +405,7 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
 
 /// The lane's wait reason while herdr shows it idle, done or unknown.
 fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::waiting::Waiting> {
-    let w = waits
-        .iter()
-        .find(|w| w.lane == l.name)
-        .cloned()
-        .or_else(|| crate::waiting::orch(waits, l.fleet.as_deref()?).filter(|_| l.role == "orch"));
+    let w = waits.iter().find(|w| w.lane == l.name).cloned();
     w.filter(|_| matches!(l.state.as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
@@ -1351,21 +1347,15 @@ impl<'a> Server<'a> {
                 );
                 continue;
             }
-            let drive = if fc.driven() {
-                button("drive", "Drive now")
-            } else {
-                String::new()
-            };
+            let drive = button("drive", "Drive now");
             h += &format!(
                 "<h2{sa}><span>{}</span>{drive}{}</h2>",
                 esc(f),
                 button("pause", "Pause")
             );
-            if fc.driven() {
-                let last = crate::drive::last_pass(ctx, f).map(|t| age(now.saturating_sub(t)));
-                let last = last.map_or("no pass yet".into(), |a| format!("last pass {a} ago"));
-                h += &format!("<p class=m>driver: herdsman · {last}</p>");
-            }
+            let last = crate::drive::last_pass(ctx, f).map(|t| age(now.saturating_sub(t)));
+            let last = last.map_or("no pass yet".into(), |a| format!("last pass {a} ago"));
+            h += &format!("<p class=m>driver: herdsman · {last}</p>");
             let stall = cfg.limits.stall_minutes * 60;
             let live = mine.iter().filter(|s| s.active_lane().is_some() && gone(s).is_none());
             let next = live.map(|s| ((s.last_ts + stall).saturating_sub(now), s.issue)).min();

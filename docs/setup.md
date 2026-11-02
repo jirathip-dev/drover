@@ -35,10 +35,6 @@ required_checks = ["test"]                   # gate on these checks only; unset 
 serial_paths = ["db/migrations/**"]          # `--serial` lanes: serial_max (default 1) at a time
 serial_label = "schema"                      # their Queue mark, 🔒schema; ≤ 8 characters, default "serial"
 
-[fleet.app.role.orch]
-harness = "hermes"
-profile = "lane-orch"
-
 [fleet.app.role.impl]
 harness = "claude"
 profile = "lane-impl"
@@ -66,11 +62,12 @@ in fleet.toml: see [providers.md](providers.md).
 
 ```sh
 herdsman queue app add 12
-herdsman spawn app - orch
+herdsman drive app
 herdsman status
 ```
 
-The orchestrator picks issues off the queue and spawns the lanes. Check it worked:
+`herdsman drive` starts the queue's issues and moves each lane on; the watchdog ([4](#4-watchdog))
+runs it every 5 minutes. Check it worked:
 `herdsman status` shows #12 moving past `queued`, and `herdsman board` shows its lane.
 
 ## 4. Watchdog
@@ -82,7 +79,7 @@ then runs `herdsman doctor` and exits with its code. Each step prints `✓ done`
 
 Run it every 5 minutes: `herdsman timer install`. That is the tick job alone: `herdsman tick` every
 5 minutes runs `herdsman check` (alerts once per stall, dead lane or unmerged ready issue), then
-`herdsman drive` (the loop of `driver = "herdsman"` fleets, [lanes.md](lanes.md#drive)). No cron and
+`herdsman drive` (every fleet's loop, [lanes.md](lanes.md#drive)). No cron and
 no Hermes needed.
 
 - macOS: `~/Library/LaunchAgents/dev.herdsman.tick.plist` (`--label` picks another label),

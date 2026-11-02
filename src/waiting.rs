@@ -1,4 +1,4 @@
-//! #46: what an idle lane waits on (orch | owner | ci | none), worked out from the log, git and the cached PR.
+//! #46: what an idle lane waits on (drive | owner | ci | none), worked out from the log, git and the cached PR.
 use crate::config::Config;
 use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
 use crate::runner::{ok, Runner};
@@ -9,11 +9,10 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Waiting {
     pub fleet: String,
-    /// 0 for the orch lane.
     pub issue: u64,
     /// The lane this row is for; every lane of an issue gets one.
     pub lane: String,
-    /// orch | owner | ci | none
+    /// drive | owner | ci | none
     pub who: &'static str,
     pub what: String,
     pub since: u64,
@@ -25,11 +24,11 @@ impl Waiting {
     pub fn label(&self, now: u64) -> String {
         format!("idle · {} ({})", self.what, age(now.saturating_sub(self.since)))
     }
-    /// Page tone: owner red, orch amber past 5 min, an impl idle without pushing amber at once, the rest dim.
+    /// Page tone: owner red, drive amber past 5 min, an impl idle without pushing amber at once, the rest dim.
     pub fn tone(&self, now: u64) -> &'static str {
         match self.who {
             "owner" => "r",
-            "orch" if now.saturating_sub(self.since) > 300 => "a",
+            "drive" if now.saturating_sub(self.since) > 300 => "a",
             "none" if self.what.contains("idle without") => "a",
             _ => "m",
         }
@@ -80,8 +79,8 @@ pub fn waiting_on(
     let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
     if let Some(c) = events.iter().filter(since_spawn).find(|e| e.is("account-capped", f, n)) {
         let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
-        let what = "account capped, waiting for orch to respawn on a free one";
-        return w("orch", what, c.ts, cmd("spawn", &format!(" {role} --supersede")));
+        let what = "account capped, waiting for drive to respawn on a free one";
+        return w("drive", what, c.ts, cmd("spawn", &format!(" {role} --supersede")));
     }
     let pushed = pr["headRefOid"].as_str().unwrap_or_default();
     // #129: an auto-update moves the head without new work, so a review of the head it updated still stands.
@@ -118,10 +117,10 @@ pub fn waiting_on(
                 pr["number"],
                 pr["baseRefName"].as_str().unwrap_or("?")
             );
-            w("orch", &what, s.last_ts, cmd("spawn", " impl --supersede --update"))
+            w("drive", &what, s.last_ts, cmd("spawn", " impl --supersede --update"))
         }
         "ready" if gh::ci(&gh::required(&pr["statusCheckRollup"], req)) == "green" => {
-            w("orch", "PASS + green, waiting for merge", s.last_ts, cmd("merge", ""))
+            w("drive", "PASS + green, waiting for merge", s.last_ts, cmd("merge", ""))
         }
         "ready" => w("ci", "waiting for CI", s.last_ts, None),
         // The exact command, or none (no nudge) while the verdict word or the head sha is unknown.
@@ -132,15 +131,15 @@ pub fn waiting_on(
                     "verdict is for {:.7}, the PR head moved to {pushed:.7}: review again",
                     head.unwrap_or_default().0
                 );
-                w("orch", &what, s.last_ts, cmd("spawn", " rev --supersede"))
+                w("drive", &what, s.last_ts, cmd("spawn", " rev --supersede"))
             }
             Some((path, v)) => {
                 let at = head.is_some_and(|h| h.0 == base);
                 let next = (matches!(v, "PASS" | "FAIL") && at)
                     .then(|| format!("herdsman verdict {f} {n} {v} --sha {pushed} --file {path}"));
                 w(
-                    "orch",
-                    "verdict written, waiting for orch to record it",
+                    "drive",
+                    "verdict written, waiting for drive to record it",
                     s.last_ts,
                     next,
                 )
@@ -148,27 +147,27 @@ pub fn waiting_on(
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },
         "fix" if s.last_event == "verdict" => w(
-            "orch",
-            "review FAIL, waiting for orch to start fix round",
+            "drive",
+            "review FAIL, waiting for drive to start fix round",
             s.last_ts,
             cmd("spawn", " impl --supersede"),
         ),
         "impl" | "fix" if !pushed.is_empty() && !s.reviewed(pushed) && head.is_none_or(|h| h.0 == pushed) => {
             let what = format!(
-                "pushed {}{}, waiting for orch to spawn review",
+                "pushed {}{}, waiting for drive to spawn review",
                 if s.rounds > 0 { "fix " } else { "" },
                 &pushed[..7.min(pushed.len())]
             );
             w(
-                "orch",
+                "drive",
                 &what,
                 head.map_or(s.last_ts, |h| h.1.max(s.last_ts)),
                 cmd("spawn", " rev"),
             )
         }
         "impl" | "fix" if s.last_event == "lane-killed" => w(
-            "orch",
-            "lane killed, waiting for orch to respawn impl",
+            "drive",
+            "lane killed, waiting for drive to respawn impl",
             s.last_ts,
             cmd("spawn", " impl"),
         ),
@@ -276,8 +275,7 @@ pub fn scan(
         {
             w.what = format!("PASS, PR lacks label `{l}`, so the full CI has not run");
         }
-        let to = f.driven().then_some("for drive (next pass ≤ 5 min)");
-        w.what = w.what.replace("for orch", to.unwrap_or("for orch"));
+        w.what = w.what.replace("for drive", "for drive (next pass ≤ 5 min)");
         // #83: a paused fleet's lane with no pane and a clean, pushed worktree is parked until `resume`.
         let safe = || wt.is_some_and(|wt| crate::spawn::dirty(r, std::path::Path::new(wt)).is_none());
         if f.paused
@@ -303,26 +301,4 @@ pub fn scan(
         out.push((s, w));
     }
     out
-}
-
-/// The orch lane's reason: the items waiting on it, if any.
-pub fn orch(waits: &[Waiting], fleet: &str) -> Option<Waiting> {
-    let mine: Vec<_> = waits.iter().filter(|w| w.who == "orch" && w.fleet == fleet).collect();
-    let since = mine.iter().map(|w| w.since).min()?;
-    let what = format!(
-        "orch idle with {} items waiting",
-        mine.iter()
-            .map(|w| w.issue)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-    );
-    Some(Waiting {
-        fleet: fleet.into(),
-        issue: 0,
-        lane: format!("{fleet}-orch"),
-        who: "orch",
-        what,
-        since,
-        next_cmd: None,
-    })
 }

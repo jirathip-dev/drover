@@ -29,7 +29,7 @@ enum Cmd {
     /// Switch a role's harness/model/profile/effort in fleet.toml; prints old -> new
     Set {
         fleet: String,
-        /// orch | impl | rev
+        /// impl | rev | design
         role: String,
         /// claude | hermes | dsh
         #[arg(long, value_parser = harness::NAMES)]
@@ -48,13 +48,10 @@ enum Cmd {
     Pause { fleet: String },
     /// Resume a paused fleet
     Resume { fleet: String },
-    /// Create worktree + herdr pane, write .brief.md, launch the role's harness, verify the prompt landed;
-    /// ISSUE `-` with role orch starts the fleet's orchestrator
+    /// Create worktree + herdr pane, write .brief.md, launch the role's harness, verify the prompt landed
     Spawn {
         fleet: String,
-        /// Issue number, or `-` for the orch lane
         issue: String,
-        #[arg(value_parser = config::ROLES)]
         role: String,
         #[command(flatten)]
         o: spawn::Opts,
@@ -62,8 +59,7 @@ enum Cmd {
     /// Record a lane already running in a herdr pane (repair a spawn that was never logged)
     Adopt {
         fleet: String,
-        /// Issue number, or `-` for the orch lane
-        issue: String,
+        issue: u64,
         #[arg(value_parser = config::ROLES)]
         role: String,
         /// The herdr pane the harness runs in
@@ -91,7 +87,7 @@ enum Cmd {
         #[arg(long)]
         owner_override: bool,
     },
-    /// Owner/orch only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`
+    /// Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`
     Extend {
         fleet: String,
         issue: u64,
@@ -102,7 +98,7 @@ enum Cmd {
         #[arg(long)]
         no_spawn: bool,
     },
-    /// Owner/orch only: park a needs-human issue (its card's [park]); the card clears
+    /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
     Ask {
@@ -138,7 +134,7 @@ enum Cmd {
     },
     /// Per-issue state, lane and last-event age
     Status(Scope),
-    /// Every lane waiting on the orch or the owner, with its next command (the owner's watchdog)
+    /// Every lane waiting on drive or the owner, with its next command (the owner's watchdog)
     Waiting(Scope),
     /// Print the issue spec cached at spawn; read this instead of `gh issue view`
     Brief { fleet: String, issue: u64 },
@@ -220,7 +216,7 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
-    /// Alert once per state on stall, lane-dead, ready-unmerged, orch-holding, ask-waiting, orphan-lane; nudge an idle orch; idempotent, safe from cron
+    /// Alert once per state on stall, lane-dead, ready-unmerged, ask-waiting, orphan-lane; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
     Accounts {
@@ -634,7 +630,19 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: ProfilesCmd::Sync { check: false },
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
-                    let issue = lane(&issue)?;
+                    // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.
+                    if role == "orch" {
+                        let why = "herdsman drives fleets itself; see herdsman timer";
+                        return gate::refused("NO_ORCH", why);
+                    }
+                    anyhow::ensure!(
+                        config::ROLES.contains(&role.as_str()),
+                        "role must be one of {:?}",
+                        config::ROLES
+                    );
+                    let issue = issue
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("issue must be a number, not `{issue}`"))?;
                     if !spawn::spawn(ctx, &cfg, r, out, (&fleet, issue, &role), &o)? {
                         return Ok(4);
                     }
@@ -645,7 +653,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     role,
                     pane,
                 } => {
-                    let issue = lane(&issue)?;
                     spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane)?;
                 }
                 Cmd::Ask {
@@ -677,7 +684,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .into_iter()
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane))
                         .map(|x| x.1)
-                        .filter(|w| matches!(w.who, "orch" | "owner") && fleet.as_ref().is_none_or(|f| *f == w.fleet))
+                        .filter(|w| matches!(w.who, "drive" | "owner") && fleet.as_ref().is_none_or(|f| *f == w.fleet))
                         .collect();
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
@@ -693,7 +700,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             crate::events::age(ctx.now.saturating_sub(w.since)),
                             w.next_cmd
                                 .as_deref()
-                                .or((w.who == "orch").then_some("?"))
+                                .or((w.who == "drive").then_some("?"))
                                 .map_or(String::new(), |c| format!(" → {c}"))
                         )?;
                     }
@@ -806,7 +813,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
     Ok(0)
 }
 
-/// Parse a lane's `<ISSUE>` argument (`-` is the orch lane's issue).
+/// Parse an ask's `<ISSUE>` argument (`-`: the fleet, no issue).
 fn lane(issue: &str) -> Result<Option<u64>> {
     match issue {
         "-" => Ok(None),

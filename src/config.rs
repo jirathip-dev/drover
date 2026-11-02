@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const ROLES: [&str; 4] = ["orch", "impl", "rev", "design"];
+pub const ROLES: [&str; 3] = ["impl", "rev", "design"];
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -122,7 +122,7 @@ pub struct Fleet {
     /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
-    /// #92: who runs the loop, `"orch"` (an AI lane, the default) or `"herdsman"` (`herdsman drive`).
+    /// #155: ignored (`herdsman drive` runs every fleet); `herdsman doctor` notes it until the clean-up removes it.
     pub driver: Option<String>,
     /// #103: exported into every lane (`~/` expands); `clone_node_modules` APFS-clones `local`'s on a lockfile match.
     #[serde(default)]
@@ -213,7 +213,7 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40), a stuck orch (#46) and needs-human (#130).
+/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "blocked",
     "stall",
@@ -222,7 +222,6 @@ pub const WEBPUSH_ON: &[&str] = &[
     "merged",
     "needs-decision",
     "needs-human",
-    "orch-stuck",
     "ask-waiting",
     "decision-undelivered",
     "state-write-failed",
@@ -327,9 +326,6 @@ impl Config {
 }
 
 impl Fleet {
-    pub fn driven(&self) -> bool {
-        self.driver.as_deref() == Some("herdsman")
-    }
     pub fn serial_label(&self) -> &str {
         self.serial_label.as_deref().unwrap_or("serial")
     }

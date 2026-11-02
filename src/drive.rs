@@ -1,4 +1,4 @@
-//! #92 `herdsman drive`: one pass of the orch's loop, no AI; each action logs a passive `driven` event.
+//! #92 `herdsman drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
 use crate::events::{emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -52,7 +52,7 @@ pub fn summary(fleet: &str, out: &str) -> String {
 }
 const PAST: [&str; 3] = ["started", "merged", "reviewed"];
 
-/// One pass over every `driver = "herdsman"` fleet (or `only`), under `<state dir>/drive.lock`.
+/// One pass over every fleet (or `only`), under `<state dir>/drive.lock`.
 pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only: Option<&str>) -> Result<()> {
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
@@ -79,10 +79,10 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only:
             lock.display()
         )?);
     }
-    let mine = |(n, f): &(&String, &crate::config::Fleet)| f.driven() && only.is_none_or(|o| o == n.as_str());
+    let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
-    for (name, _) in cfg.fleet.iter().filter(mine).filter(|(_, f)| !f.paused) {
+    for (name, _) in cfg.fleet.iter().filter(mine) {
         res = res.and(pass(ctx, cfg, r, out, name, start).map(|more| start = more));
         let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
     }
@@ -115,8 +115,8 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
         if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
-        } else if w.who == "orch" {
-            // `waiting` names the orch's exact next command; drive runs it instead.
+        } else if w.who == "drive" {
+            // `waiting` names the exact next command; drive runs it.
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
