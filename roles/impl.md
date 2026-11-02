@@ -23,6 +23,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - If the repo has a `justfile`, run `just --list` once and use its recipes.
 - Test with the exact commands from the brief. Save output to a named log and report the
   raw exit status; `cmd | grep` is never PASS/FAIL evidence.
+- Form fixes (PR body, re-date, format, docs) are edits in a new commit: never a history rewrite or force-push.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
 - After three attempts in one diagnostic class without progress, stop and report.

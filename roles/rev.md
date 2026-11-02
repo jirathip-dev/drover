@@ -23,11 +23,13 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews.
 - The implementer's standing answers (staging re-merges, a minimal "staging build fix", one
   host-tool retry, amendment text for the cap or shared files) are not findings.
 - Label every finding `blocking` or `non-blocking` with `file:line`.
-- Verdict is binary: PASS or FAIL. Name the single biggest remaining gap; on PASS, state
-  exactly what you could NOT verify.
+- Verdict is PASS or FAIL. `FAIL (form-only)` only if every blocker is in a form category (the
+  brief lists them; e.g. `trailer`, `pr-body`, `format`); one substantive blocker makes it a
+  plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT
+  verify.
 
 ## Output
 
-Write `verdict.md` in your worktree: first line `PASS` or `FAIL`, then the findings. Report
-the exact head sha you reviewed. A review that finds nothing is suspect; one that names its
+Write `verdict.md` in your worktree: first line `PASS`, `FAIL` or `FAIL (form-only)`, then the
+findings; tag each blocking one `blocking [<category>]`. Report the exact head sha you reviewed. A review that finds nothing is suspect; one that names its
 blind spots is trustworthy.

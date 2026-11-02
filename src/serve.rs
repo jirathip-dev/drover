@@ -2254,6 +2254,10 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
     }
     if let Some((s, (_, v, _))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
         parts.push(format!("rev <span class={}>{}</span> r{}", tone(v), esc(v), s.rounds));
+        if v.ends_with(crate::events::FORM) {
+            let of = fc.and_then(|c| c.form_rounds).unwrap_or_default();
+            parts.push(format!("<span class=a>not counted · form {}/{of}</span>", s.form));
+        }
     }
     parts.join(" · ")
 }
