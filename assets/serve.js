@@ -8,6 +8,7 @@ const put = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 const R = B.dataset.root ?? '/', DEMO = !!B.dataset.demo;
 if (DEMO) { const f = fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('demo: no writes')) : f(u, o); }
 function tab(t) {
+  document.documentElement.dataset.tab = t; // #206: serve.css shows this tab's section (serve.rs sets it before the first paint)
   $$('main>section').forEach(s => s.hidden = s.id !== t);
   $$('nav a').forEach(a => a.classList.toggle('on', a.hash === '#' + t));
   put('tab', t);
@@ -20,9 +21,13 @@ const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.tex
 // A form POST of `data` (an object or FormData) to `path`.
 const post = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); });
-// A tapped alert opens `/?issue=N#tab`: that tab, the issue's row open.
-const t0 = location.hash.slice(1) || get('tab'), DBG = new URLSearchParams(location.search), want = DBG.get('issue');
-tab(t0 && document.getElementById(t0) ? t0 : 'queue');
+// A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
+const DBG = new URLSearchParams(location.search), want = DBG.get('issue');
+tab(document.documentElement.dataset.tab || 'queue');
+// #206 `?debug` (kept for the tab's session): how the page came up. A load or reload repaints it all; a pull only refresh()es.
+const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
+dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
+addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
 const MODES = ['horse', 'ascii', 'glyph'];
 // The mode button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
@@ -148,6 +153,7 @@ document.addEventListener('click', async e => {
 });
 // Network only (the SW passes `frags` through); spins ↻ until done.
 async function refresh() {
+  dbg('refresh');
   if (DEMO) return herdPull();
   claim();
   busy = true;
