@@ -2,7 +2,7 @@
 mod common;
 use common::*;
 use herdsman::events::{fold, read};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn plan(c: &herdsman::Ctx, r: &Fake, role: &str) -> Value {
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", role, "--dry-run", "--json"]);
@@ -112,7 +112,7 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     let (local, wt) = (d.join("local"), d.join("wt"));
     std::fs::create_dir_all(&local).unwrap();
     std::fs::create_dir_all(&wt).unwrap();
-    let m = || herdsman::spawn::lockfiles_match(&local, &wt);
+    let m = || herdsman::spawn::lockfiles_match(&["package-lock.json", "pnpm-lock.yaml"], &local, &wt);
     assert!(!m(), "no lockfile anywhere is no match");
     std::fs::write(local.join("package-lock.json"), "a").unwrap();
     assert!(!m(), "missing in the lane");
@@ -122,6 +122,165 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     assert!(!m(), "a lockfile only the lane has");
     std::fs::write(local.join("pnpm-lock.yaml"), "c").unwrap();
     assert!(!m(), "differing lockfiles");
+}
+
+/// #185: `clone_build` clones `target` on a matching `Cargo.lock` only; a failed clone is logged, never retried as a copy.
+#[test]
+fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
+    let d = tmpdir("clone-build");
+    let (local, wt) = (d.join("local"), d.join("wt"));
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    std::fs::write(wt.join("Cargo.lock"), "b").unwrap();
+    let dirs = ["target".to_string(), "node_modules".into()];
+    let clone = |r: &Fake| herdsman::spawn::clone_build(r, &dirs, &local, &wt);
+    let r = Fake::default().reply("cp ", "");
+    assert_eq!(clone(&r), None, "mismatch: no clone");
+    assert!(!r.called("cp "));
+    std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
+    std::fs::create_dir(wt.join(".target.clone")).unwrap(); // what the faked `cp` would have made
+    let d = clone(&r).unwrap();
+    assert_eq!((d["dirs"].clone(), d["errors"].clone()), (json!(["target"]), json!([])));
+    assert!(wt.join("target").is_dir() && !wt.join(".target.clone").exists());
+    let calls = r.calls.borrow().clone();
+    assert_eq!(calls.len(), 1, "node_modules has no lockfile: {calls:?}");
+    let (src, tmp) = (local.join("target"), wt.join(".target.clone"));
+    assert!(calls[0].ends_with(&format!(" {} {}", src.display(), tmp.display())));
+    let flag = if cfg!(target_os = "macos") {
+        "cp -cR "
+    } else {
+        "cp -R --reflink=always "
+    };
+    assert!(calls[0].starts_with(flag), "{}", calls[0]);
+    assert_eq!(clone(&r), None, "the lane has its own target: never cloned over");
+    std::fs::remove_dir(wt.join("target")).unwrap();
+    let d = clone(&Fake::default()).unwrap();
+    assert_eq!(d["dirs"], json!([]));
+    assert!(d["errors"][0].as_str().unwrap().starts_with("target: "), "{d}");
+    let d = herdsman::spawn::clone_build(&r, &["targt".into()], &local, &wt).unwrap();
+    assert_eq!(d["errors"], json!(["targt: not target or node_modules"]));
+    assert_eq!(r.count("cp "), 1);
+}
+
+/// #185: a reopened worktree keeps its own build folders.
+#[test]
+fn reopen_spawn_clones_no_build_folder() {
+    let d = tmpdir("clone-reopen");
+    let local = d.join("local");
+    let cfg = CONFIG
+        .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
+        .replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\nclone_build = [\"target\"]",
+        );
+    let c = ctx(&d, &cfg);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree open",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run", "{}")
+        .reply("herdr agent start", "{}")
+        .reply("herdr pane send-keys w9:p1 Enter", "{}")
+        .reply("cp ", "");
+    run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!r.called("cp "));
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "spawn") && !ev.iter().any(|e| e.kind == "build-cloned"));
+}
+
+/// `Fake`, plus `herdr worktree create` checks out `Cargo.lock` into the new lane like the real one, and the kick's
+/// `herdr agent wait` holds until `cp` ran (the third field: it did), which a clone run before or after it never does.
+struct Checkout<'a>(&'a Fake, std::path::PathBuf, std::sync::atomic::AtomicBool);
+
+impl herdsman::runner::Runner for Checkout<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "herdr" && args.starts_with(&["worktree".into(), "create".into()]) {
+            std::fs::create_dir_all(&self.1).unwrap();
+            std::fs::write(self.1.join("Cargo.lock"), "a").unwrap();
+        }
+        if prog == "herdr" && args.starts_with(&["agent".into(), "wait".into()]) {
+            let t = std::time::Instant::now();
+            while !self.0.called("cp ") && t.elapsed().as_secs() < 5 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            self.2.store(self.0.called("cp "), std::sync::atomic::Ordering::SeqCst);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs)
+    }
+}
+
+/// #185: a fresh lane whose clone fails: the lane started first, the failure is logged, the spawn exits 0.
+#[test]
+fn failed_clone_is_logged_and_the_spawn_succeeds() {
+    let d = tmpdir("clone-fail");
+    let local = d.join("local");
+    std::fs::create_dir_all(local.join("target")).unwrap();
+    std::fs::write(local.join("Cargo.lock"), "a").unwrap();
+    let cfg = CONFIG
+        .replace("harness  =  \"hermes\"", "harness = \"claude\"")
+        .replace("/tmp/does-not-matter/sendmeter", &local.to_string_lossy())
+        .replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\nclone_build = [\"target\"]",
+        );
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let f = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree create",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run", "{}")
+        .reply("herdr agent start", "{}")
+        .reply("herdr agent wait", "{}")
+        .once_err("cp ", 1, "clonefile failed");
+    let ck = Checkout(&f, wt, Default::default());
+    let (code, out) = run(&c, &ck, &["spawn", "sendmeter", "12", "impl"]);
+    assert!(ck.2.into_inner(), "the clone runs beside the kick, not before it");
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert_eq!(f.count("cp "), 1, "one clone attempt, never a fallback copy");
+    assert!(
+        f.index("herdr agent start") < f.index("cp "),
+        "the lane starts before the clone"
+    );
+    let ev = read(&c.state).unwrap();
+    let e = ev
+        .iter()
+        .find(|e| e.kind == "build-cloned")
+        .expect("build-cloned logged");
+    assert_eq!(e.data["dirs"], json!([]));
+    assert!(
+        e.data["errors"][0].as_str().unwrap().contains("clonefile failed"),
+        "{e:?}"
+    );
+    assert_eq!(fold(&ev)[&("sendmeter".to_string(), 12)].state, "impl");
 }
 
 #[test]
@@ -191,6 +350,16 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     // #24: the lane's shell exports HERDSMAN_LANE before the harness starts, arming `herdsman hook`.
     assert!(r.index("herdr pane run w9:p1 export").unwrap() < r.index("herdr agent start").unwrap());
+    // #194: a reopened worktree keeps the lane's name, not herdr's branch label.
+    let open = r
+        .calls
+        .borrow()
+        .iter()
+        .find(|c| c.starts_with("herdr worktree open"))
+        .cloned()
+        .unwrap();
+    assert!(open.ends_with("--label sendmeter-impl-12"), "{open}");
+    assert!(r.called("herdr workspace rename w9 sendmeter-impl-12"));
     // #19: the title comes from the spec fetched at spawn, not a stale or missing cache.
     let calls = r.calls.borrow();
     let start = calls.iter().find(|c| c.starts_with("herdr agent start")).unwrap();
