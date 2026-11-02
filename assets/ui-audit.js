@@ -42,6 +42,16 @@
     if (new Set(xs.values()).size > 1) early.push(`Host values start at different x: ${[...xs].map(([k, x]) => `${k} ${x}`).join(', ')}`);
     gs.forEach((g, i) => { g.open = was[i]; });
   };
+  // #173: a fleet's [config] sheet, scrolled to its Pipeline group.
+  const pipe = async fleet => {
+    tab('queue');
+    const b = [...$$('#queue .cfg')].find(b => b.dataset.f === fleet);
+    if (!b) return early.push(`no [config] button for ${fleet} in the demo`);
+    await config(b);
+    const g = $('#sheet .pp');
+    if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
+    g.scrollIntoView();
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
@@ -82,6 +92,10 @@
         if (getComputedStyle(c.querySelector('summary')).color !== want) early.push(`.dp.${tone} reads ${getComputedStyle(c.querySelector('summary')).color}, not ${want}`);
       }
     },
+    // #173: the Pipeline group of a fleet's [config] sheet: the built-in one (acme-web), then acme-api's custom
+    // impl → rev → sec → gates.
+    pipeline: () => pipe('acme-web'),
+    'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
@@ -274,7 +288,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.

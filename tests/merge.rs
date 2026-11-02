@@ -283,7 +283,10 @@ fn verdict_pins_exact_branch_head() {
     assert_eq!(exit, 0, "{out}");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!((st.state.as_str(), st.rounds), ("ready", 1));
-    assert_eq!(st.verdicts, vec![(HEAD.to_string(), "PASS".to_string())]);
+    assert_eq!(
+        st.verdicts,
+        vec![(HEAD.to_string(), "PASS".to_string(), "rev".to_string())]
+    );
 }
 
 // --- #6: the evidence comment must land ---

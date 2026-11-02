@@ -219,3 +219,69 @@ fn closing_a_sheet_never_repaints_the_page() {
     }
     assert!(bad.is_empty(), "{bad:?}");
 }
+
+/// #206: a reload on Events painted the Queue tab (and `[?]`) with squished rows until serve.js ran `tab()`. WebKit with
+/// `localStorage.tab` set: the first painted frame (the page with its scripts cut, as it paints before they run) shows
+/// that tab's section alone, and the Queue rows (row height, `#n` column width) lay out as they settle.
+#[test]
+fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let (html, _) = fixture();
+    let d = tmpdir("ui-first-paint");
+    let (settled, first) = (d.join("settled.html"), d.join("first.html"));
+    std::fs::write(&settled, &html).unwrap();
+    std::fs::write(
+        &first,
+        format!("{}</body></html>", &html[..html.find("<script src=").unwrap()]),
+    )
+    .unwrap();
+    // Shown or not: Queue, Lanes, Host, Events, [?]; then each Queue row's height and `#n` width.
+    let measure = "window.measure = [...['#queue', '#lanes', '#host', '#events', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
+        ...[...document.querySelectorAll('details.q')].flatMap(d => [d.querySelector('summary').getBoundingClientRect().height, d.querySelector('summary>span').getBoundingClientRect().width])]";
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
+    let shot = |tab: &str, frame: &str, file: &std::path::Path| {
+        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("first-{tab}-{frame}.png")), |p| {
+            std::path::Path::new(&p).join(format!("first-{tab}-{frame}.png"))
+        });
+        let o = swift()
+            .env("HERDSMAN_TAB", tab)
+            .args([
+                script,
+                file.to_str().unwrap(),
+                "390",
+                "-",
+                "horse",
+                png.to_str().unwrap(),
+                measure,
+            ])
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout);
+        let v: Vec<f64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
+        assert!(
+            o.status.success() && v.len() > 7,
+            "{tab} {frame}: {out} {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        v[2..].to_vec()
+    };
+    for (tab, shown) in [
+        ("events", [0.0, 0.0, 0.0, 1.0, 0.0]),
+        ("queue", [1.0, 0.0, 0.0, 0.0, 1.0]),
+    ] {
+        let (a, b) = (shot(tab, "first", &first), shot(tab, "settled", &settled));
+        assert_eq!(
+            a[..5],
+            shown,
+            "{tab}: the first frame's sections (queue lanes host events [?])"
+        );
+        assert_eq!(b[..5], shown, "{tab}: the settled sections");
+        assert_eq!(
+            a, b,
+            "{tab}: first paint vs settled (sections, then row height and #n width per Queue row)"
+        );
+    }
+}

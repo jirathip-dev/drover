@@ -57,7 +57,7 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
 # notify_global = true   # also send this fleet's events to the global [[notify]]
-# clone_node_modules = true   # cp -cR (APFS clone) local node_modules into a new lane when the lockfiles match
+# clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
@@ -100,6 +100,7 @@ C = "CLAUDE_CODE_OAUTH_TOKEN_C"
 [limits]
 review_rounds = 3
 update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart from review_rounds
+# Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds

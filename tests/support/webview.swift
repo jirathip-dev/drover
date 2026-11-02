@@ -6,6 +6,8 @@
 // snapshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
+// #206: `HERDSMAN_TAB` is the stored tab (a private localStorage) before the page loads; tab `-`: no tab()/mode() and no
+// <details> opened, the page as it loaded (with its scripts cut, as it first paints).
 // swift webview.swift <page.html> <width> <tab> <mode> [out.png] [js] [close]
 import AppKit
 import WebKit
@@ -17,7 +19,12 @@ let (tab, mode, png, extra) = (a[3], a[4], a.count > 5 ? a[5] : nil, a.count > 6
 let close = a.count > 7 ? a[7] : nil
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
-let web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 844))
+let conf = WKWebViewConfiguration()
+if let t = ProcessInfo.processInfo.environment["HERDSMAN_TAB"] {
+    conf.websiteDataStore = .nonPersistent() // its own localStorage: other runs' tab() writes never reach it
+    conf.userContentController.addUserScript(WKUserScript(source: "localStorage.tab = '\(t)'", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+}
+let web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 844), configuration: conf)
 let win = NSWindow(contentRect: web.frame, styleMask: [.borderless], backing: .buffered, defer: false)
 win.contentView = web
 
@@ -86,7 +93,7 @@ func gate(_ w: WKWebView, _ close: String) {
 final class Nav: NSObject, WKNavigationDelegate {
     func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
         if let close { return gate(w, close) }
-        let js = """
+        let js = tab == "-" ? "\(extra); [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]" : """
         tab('\(tab)'); mode('\(mode)'); \(extra);
         \(png == nil ? "document.querySelectorAll('details').forEach(d => d.open = true);" : "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });")
         [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]

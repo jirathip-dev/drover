@@ -102,7 +102,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
     let s = fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".into(), 12))
         .unwrap();
-    assert_eq!((s.state.as_str(), s.unfinished("impl")), ("queued", false));
+    assert_eq!((s.state.as_str(), s.unfinished("impl", false)), ("queued", false));
     assert!(run(&c, &r, &["kill", LANE]).1.starts_with("REFUSED NO_SUCH_AGENT"));
 }
 
