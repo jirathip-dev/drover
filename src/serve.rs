@@ -173,6 +173,8 @@ struct Watch {
     /// The last `herd` push: (time, hash of the body).
     herd: (u64, u64),
     frags: BTreeMap<(bool, &'static str), u64>,
+    /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
+    driving: bool,
 }
 
 pub struct Server<'a> {
@@ -245,6 +247,50 @@ fn enc(s: &str) -> String {
             }
         })
         .collect()
+}
+
+/// #166: a driven fleet's result line under its header: `⟳ driving…`, else its last pass coloured by
+/// `drive::result`; a tap lists each action in plain words, a tap on one its raw code.
+fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str) -> String {
+    if crate::drive::running(ctx, fleet) {
+        return "<p class=\"dp m\">⟳ driving…</p>".into();
+    }
+    let Some(e) = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet) else {
+        return String::new();
+    };
+    let (tone, line) = crate::drive::result(e);
+    let acts = e
+        .data
+        .get("actions")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let items: String = acts
+        .iter()
+        .map(|a| {
+            let who = a["issue"]
+                .as_u64()
+                .map_or_else(|| a["step"].as_str().unwrap_or_default().into(), |n| format!("#{n}"));
+            let (w, code) = (
+                a["words"].as_str().unwrap_or_default(),
+                a["code"].as_str().unwrap_or("ok"),
+            );
+            format!(
+                "<li><details><summary>{}: {}</summary><code>{code}</code></details></li>",
+                esc(&who),
+                esc(w)
+            )
+        })
+        .collect();
+    let items = if items.is_empty() {
+        "<li>nothing was due</li>".into()
+    } else {
+        items
+    };
+    format!(
+        "<details class=\"dp {tone}\"><summary>{} · tap for details</summary><ul>{items}</ul></details>",
+        esc(&line)
+    )
 }
 
 fn esc(s: &str) -> String {
@@ -542,8 +588,9 @@ impl<'a> Server<'a> {
         if kicked {
             self.purge();
         }
-        let mut changed = kicked || log != w.log || now >= w.rendered + 15;
-        w.log = log;
+        let driving = self.ctx.state.with_file_name("drive.lock").exists();
+        let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
+        (w.log, w.driving) = (log, driving);
         if now >= w.herdr.0 + 2 {
             let out = herdr::agent_list(self.r);
             changed |= hash(&out) != w.herdr.1;
@@ -959,7 +1006,7 @@ impl<'a> Server<'a> {
                 format!("answered {}", g("id"))
             }
             "drive" => {
-                crate::drive::drive(ctx, &Config::load(&ctx.config)?, self.r, &mut out, Some(fleet))?;
+                crate::drive::drive(ctx, &Config::load(&ctx.config)?, self.r, &mut out, Some(fleet), true)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             // #130: a needs-human card's buttons.
@@ -1365,6 +1412,7 @@ impl<'a> Server<'a> {
                 let last = crate::drive::last_pass(ctx, f).map(|t| age(now.saturating_sub(t)));
                 let last = last.map_or("no pass yet".into(), |a| format!("last pass {a} ago"));
                 h += &format!("<p class=m>driver: herdsman · {last}</p>");
+                h += &drive_line(ctx, events, f);
             }
             let stall = cfg.limits.stall_minutes * 60;
             let live = mine.iter().filter(|s| s.active_lane().is_some() && gone(s).is_none());
