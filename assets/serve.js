@@ -88,13 +88,36 @@ function frag(id, html) {
   nu.innerHTML = html;
   tidy(nu);
   morph(el, nu);
+  if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
   rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
   last = Date.now();
   alerts();
+  badge();
   if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
+// #141: the Host groups. A group takes its worst row's status (grey rows don't count); problems go first (red, then
+// amber) and start open, the header summing up the rows at that status. A tap's open/closed holds for the session
+// until the group's status changes.
+const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
+const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
+const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx')).map(n => n.textContent).join('').trim();
+const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
+const gname = g => 'host:' + g.querySelector('.gn').textContent;
+function groups() {
+  const host = $('#host'), rank = t => ({ r: 0, a: 1 })[t] ?? 2;
+  [...host.querySelectorAll(':scope>.grp')].map(g => {
+    const rows = [...g.querySelectorAll('[data-t]')], w = Math.min(2, ...rows.map(r => rank(r.dataset.t))), s = sget(gname(g));
+    g.dataset.t = 'rag'[w];
+    g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
+    g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
+    return [w, g];
+  }).sort((a, b) => a[0] - b[0]).forEach(([, g]) => host.append(g));
+}
+document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
+// #141: `[queue·N]`, N the needs-you cards above the tabs.
+function badge() { const n = $$('#needs .ask').length; $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : ''); }
 // #68: buttons hold labels, never sentences: a control's runtime result is an 11 px `p.st` under it (red on error).
 function note(b, msg, ok) {
   let s = b.nextElementSibling;
@@ -115,6 +138,8 @@ function alerts() {
 // Also shows the sheet's Pair button (open() hides it again).
 function unpaired() { nopair = true; alerts(); $('.pairf').hidden = false; $$('[data-op=close]').forEach(b => b.hidden = true); }
 alerts();
+groups();
+badge();
 document.addEventListener('click', async e => {
   const b = e.target.closest('#push');
   if (!b) return;
@@ -209,7 +234,7 @@ B.insertAdjacentHTML('beforeend', `<div id=sheet hidden><div class=bd></div><div
 <p class=st></p></div></div>`);
 if (DEMO) sync();
 const S = $('#sheet'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
-let agent = null, timer = 0, y = 0, nopane = false, opane = null;
+let agent = null, timer = 0, nopane = false, opane = null;
 // The Lanes row of `agent` (its sheet card), from the needs-you cards and the herd.
 const laneOf = agent => [...$$('.lane')].find(l => l.dataset.agent === agent);
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text || '' });
@@ -556,11 +581,10 @@ function legend() {
   $('.top').replaceChildren(...Object.entries(HINT).map(([w, h]) => el('p', '', `${w} = ${h}`)), ...[...dots, ...serial].map(t => el('p', '', t)));
   show('mid');
 }
-// Lock the page under the sheet (iOS scrolls the body otherwise); reopened mid-close, it is still locked.
+// #166: one helper for every sheet (lane chat, legend). The page under it is never touched while it opens or closes:
+// no position change, no scroll reset (iOS repainted the whole page black); `overflow:hidden` on <html> holds it still.
 function show(d) {
   if (shut) { clearTimeout(shut); shut = 0; S.classList.remove('out'); } else {
-    y = scrollY;
-    B.style.top = -y + 'px';
     document.documentElement.classList.add('lock');
     S.hidden = false;
     S.classList.add('drag');
@@ -571,7 +595,7 @@ function show(d) {
   fit();
   snap(d);
 }
-// Slides off-screen, then hides; the scroll lock and the page position come back after the slide.
+// Only the sheet slides off (200 ms ease-out, none under reduced motion) and the backdrop fades; then it hides.
 function close() {
   if (S.hidden || shut) return;
   clearInterval(timer);
@@ -585,9 +609,7 @@ function close() {
     S.hidden = true;
     S.classList.remove('out');
     document.documentElement.classList.remove('lock');
-    B.style.top = '';
-    scrollTo(0, y);
-  }, 220);
+  }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200);
 }
 // #70: the sheet is a full-height box placed by translateY at a detent (`full` stops under the safe area).
 // pos() moves it, fades the backdrop with it, and pads its bottom by the hidden part so the composer shows.
@@ -706,12 +728,13 @@ document.addEventListener('click', async e => {
 });
 $('.bd').onclick = close;
 addEventListener('keydown', e => { if (e.key === 'Escape' && !S.hidden) close(); });
-// #70: the sheet follows the finger 1:1 (light rubber band above full), one move per frame. On release: a flick
-// (over 0.5 px/ms in the last 80 ms) goes one detent its way, else the nearest; below half, or flicked down from it, closes.
+// #70: the sheet follows the finger 1:1 (light rubber band above full), one move per frame. On release (#166): down
+// past 30 % of its shown height, or flicked down (over 0.5 px/ms in the last 80 ms), closes; flicked up goes one detent
+// up; else it springs back to the nearest detent.
 function grab(y) {
   if (kb() || shut) return false;
   clearTimeout(padT);
-  d0 = { y, t: ty };
+  d0 = { y, t: ty, h: S.clientHeight - ty };
   moves = [];
   S.classList.add('drag');
   return true;
@@ -726,23 +749,24 @@ function drop() {
   cancelAnimationFrame(rq);
   rq = 0;
   if (to !== null) pos(to);
+  const g = d0;
   to = d0 = null;
   S.classList.remove('drag');
   const now = performance.now(), m = moves.filter(([, t]) => now - t <= 80), a = m[0], b = m[m.length - 1];
   const v = m.length > 1 && b[1] > a[1] ? (b[0] - a[0]) / (b[1] - a[1]) : 0, ds = ['full', 'mid', 'half'], os = ds.map(off);
-  let i;
-  if (Math.abs(v) > .5) i = v > 0 ? os.findIndex(o => o > ty + 1) : Math.max(0, os.findLastIndex(o => o < ty - 1));
-  else i = ty > os[2] + 16 ? -1 : os.reduce((k, o, j) => Math.abs(o - ty) < Math.abs(os[k] - ty) ? j : k, 0);
-  if (i < 0) close(); else snap(ds[i]);
+  if (v > .5 || ty - g.t > .3 * g.h) return close();
+  const i = v < -.5 ? Math.max(0, os.findLastIndex(o => o < ty - 1)) : os.reduce((k, o, j) => Math.abs(o - ty) < Math.abs(os[k] - ty) ? j : k, 0);
+  snap(ds[i]);
 }
 const hd = $('.hd');
 hd.onpointerdown = e => { if (grab(e.clientY)) try { hd.setPointerCapture(e.pointerId); } catch (_) {} };
 hd.onpointermove = e => { if (d0) drag(e.clientY, e.timeStamp); };
 hd.onpointerup = hd.onpointercancel = () => { if (d0) drop(); };
-// The conversation scrolls; pulled down while at its top (or once it reaches it), it hands the touch to the sheet.
-// Move and end listen on the touched node itself: a poll may swap it out mid-touch, and then nothing bubbles.
+// The conversation scrolls; pulled down from its top, it hands the touch to the sheet. A touch that starts scrolled
+// down (#166) only scrolls. Move and end listen on the touched node itself: a poll may swap it out mid-touch.
 chat.addEventListener('touchstart', e => {
   const t = e.target;
+  if (chat.scrollTop > 0) return;
   let c0 = e.touches[0].clientY;
   const move = e => {
     const y = e.touches[0].clientY;

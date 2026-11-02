@@ -1,11 +1,12 @@
 //! #92 `herdsman drive`: one pass of the orch's loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
-use crate::events::{emit, fold, read, Event, IssueState};
+use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::{gh, host, queue, waiting, Ctx};
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -13,7 +14,7 @@ use std::path::Path;
 /// #168: a lock without a live pid older than this belongs to a pass that died; the next pass takes it over.
 const STALE_LOCK_SECS: u64 = 600;
 
-/// #168: `drive.lock` holds the pass's pid; dropping the guard (error or panic included) removes it.
+/// #168: `drive.lock` holds the pass's pid, then the fleet a manual press drives (#166); dropping the guard (error or panic included) removes it.
 struct Lock(std::path::PathBuf);
 impl Drop for Lock {
     fn drop(&mut self) {
@@ -22,18 +23,17 @@ impl Drop for Lock {
 }
 
 /// The lock, unless a live pass holds it: a dead pid's lock is stale at once, one without a pid after `STALE_LOCK_SECS`.
-fn take(r: &dyn Runner, lock: &Path) -> Option<Lock> {
-    let pid = std::fs::read_to_string(lock).unwrap_or_default();
-    let pid = pid.trim();
+fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
+    let held = std::fs::read_to_string(lock).unwrap_or_default();
+    let pid = held.split_whitespace().next().filter(|p| p.parse::<u32>().is_ok());
     let age = lock
         .metadata()
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.elapsed().ok());
-    let dead = if pid.is_empty() {
-        age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS)
-    } else {
-        ok(r, "kill", &["-0", pid]).is_err()
+    let dead = match pid {
+        None => age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS),
+        Some(pid) => ok(r, "kill", &["-0", pid]).is_err(),
     };
     if dead {
         let _ = std::fs::remove_file(lock);
@@ -43,7 +43,7 @@ fn take(r: &dyn Runner, lock: &Path) -> Option<Lock> {
         .create_new(true)
         .open(lock)
         .ok()?;
-    let _ = write!(f, "{}", std::process::id());
+    let _ = write!(f, "{} {fleet}", std::process::id());
     Some(Lock(lock.into()))
 }
 
@@ -86,13 +86,126 @@ pub fn summary(fleet: &str, out: &str) -> String {
 }
 const PAST: [&str; 3] = ["started", "merged", "reviewed"];
 
-/// One pass over every `driver = "herdsman"` fleet (or `only`), under `<state dir>/drive.lock`.
-pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only: Option<&str>) -> Result<()> {
+thread_local! {
+    /// #166: this fleet's actions in the running pass, a silent repeat too: its `drive-pass` record.
+    static ACTS: RefCell<Vec<Value>> = const { RefCell::new(vec![]) };
+}
+
+/// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
+fn words(code: Code, step: &str, result: &str) -> String {
+    let why = result.split_once(": ").map_or(result, |p| p.1);
+    let why = why.split("; retry later").next().unwrap_or(why);
+    match code {
+        None => PAST.iter().find(|d| d.starts_with(step)).map_or(step, |d| d).into(),
+        Some("HOST_BUSY") => format!("Mac busy ({why})"),
+        Some("DISK_LOW") => format!("disk nearly full ({why})"),
+        Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
+        Some("CI_NOT_GREEN") => "waiting for CI".into(),
+        Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
+        Some("LANE_LIVE") => "a lane is already on it".into(),
+        Some("ROUND_LIMIT" | "UPDATE_LIMIT") => "out of rounds: needs you".into(),
+        Some("EXIT" | "ERROR") => format!("failed: {result}"),
+        Some(c) => format!("held back ({c})"),
+    }
+}
+
+/// #166: the fleet's result line from a `drive-pass`: (tone, `HH:MM · started N · merged N · M waiting: <top reason>`).
+/// Red on an error, green if it started or merged something, amber if everything was held back, else plain.
+pub fn result(e: &Event) -> (&'static str, String) {
+    let acts = e
+        .data
+        .get("actions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let n = |o: &str| acts.iter().filter(|a| a["outcome"] == o).count();
+    let held: Vec<&str> = acts
+        .iter()
+        .filter(|a| a["outcome"] == "waiting")
+        .filter_map(|a| a["words"].as_str())
+        .collect();
+    let top = held.iter().rev().max_by_key(|w| held.iter().filter(|x| x == w).count());
+    let (started, merged, failed) = (n("started"), n("merged"), n("error"));
+    let mut line = format!("{} · started {started} · merged {merged}", e.str("at").unwrap_or("?"));
+    line += &top.map_or(String::new(), |w| format!(" · {} waiting: {w}", held.len()));
+    if failed > 0 {
+        line += &format!(" · {failed} failed");
+    }
+    let tone = match () {
+        () if failed > 0 => "r",
+        () if started + merged > 0 => "g",
+        () if !held.is_empty() => "a",
+        () => "m",
+    };
+    (tone, line)
+}
+
+/// #166: a pass is driving `fleet` now (the lock names the fleet a manual press drives; empty: every fleet).
+pub fn running(ctx: &Ctx, fleet: &str) -> bool {
+    let f = std::fs::read_to_string(state_dir(ctx).join("drive.lock"));
+    f.is_ok_and(|f| f.split_whitespace().nth(1).is_none_or(|f| f == fleet))
+}
+
+/// A recorded action as `drive` prints it (`<fleet> #<n> <step>: <words>`, a refusal's code before its words).
+fn line(fleet: &str, a: &Value) -> String {
+    let who = a["issue"]
+        .as_u64()
+        .map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
+    let (step, w) = (
+        a["step"].as_str().unwrap_or_default(),
+        a["words"].as_str().unwrap_or_default(),
+    );
+    match a["code"].as_str() {
+        None => format!("{who} {step}: {w}"),
+        Some("EXIT" | "ERROR") => format!("{who} {step}: error: {w}"),
+        Some(c) => format!("{who} {step}: REFUSED {c}: {w}"),
+    }
+}
+
+/// #166: a manual press that finds the lock held waits for that pass (at most 120 s), then prints its actions.
+fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &Path, only: Option<&str>) -> Result<()> {
+    for _ in 0..120 {
+        if !lock.exists() {
+            break;
+        }
+        r.sleep(1);
+    }
+    if lock.exists() {
+        return Ok(writeln!(out, "drive: still driving · result will appear here")?);
+    }
+    let events = read(&ctx.state)?;
+    let done = |e: &&Event| e.kind == "drive-pass" && only.is_none_or(|f| e.fleet == f);
+    let ended = |e: &&Event| e.data.get("ended").and_then(Value::as_u64) >= Some(ctx.now);
+    let Some(e) = events.iter().rev().filter(done).find(ended) else {
+        return Ok(writeln!(out, "drive: the other pass ended without driving it")?);
+    };
+    let acts = e
+        .data
+        .get("actions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    acts.iter().try_for_each(|a| writeln!(out, "{}", line(&e.fleet, a)))?;
+    Ok(())
+}
+
+/// One pass over every `driver = "herdsman"` fleet (or `only`), under `<state dir>/drive.lock`; `manual`: a press.
+pub fn drive(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    only: Option<&str>,
+    manual: bool,
+) -> Result<()> {
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     let _ = std::fs::write(ctx.state.with_file_name("drive.at"), ctx.now.to_string());
     let lock = state_dir(ctx).join("drive.lock");
-    let Some(_held) = take(r, &lock) else {
+    let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
+        if manual {
+            return wait(ctx, r, out, &lock, only);
+        }
         return Ok(writeln!(
             out,
             "drive: another pass holds {}; nothing done",
@@ -103,8 +216,22 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only:
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
     for (name, _) in cfg.fleet.iter().filter(mine).filter(|(_, f)| !f.paused) {
-        res = res.and(pass(ctx, cfg, r, out, name, start).map(|more| start = more));
+        ACTS.with_borrow_mut(Vec::clear);
+        let p = pass(ctx, cfg, r, out, name, start);
+        if let Err(e) = &p {
+            let w = format!("failed: {e:#}");
+            ACTS.with_borrow_mut(|a| a.push(json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": w})));
+        }
+        res = res.and(p.map(|more| start = more));
         let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+        // #166: one `drive-pass` per fleet and pass, manual or automatic: the board's result line.
+        let end = crate::now();
+        let (by, at) = (
+            if manual { "manual" } else { "auto" },
+            crate::usage::date(r, end, "+%H:%M"),
+        );
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": ACTS.take()});
+        let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res
 }
@@ -126,6 +253,16 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let red = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "failed";
         let n = s.issue.to_string();
+        // #149: an unmarked open PR touching a serial path is marked serial here, not refused at merge.
+        if pr["state"] == "OPEN" && !f.serial_paths.is_empty() && !queue::serial(&events, fleet).contains(&s.issue) {
+            let (num, head) = (pr["number"].to_string(), pr["headRefOid"].as_str().unwrap_or_default());
+            let files = gh::diff_names(ctx, r, f, (fleet, s.issue), &num, head).unwrap_or_default();
+            if let Some(p) = files.into_iter().find(|p| f.serial_path(p)) {
+                writeln!(out, "{fleet} #{n} serial-auto: {p}")?;
+                let e = Event::new(ctx.now, fleet, Some(s.issue), "serial-auto", json!({"path": p}));
+                emit(&ctx.state, cfg, e)?;
+            }
+        }
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
             writeln!(out, "{fleet} #{n} label: {e:#}")?;
         }
@@ -308,6 +445,15 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     if step == "clean" && code.is_none() && !text.contains("removed ") {
         return Ok(None);
     }
+    let outcome = match code {
+        None => PAST.iter().find(|d| d.starts_with(step)).map_or(step, |d| d),
+        Some("EXIT" | "ERROR") => "error",
+        Some(_) => "waiting",
+    };
+    let w = words(code, step, &result);
+    ACTS.with_borrow_mut(|a| {
+        a.push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w}));
+    });
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
     // A repeated refusal is silent too (no cron mail every pass).

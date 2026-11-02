@@ -80,11 +80,18 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     )
 }
 
-/// The second pass changes nothing: no output, no event.
+/// The second pass changes nothing: no output, no event but its own `drive-pass` record (#166).
 fn idle(c: &herdsman::Ctx, r: &Fake) {
-    let before = read(&c.state).unwrap().len();
+    let acts = || {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind != "drive-pass")
+            .count()
+    };
+    let before = acts();
     assert_eq!(drive(c, r).0, "");
-    assert_eq!(read(&c.state).unwrap().len(), before);
+    assert_eq!(acts(), before);
 }
 
 fn state(c: &herdsman::Ctx) -> String {
@@ -886,6 +893,57 @@ fn host_busy_stops_the_pass_and_cap_stops_starting() {
     idle(&c, &fan_fake(&working(&c, &[1])));
 }
 
+/// #149: unmarked #12 at PASS + green whose PR changes `files`: one drive pass, then the `serial-auto` events.
+fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Event>) {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        &format!("integration = \"staging\"\ndriver = \"herdsman\"\n{SERIAL}"),
+    );
+    let c = ctx(&tmpdir(name), &cfg);
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("gh pr diff 100", files)
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["merge"], "{out}");
+    assert!(!out.contains("SERIAL_UNMARKED"), "{out}");
+    assert_eq!(state(&c), "merged");
+    let auto = read(&c.state).unwrap().into_iter().filter(|e| e.kind == "serial-auto");
+    (c, r, out, auto.collect())
+}
+
+#[test]
+fn an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges() {
+    let (c, r, out, auto) = serial_auto("drive-serial-auto", "src/a.rs\nsupabase/migrations/1_x.sql\n");
+    assert!(
+        out.contains("sendmeter #12 serial-auto: supabase/migrations/1_x.sql"),
+        "{out}"
+    );
+    assert_eq!(auto.len(), 1);
+    assert_eq!(
+        (auto[0].issue, auto[0].str("path")),
+        (Some(12), Some("supabase/migrations/1_x.sql"))
+    );
+    idle(&c, &r);
+}
+
+#[test]
+fn a_pr_off_serial_paths_is_not_marked() {
+    let (_, _, out, auto) = serial_auto("drive-serial-none", "src/a.rs\n");
+    assert!(auto.is_empty(), "{out}");
+}
+
 /// A PR view (CI: the full run not reported yet) carrying `labels`.
 fn labelled_pr(head: &str, labels: &[&str]) -> String {
     let mut v: serde_json::Value = serde_json::from_str(&pr(head, "pending")).unwrap();
@@ -976,4 +1034,147 @@ fn status_says_a_ready_pr_lacks_the_merge_label() {
     let (code, out) = run(&c, &r, &["status", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("PR lacks label `merge-ready`"), "{out}");
+}
+
+/// #166: the `drive-pass` events of `c` (newest last).
+fn passes(c: &herdsman::Ctx) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "drive-pass")
+        .collect()
+}
+
+#[test]
+fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_repeat_too() {
+    let c = setup("drive-pass");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let busy = || {
+        Fake {
+            replies: fake(NO_AGENTS).reply("git -C", "").replies,
+            ..Default::default()
+        }
+        .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n")
+    };
+    drive(&c, &busy());
+    let mut out = vec![];
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    // The second pass is a manual press and prints nothing (a repeat), but its record still lists the refusal.
+    herdsman::drive::drive(&c, &cfg, &busy(), &mut out, Some("sendmeter"), true).unwrap();
+    let p = passes(&c);
+    assert_eq!(p.len(), 2, "{p:?}");
+    assert_eq!((p[0].str("by"), p[1].str("by")), (Some("auto"), Some("manual")));
+    for e in &p {
+        assert_eq!(e.fleet, "sendmeter");
+        assert_eq!(e.data["started"], c.now);
+        assert!(e.data["ended"].as_u64().unwrap() >= c.now);
+        let a = &e.data["actions"][0];
+        assert_eq!((a["issue"].as_u64(), a["step"].as_str()), (Some(12), Some("start")));
+        assert_eq!(
+            (a["outcome"].as_str(), a["code"].as_str()),
+            (Some("waiting"), Some("HOST_BUSY"))
+        );
+        assert!(
+            a["words"].as_str().unwrap().starts_with("Mac busy (memory pressure"),
+            "{a}"
+        );
+    }
+    let (tone, line) = herdsman::drive::result(&p[1]);
+    assert_eq!(tone, "a", "everything held back: amber");
+    assert!(
+        line.ends_with(" · started 0 · merged 0 · 1 waiting: Mac busy (memory pressure critical)"),
+        "{line}"
+    );
+}
+
+/// The other pass: it ends (its record, then the lock goes) on the press's 3rd one-second wait.
+struct Other<'a>(&'a Fake, &'a herdsman::Ctx, std::sync::atomic::AtomicUsize);
+impl herdsman::runner::Runner for Other<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {
+        if self.2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 2 {
+            let a = json!([{"issue": 12, "step": "start", "outcome": "started", "code": null, "words": "started"},
+                {"issue": 13, "step": "start", "outcome": "waiting", "code": "CAP", "words": "lane limit or usage cap reached"}]);
+            let d =
+                json!({"by": "auto", "started": self.1.now - 3, "ended": self.1.now + 2, "at": "07:41", "actions": a});
+            append(
+                &self.1.state,
+                &Event::new(self.1.now - 3, "sendmeter", None, "drive-pass", d),
+            )
+            .unwrap();
+            std::fs::remove_file(self.1.state.parent().unwrap().join("drive.lock")).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions() {
+    let c = setup("drive-wait");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let lock = c.state.parent().unwrap().join("drive.lock");
+    std::fs::write(&lock, "").unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert!(herdsman::drive::running(&c, "sendmeter"));
+    let (f, mut out) = (fake(NO_AGENTS).reply("git -C", ""), vec![]);
+    let r = Other(&f, &c, 0.into());
+    herdsman::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(
+        out,
+        "sendmeter #12 start: started\nsendmeter #13 start: REFUSED CAP: lane limit or usage cap reached\n"
+    );
+    assert_eq!(r.2.into_inner(), 3, "waited 3 s, then ran no pass of its own");
+    assert!(!f.called("herdr"), "never two passes");
+    assert_eq!(
+        herdsman::drive::summary("sendmeter", &out),
+        "sendmeter: started #12 · 1 skipped (CAP)"
+    );
+    assert_eq!(passes(&c).len(), 1);
+
+    // Bounded: a pass still running after 120 s leaves the press with a pointer to the line.
+    std::fs::write(&lock, "").unwrap();
+    let mut out = vec![];
+    herdsman::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true).unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "drive: still driving · result will appear here\n"
+    );
+    assert_eq!(f.count("sleep 1"), 120);
+}
+
+#[test]
+fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back() {
+    let line = |acts: serde_json::Value| {
+        herdsman::drive::result(&Event::new(
+            1,
+            "f",
+            None,
+            "drive-pass",
+            json!({"at": "07:41", "actions": acts}),
+        ))
+    };
+    let a = |o: &str, w: &str| json!({"issue": 1, "step": "start", "outcome": o, "words": w});
+    let busy = a("waiting", "Mac busy (load/cpu 4.60 > 2.5)");
+    assert_eq!(
+        line(json!([a("started", "started"), a("merged", "merged"), busy])),
+        (
+            "g",
+            "07:41 · started 1 · merged 1 · 1 waiting: Mac busy (load/cpu 4.60 > 2.5)".into()
+        )
+    );
+    let all = json!([busy, a("waiting", "waiting for CI"), busy, busy]);
+    assert_eq!(
+        line(all),
+        (
+            "a",
+            "07:41 · started 0 · merged 0 · 4 waiting: Mac busy (load/cpu 4.60 > 2.5)".into()
+        )
+    );
+    assert_eq!(
+        line(json!([a("started", "started"), a("error", "failed: exit 1")])),
+        ("r", "07:41 · started 1 · merged 0 · 1 failed".into())
+    );
+    assert_eq!(line(json!([])), ("m", "07:41 · started 0 · merged 0".into()));
 }
