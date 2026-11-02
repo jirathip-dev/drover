@@ -20,7 +20,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    - herdsman itself, then run `herdsman profiles sync` there. The lane's tool-guard hook calls `herdsman hook`, and
      the Claude profile lives under that host's own home.
 
-   herdsman never copies credentials to another host.
+   herdsman never copies credentials to another host: a role's `account` token is only exported to lanes on the
+   main host; a lane on another host runs on that host's own Claude login.
 3. Add the host to fleet.toml:
 
 ```toml

@@ -174,6 +174,19 @@ fn admission_runs_per_host() {
 #[test]
 fn a_remote_lane_runs_every_command_on_its_host() {
     let c = setup("hosts-spawn", "", true, 0);
+    // The impl role has an account: its token must never reach bazzite (Q3).
+    let token = concat!("sk", "-ant-oat01-AAAA-secret");
+    let env = c.state.parent().unwrap().join("tokens.env");
+    std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={token}\n")).unwrap();
+    let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
+        "harness = \"claude\"",
+        "harness = \"claude\"\naccount = \"A\"",
+        1,
+    ) + &format!(
+        "\n[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n",
+        env.display()
+    );
+    std::fs::write(&c.config, toml).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     run(
         &c,
@@ -219,6 +232,10 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     assert!(calls
         .iter()
         .any(|c| c.starts_with(&format!("{SSH}'sh' '-c' 'mkdir")) && c.ends_with(&format!("'{WT}/.brief.md'"))));
+    assert!(
+        !calls.iter().any(|c| c.contains("OAUTH_TOKEN") || c.contains(token)),
+        "token sent to bazzite: {calls:?}"
+    );
     let start = calls.iter().find(|c| c.contains("agent start")).unwrap();
     assert!(start.contains(&format!("Read {WT}/.brief.md")), "{start}");
     drop(calls);
@@ -228,8 +245,8 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         .rfind(|e| e.kind == "spawn")
         .unwrap();
     assert_eq!(
-        (e.str("host"), e.str("machine"), e.str("worktree")),
-        (Some("bazzite"), Some("bazzite"), Some(WT))
+        (e.str("host"), e.str("machine"), e.str("worktree"), e.str("account")),
+        (Some("bazzite"), Some("bazzite"), Some(WT), None)
     );
     // Its review round goes to the same host (the worktree lives there).
     assert_eq!(

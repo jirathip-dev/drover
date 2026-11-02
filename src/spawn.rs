@@ -456,6 +456,9 @@ pub fn spawn(
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f.repo_name());
+        if pl.machine.is_some() {
+            p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
+        }
     }
     let home = |a: Vec<String>| crate::hosts::rehome(a, placed.as_ref().and_then(|pl| pl.home.as_deref()));
     let wt = p.worktree.to_string_lossy().into_owned();
