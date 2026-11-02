@@ -246,6 +246,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
     waits.sort_by_key(|(s, _)| conflicts.contains_key(&s.issue));
+    let mut hold = false;
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
@@ -282,8 +283,32 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
                 ("spawn", _) => "respawn",
                 (v, _) => v,
             };
+            // #182: a review due from the PR alone logs the push the lane never handed off.
+            let head = pr["headRefOid"].as_str().unwrap_or_default();
+            let logged = events
+                .iter()
+                .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
+            if w.what.starts_with("PR head") && !logged {
+                let e = Event::new(
+                    ctx.now,
+                    fleet,
+                    Some(s.issue),
+                    "pushed",
+                    json!({"sha": head, "via": "pr"}),
+                );
+                emit(&ctx.state, cfg, e)?;
+            }
             let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            if step == "merge" && code.is_none() {
+            // #182: finishing work beats starting it: a review or fix the host refused holds this pass's starts.
+            hold |= args[0] == "spawn" && matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));
+            // #182: a PASS recorded at a green head merges in this same pass.
+            let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(&pr, l));
+            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "green";
+            let merge = step == "verdict" && args[3] == "PASS" && code.is_none() && label && green;
+            let at = (fleet, Some(s.issue), "merge");
+            if (step == "merge" && code.is_none())
+                || merge && act(ctx, cfg, r, out, &events, at, &["merge", fleet, &n])?.is_none()
+            {
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
                     writeln!(out, "{fleet} auto-update: {e:#}")?;
                 }
@@ -298,8 +323,11 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
         }
     }
-    let mut go = start;
-    for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
+    let mut go = start && !hold;
+    for n in queue::startable(&events, fleet)
+        .into_iter()
+        .take_while(|_| start && !hold)
+    {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, "impl"])?;
         go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));

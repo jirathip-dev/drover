@@ -44,6 +44,7 @@ pub fn waiting_on(
     pr: &Value,
     req: &[String],
     rev: Option<(&str, &str)>,
+    now: u64,
 ) -> Waiting {
     let (f, n) = (&s.fleet, s.issue);
     let lane = s.lane.clone().unwrap_or_default();
@@ -179,6 +180,16 @@ pub fn waiting_on(
             s.last_ts,
             cmd("spawn", " impl"),
         ),
+        // #182: a PR head moved with no handoff (the lane's worktree is elsewhere) is due once its CI is done, 2 min on.
+        "impl" | "fix"
+            if !pushed.is_empty()
+                && !s.reviewed(pushed)
+                && gh::ci(&gh::required(&pr["statusCheckRollup"], req)) != "pending"
+                && now >= s.last_ts + 120 =>
+        {
+            let what = format!("PR head {pushed:.7} moved without a handoff, waiting for drive to spawn review");
+            w("drive", &what, s.last_ts, cmd("spawn", " rev"))
+        }
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
@@ -278,6 +289,7 @@ pub fn scan(
             &pr,
             &f.required_checks,
             path.as_deref().zip(word.as_deref()),
+            ctx.now,
         );
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.
         if let Some(l) = f

@@ -259,6 +259,7 @@ pub const PASSIVE: &[&str] = &[
     "decision-redelivered",
     "labelled",
     "unlabelled",
+    "pushed",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.

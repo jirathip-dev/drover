@@ -1,7 +1,7 @@
 //! `herdsman spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
-use crate::events::{emit, fold, plain, read, Event};
+use crate::events::{age, emit, fold, plain, read, Event};
 use crate::gate::refused;
 use crate::harness::{self, hook_command};
 use crate::herdr;
@@ -397,7 +397,27 @@ pub fn spawn(
         .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
         .collect();
     let mut dup = vec![];
-    if !live.is_empty() {
+    // #182: a pane no spawn logged and not working is stale: name its last activity (the brief written for it).
+    let logged = |a: &&&Value| {
+        events
+            .iter()
+            .any(|e| e.kind == "spawn" && e.str("pane") == a["pane_id"].as_str())
+    };
+    if let Some(a) = live.iter().find(|a| a["agent_status"] != "working" && !logged(a)) {
+        let t = std::fs::metadata(&p.brief).and_then(|m| m.modified()).ok();
+        let t = t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+        let idle = t.map_or(String::new(), |t| {
+            format!(" {}", age(ctx.now.saturating_sub(t.as_secs())))
+        });
+        let (pane, st) = (
+            a["pane_id"].as_str().unwrap_or("?"),
+            a["agent_status"].as_str().unwrap_or("idle"),
+        );
+        dup.push((
+            "LANE_LIVE",
+            format!("stale pane {pane} ({st}{idle}): herdsman adopt or --supersede"),
+        ));
+    } else if !live.is_empty() {
         dup.push(("LANE_LIVE", format!("live agent(s) {names:?} in {wt}")));
     }
     if let Some(s) = fold(&events)
@@ -426,7 +446,12 @@ pub fn spawn(
         return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
     }
     if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
-        return refused(code, format!("{msg}; `--supersede` replaces it"));
+        let tail = if msg.ends_with("--supersede") {
+            ""
+        } else {
+            "; `--supersede` replaces it"
+        };
+        return refused(code, format!("{msg}{tail}"));
     }
 
     lane_admit(f, &events, fleet, issue, role)?;
@@ -547,10 +572,18 @@ pub fn spawn(
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
-            return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
+            // #182: a pane that can't be adopted (rename failed) is closed: no zombie for the next pass's LANE_LIVE.
+            let adopted = adopt(ctx, cfg, r, out, (fleet, issue, role), &pane);
+            if adopted.is_err() {
+                let _ = herdr::close(r, &pane);
+            }
+            return adopted.map(|()| true);
         }
         // Under load herdr can time out while the harness still comes up: keep it as the lane.
         if !herdr::failed_with(&start, "timeout") {
+            if herdr::harness_in(r, &pane).is_some() {
+                let _ = herdr::close(r, &pane);
+            }
             bail!("herdr agent start failed: {}", start.stderr.trim());
         }
         if herdr::harness_in(r, &pane).is_none() {

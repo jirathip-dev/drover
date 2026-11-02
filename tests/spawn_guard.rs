@@ -632,3 +632,42 @@ fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
     let s = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(s.str("pane"), Some("w9:p2"));
 }
+
+/// #182: an orphan whose adopt fails (rename refused) is closed, so the next spawn meets no LANE_LIVE.
+#[test]
+fn a_failed_rename_closes_the_pane_and_the_next_spawn_runs() {
+    let d = tmpdir("taken-rename-fails");
+    let c = ctx(&d, CONFIG);
+    let r = name_taken(&c, wt(&c).to_str().unwrap()).once_err("herdr agent rename w9:p7", 1, "agent rename failed");
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out} {:?}", r.calls.borrow());
+    assert!(r.called("herdr pane close w9:p7"), "{:?}", r.calls.borrow());
+    assert!(read(&c.state).unwrap().is_empty(), "nothing logged");
+    let r = happy(&c, NO_AGENTS);
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "no LANE_LIVE: {out}");
+}
+
+/// #182: a live pane no spawn logged and not working is named with its last activity.
+#[test]
+fn a_stale_pane_is_lane_live_with_its_idle_age() {
+    let d = tmpdir("dup-stale");
+    let c = ctx(&d, CONFIG);
+    let brief = wt(&c).join(".brief.md");
+    std::fs::create_dir_all(wt(&c)).unwrap();
+    std::fs::write(&brief, "b").unwrap();
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(c.now - 3 * 3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&brief)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+    let list = agents(&[("", "idle", wt(&c).to_str().unwrap(), "w6N5:p1")]);
+    let out = assert_refused(&c, &happy(&c, &list), &[], "LANE_LIVE");
+    assert!(
+        out.contains("stale pane w6N5:p1 (idle 3h): herdsman adopt or --supersede"),
+        "{out}"
+    );
+    assert!(!out.contains("replaces it"), "{out}");
+}
