@@ -27,6 +27,9 @@ summary::-webkit-details-marker{display:none}
 summary>span{min-width:0}
 details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lane{border-bottom:1px solid var(--line)}
+/* #205: an open Queue card's lanes, newest first: one-line 44 px tap rows; `+N older` expands. */
+.ql{display:block;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
+.qm{border:0}.qm>summary{display:block}
 .lr{display:grid;grid-template-columns:48px minmax(0,1fr) max-content;gap:0 var(--s2);align-items:center;width:100%;text-align:left;background:none;border:0;border-radius:0;padding:var(--s1) 0}
 .lr>span{min-width:0}
 /* #53: grid name/state cells stay on one line; only free text (the reason) wraps, at most 2 lines. */
