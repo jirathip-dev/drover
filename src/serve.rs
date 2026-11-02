@@ -42,6 +42,8 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("kitchen/scene.svg", SVG),
 ];
 const SVG: &str = "image/svg+xml";
+const I180: &[u8] = include_bytes!("../assets/icon-180.png");
+const I192: &[u8] = include_bytes!("../assets/icon-192.png");
 /// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
@@ -49,15 +51,23 @@ const FILES: &[(&str, &str, &[u8])] = &[
         "application/manifest+json",
         include_bytes!("../assets/manifest.webmanifest"),
     ),
-    ("icon-180.png", "image/png", include_bytes!("../assets/icon-180.png")),
-    ("icon-192.png", "image/png", include_bytes!("../assets/icon-192.png")),
+    ("icon-180.png", "image/png", I180),
+    ("icon-192.png", "image/png", I192),
     ("icon-512.png", "image/png", include_bytes!("../assets/icon-512.png")),
+    // #195: the root icons Safari probes; a 404 there falls back to another service's icon on the same host.
+    ("apple-touch-icon.png", "image/png", I180),
+    ("apple-touch-icon-precomposed.png", "image/png", I180),
+    ("favicon.ico", "image/png", I192),
 ];
-/// FNV-1a over the assets at build time: their `/a/<hash8>/` path.
+/// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
-    while k < ASSETS.len() {
-        let b = ASSETS[k].2;
+    while k < ASSETS.len() + FILES.len() {
+        let b = if k < ASSETS.len() {
+            ASSETS[k].2
+        } else {
+            FILES[k - ASSETS.len()].2
+        };
         while i < b.len() {
             h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
             i += 1;
@@ -1164,7 +1174,7 @@ impl<'a> Server<'a> {
             "<!doctype html><html lang=en><head><meta charset=utf-8>\
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
-             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png><link rel=apple-touch-icon href={root}icon-180.png>\
+             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css></head>\
              <body data-ts={} data-mode=horse{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
