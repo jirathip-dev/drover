@@ -107,7 +107,9 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     std::thread::scope(|sc| {
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
-            *lock(&h) = host::sample(r);
+            let mut hs = host::sample(r);
+            host::window(&ctx.state, &mut hs);
+            *lock(&h) = hs;
             std::thread::sleep(Duration::from_secs(10));
         });
         sc.spawn(move || loop {
@@ -875,7 +877,7 @@ impl<'a> Server<'a> {
                 format!("no menu on {agent}'s pane: menu changed — refreshed; answer with the reply box"),
             );
         };
-        if l.role == "rev" && !q.starts_with("Do you want") {
+        if reviewer(ctx, &fleet, &l.role) && !q.starts_with("Do you want") {
             return refused("REV_READONLY", "reviewer lanes answer permission prompts only");
         }
         if !choice
@@ -905,7 +907,7 @@ impl<'a> Server<'a> {
         let (agent, text) = (g("agent"), g("text"));
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let (fleet, pane) = (&fleet, &pane);
-        if l.role == "rev" {
+        if reviewer(ctx, fleet, &l.role) {
             return refused("REV_READONLY", "reviewer lanes are not steered mid-review");
         }
         let n = text.chars().count();
@@ -1533,6 +1535,7 @@ impl<'a> Server<'a> {
                 load_per_cpu: Some(k * lim.load_per_cpu),
                 pressure: Some(p.into()),
                 swapout: Some(0.0),
+                ..Host::default()
             },
         );
         let host = json!({"load": h.load_per_cpu, "limit": lim.load_per_cpu, "pressure": h.pressure, "swapouts": h.swapout, "swap_limit": lim.swapout_rate, "gate": host::admit(&h, lim).err()});
@@ -1656,13 +1659,26 @@ impl<'a> Server<'a> {
         let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
         let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
         let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
-        for (k, x, l, p) in [
-            ("load/cpu", hs.load_per_cpu, lim.load_per_cpu, 2),
-            ("swap-out", hs.swapout, lim.swapout_rate, 0),
+        // #168: swap-out's gauge is the window's median (the rule, with pressure warn/critical); `now` is one sample.
+        let avg = hs.swap_median.map_or("?".into(), |m| format!("{m:.0}"));
+        for (k, x, g, l, p) in [
+            ("load/cpu", hs.load_per_cpu, hs.load_per_cpu, lim.load_per_cpu, 2),
+            (
+                "swap-out",
+                hs.swapout,
+                hs.swap_median.or(hs.swapout),
+                lim.swapout_rate,
+                0,
+            ),
         ] {
-            let (t, bar, pct) = gauge(x.unwrap_or(0.0) / l, "▏");
+            let (t, bar, pct) = gauge(g.unwrap_or(0.0) / l, "▏");
             let x = x.map_or("?".into(), |x| format!("{x:.p$}"));
-            let unit = ["", " <span class=mt>pages/2s</span>"][usize::from(p == 0)];
+            let unit = match p {
+                0 => format!(
+                    " now · {avg} avg <span class=mt>pages/2s · held on the avg with pressure warn/critical</span>"
+                ),
+                _ => String::new(),
+            };
             let o = if t == "r" { "▶ " } else { "" };
             let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
             m += &hrow(k, t, &(bar + &val), "", "");
@@ -2214,6 +2230,12 @@ fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], all: bool) -> S
         h += "<p><a href=\"?all=1\">all events, unfolded</a></p>";
     }
     h
+}
+
+/// A check role's lane (`rev`, or #173 any check stage's): read-only from the page.
+fn reviewer(ctx: &Ctx, fleet: &str, role: &str) -> bool {
+    let cfg = Config::load(&ctx.config).ok();
+    role == "rev" || cfg.and_then(|c| Some(c.fleet.get(fleet)?.family(role) == "rev")) == Some(true)
 }
 
 /// #173: where an issue is in its fleet's pipeline: (stage, the mode or round its chip shows); `None` off the graph.

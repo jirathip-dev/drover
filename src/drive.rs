@@ -11,8 +11,41 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-/// A lock older than this belongs to a pass that died; the next pass takes it over.
-const STALE_LOCK_SECS: u64 = 1800;
+/// #168: a lock without a live pid older than this belongs to a pass that died; the next pass takes it over.
+const STALE_LOCK_SECS: u64 = 600;
+
+/// #168: `drive.lock` holds the pass's pid, then the fleet a manual press drives (#166); dropping the guard (error or panic included) removes it.
+struct Lock(std::path::PathBuf);
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The lock, unless a live pass holds it: a dead pid's lock is stale at once, one without a pid after `STALE_LOCK_SECS`.
+fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
+    let held = std::fs::read_to_string(lock).unwrap_or_default();
+    let pid = held.split_whitespace().next().filter(|p| p.parse::<u32>().is_ok());
+    let age = lock
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok());
+    let dead = match pid {
+        None => age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS),
+        Some(pid) => ok(r, "kill", &["-0", pid]).is_err(),
+    };
+    if dead {
+        let _ = std::fs::remove_file(lock);
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock)
+        .ok()?;
+    let _ = write!(f, "{} {fleet}", std::process::id());
+    Some(Lock(lock.into()))
+}
 
 /// `<state dir>/drive-<fleet>.last`: the time of the fleet's last pass (the board's `last pass`).
 pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
@@ -109,7 +142,8 @@ pub fn result(e: &Event) -> (&'static str, String) {
 
 /// #166: a pass is driving `fleet` now (the lock names the fleet a manual press drives; empty: every fleet).
 pub fn running(ctx: &Ctx, fleet: &str) -> bool {
-    std::fs::read_to_string(state_dir(ctx).join("drive.lock")).is_ok_and(|f| f.is_empty() || f == fleet)
+    let f = std::fs::read_to_string(state_dir(ctx).join("drive.lock"));
+    f.is_ok_and(|f| f.split_whitespace().nth(1).is_none_or(|f| f == fleet))
 }
 
 /// A recorded action as `drive` prints it (`<fleet> #<n> <step>: <words>`, a refusal's code before its words).
@@ -168,27 +202,16 @@ pub fn drive(
     std::fs::create_dir_all(state_dir(ctx))?;
     let _ = std::fs::write(ctx.state.with_file_name("drive.at"), ctx.now.to_string());
     let lock = state_dir(ctx).join("drive.lock");
-    let age = |p: &Path| {
-        p.metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-    };
-    if age(&lock).is_some_and(|a| a.as_secs() > STALE_LOCK_SECS) {
-        let _ = std::fs::remove_file(&lock);
-    }
-    let mine = std::fs::OpenOptions::new().write(true).create_new(true).open(&lock);
-    if let Ok(mut f) = mine {
-        let _ = f.write_all(only.unwrap_or_default().as_bytes());
-    } else if manual {
-        return wait(ctx, r, out, &lock, only);
-    } else {
+    let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
+        if manual {
+            return wait(ctx, r, out, &lock, only);
+        }
         return Ok(writeln!(
             out,
             "drive: another pass holds {}; nothing done",
             lock.display()
         )?);
-    }
+    };
     let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
@@ -210,7 +233,6 @@ pub fn drive(
         let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": ACTS.take()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    let _ = std::fs::remove_file(&lock);
     res
 }
 
@@ -280,8 +302,8 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
-        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "ALL_CAPPED"));
-        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "CAP" | "ALL_CAPPED")) {
+        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));
+        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "CAP" | "ALL_CAPPED")) {
             break;
         }
     }
