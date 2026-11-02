@@ -5,7 +5,7 @@
 // URL as the page) gets the page: the cached copy, else the network's.
 // Paths are under the registration's scope (`/` live, e.g. `/herdsman/` for the Pages demo); one cache per scope.
 const P = self.registration ? new URL(self.registration.scope).pathname : '/', C = 'herdsman-v6:' + P;
-const A = ['serve.css', 'herd.css', 'serve.js', 'herd.js', 'horses.svg'].map(f => P + 'a/@V/' + f);
+const A = ['serve.css', 'herd.css', 'serve.js', 'herd.js', 'themes/farm/sprites.svg', 'themes/farm/theme.json'].map(f => P + 'a/@V/' + f);
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(A)).catch(() => {})); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.endsWith(':' + P) && k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

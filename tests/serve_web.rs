@@ -817,7 +817,8 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
         ("herd.css", "text/css"),
         ("serve.js", "text/javascript"),
         ("herd.js", "text/javascript"),
-        ("horses.svg", "image/svg+xml"),
+        ("themes/farm/sprites.svg", "image/svg+xml"),
+        ("themes/farm/theme.json", "application/json"),
     ] {
         let res = get(&s, &format!("/a/{v}/{f}"));
         assert!(
@@ -826,7 +827,10 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
                 && res.contains("Cache-Control: public, max-age=31536000, immutable\r\n"),
             "{f}"
         );
-        assert!(page.contains(&format!("/a/{v}/{f}")) || f == "horses.svg", "{f} linked");
+        assert!(
+            page.contains(&format!("/a/{v}/{f}")) || f.starts_with("themes/"),
+            "{f} linked"
+        );
         assert!(
             sw.contains(&format!("'{f}'")) && sw.contains(&format!("P + 'a/{v}/'")),
             "{f} precached"

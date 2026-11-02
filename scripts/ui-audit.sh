@@ -27,8 +27,9 @@ run() { # url, extra args
   return "$rc"
 }
 fail=0
-for v in queue queue-open queue-change queue-drive lanes sheet sheet-parked sheet-other sheet-drag host events herd1 herd2 herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
+for v in queue queue-open queue-change queue-drive lanes sheet sheet-parked sheet-other sheet-drag host events herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
   url="http://127.0.0.1:$port/index.html?audit=$v"
+  case $v in herd-kitchen) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172
   run "$url" --screenshot="$shots/$v.png" >/dev/null || fail=1
   run "$url&check=1" --dump-dom > "$shots/$v.html" || fail=1
   if ! python3 - "$shots/$v.html" "$v" <<'EOF'

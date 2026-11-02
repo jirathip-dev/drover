@@ -56,6 +56,8 @@ pub struct Serve {
     pub launchd_label: Option<String>,
     pub addr: Option<String>,
     pub tailscale_https_port: Option<u16>,
+    /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
+    pub theme: Option<String>,
 }
 
 impl Serve {
