@@ -57,6 +57,12 @@ pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
         .ok()
 }
 
+/// #217: `drive.lock` over an extend's spawn, so no pass starts the same round meanwhile; `None` while a pass runs.
+pub fn hold(ctx: &Ctx, r: &dyn Runner, fleet: &str) -> Option<impl Drop> {
+    std::fs::create_dir_all(state_dir(ctx)).ok()?;
+    take(r, &state_dir(ctx).join("drive.lock"), fleet)
+}
+
 fn state_dir(ctx: &Ctx) -> &Path {
     ctx.state.parent().unwrap_or(&ctx.state)
 }

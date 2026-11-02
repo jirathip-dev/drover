@@ -483,10 +483,14 @@ pub fn needs_human(
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
             // #217: the decision is logged first (the card goes at once); a failed spawn is drive's next due step.
+            // Under drive.lock: a pass meanwhile would start the same round; a running pass leaves it to the next.
+            let held = crate::drive::hold(ctx, r, fleet);
             if state == "needs-human" {
                 crate::events::append(&ctx.state, &ev("round-extended"))?;
             }
-            if spawn {
+            if spawn && held.is_none() {
+                writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
+            } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,
                     ..Default::default()

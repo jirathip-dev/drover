@@ -1408,18 +1408,20 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
     );
 }
 
-/// Notes, at each command run, whether the log already holds `round-extended`.
+/// Notes, at each command run, whether the log already holds `round-extended` and drive.lock is held.
 struct Spy<'a>(Fake, &'a herdsman::Ctx, std::sync::Mutex<Vec<bool>>);
 impl herdsman::runner::Runner for Spy<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        let logged = read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
+        let held = self.1.state.parent().unwrap().join("drive.lock").exists();
+        let logged = held && read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
         self.2.lock().unwrap().push(logged);
         self.0.run(prog, args)
     }
 }
 
 /// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
-/// with the reason, and the next drive pass starts the recorded round as its fix step.
+/// with the reason, and the next drive pass starts the recorded round as its fix step. The spawn runs under
+/// drive.lock, so no pass starts the same round meanwhile.
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1449,7 +1451,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let seen = spy.2.lock().unwrap().clone();
     assert!(
         !seen.is_empty() && seen.iter().all(|&l| l),
-        "a command ran before the decision: {seen:?}"
+        "a command ran before the decision or outside drive.lock: {seen:?}"
     );
     let all = read(&c.state).unwrap();
     let failed = all
@@ -1463,6 +1465,37 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     assert_eq!(state(&c), "fix(3)");
 
     let r = base();
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["fix"], "{out}");
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+}
+
+/// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the
+/// pass could start it too); the next pass starts it.
+#[test]
+fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
+    let c = setup("drive-extend-lock");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    let lock = c.state.parent().unwrap().join("drive.lock");
+    std::fs::write(&lock, "").unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+        .reply("git -C", "");
+    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
+    assert!(code == 0 && out.contains("the next pass starts the round"), "{out}");
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(lock.exists(), "the pass's lock is left alone");
+    assert_eq!(
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "round-extended")
+            .count(),
+        1
+    );
+
+    std::fs::remove_file(&lock).unwrap();
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
