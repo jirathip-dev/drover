@@ -1073,7 +1073,14 @@ impl<'a> Server<'a> {
             "events" => Some(events_tab(ctx, cfg.as_ref(), &events, false)),
             "roles" => {
                 let (c, f) = (cfg?, q.get("fleet")?);
-                Some(roles(&c, f, c.fleet.get(f)?, self.addr.is_some(), &mtime(ctx)))
+                Some(roles(
+                    &c,
+                    f,
+                    c.fleet.get(f)?,
+                    self.addr.is_some(),
+                    &mtime(ctx),
+                    &fold(&events),
+                ))
             }
             _ => None,
         }
@@ -1159,11 +1166,11 @@ impl<'a> Server<'a> {
             let why = events.iter().rev().find(|e| e.is("needs-human", f, n));
             let why = esc(why.and_then(|e| e.str("reason")).unwrap_or("gate"));
             let m = pr["mergeable"].as_str().unwrap_or("?");
-            let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), u32::MAX).is_ok()) && m == "MERGEABLE";
+            let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE";
             let (line, m) = (pr_line(ctx, fc, f, n, None), m.to_lowercase());
             let fail = esc(crate::events::finding(events, f, n).unwrap_or_default());
             let v = match s.verdicts.last() {
-                Some((sha, v)) if v == "PASS" => {
+                Some((sha, v, _)) if v == "PASS" => {
                     let stale = if pr["headRefOid"].as_str() == Some(sha.as_str()) {
                         ""
                     } else {
@@ -1294,7 +1301,12 @@ impl<'a> Server<'a> {
                 let is_dead = state == "dead";
                 let a = ago(now, s.map_or(0, |s| s.last_ts));
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
-                let mut card = vec![esc(lane), pr_line(ctx, Some(fc), f, n, s)];
+                let head = gh::cached_pr(ctx, f, n)["headRefOid"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let chips = s.map_or(String::new(), |s| stage_line(fc, s, &head));
+                let mut card = vec![chips, esc(lane), pr_line(ctx, Some(fc), f, n, s)];
                 if is_dead {
                     card.push("<span class=r>dead: the log has this lane open, herdr has no such agent</span>".into());
                 }
@@ -1383,7 +1395,7 @@ impl<'a> Server<'a> {
             body += &if self.export.is_some() {
                 format!(
                     "<details class=roles><summary><span>roles</span></summary>{}</details>",
-                    roles(cfg, f, fc, rw, &mt)
+                    roles(cfg, f, fc, rw, &mt, st)
                 )
             } else {
                 let src = format!("frag?id=roles&amp;fleet={}", enc(f));
@@ -1427,6 +1439,13 @@ impl<'a> Server<'a> {
             let last = crate::drive::last_pass(ctx, f).map(|t| age(now.saturating_sub(t)));
             let last = last.map_or("no pass yet".into(), |a| format!("last pass {a} ago"));
             h += &format!("<p class=m>driver: herdsman · {last}</p>");
+            if !fc.bad.is_empty() {
+                let n = fc.bad.len();
+                h += &format!(
+                    "<p class=r>! BAD_PIPELINE · {n} error{} in fleet.toml · nothing moves until it is fixed</p>",
+                    if n == 1 { "" } else { "s" }
+                );
+            }
             h += &drive_line(ctx, events, f);
             let stall = cfg.limits.stall_minutes * 60;
             let live = mine.iter().filter(|s| s.active_lane().is_some() && gone(s).is_none());
@@ -2040,7 +2059,7 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
             })
         ));
     }
-    if let Some((s, (_, v))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
+    if let Some((s, (_, v, _))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
         parts.push(format!("rev <span class={}>{}</span> r{}", tone(v), esc(v), s.rounds));
     }
     parts.join(" · ")
@@ -2071,12 +2090,34 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     ))
 }
 
-/// A fleet's role rows: the model/effort pickers (`rw`), else the settings as text.
-fn roles(cfg: &Config, fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str) -> String {
-    fc.role
+/// A fleet's pipeline (#173), then its role rows: the model/effort pickers (`rw`), else the settings as text; a role's
+/// tag names the stages that run it.
+fn roles(cfg: &Config, fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str, st: &States) -> String {
+    let tag = |role: &str| {
+        let on: Vec<String> = fc
+            .flow()
+            .stage
+            .iter()
+            .filter(|s| s.role.as_deref() == Some(role))
+            .map(|s| format!("{}: {}", s.kind, s.name))
+            .collect();
+        let on = if role == "design" {
+            "owner only".into()
+        } else {
+            on.join(", ")
+        };
+        if on.is_empty() {
+            String::new()
+        } else {
+            format!("<span class=\"tag m\">{}</span> ", esc(&on))
+        }
+    };
+    let forms: String = fc
+        .role
         .iter()
-        .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt))
-        .collect()
+        .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt).replacen("</b> ", &format!("</b> {}", tag(name)), 1))
+        .collect();
+    pipeline_group(fleet, fc, st) + &forms
 }
 
 fn role_form(cfg: &Config, fleet: &str, role: &str, r: &Role, rw: bool, mt: &str) -> String {
@@ -2173,4 +2214,374 @@ fn events_tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], all: bool) -> S
         h += "<p><a href=\"?all=1\">all events, unfolded</a></p>";
     }
     h
+}
+
+/// #173: where an issue is in its fleet's pipeline: (stage, the mode or round its chip shows); `None` off the graph.
+fn stage_at<'a>(fc: &'a crate::config::Fleet, s: &'a IssueState) -> Option<(&'a str, String)> {
+    let p = fc.flow();
+    let build = p.stage_of(s.build.as_deref().unwrap_or(p.start()));
+    let n = s.state.split(['(', ')']).nth(1).unwrap_or_default();
+    match s.state.split('(').next()? {
+        "impl" => Some((build, String::new())),
+        "fix" if s.updating => Some((build, "update".into())),
+        "fix" => Some((build, "fix".into())),
+        "review" => Some((s.stage.as_str(), format!("r{n}"))),
+        "ready" | "blocked" => Some((p.gate(), String::new())),
+        _ => None,
+    }
+}
+
+/// Kind → (glyph class, glyph): ▲ build, ◆ check, ◫ gate, ✓ merge, ! park.
+fn glyph(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "build" => ("b", "▲"),
+        "check" => ("c", "◆"),
+        "gate" => ("g", "◫"),
+        "merge" => ("m", "✓"),
+        _ => ("x", "!"),
+    }
+}
+
+/// #173: the card's "where it is now": `○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`, the current stage lit, the stages
+/// before it plain, a check with a PASS at the PR head ticked.
+fn stage_line(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> String {
+    let Some((at, mode)) = stage_at(fc, s) else {
+        return String::new();
+    };
+    let p = fc.flow();
+    let pos = p.stage.iter().position(|x| x.name == at).unwrap_or(0);
+    let chips = p.stage.iter().enumerate().map(|(i, x)| {
+        let (k, g) = glyph(&x.kind);
+        let ok = x.kind == "check"
+            && s.verdicts
+                .iter()
+                .rev()
+                .find(|v| v.2 == x.name && v.0 == head)
+                .is_some_and(|v| v.1 == "PASS");
+        let tick = if ok && i != pos { "<b class=g>✓</b>" } else { "" };
+        let cls = match i.cmp(&pos) {
+            std::cmp::Ordering::Less => "pt dn".to_string(),
+            std::cmp::Ordering::Equal => format!("pt on k{k}"),
+            std::cmp::Ordering::Greater => "pt".into(),
+        };
+        let name = if i == pos && !mode.is_empty() {
+            format!("{} · {mode}", x.name)
+        } else {
+            x.name.clone()
+        };
+        format!(
+            "<span class=\"{cls}\"><i class=\"kd {k}\">{g}</i>{}{tick}</span>",
+            esc(&name)
+        )
+    });
+    let all: Vec<String> = std::iter::once("<span class=\"pt dn\"><i class=kd>○</i></span>".to_string())
+        .chain(chips)
+        .chain(["<span class=pt><i class=\"kd m\">✓</i>merge</span>".to_string()])
+        .collect();
+    format!("<span class=ps>{}</span>", all.join("<i class=sx>─</i>"))
+}
+
+/// #173: the fleet's pipeline group (in the `roles` drawer until #162's `[config]` sheet lands): the validity line or
+/// the broken rules, the graph with `n here` per stage, a legend, the pipeline as fleet.toml text.
+fn pipeline_group(fleet: &str, fc: &crate::config::Fleet, st: &States) -> String {
+    let p = fc.flow();
+    let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == fleet && !s.done()).collect();
+    let names: Vec<&str> = p.stage.iter().map(|s| s.name.as_str()).collect();
+    let checks: Vec<&str> = p.checks().map(|c| c.name.as_str()).collect();
+    let hint = match (fc.bad.len(), p.builtin) {
+        (0, true) => "built-in · edit fleet.toml".to_string(),
+        (0, false) => format!("fleet.toml:{}", p.stage.first().map_or(0, |s| s.line)),
+        (n, _) => format!(
+            "<b class=r>BAD_PIPELINE · {n} error{}</b>",
+            if n == 1 { "" } else { "s" }
+        ),
+    };
+    let mut h = format!("<section class=\"cg pp\"><h3>Pipeline<span>{hint}</span></h3>");
+    if fc.bad.is_empty() {
+        let both =
+            (checks.len() > 1).then(|| format!(" · merge needs a PASS from {} at the same head", checks.join(" and ")));
+        h += &format!(
+            "<p class=pv><span class=g>✓ valid</span> · {} stages ({}) · every stage reachable, every path ends, every loop has a limit{}</p>",
+            names.len(),
+            esc(&names.join(", ")),
+            esc(&both.unwrap_or_default())
+        );
+    } else {
+        let li: String = fc
+            .bad
+            .iter()
+            .map(|b| {
+                format!(
+                    "<li><b class=r>{}</b>{}<span class=at>fleet.toml:{}</span></li>",
+                    b.rule,
+                    esc(&b.msg),
+                    b.line
+                )
+            })
+            .collect();
+        h += &format!("<div class=pe><p>Nothing moves for {0} until fleet.toml is fixed: <span class=qn>drive, spawn, verdict and merge</span> refuse <span class=r>BAD_PIPELINE</span>. Lanes already running keep working. Other fleets are not affected.</p><ol>{li}</ol></div>", esc(fleet));
+    }
+    let src = if p.builtin {
+        format!("# Built-in: herdsman runs this while fleet.toml has no\n# [[fleet.{fleet}.pipeline.stage]]. Copy it there to change it.\n")
+    } else {
+        String::new()
+    };
+    let toml: String = p
+        .stage
+        .iter()
+        .map(|s| {
+            let next: Vec<String> = s.next.iter().map(|(o, t)| format!("{o} = \"{t}\"")).collect();
+            let role = s.role.as_ref().map_or(String::new(), |r| format!("role = \"{r}\"\n"));
+            let rounds = s.rounds.map_or(String::new(), |r| format!("rounds = {r}\n"));
+            format!(
+                "\n[[fleet.{fleet}.pipeline.stage]]\nname = \"{}\"\nkind = \"{}\"\n{role}{rounds}next = {{ {} }}\n",
+                s.name,
+                s.kind,
+                next.join(", ")
+            )
+        })
+        .collect();
+    let what = if p.builtin {
+        "the built-in pipeline".into()
+    } else {
+        format!("[fleet.{fleet}.pipeline]")
+    };
+    h + &format!(
+        "<div class=pw2><div>{}<p class=lg><i class=\"kd b\">▲</i> build pushes code · <i class=\"kd c\">◆</i> check: PASS or FAIL · <i class=\"kd g\">◫</i> gate: herdsman's own · <i class=\"kd m\">✓</i> <i class=\"kd x\">!</i> ends</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · {}</span></summary><pre>{}</pre></details></div></section>",
+        pipeline_graph(fleet, fc, &mine),
+        esc(&what),
+        esc((src + &toml).trim())
+    )
+}
+
+/// One grid row per text line (`--ln` tall), so a rail meets each line at its middle (docs/design/pipeline): column 1
+/// the park rail, 2 the boxes, then one rail per loop target, the shortest span innermost.
+fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) -> String {
+    let p = fc.flow();
+    let here = |stage: &str| {
+        mine.iter()
+            .filter(|s| stage_at(fc, s).is_some_and(|a| a.0 == stage))
+            .count()
+    };
+    let word = |o: &str| match o {
+        "PASS" | "ok" => format!("<b class=g>{o}</b>"),
+        "FAIL" => "<b class=r>FAIL</b>".into(),
+        "ci_red" => "<b class=r>CI red</b>".into(),
+        "conflict" => "<b class=a>conflict</b>".into(),
+        o => format!("<b>{}</b>", esc(o)),
+    };
+    let main = |kind: &str| match kind {
+        "build" => "push",
+        "check" => "PASS",
+        _ => "ok",
+    };
+    let reach: Vec<&str> = std::iter::once(p.stage.first().map_or("", |s| s.name.as_str()))
+        .chain(
+            p.stage
+                .iter()
+                .flat_map(|s| s.next.values().map(|t| t.split(':').next().unwrap_or(t))),
+        )
+        .collect();
+    let (mut h, mut row) = (String::new(), 0);
+    let mut put = |h: &mut String, cls: &str, inner: &str| {
+        row += 1;
+        *h += &format!("<p class=\"{cls}\" style=\"grid-row:{row}\">{inner}</p>");
+        row
+    };
+    let (mut rails, mut park, mut heads) = (BTreeMap::<&str, Vec<usize>>::new(), vec![], BTreeMap::new());
+    let queued = mine.iter().filter(|s| s.state == "queued").count();
+    put(
+        &mut h,
+        "nl st",
+        &format!("<i class=kd>○</i><b>queued</b><span class=m>{queued} waiting</span>"),
+    );
+    put(
+        &mut h,
+        "pl",
+        "<b>start</b><span>if unblocked · serial slot · host room</span>",
+    );
+    let checks: Vec<&str> = p.checks().map(|c| c.name.as_str()).collect();
+    for (i, s) in p.stage.iter().enumerate() {
+        let errs: Vec<&crate::pipeline::Problem> = fc.bad.iter().filter(|b| b.stage == s.name).collect();
+        let dead = !reach.contains(&s.name.as_str());
+        let (k, g) = glyph(&s.kind);
+        // (html, the rail it leaves on: a loop target or `park`).
+        let mut lines: Vec<(String, Option<&str>)> = vec![];
+        let kind = if s.kind == "gate" {
+            "gate · herdsman".into()
+        } else {
+            s.kind.clone()
+        };
+        let n = here(&s.name);
+        let tag = if n > 0 {
+            format!("<span class=\"tag m\">{n} here</span>")
+        } else {
+            String::new()
+        };
+        lines.push((
+            format!(
+                "<i class=\"kd {k}\">{g}</i><b>{}</b><span class=m>{}</span>{tag}",
+                esc(&s.name),
+                esc(&kind)
+            ),
+            None,
+        ));
+        let detail = match (&s.role, fc.role.get(s.role.as_deref().unwrap_or_default())) {
+            (Some(r), Some(ro)) => {
+                let m = ro.model.as_deref().unwrap_or("default");
+                format!(
+                    "role {r} · {} · {m} · effort {}",
+                    ro.harness,
+                    ro.effort.as_deref().unwrap_or("none")
+                )
+            }
+            (Some(r), None) => format!("role {r} · not defined"),
+            (None, _) => {
+                let ci = if fc.required_checks.is_empty() {
+                    "green".into()
+                } else {
+                    fc.required_checks.join(" + ")
+                };
+                let from = if checks.len() > 1 {
+                    format!("from {} ", checks.join(" + "))
+                } else {
+                    String::new()
+                };
+                format!("CI {ci} · PASS {from}at head · serial · mergeable")
+            }
+        };
+        lines.push((format!("<span class=dt title=\"{0}\">{0}</span>", esc(&detail)), None));
+        for b in &errs {
+            let t = esc(&format!("{}: {}", b.rule, b.msg));
+            lines.push((format!("<span class=\"dt r\" title=\"{t}\">✗ {t}</span>"), None));
+        }
+        let spine = p.stage.get(i + 1).map_or("merge", |x| x.name.as_str());
+        for (o, t) in s
+            .next
+            .iter()
+            .filter(|(o, t)| !(o.as_str() == main(&s.kind) && t.as_str() == spine))
+        {
+            let (to, update) = t.strip_suffix(":update").map_or((t.as_str(), false), |b| (b, true));
+            let what = match (to, update, o.as_str()) {
+                ("park", ..) => "park".to_string(),
+                (_, true, _) => format!("update in {to}"),
+                (_, _, "FAIL" | "ci_red" | "conflict") => format!("fix in {to}"),
+                _ => to.to_string(),
+            };
+            let limit = match (o.as_str(), s.rounds) {
+                ("FAIL" | "conflict", Some(r)) => format!(" · ≤{r} rounds, then park"),
+                ("ci_red", _) => format!(" · {}'s rounds", p.loop_of(&s.name)),
+                _ => String::new(),
+            };
+            let t = esc(&format!("{what}{limit}"));
+            lines.push((format!("<span title=\"{t}\">{} → {t}</span>", word(o)), Some(to)));
+        }
+        if s.rounds.is_some() && (s.kind == "check" || s.next.get("conflict").is_some_and(|t| t.ends_with(":update"))) {
+            lines.push(("<span><b>out of rounds</b> → park</span>".into(), Some("park")));
+        }
+        let last = lines.len() - 1;
+        for (j, (inner, rail)) in lines.into_iter().enumerate() {
+            let mut cls = String::from("nb");
+            cls += match j {
+                0 if last == 0 => " t b",
+                0 => " t",
+                j if j == last => " b",
+                _ => "",
+            };
+            cls += match rail {
+                Some("park") => " po l",
+                Some(_) => " po",
+                None => "",
+            };
+            cls += if dead {
+                " dead"
+            } else if errs.is_empty() {
+                ""
+            } else {
+                " bad"
+            };
+            let r = put(&mut h, &cls, &inner);
+            match rail {
+                Some("park") => park.push(r),
+                Some(t) => rails.entry(t).or_default().push(r),
+                None => {}
+            }
+            if j == 0 {
+                heads.insert(s.name.as_str(), r);
+            }
+        }
+        let o = main(&s.kind);
+        if s.next.get(o).is_some_and(|t| t == spine) {
+            let why = match o {
+                "push" => "a new head",
+                "PASS" if i > 0 && p.stage[i - 1].kind == "check" => "at the same head",
+                "PASS" => "at the exact head",
+                _ => "",
+            };
+            put(&mut h, "pl", &format!("{}<span>{why}</span>", word(o)));
+        } else if !reach.contains(&spine) {
+            put(
+                &mut h,
+                "pl no",
+                &format!("<span class=r>✗ nothing leads to {}</span>", esc(spine)),
+            );
+        } else {
+            put(&mut h, "pl no", "");
+        }
+    }
+    let gone = if reach.contains(&"merge") { "" } else { " dead" };
+    let into = esc(&fc.integration);
+    let un = if gone.is_empty() { "" } else { " · unreachable" };
+    put(
+        &mut h,
+        &format!("nb t b end{gone}"),
+        &format!("<i class=\"kd m\">✓</i><b>merge</b><span class=m>into {into}{un}</span>"),
+    );
+    put(&mut h, "nl", "");
+    let parked = mine.iter().filter(|s| s.state == "needs-human").count();
+    let pr = put(&mut h, "nb t b end", &format!("<i class=\"kd x\">!</i><b>park</b><span class=m>needs you</span><span class=\"tag m\">{parked} here</span>"));
+    put(
+        &mut h,
+        "pl pn",
+        "<span>on its card: one more round, or park for good</span>",
+    );
+    let area = |r0: usize, c0: usize, r1: usize, c1: usize| format!("style=\"grid-area:{r0}/{c0}/{r1}/{c1}\"");
+    let mut spans: Vec<(&str, usize, usize)> = rails
+        .iter()
+        .map(|(t, rs)| {
+            let hd = heads.get(t).copied().unwrap_or(1);
+            let lo = rs.iter().copied().chain([hd]).min().unwrap_or(hd);
+            (*t, lo, rs.iter().copied().chain([hd]).max().unwrap_or(hd))
+        })
+        .collect();
+    spans.sort_by_key(|s| s.2 - s.1);
+    for (c, (t, lo, hi)) in spans.iter().enumerate() {
+        let col = c + 3;
+        h += &format!("<i class=ey {}></i>", area(*lo, col, hi + 1, col + 1));
+        let hd = heads.get(t).copied().unwrap_or(1);
+        h += &format!("<i class=\"ex in\" {}></i>", area(hd, 3, hd + 1, col + 1));
+        for r in &rails[t] {
+            h += &format!("<i class=ex {}></i>", area(*r, 3, r + 1, col + 1));
+        }
+    }
+    if let Some(lo) = park.iter().min() {
+        h += &format!(
+            "<i class=\"ey l\" {}></i><i class=\"ex l in\" {}></i>",
+            area(*lo, 1, pr + 1, 2),
+            area(pr, 1, pr + 1, 2)
+        );
+        for r in &park {
+            h += &format!("<i class=\"ex l\" {}></i>", area(*r, 1, r + 1, 2));
+        }
+    }
+    let rep = if spans.is_empty() {
+        String::new()
+    } else {
+        format!(" repeat({},2ch)", spans.len())
+    };
+    format!(
+        "<div class=pg role=img aria-label=\"{} pipeline: {}\" style=\"grid-template-columns:2ch minmax(0,1fr){rep};grid-template-rows:repeat({row},var(--ln))\">{h}</div>",
+        esc(fleet),
+        esc(&p.stage.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "))
+    )
 }

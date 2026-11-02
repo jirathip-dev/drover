@@ -39,3 +39,34 @@ integration = "staging"
 harness = "claude"
 model = "sonnet"
 effort = "high"
+
+# #173: acme-api runs a custom pipeline: a second check (sec) between rev and the gate.
+[fleet.acme-api.role.sec]
+harness = "claude"
+model = "opus"
+
+[[fleet.acme-api.pipeline.stage]]
+name = "impl"
+kind = "build"
+role = "impl"
+next = { push = "rev" }
+
+[[fleet.acme-api.pipeline.stage]]
+name = "rev"
+kind = "check"
+role = "rev"
+rounds = 3
+next = { PASS = "sec", FAIL = "impl" }
+
+[[fleet.acme-api.pipeline.stage]]
+name = "sec"
+kind = "check"
+role = "sec"
+rounds = 2
+next = { PASS = "gates", FAIL = "impl" }
+
+[[fleet.acme-api.pipeline.stage]]
+name = "gates"
+kind = "gate"
+rounds = 3
+next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }

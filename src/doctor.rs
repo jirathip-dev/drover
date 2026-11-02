@@ -58,6 +58,20 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || gh repo clone {repo} {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        // #173: a broken pipeline stops only its fleet; each rule it breaks, with its fleet.toml line.
+        let bad = match fleet.bad.len() {
+            0 if fleet.flow().builtin => "valid (built-in)".to_string(),
+            0 => "valid".into(),
+            n => format!("BAD_PIPELINE, {n} error(s): its fleet stops → fix [fleet.{name}.pipeline]"),
+        };
+        let bad = format!("pipeline {name} — {bad}");
+        row(rows, fleet.bad.is_empty(), '✗', &bad);
+        rows.extend(
+            fleet
+                .bad
+                .iter()
+                .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
+        );
     }
     if let Some(path) = cfg.accounts.accounts_env.as_deref().map(expand) {
         let text = std::fs::read_to_string(&path).unwrap_or_default();

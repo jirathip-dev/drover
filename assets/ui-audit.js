@@ -27,6 +27,14 @@
     if (on.length !== 1) early.push(`${on.length} active tabs, not 1`);
     else if (getComputedStyle(on[0].firstElementChild).backgroundColor !== accent) early.push(`the active tab's fill is ${getComputedStyle(on[0].firstElementChild).backgroundColor}, not the accent ${accent}`);
   };
+  const drawer = fleet => {
+    tab('queue');
+    const d = [...$$('#queue details.roles')].find(d => d.querySelector(`.pg[aria-label^="${fleet} "]`));
+    if (!d) return early.push(`no pipeline graph for ${fleet} in the demo`);
+    d.open = true;
+    $('#queue').prepend(d);
+    if (!DBG.get('check')) $('#needs').hidden = true;
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
@@ -65,6 +73,10 @@
         if (getComputedStyle(c.querySelector('summary')).color !== want) early.push(`.dp.${tone} reads ${getComputedStyle(c.querySelector('summary')).color}, not ${want}`);
       }
     },
+    // #173: a fleet's roles drawer with its pipeline graph: the built-in one (acme-web), then acme-api's custom
+    // impl → rev → sec → gates, moved to the top (a scrolled view shoots blank).
+    pipeline: () => drawer('acme-web'),
+    'pipeline-custom': () => drawer('acme-api'),
     lanes: () => tab('lanes'),
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');

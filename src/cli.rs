@@ -1,5 +1,5 @@
 //! The clap CLI, `herdsman help --agent` and dispatch to the modules.
-use crate::config::{self, home, Config};
+use crate::config::{home, Config};
 use crate::events::{fold, read, status_line};
 use crate::runner::{self, Runner};
 use crate::{
@@ -60,7 +60,6 @@ enum Cmd {
     Adopt {
         fleet: String,
         issue: u64,
-        #[arg(value_parser = config::ROLES)]
         role: String,
         /// The herdr pane the harness runs in
         #[arg(long)]
@@ -635,11 +634,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let why = "herdsman drives fleets itself; see herdsman timer";
                         return gate::refused("NO_ORCH", why);
                     }
-                    anyhow::ensure!(
-                        config::ROLES.contains(&role.as_str()),
-                        "role must be one of {:?}",
-                        config::ROLES
-                    );
                     let issue = issue
                         .parse()
                         .map_err(|_| anyhow::anyhow!("issue must be a number, not `{issue}`"))?;
