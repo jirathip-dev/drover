@@ -135,6 +135,8 @@ pub struct Fleet {
     pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
+    /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
+    pub port_range: Option<String>,
     /// #164: build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
     #[serde(default)]
     pub build_dirs: Vec<String>,

@@ -50,6 +50,7 @@ fn kick_with_non_ascii_path_does_not_panic() {
         lane: s(),
         account: None,
         env: Default::default(),
+        port: 41000,
         mcp: Default::default(),
         mcp_file: wt.join(".mcp.lane.json"),
         head: s(),

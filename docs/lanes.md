@@ -45,6 +45,11 @@ and logs the error, never a full copy. The worktree budget and Host disk row cou
 apparent size. `clone_node_modules = true` is the old spelling of `clone_build = ["node_modules"]`, kept for
 one release.
 
+Every lane gets `HERDSMAN_PORT` (#187): a stable hash of `<fleet>/<branch>` into the fleet's `port_range`
+(default `"41000-41999"`), the next free one if a lane of an open issue already holds it; the spawn event
+logs it and the Lanes tab shows it (`:41234`). Lanes start dev servers on it, never a fixed port; `env`
+values expand it: `[fleet.web.env] PORT = "$HERDSMAN_PORT"`. `scripts/ui-audit.sh` serves on it when set.
+
 `herdsman close <agent>` closes the pane of a herdr agent that is not a herdsman lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
 (use stop, kill or clean). `herdsman stop <agent>` sends Esc (logs `stop`). `herdsman kill <agent>` prints what is lost
