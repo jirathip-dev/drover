@@ -2231,7 +2231,14 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
         a if a < 7200 => "1h".into(),
         _ if day(t) == day(ctx.now) => "earlier today".into(),
         _ if day(t) + 1 == day(ctx.now) => "yesterday".into(),
-        _ => crate::usage::date(r, t, "+%b %-d").to_lowercase(),
+        _ => {
+            let (m, d) = crate::access::civil_month_day(day(t).max(0).cast_unsigned());
+            let mon = "jan feb mar apr may jun jul aug sep oct nov dec"
+                .split(' ')
+                .zip(1..)
+                .find(|x| x.1 == m);
+            format!("{} {d}", mon.map_or("", |x| x.0))
+        }
     };
     let mut order: Vec<&Event> = events.iter().rev().collect();
     order.sort_by_key(|e| std::cmp::Reverse(e.ts));

@@ -267,3 +267,27 @@ fn rows_sit_under_now_5m_1h_earlier_today_and_yesterday() {
     assert_eq!(heads, [want, want].concat(), "both views");
     assert!(h.contains("5 important rows · back to yesterday 21:06"), "{h}");
 }
+
+#[test]
+fn old_rows_are_dated_without_a_date_call_each() {
+    let c = ctx(&tmpdir("events-old"), CONFIG);
+    for i in 0..30 {
+        let e = Event::new(
+            NOW - 200_000 - i * 3600,
+            "sendmeter",
+            Some(7),
+            "merged",
+            json!({"into": "staging"}),
+        );
+        append(&c.state, &e).unwrap();
+    }
+    let f = Fake::default();
+    let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+    let h = String::from_utf8_lossy(&s.respond("GET /frag?id=events HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW))
+        .into_owned();
+    assert!(
+        h.contains("<h3><span>jan 10</span>") && h.contains("<h3><span>jan 9</span>"),
+        "{h}"
+    );
+    assert!(f.count("date ") <= 1, "{:?}", f.calls.borrow());
+}

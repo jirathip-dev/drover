@@ -303,6 +303,8 @@ let EF = null;
 try { EF = JSON.parse(get('events:filter')); } catch (e) {}
 if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
 function evf(root) {
+  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
+  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
   root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
   root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
   root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
