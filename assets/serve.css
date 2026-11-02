@@ -253,3 +253,8 @@ details.q[open]{padding-bottom:var(--s2)}
 .rw>pre{margin:0 0 var(--s2) 10ch;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .rw>.sub{margin:0 0 var(--s2) 10ch}.rw>.sub>p{margin:0;padding:var(--s1) 0}
 .grp form.role{border-top:0}
+/* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
+   The line is 28 px controls in 8 px padding: 44 px tall, the rings inside it. */
+body:not(.unf) .ask.lt{display:none}
+.later{display:flex;align-items:center;gap:var(--s4);margin:var(--s2) 0;padding:var(--s2);border:1px solid var(--r);border-radius:8px;background:color-mix(in srgb,var(--r) 15%,transparent)}
+.later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
