@@ -199,3 +199,101 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     assert_eq!(reaped.len(), 1);
     assert_eq!(reaped[0].data["names"], json!(["Google Chrome Helper"]));
 }
+
+/// #223: a `done` lane past `idle_reap_minutes` loses the processes its agent started, never its shell or agent.
+#[test]
+fn check_trims_a_done_lanes_children_but_not_its_agent() {
+    let d = tmpdir("trim-check");
+    let c = ctx(&d, CONFIG);
+    let wt = c.worktrees.join("sendmeter").join("issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.to_string_lossy().into_owned();
+    let spawn = json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "wA:p1"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
+    // pane shell 200 (parent: herdr) → agent 201 → tsserver 202 → its helper 203; 300 sits outside the worktree.
+    let rows = format!("p200\nczsh\nfcwd\nn{wt}\np201\nc2.1.309\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}/web\np203\ncnode\nfcwd\nn{wt}\np300\ncnode\nfcwd\nn/elsewhere\n");
+    let ps = "  199     1   9000\n  200   199   4000\n  201   200 300000\n  202   201 2097152\n  203   202 102400\n  300   201   5000\n";
+    let fake = |status: &str| {
+        Fake::default()
+            .reply("herdr agent list", &agents(&[("impl-12", status, &wt, "wA:p1")]))
+            .once("lsof", 0, &rows)
+            .reply("lsof", "")
+            .reply("ps -axo", ps)
+            .reply("herdr", "{}")
+            .reply("git -C", "")
+            .reply("kill", "")
+    };
+    let trimmed = |c: &herdsman::Ctx| {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "lane-trimmed")
+            .collect::<Vec<_>>()
+    };
+
+    let r = fake("working");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kills(&r).is_empty(), "a working lane keeps its children");
+
+    let r = fake("done");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        kills(&r),
+        ["kill -TERM 202 203"],
+        "only the agent's children: {:?}",
+        r.calls.borrow()
+    );
+    let ev = trimmed(&c);
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0].data["agent"], "impl-12");
+    assert_eq!(ev[0].data["killed"], json!(["node", "node"]));
+    assert_eq!(ev[0].data["freed_mb"], 2148);
+
+    let young = c.now - 60; // done, but its last event is under `idle_reap_minutes` old
+    let c2 = herdsman::Ctx {
+        now: young + 120,
+        ..ctx(&tmpdir("trim-young"), CONFIG)
+    };
+    append(
+        &c2.state,
+        &Event::new(
+            young,
+            "sendmeter",
+            Some(12),
+            "spawn",
+            json!({"role": "impl", "agent": "impl-12", "worktree": wt}),
+        ),
+    )
+    .unwrap();
+    let r = fake("done");
+    let (code, out) = run(&c2, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kills(&r).is_empty() && trimmed(&c2).is_empty(), "too soon to trim");
+}
+
+/// #223: the Host tab names the top memory users and their owner: a lane, the VM, or other.
+#[test]
+fn host_tab_shows_top_memory_users_with_their_owner() {
+    use herdsman::serve::Server;
+    let (_d, c, mine, _) = setup("top-host");
+    let top = "Processes: 600 total\n\nPID    COMMAND          MEM \n18800  com.apple.Virtua 16G \n4242   node             2210M\n8138   python3.14       703M\n";
+    let r = Fake::default()
+        .reply("lsof", &format!("p4242\ncnode\nfcwd\nn{mine}\n"))
+        .reply("herdr agent list", &agents(&[("impl-12", "done", &mine, "wA:p1")]))
+        .reply("top -l 1 -o mem", top);
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page =
+        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000)).into_owned();
+    assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
+    assert!(
+        page.contains("16G com.apple.Virtua (VM (colima))"),
+        "the VM is classified"
+    );
+    assert!(
+        page.contains("2210M node (lane impl-12)"),
+        "a lane's process names the lane"
+    );
+    assert!(page.contains("703M python3.14 (other)"));
+}

@@ -1847,6 +1847,11 @@ impl<'a> Server<'a> {
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
+        // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
+        let top = host::top(r, &herdr::agents(r).unwrap_or_default()).join(" · ");
+        if !top.is_empty() {
+            m += &kv("top memory", "g", &esc(&top));
+        }
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let (min, o) = (lim.min_free_gb, if t == "r" { "▶ " } else { "" });

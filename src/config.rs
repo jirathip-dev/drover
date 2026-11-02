@@ -210,6 +210,8 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
+    pub idle_reap_minutes: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
     /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
@@ -256,6 +258,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            idle_reap_minutes: 10,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
                 .ok()

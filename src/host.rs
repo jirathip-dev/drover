@@ -47,30 +47,56 @@ pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, Strin
         .collect()
 }
 
-/// #186: TERM every process inside `dir`, wait 5 s, KILL those still there; the commands signalled.
-pub fn reap(r: &dyn Runner, dir: &Path) -> Vec<String> {
-    let first = inside(&cwds(r), dir);
+/// #186: TERM every process inside `dir` (#223: with `trim`, all but the pane's shell and the agent, the top two
+/// levels there), wait 5 s, KILL those still there; the commands signalled and the MB they held.
+pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
+    let (mut first, ps) = (inside(&cwds(r), dir), stdout(r, "ps", &["-axo", "pid=,ppid=,rss="]));
+    let ps = ps.filter(|_| trim).unwrap_or_default();
+    let ps: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
+    let col = |pid: &str, i| Some(*ps.iter().find(|w| w.first() == Some(&pid))?.get(i)?);
+    let all = first.clone();
+    let here = |p: Option<&str>| all.iter().any(|a| Some(a.0.as_str()) == p);
+    first.retain(|p| !trim || here(col(&p.0, 1)) && here(col(&p.0, 1).and_then(|q| col(q, 1))));
+    let kb: u64 = first.iter().filter_map(|p| col(&p.0, 2)?.parse::<u64>().ok()).sum();
     let kill = |sig: &str, ps: &[(String, String, String)]| {
-        let pids = ps.iter().map(|p| p.0.clone());
-        let _ = r.run(
-            "kill",
-            &std::iter::once(sig.to_string()).chain(pids).collect::<Vec<_>>(),
-        );
+        let mut args = vec![sig.to_string()];
+        args.extend(ps.iter().map(|p| p.0.clone()));
+        let _ = r.run("kill", &args);
     };
     if first.is_empty() {
-        return vec![];
+        return (vec![], 0);
     }
     kill("-TERM", &first);
     r.sleep(5);
-    let left: Vec<_> = inside(&cwds(r), dir)
-        .into_iter()
-        .filter(|p| first.contains(p))
-        .collect();
+    let mut left = inside(&cwds(r), dir);
+    left.retain(|p| first.contains(p));
     if !left.is_empty() {
         kill("-KILL", &left);
     }
-    first.into_iter().map(|p| p.1).collect()
+    (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
+
+/// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live
+/// agent's cwd, `VM (colima)` for a virtual machine, else `other`.
+pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
+    let (ps, out) = (cwds(r), stdout(r, "top", &TOP).unwrap_or_default());
+    let row = |l: &str| {
+        let (pid, w) = l.trim().split_once(' ')?;
+        let (cmd, mem) = w.trim().rsplit_once(' ')?;
+        let cwd = Path::new(ps.iter().find(|p| p.0 == pid).map_or("\0", |p| &p.2));
+        let lane = agents
+            .iter()
+            .find(|a| a["cwd"].as_str().is_some_and(|d| cwd.starts_with(d)));
+        let vm = ["other", "VM (colima)"][usize::from(l.contains("Virtua") || l.contains("qemu"))];
+        let owner = lane.map_or(vm.into(), |a| {
+            format!("lane {}", a["name"].as_str().unwrap_or_default())
+        });
+        Some(format!("{mem} {} ({owner})", cmd.trim()))
+    };
+    out.split_once("MEM")
+        .map_or(vec![], |(_, t)| t.lines().filter_map(row).collect())
+}
+const TOP: [&str; 8] = ["-l", "1", "-o", "mem", "-stats", "pid,command,mem", "-n", "3"];
 
 #[derive(Debug, Default, Clone)]
 pub struct Host {
