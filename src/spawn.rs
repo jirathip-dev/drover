@@ -328,10 +328,48 @@ pub fn changes(st: &str) -> usize {
 }
 
 /// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
-pub fn lockfiles_match(local: &Path, wt: &Path) -> bool {
-    let locks = ["package-lock.json", "pnpm-lock.yaml"];
+pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     let read = |dir: &Path, l: &str| std::fs::read(dir.join(l)).ok();
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
+}
+
+/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for
+/// `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it
+/// clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the
+/// clone lands beside it and renames in only while the name is free.
+pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+    let (t, mut done, mut errs) = (std::time::Instant::now(), vec![], vec![]);
+    for d in dirs {
+        let locks: &[&str] = match d.as_str() {
+            "target" => &["Cargo.lock"],
+            "node_modules" => &["package-lock.json", "pnpm-lock.yaml"],
+            _ => {
+                errs.push(format!("{d}: not target or node_modules"));
+                continue;
+            }
+        };
+        let (src, dst, tmp) = (local.join(d), wt.join(d), wt.join(format!(".{d}.clone")));
+        if !src.is_dir() || dst.exists() || !lockfiles_match(locks, local, wt) {
+            continue;
+        }
+        let (s, t) = (src.to_string_lossy(), tmp.to_string_lossy());
+        let res = match cfg!(target_os = "macos") {
+            true if dev(local) != dev(wt) => Err(anyhow::anyhow!("another volume, no clone")),
+            true => ok(r, "cp", &["-cR", &s, &t]),
+            false => ok(r, "cp", &["-R", "--reflink=always", &s, &t]),
+        };
+        match res.and_then(|_| Ok(std::fs::rename(&tmp, &dst)?)) {
+            Ok(()) => done.push(d),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                errs.push(format!("{d}: {e:#}"));
+            }
+        }
+    }
+    let secs = t.elapsed().as_secs();
+    (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
@@ -511,6 +549,7 @@ pub fn spawn(
     }
 
     let local = f.local_path().to_string_lossy().into_owned();
+    let reopen = p.worktree.exists();
     let mut sha = None;
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, r, f, fleet, issue, true)?;
@@ -520,13 +559,7 @@ pub fn spawn(
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
         let open = herdr::worktree_open_argv(&local, &wt, &p.agent);
-        let reopen = p.worktree.exists();
         let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
-        if f.clone_node_modules && !reopen && lockfiles_match(&f.local_path(), &p.worktree) {
-            if let Err(e) = ok(r, "cp", &["-cR", &format!("{local}/node_modules"), &wt]) {
-                eprintln!("clone_node_modules: {e:#}");
-            }
-        }
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
@@ -605,27 +638,43 @@ pub fn spawn(
             bail!("{why}; closed pane {pane}");
         }
     }
-    let kicked = h.kick(r, &p, &pane);
-    let mut d = lane_data(&p, &pane, ws);
-    d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
-    d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
-    d["update"] = json!(o.update);
-    if let Some(h) = sha.filter(|h| !h.is_empty()) {
-        d["sha"] = json!(h);
+    // #185: a new lane's clone runs beside the kick and pane clean-up, once the lane has started; a failure is logged.
+    let mut dirs: Vec<String> = f.clone_build.clone();
+    dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
+    dirs.sort();
+    dirs.dedup();
+    let dirs = if reopen { &[][..] } else { &dirs[..] };
+    let (res, cloned) = std::thread::scope(|s| {
+        let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
+        let res = (|| -> Result<bool> {
+            let kicked = h.kick(r, &p, &pane);
+            let mut d = lane_data(&p, &pane, ws);
+            d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
+            d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
+            d["update"] = json!(o.update);
+            if let Some(h) = sha.filter(|h| !h.is_empty()) {
+                d["sha"] = json!(h);
+            }
+            event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
+            let confirmed = kicked?;
+            // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
+            if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
+                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
+                    let _ = herdr::close(r, old);
+                    event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
+                }
+            }
+            pj["pane"] = json!(pane);
+            pj["confirmed"] = json!(confirmed);
+            print_plan(out, &pj, o.json)?;
+            Ok(confirmed)
+        })();
+        (res, c.join().ok().flatten())
+    });
+    if let Some(d) = cloned {
+        event("build-cloned", d)?;
     }
-    event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
-    let confirmed = kicked?;
-    // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
-    if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
-        if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-            let _ = herdr::close(r, old);
-            event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
-        }
-    }
-    pj["pane"] = json!(pane);
-    pj["confirmed"] = json!(confirmed);
-    print_plan(out, &pj, o.json)?;
-    Ok(confirmed)
+    res
 }
 
 /// #107: the pane of the lane's agent (its planned name, or `unnamed`) in its worktree that no `spawn` logged: adopt it.
