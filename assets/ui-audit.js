@@ -30,13 +30,14 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the row; the check keeps the needs cards
     },
-    // #92: the demo's `driver = "herdsman"` fleet (docs): its heading and `driver: herdsman · last pass …` line, moved
-    // to the top (a scrolled view shoots blank).
+    // #92: the demo's `driver = "herdsman"` fleet (docs): its card with `drive · …` and [drive now], moved to the top
+    // (a scrolled view shoots blank).
     'queue-drive': () => {
       tab('queue');
-      const p = [...$$('#queue p.m')].find(p => p.textContent.startsWith('driver:'));
-      $('#queue').prepend(p.previousElementSibling, p);
+      $('#queue').prepend([...$$('#queue .fc')].find(c => c.querySelector('.ds')?.textContent.includes('drive ·')));
     },
+    // #162: the [config] sheet of the fleet that needs you (acme-api): every group, the role pickers.
+    config: () => { tab('queue'); config($('#queue .cfg')); },
     lanes: () => tab('lanes'),
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
@@ -209,7 +210,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.

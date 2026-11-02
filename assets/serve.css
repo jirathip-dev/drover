@@ -34,7 +34,7 @@ details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lr .why{grid-column:2/-1;font-size:var(--fs-meta);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 h3{font-size:var(--fs);color:var(--mute);margin:var(--s3) 0 var(--s1)}
 .lane .act{grid-column:1/-1;color:var(--mute);font-size:var(--fs-meta);min-height:1.5em}
-.roles summary,.done summary,.paused summary{grid-template-columns:1fr}
+.done summary{grid-template-columns:1fr}
 form{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--s4);margin:0}
 form.role{display:flex;padding:var(--s2) 0;border-top:1px solid var(--line)}
 .btns{display:flex;flex-wrap:wrap;gap:var(--s4)}
@@ -64,7 +64,7 @@ nav a.on{color:var(--fg);box-shadow:inset 0 2px var(--g)}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on{margin-left:var(--s2)}#herd-on svg{width:19px;height:14px}
+#rf,#herd-on{width:40px}#herd-on{margin-left:var(--s2)}header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
@@ -196,10 +196,9 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
    #n column, so it never crosses the graph. The card is a box beside the gutter; a hanging row's title wraps. */
 details.q{position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1ch);--y:calc(var(--s1) + var(--fs) * .75);
   background:linear-gradient(var(--line),var(--line)) no-repeat calc(var(--gw) + var(--s2)) 100%/100% 1px}
-.d0{--d:0}.d1{--d:1}.d2{--d:2}.d3{--d:3}
+.d0{--d:0}.d1{--d:1}.d2{--d:2}
 details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 details.q .tl{grid-column:2/-1}
-details.q:not(.d0) .tl{white-space:normal}
 details.q[open]{padding-bottom:var(--s2)}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid #30363d;border-radius:6px;background:#161b22}
 .cd>p{margin:var(--s2) 0}
@@ -208,8 +207,7 @@ details.q[open]{padding-bottom:var(--s2)}
 .gt .p::before,.gt .t::before,.gt .e::before,.gt .k::before{content:"";position:absolute;top:0;bottom:0;margin-left:.5ch;border-left:1px solid var(--mute);translate:-50%}
 .gt .e::before{bottom:auto;height:var(--y)}
 .gt .k::before{top:calc(var(--y) + var(--fs) * .4)}
-/* #115 amendment A: the [?] legend, right-aligned over the queue; it opens in the lane sheet with the lane parts hidden. */
-.qh{display:flex;justify-content:flex-end;margin:var(--s2) 0 0}
+/* #115 amendment A: the [?] legend (#162: in the header, Queue tab only); it opens in the lane sheet with the lane parts hidden. */
 .sh.lg :is(.acts,.cf,.chat,.live,.pairf,.cmds,.reply,.st){display:none}
 .sh.lg .top{max-height:none;border:0}
 /* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
@@ -217,3 +215,42 @@ details.q[open]{padding-bottom:var(--s2)}
 body:not(.unf) .ask.lt{display:none}
 .later{display:flex;align-items:center;gap:var(--s4);margin:var(--s2) 0;padding:var(--s2);border:1px solid var(--r);border-radius:8px;background:color-mix(in srgb,var(--r) 15%,transparent)}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
+/* #162: a fleet card: a bordered box with a 3 px top bar in the fleet's colour --fk (an accent token; red means "needs
+   you", so it is never a bar). The header: name in the colour, drive dot + age, then [drive now] [pause] [config]. */
+.fc{--fk:var(--l);margin:var(--s3) 0;border:1px solid #30363d;border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
+.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fh{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit)}
+.fn{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--s2);white-space:nowrap;overflow:hidden}
+.fn>b{color:var(--fk)}
+.fn .ds{font-size:var(--fs-meta);color:var(--mute);overflow:hidden;text-overflow:ellipsis}
+.fn i{font-style:normal}
+.fh>.btns{padding-bottom:var(--s1)}
+.fm{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.fc>details.q:last-of-type{background:none}
+/* `done today: N` and the paused line get a chevron: a row that opens shows it opens. */
+.cv{font-style:normal;color:var(--mute)}.cv::before{content:"▸"}[open]>summary .cv::before{content:"▾"}
+.fc>.done{border-bottom:0;border-top:1px solid var(--line)}
+.fc>.done>summary{display:flex;gap:var(--s2);color:var(--mute);font-size:var(--fs-meta)}
+.fc>.done>p{margin:0 0 var(--s1);font-size:var(--fs-meta)}
+/* A paused fleet: one grey line, its bar muted; [resume] on the right (paired devices only); a tap peeks its rows. */
+.fc.off{--fk:var(--mute);border-bottom:1px solid #30363d;padding-bottom:0;color:var(--mute)}
+.fc.off>summary{display:flex;align-items:center;gap:var(--s4);min-height:var(--hit)}
+.fc.off>summary>.fn{flex:1;text-overflow:ellipsis}
+/* The [config] sheet: the lane sheet with the fleet's bar on top; groups of read-only rows (key 11 px, value 13 px)
+   and the role pickers (the `set` op). A group's muted right-hand hint says where the rest is edited. */
+.sh.cs{border-top:3px solid var(--fk)}.sh.cs .hd b{color:var(--fk)}
+.sh.cs .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
+.cp{font-size:var(--fs-meta)}
+.cg{border-top:1px solid var(--line);padding:var(--s1) 0 var(--s2)}
+.cg>h3{display:flex;align-items:center;gap:var(--s2);min-height:var(--ctl);margin:0;font-size:var(--fs-meta);font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--fg)}
+.cg>h3>span{margin-left:auto;letter-spacing:0;text-transform:none;color:var(--mute)}
+.kv2{display:grid;grid-template-columns:15ch minmax(0,1fr);gap:var(--s1) var(--s2);align-items:baseline;margin:0}
+.kv2>dt{font-size:var(--fs-meta);color:var(--mute)}
+.kv2>dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.kv2 .tag{margin-left:var(--s1)}
+.cs .role{display:flex;flex-direction:column;align-items:stretch;gap:var(--s1);padding:var(--s2) 0;border-top:0}
+.cs .rh{display:flex;align-items:baseline;gap:var(--s2)}
+.cs .top .rh,.cs .top .rk{margin:0}
+.cs .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
+.cs .rk{font-size:var(--fs-meta);color:var(--mute)}
+.cs .soon{padding:var(--s2);border:1px dashed #30363d;border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}

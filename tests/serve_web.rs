@@ -151,7 +151,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
             Some("web".into())
         )
     );
-    assert!(get(&s, "/").contains(">paused</span>") && get(&s, "/").contains(">Resume</button>"));
+    assert!(get(&s, "/").contains("> paused · ") && get(&s, "/").contains(">Resume</button>"));
     // Paused: next offers nothing, impl/rev spawns refuse, orch still spawns its plan.
     for c in [&cli, &web] {
         assert_eq!(
@@ -188,9 +188,9 @@ fn role_dropdowns_set_like_herdsman_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    // #60: a fleet's role forms load when its row is opened.
-    assert!(get(&s, "/").contains("<details class=roles data-src=\"frag?id=roles&amp;fleet=sendmeter\"><summary><span>roles</span></summary></details>"));
-    let page = get(&s, "/frag?id=roles&fleet=sendmeter");
+    // #162: a fleet's role forms are in its [config] sheet, loaded when [config] is tapped.
+    assert!(get(&s, "/").contains("<button type=button class=cfg data-f=\"sendmeter\">Config</button>"));
+    let page = get(&s, "/frag?id=config&fleet=sendmeter");
     assert!(
         page.contains("<option selected>opus</option><option>sonnet</option>"),
         "only `models`"
@@ -651,7 +651,7 @@ fn page_fits_390px_without_horizontal_scroll() {
         "rows are details"
     );
     assert!(
-        html.contains("class=tl>Queue rows show issue and PR titles from the …"),
+        html.contains("class=tl>Queue rows show issue and PR titles from the…"),
         "title line"
     );
     for t in ["queue", "lanes", "host", "events"] {
@@ -764,10 +764,13 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     assert_eq!(done.matches("<p>#").count(), 5, "at most 5: {done}");
     assert!(done.starts_with("done today: 30</span></summary><p>#129 ") && done.contains("pull/1129\">PR #1129</a>"));
     // Paused fleet: one collapsed line, its dead lane red with no buttons.
-    assert!(queue.contains(
-        "<details class=paused><summary><span>synergy · <span class=r>paused</span> · 1 lane (dead)</span></summary>"
-    ));
-    let syn = &queue[queue.find("class=paused").unwrap()..];
+    assert!(
+        queue.contains(
+            "<summary><i class=cv></i><span class=fn><b>synergy</b> <i class=m>●</i> paused · 1 lane (dead)</span>"
+        ),
+        "{queue}"
+    );
+    let syn = &queue[queue.find("class=\"fc off").unwrap()..];
     assert!(syn.contains("<span>#1039</span><span class=r>dead</span>"), "{syn}");
     let dead_row = &syn[syn.find("<span>#1039</span>").unwrap()..];
     let dead_row = &dead_row[..dead_row.find("</details>").unwrap()];
@@ -908,7 +911,7 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
         ))
         .into_owned()
     };
-    for path in ["/frag?id=events", "/frag?id=roles&fleet=sendmeter"] {
+    for path in ["/frag?id=events", "/frag?id=config&fleet=sendmeter"] {
         assert!(send(path, "").starts_with("HTTP/1.1 200 OK"), "{path}");
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
@@ -921,7 +924,13 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
             );
         }
     }
-    for path in ["/frag?id=nope", "/frag", "/frag?id=roles", "/frag?id=roles&fleet=nope"] {
+    for path in [
+        "/frag?id=nope",
+        "/frag",
+        "/frag?id=roles&fleet=sendmeter",
+        "/frag?id=config",
+        "/frag?id=config&fleet=nope",
+    ] {
         let res = send(path, "");
         assert!(
             res.starts_with("HTTP/1.1 404 Not Found") && res.ends_with("no such part\n"),

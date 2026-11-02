@@ -1,5 +1,5 @@
 //! #58 amendment B: one terminal-style control system. The `tests/ui/audit.js` console audit on every
-//! screen (Queue with rows and roles open, Lanes, Host, Events, the sheet, Herd): zero outliers. 390 px
+//! screen (Queue with rows open, a fleet's [config] sheet, Lanes, Host, Events, the sheet, Herd): zero outliers. 390 px
 //! screenshots go to `$HERDSMAN_SNAPSHOTS`.
 mod common;
 use common::*;
@@ -61,10 +61,10 @@ fn every_control_passes_the_audit_at_390px() {
     };
     let html = page[page.find("<!doctype").unwrap()..]
         .replace(
-            "<summary><span>roles</span></summary></details>",
+            "<section id=lanes>",
             &format!(
-                "<summary><span>roles</span></summary>{}</details>",
-                part("/frag?id=roles&fleet=sendmeter")
+                "<template data-cfg=\"sendmeter\">{}</template><section id=lanes>",
+                part("/frag?id=config&fleet=sendmeter")
             ),
         )
         .replace(
@@ -82,12 +82,11 @@ fn every_control_passes_the_audit_at_390px() {
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
-    let roles =
-        "document.querySelector('details.roles').open = true; document.querySelector('details.roles').scrollIntoView()";
+    let config = "config(document.querySelector('.cfg[data-f=\"sendmeter\"]'))";
     let scenes = [
         // The header (`[↻]` and the horse) is in every tab's frame and audit.
         ("ui-queue", "queue", "body", String::new()),
-        ("ui-roles", "queue", "body", roles.to_string()),
+        ("ui-config", "queue", "#sheet", config.to_string()),
         ("ui-lanes", "lanes", "body", String::new()),
         ("ui-host", "host", "body", String::new()),
         ("ui-events", "events", "body", String::new()),

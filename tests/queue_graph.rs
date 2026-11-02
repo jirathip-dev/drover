@@ -78,9 +78,11 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     let (c, r) = fixture();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = req(&s, "/", "");
-    assert!(page.contains("<button type=button class=qhelp aria-label=\"what the marks mean\">?</button>"));
-    assert!(page.contains("<h2 data-s=\"db\" data-sp=\"db/migrations/**, db/seed.sql\"><span>acme</span>"));
-    assert!(page.contains("<h2 data-s=\"serial\" data-sp=\"schema/**\"><span>beta</span>"));
+    assert!(page.contains("<button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf"));
+    assert!(page.contains("<div class=\"fc k-l\" data-s=\"db\" data-sp=\"db/migrations/**, db/seed.sql\"><div class=fh><span class=fn><b>acme</b>"));
+    assert!(page.contains(
+        "<div class=\"fc k-a\" data-s=\"serial\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
+    ));
     assert!(page.contains("<details class=\"q\" data-q><summary><span>#1</span>"));
     assert!(page.contains("<details class=\"q\" data-q data-b=99><summary><span>#7</span>"));
     assert!(page.contains("<details class=\"q\" data-q data-s=\"db\"><summary><span>#8</span>"));
@@ -107,8 +109,8 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         "#1 ● impl ▼after7",
         "#2 ├─○ queued ▼after6",
         "#3 │ └─○ queued",
-        "#4 │   └─○ queued",
-        "#5 │   ┆─○ queued on #4",
+        "#4 │ └─○ queued after #3",
+        "#5 │ └─○ queued after #4",
         "#6 └─○ queued ▲before2",
         "#7 ○ queued ! #99 ▲before1 ▼after8",
         "#8 ○ queued 🔒db ▲before7",
