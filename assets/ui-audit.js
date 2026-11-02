@@ -47,6 +47,24 @@
       const p = [...$$('#queue p.m')].find(p => p.textContent.startsWith('driver:'));
       $('#queue').prepend(p.previousElementSibling, p);
     },
+    // #166: the driven fleet's result line in its 3 colours: the demo's amber pass (open, an action's code open), then
+    // green and red copies, moved to the top; each must read in its colour.
+    'queue-result': () => {
+      tab('queue');
+      const d = $('#queue details.dp');
+      if (!d) return early.push('no drive result line in the demo');
+      const copy = (tone, text) => { const c = d.cloneNode(true); c.className = 'dp ' + tone; c.querySelector('summary').textContent = text; return c; };
+      const all = [d, copy('g', '07:46 · started 1 · merged 1 · tap for details'), copy('r', '07:51 · started 0 · merged 0 · 1 failed · tap for details')];
+      $('#queue').prepend(d.previousElementSibling.previousElementSibling, d.previousElementSibling, ...all);
+      d.open = true;
+      d.querySelector('li details').open = true;
+      if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the lines; the check keeps the needs cards
+      for (const c of all) {
+        const tone = c.classList[1], probe = B.appendChild(Object.assign(document.createElement('i'), { className: tone })), want = getComputedStyle(probe).color;
+        probe.remove();
+        if (getComputedStyle(c.querySelector('summary')).color !== want) early.push(`.dp.${tone} reads ${getComputedStyle(c.querySelector('summary')).color}, not ${want}`);
+      }
+    },
     lanes: () => tab('lanes'),
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
@@ -121,7 +139,7 @@
       close();
       await frame();
       const slide = getComputedStyle(sh).transitionDuration;
-      if (S.hidden || !S.matches('.out') || aim() < sh.offsetHeight - 1 || slide !== '0.22s') dragged.push(`a frame after close: hidden ${S.hidden}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
+      if (S.hidden || !S.matches('.out') || aim() < sh.offsetHeight - 1 || slide !== '0.2s') dragged.push(`a frame after close: hidden ${S.hidden}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
       await wait();
       if (!S.hidden) dragged.push('300 ms after close the sheet is still shown');
       if (!DBG.get('check')) { open($('.lane')); S.classList.add('drag'); snap('half'); } // the screenshot: the sheet at half, unanimated

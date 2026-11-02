@@ -28,7 +28,7 @@ run() { # url, extra args
 }
 fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
-for v in queue queue-open queue-change queue-drive lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked events herd1 herd2 herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
+for v in queue queue-open queue-change queue-drive queue-result lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked events herd1 herd2 herd-night herd-night-storm herd-scroll queue-scroll toast needs-later; do
   dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}
   url="http://127.0.0.1:$port/${dir}index.html?audit=$view"
   run "$url" --screenshot="$shots/$v.png" >/dev/null || fail=1
@@ -44,4 +44,6 @@ EOF
   then fail=1; fi
   rm "$shots/$v.html"
 done
+# #166: the chat sheet opened and swipe-closed under a CDP screencast: no near-black frame, the page never moves.
+${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots" || fail=1
 exit $fail
