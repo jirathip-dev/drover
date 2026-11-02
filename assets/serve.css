@@ -80,6 +80,9 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 @keyframes s{to{transform:rotate(1turn)}}
 #ptr{position:fixed;top:calc(var(--hit) + var(--s3));left:calc(50% - var(--s2));z-index:1}
 main{transition:transform .2s}
+/* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
+   section shows, and [?] only on Queue. */
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -210,6 +213,7 @@ details.q{position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1c
 .d0{--d:0}.d1{--d:1}.d2{--d:2}
 details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 details.q .tl{grid-column:2/-1}
+details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid #30363d;border-radius:6px;background:#161b22}
 .cd>p{margin:var(--s2) 0}

@@ -169,7 +169,7 @@ pub fn waiting_on(
             // #92: a verdict is for the head the rev lane was spawned at; a moved PR head gets a fresh reviewer.
             Some(_) if head.is_some_and(|h| !pushed.is_empty() && h.0 != base) => {
                 let what = format!(
-                    "verdict is for {:.7}, the PR head moved to {pushed:.7}: review again",
+                    "review was for {:.7}, head moved to {pushed:.7} (not a clean merge): review again",
                     head.unwrap_or_default().0
                 );
                 let c = s.check.as_deref().unwrap_or("rev");
@@ -177,8 +177,12 @@ pub fn waiting_on(
             }
             Some((path, v)) => {
                 let at = head.is_some_and(|h| h.0 == base);
-                let next = (matches!(v, "PASS" | "FAIL") && at)
-                    .then(|| format!("herdsman verdict {f} {n} {v} --sha {pushed} --file {path}"));
+                let next = (matches!(v, "PASS" | "FAIL") && at).then(|| {
+                    format!(
+                        "herdsman verdict {f} {n} {v} --sha {} --file {path}",
+                        head.unwrap_or_default().0
+                    )
+                });
                 w(
                     "drive",
                     "verdict written, waiting for drive to record it",
@@ -321,7 +325,27 @@ pub fn scan(
         let at = spawn
             .filter(|_| s.check_lane() == Some(&lane))
             .and_then(|e| Some((e.str("sha")?, e.ts)));
-        let mut w = waiting_on(events, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        // #207: a PR head that merges the reviewed one with integration and adds nothing carries its verdict, as a
+        // logged auto-update does: read as one, the verdict is recorded at the reviewed sha.
+        let pushed = pr["headRefOid"].as_str().unwrap_or_default();
+        let updated = |e: &Event| e.is("auto-updated", &s.fleet, s.issue) && e.str("to") == Some(pushed);
+        let carry = at.filter(|(x, _)| {
+            word.is_some()
+                && !pushed.is_empty()
+                && !x.eq_ignore_ascii_case(pushed)
+                && !events.iter().any(updated)
+                && crate::overlap::carries(r, f, &s, x, pushed)
+        });
+        let ev = carry.map(|(x, _)| {
+            let d = serde_json::json!({"from": x, "to": pushed});
+            [
+                events,
+                &[Event::new(ctx.now, &s.fleet, Some(s.issue), "auto-updated", d)],
+            ]
+            .concat()
+        });
+        let ev = ev.as_deref().unwrap_or(events);
+        let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.
         if let Some(l) = f
             .merge_label
