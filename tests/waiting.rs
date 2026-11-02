@@ -1,14 +1,13 @@
-//! #46: idle with a reason: `waiting_on` per case, the orch nudge / `orch-stuck`, and the owner's 9 idle lanes replayed.
+//! #46: idle with a reason: `waiting_on` per case and the owner's idle lanes replayed; #155: waits name drive.
 mod common;
 use common::*;
 use herdsman::config::Config;
 use herdsman::events::{append, read, Event};
 use herdsman::serve::Server;
-use herdsman::waiting::{orch, scan, Waiting};
+use herdsman::waiting::{scan, Waiting};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
-const ORCH: &str = "sendmeter-orch";
 
 /// A 40-hex sha starting with `p`.
 fn sha(p: &str) -> String {
@@ -173,14 +172,14 @@ fn every_case_has_its_who_what_and_next_command() {
         (1, "owner", "waiting on your answer (q3)", NOW - 600, None),
         (
             3,
-            "orch",
-            "review FAIL, waiting for orch to start fix round",
+            "drive",
+            "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round",
             t + 20,
             s("spawn sendmeter 3 impl --supersede"),
         ),
         (
             4,
-            "orch",
+            "drive",
             "PASS + green, waiting for merge",
             t + 20,
             s("merge sendmeter 4"),
@@ -188,8 +187,8 @@ fn every_case_has_its_who_what_and_next_command() {
         (5, "ci", "waiting for CI", t + 20, None),
         (
             6,
-            "orch",
-            "verdict written, waiting for orch to record it",
+            "drive",
+            "verdict written, waiting for drive (next pass ≤ 5 min) to record it",
             t + 10,
             s(&format!(
                 "verdict sendmeter 6 PASS --sha {} --file {}",
@@ -205,22 +204,22 @@ fn every_case_has_its_who_what_and_next_command() {
         (13, "none", "nothing to do (closed): clean me", t, None),
         (
             14,
-            "orch",
-            "verdict written, waiting for orch to record it",
+            "drive",
+            "verdict written, waiting for drive (next pass ≤ 5 min) to record it",
             t + 10,
             None,
         ),
         (
             31,
-            "orch",
-            "pushed 70fe5a1, waiting for orch to spawn review",
+            "drive",
+            "pushed 70fe5a1, waiting for drive (next pass ≤ 5 min) to spawn review",
             NOW - 180,
             s("spawn sendmeter 31 rev"),
         ),
         (
             42,
-            "orch",
-            "pushed fix 605297c, waiting for orch to spawn review",
+            "drive",
+            "pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review",
             NOW - 480,
             s("spawn sendmeter 42 rev"),
         ),
@@ -230,7 +229,6 @@ fn every_case_has_its_who_what_and_next_command() {
         .map(|w| (w.issue, w.who, w.what.as_str(), w.since, w.next_cmd.clone()))
         .collect();
     assert_eq!(got, want.to_vec(), "a working lane (#11) waits on nothing");
-    assert_eq!(orch(&all, "sendmeter").unwrap().what, "orch idle with 6 items waiting");
     assert_eq!(
         (all[0].tone(NOW), all[7].tone(NOW)),
         ("r", "a"),
@@ -239,7 +237,7 @@ fn every_case_has_its_who_what_and_next_command() {
     assert_eq!(
         (all[12].tone(NOW), all[13].tone(NOW)),
         ("m", "a"),
-        "orch amber only past 5 min"
+        "drive amber only past 5 min"
     );
     // Every next command is one pasteable herdsman invocation: no empty args, no `PASS|FAIL`, no `?`.
     for cmd in all.iter().filter_map(|w| w.next_cmd.as_deref()) {
@@ -270,12 +268,18 @@ fn every_idle_lane_of_an_issue_gets_a_reason() {
     };
     assert_eq!(
         of("sendmeter-rev-42-r1"),
-        Some(("orch", "pushed fix 605297c, waiting for orch to spawn review")),
+        Some((
+            "drive",
+            "pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review"
+        )),
         "an older lane shares the issue's reason"
     );
     assert_eq!(
         of("sendmeter-impl-3"),
-        Some(("orch", "review FAIL, waiting for orch to start fix round"))
+        Some((
+            "drive",
+            "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round"
+        ))
     );
     assert_eq!(
         of("sendmeter-impl-9"),
@@ -284,115 +288,12 @@ fn every_idle_lane_of_an_issue_gets_a_reason() {
     assert_eq!(of("sendmeter-rev-9-r1"), None, "a working lane waits on nothing");
 }
 
-/// The orch lane plus one pushed impl lane, both idle unless `orch` says otherwise.
-fn nudge_fixture(name: &str, orch: &str) -> (herdsman::Ctx, Fake) {
-    let c = ctx(&tmpdir(name), CONFIG);
-    ev(
-        &c,
-        NOW - 1200,
-        None,
-        "spawn",
-        json!({"role": "orch", "agent": ORCH, "pane": "w1:p1"}),
-    );
-    spawn(&c, NOW - 1200, 42, "impl", "sendmeter-impl-42");
-    (c, pushed(orch, "605297c", NOW - 480))
-}
-
-fn pushed(orch: &str, head: &str, at: u64) -> Fake {
-    Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[
-                (ORCH, orch, "/x", "w1:p9"),
-                ("sendmeter-impl-42", "idle", "/wt", "w1:p2"),
-            ]),
-        )
-        .reply("gh pr view issue-42 ", &pr(&sha(head), "pending"))
-        .reply("git -C /wt/sendmeter-impl-42 ", &format!("{} {at}", sha(head)))
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-}
-
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
-    let (code, out) = run(c, r, &["check"]);
-    assert_eq!(code, 0, "{out}");
-    out
-}
-
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
-    read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
-}
-
 #[test]
-fn nudge_once_per_state_then_orch_stuck_once_then_renudge_on_a_new_head() {
-    let (mut c, r) = nudge_fixture("nudge", "idle");
-    let line = "#42 pushed 605297c, waiting for orch to spawn review 8m ago: run herdsman spawn sendmeter 42 rev";
-    let out = check(&c, &r);
-    assert!(out.contains(&format!("sendmeter #42 orch-nudged: {line}")), "{out}");
-    assert_eq!(r.count(&format!("herdr agent prompt {ORCH} {line}")), 1);
-    assert_eq!(
-        r.count("herdr pane send-keys w1:p9 Enter"),
-        1,
-        "the pane as herdr shows it, not the spawn's w1:p1"
-    );
-    assert_eq!(check(&c, &r), "", "no repeat on the next check");
-    assert_eq!(r.count("herdr agent prompt"), 1);
-
-    c.now = NOW + 9 * 60;
-    assert!(!check(&c, &r).contains("orch-stuck"), "not before 10 min");
-    c.now = NOW + 11 * 60;
-    let out = check(&c, &r);
-    assert!(
-        out.contains("sendmeter #42 orch-stuck: still waiting: #42 pushed 605297c"),
-        "{out}"
-    );
-    assert!(!check(&c, &r).contains("orch-stuck"));
-    assert_eq!(
-        (
-            kinds(&c, "orch-stuck"),
-            kinds(&c, "orch-nudged"),
-            r.count("herdr agent prompt")
-        ),
-        (1, 1, 1)
-    );
-
-    // A new head is a new state: one more nudge (once the 60 s PR cache has turned over).
-    c.now += 61;
-    let r2 = pushed("idle", "abc1234", c.now - 400);
-    assert!(check(&c, &r2).contains("orch-nudged: #42 pushed abc1234"));
-    assert_eq!((r2.count("herdr agent prompt"), kinds(&c, "orch-nudged")), (1, 2));
-}
-
-#[test]
-fn a_failed_enter_is_still_logged_so_the_line_is_never_typed_twice() {
-    let (c, r) = nudge_fixture("nudge-enter", "idle");
-    let r = r.once("herdr pane send-keys", 1, "");
-    assert!(check(&c, &r).contains("orch-nudged"));
-    check(&c, &r);
-    assert_eq!((r.count("herdr agent prompt"), kinds(&c, "orch-nudged")), (1, 1));
-}
-
-#[test]
-fn no_nudge_while_the_orch_is_working() {
-    let (c, r) = nudge_fixture("nudge-working", "working");
-    check(&c, &r);
-    assert!(!r.called("herdr agent prompt"));
-    assert_eq!(kinds(&c, "orch-nudged"), 0);
-    let r = pushed("idle", "605297c", NOW - 480);
-    check(&c, &r);
-    assert_eq!(
-        (r.count("herdr agent prompt"), kinds(&c, "orch-nudged")),
-        (1, 1),
-        "nudged once it went idle"
-    );
-}
-
-#[test]
-fn waiting_lists_orch_and_owner_items_with_their_next_command() {
+fn waiting_lists_drive_and_owner_items_with_their_next_command() {
     let (c, r) = fixture("waiting-cmd");
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("sendmeter #42 orch: pushed fix 605297c, waiting for orch to spawn review (8m) → herdsman spawn sendmeter 42 rev"), "{out}");
+    assert!(out.contains("sendmeter #42 drive: pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review (8m) → herdsman spawn sendmeter 42 rev"), "{out}");
     assert!(
         out.contains("sendmeter #1 owner: waiting on your answer (q3) (10m)\n"),
         "{out}"
@@ -405,23 +306,29 @@ fn waiting_lists_orch_and_owner_items_with_their_next_command() {
     let v: serde_json::Value = serde_json::from_str(&j).unwrap();
     assert_eq!(v.as_array().unwrap().len(), 7);
     assert!(
-        out.contains("sendmeter #14 orch: verdict written, waiting for orch to record it (24m) → ?\n"),
+        out.contains(
+            "sendmeter #14 drive: verdict written, waiting for drive (next pass ≤ 5 min) to record it (24m) → ?\n"
+        ),
         "unclear verdict word: {out}"
     );
     let (_, st) = run(&c, &r, &["status", "sendmeter"]);
     assert!(
-        st.contains("WAITING") && st.contains("pushed fix 605297c, waiting for orch to spawn review"),
+        st.contains("WAITING")
+            && st.contains("pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review"),
         "{st}"
+    );
+    assert!(
+        !st.contains("orch") && !out.contains("orch"),
+        "#155: no orch wording\n{st}{out}"
     );
 }
 
-/// The owner's screenshot (2026-10-31 09:48): 9 lanes herdr calls `idle`, each now with its true reason.
+/// The owner's screenshot (2026-10-31 09:48): the lanes herdr calls `idle`, each now with its true reason.
 #[test]
-fn nine_idle_lanes_render_their_reason() {
+fn idle_lanes_render_their_reason() {
     let (c, r) = fixture("nine-idle");
     run(&c, &r, &["waiting"]); // fills the PR cache the page reads
     let names = [
-        "sendmeter-orch",
         "sendmeter-impl-1",
         "sendmeter-impl-42",
         "sendmeter-impl-31",
@@ -435,13 +342,6 @@ fn nine_idle_lanes_render_their_reason() {
         .iter()
         .map(|n| json!({"name": n, "agent_status": "idle", "pane_id": format!("w1:{n}"), "cwd": "/x"}))
         .collect();
-    ev(
-        &c,
-        NOW - 3000,
-        None,
-        "spawn",
-        json!({"role": "orch", "agent": ORCH, "pane": "w1:sendmeter-orch"}),
-    );
     let r = r
         .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
         .reply("herdr workspace list", "{}")
@@ -450,13 +350,24 @@ fn nine_idle_lanes_render_their_reason() {
     let page = String::from_utf8_lossy(&s.respond("GET /?tab=lanes HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW))
         .into_owned();
     for (tone, label) in [
-        ("a", "idle · orch idle with 6 items waiting (24m)"),
         ("r", "idle · waiting on your answer (q3) (10m)"),
-        ("a", "idle · pushed fix 605297c, waiting for orch to spawn review (8m)"),
-        ("m", "idle · pushed 70fe5a1, waiting for orch to spawn review (3m)"),
-        ("a", "idle · review FAIL, waiting for orch to start fix round (24m)"),
+        (
+            "a",
+            "idle · pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review (8m)",
+        ),
+        (
+            "m",
+            "idle · pushed 70fe5a1, waiting for drive (next pass ≤ 5 min) to spawn review (3m)",
+        ),
+        (
+            "a",
+            "idle · review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round (24m)",
+        ),
         ("a", "idle · PASS + green, waiting for merge (24m)"),
-        ("a", "idle · verdict written, waiting for orch to record it (24m)"),
+        (
+            "a",
+            "idle · verdict written, waiting for drive (next pass ≤ 5 min) to record it (24m)",
+        ),
         ("a", "idle · idle without pushing (check the pane) (25m)"),
         ("m", "idle · nothing to do (merged): clean me (24m)"),
     ] {
@@ -485,9 +396,9 @@ fn nine_idle_lanes_render_their_reason() {
     );
 }
 
-/// #43: a killed lane falls back to its prior state; the issue's surviving lane tells the orch what to respawn.
+/// #43: a killed lane falls back to its prior state; the issue's surviving lane tells drive what to respawn.
 #[test]
-fn a_killed_lane_waits_on_the_orch_to_respawn_it() {
+fn a_killed_lane_waits_on_drive_to_respawn_it() {
     let c = ctx(&tmpdir("waiting-killed"), CONFIG);
     let t = NOW - 1500;
     spawn(&c, t, 42, "impl", "sendmeter-impl-42");
@@ -528,15 +439,15 @@ fn a_killed_lane_waits_on_the_orch_to_respawn_it() {
             (
                 3,
                 "sendmeter-rev-3-r1".into(),
-                "orch",
-                "lane killed, waiting for orch to respawn impl".into(),
+                "drive",
+                "lane killed, waiting for drive (next pass ≤ 5 min) to respawn impl".into(),
                 s("spawn sendmeter 3 impl")
             ),
             (
                 42,
                 "sendmeter-impl-42".into(),
-                "orch",
-                "pushed 605297c, waiting for orch to spawn review".into(),
+                "drive",
+                "pushed 605297c, waiting for drive (next pass ≤ 5 min) to spawn review".into(),
                 s("spawn sendmeter 42 rev")
             ),
         ]
@@ -578,22 +489,4 @@ fn a_long_reason_never_squeezes_the_name() {
         1,
         "the older lane does not repeat it; no `(10m)` suffix in the row"
     );
-}
-
-/// #143: a driver fleet has no orch: its waits name `drive`.
-#[test]
-fn a_driver_fleets_status_never_says_orch() {
-    let (c, r) = fixture("waiting-driven");
-    let driven = CONFIG.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\ndriver = \"herdsman\"",
-    );
-    std::fs::write(&c.config, driven).unwrap();
-    run(&c, &r, &["waiting", "sendmeter"]);
-    let (_, st) = run(&c, &r, &["status", "sendmeter"]);
-    assert!(
-        st.contains("pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review"),
-        "{st}"
-    );
-    assert!(!st.contains("orch"), "{st}");
 }

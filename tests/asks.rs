@@ -1,4 +1,4 @@
-//! #40: `herdsman ask` / `answer` / `asks`, the needs-you card, the `orch-holding` and `ask-waiting` alerts.
+//! #40: `herdsman ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -6,23 +6,35 @@ use herdsman::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
-const ORCH: &str = "sendmeter-orch";
+const LANE: &str = "sendmeter-impl-36";
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// The orch lane's spawn, so an answer can find its pane.
-fn orch_spawn(c: &herdsman::Ctx, ts: u64) {
+/// The asking lane's spawn, so an answer can find its pane.
+fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
     append(
         &c.state,
         &Event::new(
             ts,
             "sendmeter",
-            None,
+            Some(36),
             "spawn",
-            json!({"role": "orch", "agent": ORCH, "pane": "w1:p1"}),
+            json!({"role": "impl", "agent": LANE, "pane": "w1:p1"}),
         ),
+    )
+    .unwrap();
+}
+
+/// The asks as `herdsman ask` logs them inside `LANE` (`HERDSMAN_LANE` is process-wide, so not set here).
+fn from_lane(c: &herdsman::Ctx) {
+    let Ok(log) = std::fs::read_to_string(&c.state) else {
+        return;
+    }; // a refused ask logs nothing
+    std::fs::write(
+        &c.state,
+        log.replace("\"agent\":null", &format!("\"agent\":\"{LANE}\"")),
     )
     .unwrap();
 }
@@ -42,6 +54,7 @@ fn ask(c: &herdsman::Ctx) -> String {
     ];
     let (code, out) = run(c, &Fake::default(), &args);
     assert_eq!(code, 0, "{out}");
+    from_lane(c);
     out.trim().to_string()
 }
 
@@ -49,11 +62,11 @@ fn ask(c: &herdsman::Ctx) -> String {
 fn ask_answer_round_trip_prompts_the_asker_once() {
     let d = tmpdir("ask-answer");
     let c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 60);
+    lane_spawn(&c, NOW - 60);
     let id = ask(&c);
     assert_eq!(id, "q1");
     let a = &kinds(&c, "needs-decision")[0];
-    assert_eq!((a.issue, a.str("agent")), (Some(36), Some(ORCH)));
+    assert_eq!((a.issue, a.str("agent")), (Some(36), Some(LANE)));
     assert_eq!(a.data["options"], json!(["yes, to 5,200", "no, trim"]));
     assert_eq!(a.data["recommend"], 2);
     let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
@@ -69,7 +82,7 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        r.called("herdr agent prompt sendmeter-orch DECISION q1: no, trim"),
+        r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"),
         "{:?}",
         r.calls.borrow()
     );
@@ -91,6 +104,24 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     assert!(run(&c, &r, &["answer", "sendmeter", "q9", "1"])
         .1
         .contains("REFUSED NO_SUCH_ASK"));
+}
+
+/// #155: an ask from outside a lane (the owner's) names no agent; its answer prompts nobody.
+#[test]
+fn an_ask_from_outside_a_lane_names_no_agent() {
+    let c = ctx(&tmpdir("ask-nolane"), CONFIG);
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["ask", "sendmeter", "-", "Pause it?", "--option", "yes"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "needs-decision")[0].str("agent"), None);
+    let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!(
+        (code, out.trim()),
+        (0, "sendmeter q1: yes recorded; asking agent gone, not prompted")
+    );
 }
 
 #[test]
@@ -149,36 +180,22 @@ fn check(c: &herdsman::Ctx, r: &Fake) -> String {
 }
 
 #[test]
-fn orch_holding_fires_once_and_not_while_an_ask_is_open() {
-    let d = tmpdir("orch-holding");
+fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
+    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    // Past 30 min an open ask re-alerts once as `ask-waiting`.
+    let d = tmpdir("ask-waiting");
     let mut c = ctx(&d, CONFIG);
-    c.now = NOW - 22 * 60;
+    c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
+    ask(&c);
     c.now = NOW;
-    let r = Fake::default().reply("herdr agent list", &agents(&[(ORCH, "idle", "/x", "w1:p1")]));
     let out = check(&c, &r);
-    assert!(
-        out.contains("sendmeter orch-holding: #36 startable, orch idle 22m, no ask"),
-        "{out}"
-    );
-    assert_eq!(check(&c, &r), "", "once per episode");
-    assert_eq!(kinds(&c, "orch-holding").len(), 1);
-
-    // An open ask is not a silent hold; past 30 min it re-alerts once as `ask-waiting`.
-    let d2 = tmpdir("orch-asked");
-    let mut c2 = ctx(&d2, CONFIG);
-    c2.now = NOW - 40 * 60;
-    assert_eq!(run(&c2, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
-    ask(&c2);
-    c2.now = NOW;
-    let out = check(&c2, &r);
-    assert!(!out.contains("orch-holding"), "{out}");
     assert!(
         out.contains("ask-waiting: q1 unanswered for 40m: Raise the src budget?"),
         "{out}"
     );
-    assert_eq!(check(&c2, &r), "");
-    assert_eq!(kinds(&c2, "ask-waiting").len(), 1);
+    assert_eq!(check(&c, &r), "");
+    assert_eq!(kinds(&c, "ask-waiting").len(), 1);
 }
 
 #[test]
@@ -224,7 +241,7 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     // A pane in the log whose herdr agent is gone: the prompt fails, the decision is still recorded.
     let d = tmpdir("ask-gone");
     let c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 60);
+    lane_spawn(&c, NOW - 60);
     ask(&c);
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "2"]);
     assert_eq!(code, 0, "{out}");
@@ -290,7 +307,7 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let d = tmpdir("ask-web");
     let mut c = ctx(&d, CONFIG);
     c.now = NOW;
-    orch_spawn(&c, NOW - 60);
+    lane_spawn(&c, NOW - 60);
     ask(&c);
     let r = Fake::default()
         .reply("herdr agent prompt", "")
@@ -326,7 +343,7 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
         (Some("no, trim"), Some("owner"), Some("web"))
     );
     assert!(
-        r.called("herdr agent prompt sendmeter-orch DECISION q1: no, trim"),
+        r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"),
         "{:?}",
         r.calls.borrow()
     );
@@ -349,7 +366,9 @@ fn routine(c: &herdsman::Ctx, q: &str) -> (i32, String) {
         "--kind",
         "routine",
     ];
-    run(c, &Fake::default(), &args)
+    let res = run(c, &Fake::default(), &args);
+    from_lane(c);
+    res
 }
 
 #[test]
@@ -395,7 +414,7 @@ fn routine_needs_a_recommendation_and_no_owner_topic() {
 fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     let d = tmpdir("ask-default");
     let mut c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 3600);
+    lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c); // q1, owner
@@ -426,7 +445,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (Some("q2"), Some("keep"), Some("default"))
     );
     assert!(
-        r.called("herdr agent prompt sendmeter-orch DECISION q2: keep (default after 30 min, nobody replied)"),
+        r.called("herdr agent prompt sendmeter-impl-36 DECISION q2: keep (default after 30 min, nobody replied)"),
         "{:?}",
         r.calls.borrow()
     );
@@ -443,7 +462,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (dec.len(), dec[1].str("choice"), dec[1].str("by")),
         (2, Some("split"), Some("owner"))
     );
-    assert!(r.called("herdr agent prompt sendmeter-orch DECISION q2: split"));
+    assert!(r.called("herdr agent prompt sendmeter-impl-36 DECISION q2: split"));
     assert!(!page(&c).contains("decided by default"));
     assert!(run(&c, &r, &["answer", "sendmeter", "q2", "2"])
         .1
@@ -454,7 +473,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
 fn a_manual_answer_before_30_min_prevents_the_default() {
     let d = tmpdir("ask-default-manual");
     let mut c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 3600);
+    lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
     assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0);
     let r = Fake::default()
@@ -475,12 +494,12 @@ fn a_manual_answer_before_30_min_prevents_the_default() {
 fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     let d = tmpdir("ask-landed");
     let c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 60);
+    lane_spawn(&c, NOW - 60);
     ask(&c);
     let r = Fake::default()
         .reply("herdr agent prompt", "")
         .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait sendmeter-orch --until working", "");
+        .reply("herdr agent wait sendmeter-impl-36 --until working", "");
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "2"]).0, 0);
     let n = |r: &Fake| {
         (
@@ -494,18 +513,18 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
 
     let d = tmpdir("ask-undelivered");
     let c = ctx(&d, CONFIG);
-    orch_spawn(&c, NOW - 60);
+    lane_spawn(&c, NOW - 60);
     ask(&c);
     let idle = Fake::default()
         .reply("herdr agent prompt", "")
         .reply("herdr pane send-keys", "")
-        .reply("herdr agent list", &agents(&[(ORCH, "idle", "/x", "w1:p1")]));
+        .reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
     assert_eq!(run(&c, &idle, &["answer", "sendmeter", "q1", "2"]).0, 0);
     assert_eq!(n(&idle), (2, 2, 2), "one retry");
     let u = kinds(&c, "decision-undelivered");
     assert_eq!(
         (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("reason")),
-        (1, Some("q1"), Some(ORCH), Some("DECISION q1: no, trim"))
+        (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
     assert!(herdsman::config::WEBPUSH_ON.contains(&"decision-undelivered"), "pushed");
 
@@ -514,6 +533,6 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     assert!(out.contains("decision-redelivered: DECISION q1: no, trim"), "{out}");
     assert!(check(&c, &idle).is_empty());
     assert_eq!(n(&idle).0, 3);
-    assert!(idle.called("herdr agent prompt sendmeter-orch DECISION q1: no, trim"));
+    assert!(idle.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"));
     assert_eq!(kinds(&c, "decision-redelivered").len(), 1);
 }

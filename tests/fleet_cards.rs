@@ -137,7 +137,7 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
         "{alpha}"
     );
     assert!(alpha.contains("<button type=button class=cfg data-f=\"alpha\">Config</button>"));
-    assert!(alpha.contains("<details class=\"dp m\"><summary><i>●</i><span>orch</span><i class=cv></i></summary><ul><li>stall check: #1 is due now</li><li>1 lane</li>"));
+    assert!(alpha.contains("<details class=\"dp a\"><summary><i>●</i><span>drive · no pass yet</span><i class=cv></i></summary><ul><li>stall check: #1 is due now</li><li>1 lane</li>"));
 }
 
 #[test]

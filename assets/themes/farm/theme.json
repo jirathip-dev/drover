@@ -1,0 +1,6 @@
+{
+  "poses": { "working": "horse-working", "idle": "horse-stand", "done": "horse-done", "blocked": "horse-blocked" },
+  "glyphs": { "working": "○", "idle": "◦", "unknown": "?", "parked": "◦", "done": "✓", "blocked": "!", "dead": "✗" },
+  "words": { "horse": "horse", "horses": "horses", "herd": "herd", "ranch": "ranch", "barn": "barn" },
+  "scene": { "weather": true }
+}

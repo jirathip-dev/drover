@@ -9,10 +9,6 @@ repo = "acme-example/acme-web"
 local = "/srv/acme/acme-web"
 integration = "staging"
 
-[fleet.acme-web.role.orch]
-harness = "claude"
-model = "sonnet"
-
 [fleet.acme-web.role.impl]
 harness = "claude"
 model = "opus"
@@ -27,10 +23,6 @@ repo = "acme-example/acme-api"
 local = "/srv/acme/acme-api"
 integration = "staging"
 
-[fleet.acme-api.role.orch]
-harness = "claude"
-model = "sonnet"
-
 [fleet.acme-api.role.impl]
 harness = "dsh"
 
@@ -42,11 +34,6 @@ model = "opus"
 repo = "acme-example/docs"
 local = "/srv/acme/docs"
 integration = "staging"
-driver = "herdsman"
-
-[fleet.docs.role.orch]
-harness = "hermes"
-profile = "fleet-orch"
 
 [fleet.docs.role.impl]
 harness = "claude"

@@ -400,7 +400,7 @@ pub fn needs_human(
                     supersede: true,
                     ..Default::default()
                 };
-                crate::spawn::spawn(ctx, cfg, r, out, (fleet, Some(n), "impl"), &o)?;
+                crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o)?;
             }
             crate::events::append(&ctx.state, &ev("round-extended"))?;
         }

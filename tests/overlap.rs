@@ -71,10 +71,6 @@ fn repos(name: &str) -> (PathBuf, PathBuf, herdsman::Ctx, Config) {
     }
     git(&seed, &["checkout", "-q", "staging"]);
     let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
-    let config = config.replace(
-        "integration = \"staging\"",
-        "integration = \"staging\"\ndriver = \"herdsman\"",
-    );
     let c = ctx(&d, &config);
     (d, seed, c, Config::parse(&config).unwrap())
 }

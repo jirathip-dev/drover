@@ -70,6 +70,8 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `herd-night` (#71) checks Auto at 06:59/07:00/18:59/19:00 (night/day/day/night), taps `[A]` through
    day → night → auto → day → night (label, icon, stored value, scene each time), then loads the page again in an
    iframe (virtual time runs no reload) and fails unless it comes back at night.
+   `herd-kitchen` and `herd-nodone` (#172) shoot Herd page 1 in the kitchen theme, and in it with `done` missing:
+   each fails unless the chefs and counter scene are drawn, and in `herd-nodone` the done pose is farm's horse.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).
