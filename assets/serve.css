@@ -303,7 +303,7 @@ body:not(.unf) .ask.lt{display:none}
 .kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
 /* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
    park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).
-   serve.rs writes grid-row / grid-area / the column list inline (no px). */
+   serve.js writes grid-row / grid-area / the column list inline (no px). */
 .pg{--ln:calc(var(--s4) + var(--s2));display:grid;min-width:0;margin:var(--s2) 0;line-height:var(--ln)}
 .pg>*{position:relative;min-width:0;margin:0}
 /* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome

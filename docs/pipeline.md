@@ -110,8 +110,8 @@ The first stage is the start. Each rule names the stage and its `fleet.toml` lin
 
 A broken pipeline stops only its fleet. `drive` skips it, and `spawn`, `verdict`, `merge` and `set` refuse
 `BAD_PIPELINE` with every rule it breaks. Lanes already running keep working, and the other fleets run.
-`herdsman doctor` lists the errors. The board shows them in the fleet's `roles` drawer, with a red line on its Queue
-card.
+`herdsman doctor` lists the errors. The board shows them in the Pipeline group of the fleet's `[config]` sheet, with a red line on its
+Queue card.
 
 ## Events
 
@@ -120,7 +120,8 @@ check whose rounds it counts). Events from before #173 fold as before: `rev` is 
 
 ## The board
 
-The fleet's `roles` drawer draws the pipeline as a node graph. It moves to #162's `[config]` sheet when that lands.
+The Pipeline group of the fleet's `[config]` sheet draws the pipeline as a node graph. `serve` sends the pipeline as
+data (`data-pipe`: stages, outcomes, rounds, `n here` counts, broken rules), and `assets/serve.js` draws it.
 The graph shows each stage's kind, role and `n here`, the loops back with their round limits, and the rail to park.
 It is read-only: edit `fleet.toml`. Each issue card starts with its chain (`○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`),
 with the current stage lit and a check that PASSed at the head ticked. The mockup is in `docs/design/pipeline/` on
