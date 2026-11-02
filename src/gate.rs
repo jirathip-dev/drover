@@ -44,7 +44,7 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // the CLI's verdict arguments, one each
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,

@@ -142,8 +142,6 @@ pub struct Fleet {
     /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
-    /// #155: ignored (`herdsman drive` runs every fleet); `herdsman doctor` notes it until the clean-up removes it.
-    pub driver: Option<String>,
     /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,

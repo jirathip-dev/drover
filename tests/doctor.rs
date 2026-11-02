@@ -158,7 +158,7 @@ fn all_good_exits_zero_and_never_writes() {
     let rows: Vec<String> = serde_json::from_str(&json).unwrap();
     assert_eq!(rows.join("\n") + "\n", out);
 
-    // #155: a leftover `driver` key is ignored; doctor notes it with a `!` (no exit 1).
+    // #155/#156: a leftover `driver` key still parses and is ignored; doctor no longer notes it.
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
         &c.config,
@@ -170,12 +170,7 @@ fn all_good_exits_zero_and_never_writes() {
     .unwrap();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
-    let want = "! fleet.demo.driver — ignored: drive runs every fleet (#155) → remove the key";
-    assert_eq!(
-        out.lines().filter(|l| l.contains("driver")).collect::<Vec<_>>(),
-        [want],
-        "{out}"
-    );
+    assert!(!out.contains("driver"), "{out}");
 }
 
 #[test]

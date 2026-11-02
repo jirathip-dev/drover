@@ -128,12 +128,6 @@ impl Pipeline {
         self.stage.iter().filter(|s| s.kind == "check")
     }
 
-    /// The first check after the start's push: a pushed head's review.
-    pub fn first_check(&self) -> &str {
-        let s = self.stage.first().map_or("impl", |s| s.name.as_str());
-        self.next(s, "push").map_or("rev", |n| n.0)
-    }
-
     /// The stage `stage`'s verdicts count against: itself, or for a gate the check its `ci_red` fix is reviewed by.
     pub fn loop_of<'a>(&'a self, stage: &'a str) -> &'a str {
         match self.get(stage) {

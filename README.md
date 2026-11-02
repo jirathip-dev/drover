@@ -1,13 +1,20 @@
 # herdsman
 
-A small Rust CLI that runs a fleet of coding agents over [herdr](https://herdr.dev):
-one implementer and one reviewer per issue, and a merge only when the gates pass.
+A Rust CLI that drives a fleet of coding agents over [herdr](https://herdr.dev). It works a GitHub
+issue queue through build → review → merge on its own, with hard gates, host-load admission and a
+live phone board with web push. Harness-neutral (Claude Code, Hermes, dsh).
 
 ## Why
 
-If the rules live in a prompt, sooner or later an agent talks its way past them. herdsman
-keeps the state in an append-only event log and owns every step that matters: spawn,
-verdict, merge. Agents act only through it, and it refuses anything that breaks a rule.
+If the rules live in a prompt, sooner or later an agent talks its way past them. herdsman keeps the
+state in an append-only event log and owns every step that matters: spawn, verdict, merge. Agents act
+only through it, and it refuses anything that breaks a rule.
+
+- **It drives the queue itself.** `herdsman drive` does one pass (start the next issue, review a pushed
+  head, fix a FAIL, merge a PASS); `herdsman timer install` runs it every few minutes. No AI orchestrator.
+- **The pipeline is configurable.** The default is impl → rev → gates → merge; yours is validated as a
+  full loop when the config loads and drawn on the board.
+- **A phone board.** `herdsman serve` is a PWA: queue, lanes, host, events, and web push for what needs you.
 
 ## Quick start
 ```sh
@@ -22,68 +29,70 @@ integration = "staging"
 [fleet.app.role.impl]
 harness = "claude"
 profile = "lane-impl"
+
+[fleet.app.role.rev]
+harness = "claude"
+profile = "lane-rev"
 EOF
 herdsman profiles sync                # per-role Claude Code folders and the lane hook
 herdsman spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
 herdsman status
+herdsman timer install                # the drive loop, every few minutes
 herdsman serve --addr 127.0.0.1:7777  # phone page at http://127.0.0.1:7777
 ```
+No `pipeline` table means the default pipeline. Pick the board's look with `[serve] theme = "kitchen"`.
 Full setup, from install to the board on your phone over Tailscale: [docs/setup.md](docs/setup.md).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `spawn <fleet> <issue> <role>` | worktree + herdr pane + brief, launches the role's harness |
-| `adopt` | record a lane already running in a pane |
-| `verdict <fleet> <issue> PASS\|FAIL` | record a review verdict pinned to the exact head sha |
-| `merge <fleet> <issue>` | merge into the integration branch if every gate passes |
-| `status` / `board` / `serve` | per-issue state; compact board; phone page / PWA ([docs](docs/serve.md)) |
-| `pause` / `resume` | hold a fleet: `next` offers nothing, impl/rev spawns refuse `PAUSED` |
-| `queue` / `next` | ordered work queue; the first issue ready to start |
+| `drive` / `timer` / `tick` | one pass of the loop; the job that runs it; check, then drive |
+| `queue` / `next` / `pause` / `resume` | ordered work queue; the first issue ready; hold a fleet |
+| `spawn` / `adopt` | worktree + herdr pane + brief, launch the role's harness; record a running lane |
+| `verdict` / `merge` | a review verdict pinned to the exact head sha; merge if every gate passes |
+| `status` / `board` / `waiting` / `serve` | per-issue state; compact board; what waits on whom; phone page |
 | `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
-| `check` / `ask` / `answer` / `asks` | alerts (stall, dead lane, unmerged ready, waiting ask); ask for a decision, answer it |
-| `clean` / `stop` / `kill` / `close` | reclaim merged or closed lanes; Esc an agent; close its pane, unpushed work to `wip/` first (dry runs unless `--yes`); close a non-lane agent's pane |
-| `set` / `profiles` | switch a role's harness or model; write per-role folders and hooks |
-| `accounts` | Claude accounts: cap, usage, lane-hours, lanes; DeepSeek balance ([docs](docs/providers.md)) |
-| `protection` | is branch protection on for every fleet repo? |
-| `migrate` | move pre-rename `fleet` config and state to the herdsman paths |
+| `check` / `ask` / `answer` / `asks` | alerts; ask for a decision, answer it, list the open ones |
+| `clean` / `stop` / `kill` / `close` | reclaim done lanes; Esc an agent; close its pane, unpushed work to `wip/` first |
+| `set` / `profiles` / `accounts` / `hosts` | switch a role's model; per-role folders and hooks; accounts; hosts |
+| `setup` / `doctor` / `protection` | install the jobs; host check; branch protection on? |
 | `help --agent` | the usage doc agents get; refusals exit 3 with `REFUSED <CODE>: why` |
 
 ## Rules it enforces
 
-- **Exact-head review.** `merge` needs a PASS verdict and green CI for the PR's current
-  head sha. A new commit makes the old verdict stale. A fleet's `required_checks` narrows
-  "green CI" to those check names, latest run of each.
+- **Exact-head review.** `merge` needs a PASS verdict and green CI for the PR's current head sha. A new
+  commit makes the old verdict stale.
 - **Round limit.** At most 3 review rounds (`[limits].review_rounds`), then `needs-human`.
-- **Host-load admission.** `spawn` refuses `HOST_BUSY` under memory pressure, sustained swap-out
-  or high load (`--force` overrides, logged), `DISK_LOW`/`MEM_LOW` under `[limits] min_free_gb`/`min_free_mem_gb`, `DISK_BUDGET` (docs/lanes.md).
+- **Host-load admission.** `spawn` refuses `HOST_BUSY` under memory pressure or high load, and
+  `DISK_LOW`, `MEM_LOW` or `DISK_BUDGET` when space runs out.
 - **Protected branches.** Merges go only to the integration branch, never main.
-  `herdsman protection` checks that GitHub protection is on.
-- **The lane hook.** Every lane runs a pre-tool hook that blocks `gh pr merge`, issue and PR
-  comments, and pushes to main, staging or the integration branch. Reviewers are read-only.
+- **The lane hook.** Every lane runs a pre-tool hook that blocks merges, issue and PR comments, and
+  pushes to protected branches. Reviewers are read-only.
+
+## Pipeline
+
+Stages, their kinds and where each outcome goes: [docs/pipeline.md](docs/pipeline.md).
+
+## Themes
+
+The Herd's look is a folder `themes/<name>/` (sprites, scene, words) next to fleet.toml; see
+[docs/serve.md](docs/serve.md#themes-172).
+
+## Hosts
+
+Lanes on more than one machine, placed by tags and load: [docs/hosts.md](docs/hosts.md).
+
+## Disk
+
+`[limits] worktree_budget_gb` caps the worktrees; over it, drive frees the idlest lanes' build folders
+first ([docs/lanes.md](docs/lanes.md)).
 
 ## Config
 
 `~/.config/herdsman/fleet.toml` (or `FLEET_CONFIG`); every key is in [fleet.example.toml](fleet.example.toml).
-
-```toml
-[fleet.app]
-repo = "<owner>/<repo>"
-local = "~/src/app"
-integration = "staging"           # merge target; main never is
-
-[fleet.app.role.impl]
-harness = "claude"                # claude | hermes | dsh
-profile = "lane-impl"
-model = "opus"
-
-[[notify]]
-cmd = "notify <chat>"                # any command; one line on stdin
-on = ["stall", "lane-dead", "merged", "needs-human"]
-```
-
-More: [architecture](docs/architecture.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [dsh](docs/dsh.md), [phone page](docs/serve.md), [providers and keys](docs/providers.md).
+More: [architecture](docs/architecture.md), [lanes and hooks](docs/lanes.md), [dsh](docs/dsh.md),
+[phone page](docs/serve.md), [providers and keys](docs/providers.md).
 
 ## License
 

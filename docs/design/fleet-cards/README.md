@@ -31,8 +31,8 @@ drive age (`3m ago`).
 - **Order:** fleets that need you first (any needs-human item or open ask), then by name. A paused fleet that needs
   you also goes first, still collapsed, with its red count on the grey line.
 - **Need-you count:** needs-human items plus open asks for that fleet (atlas: #2684, #2782 and the #2910 decision).
-- **Drive dot:** green when the last `drive` pass is within 10 minutes, amber when it is older, grey for orch-driven
-  or paused fleets. The text shows `drive · <age>`, or `orch` when the fleet is orch-driven.
+- **Drive dot:** green when the last `drive` pass is within 10 minutes, amber when it is older, grey for paused
+  fleets. The text shows `drive · <age>`.
 - **Colour:** `sha256(name)[0] % 5` over `[--l, --p, --c, --g, --a]`, the same hash as the horse coats
   (`coat()`). Red is left out because it means "needs you" on the board. `[fleet.<n>] color = "l"|"p"|"c"|"g"|"a"`
   overrides it, and any other value is a config error. Today's names give atlas amber, herdsman blue and relay amber
