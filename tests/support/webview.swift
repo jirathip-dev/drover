@@ -6,7 +6,7 @@
 // snapshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
-// #206: `HERDSMAN_TAB` is the stored tab (localStorage) before the page loads; tab `-`: no tab()/mode() and no
+// #206: `HERDSMAN_TAB` is the stored tab (a private localStorage) before the page loads; tab `-`: no tab()/mode() and no
 // <details> opened, the page as it loaded (with its scripts cut, as it first paints).
 // swift webview.swift <page.html> <width> <tab> <mode> [out.png] [js] [close]
 import AppKit
@@ -21,6 +21,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let conf = WKWebViewConfiguration()
 if let t = ProcessInfo.processInfo.environment["HERDSMAN_TAB"] {
+    conf.websiteDataStore = .nonPersistent() // its own localStorage: other runs' tab() writes never reach it
     conf.userContentController.addUserScript(WKUserScript(source: "localStorage.tab = '\(t)'", injectionTime: .atDocumentStart, forMainFrameOnly: true))
 }
 let web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 844), configuration: conf)
