@@ -267,8 +267,9 @@
         if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis') bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
       }
       // #68: no box holds more than it shows unless it ellipsises (or scrolls by design); nothing past the screen's right edge.
-      // Tap rings (`]`, the queued horse's ::before) are hit area, not content: off while measuring. The sky's clouds drift past its clipped sides.
-      const ring = Object.assign(document.createElement('style'), { textContent: 'button::after,.pk::after,.hqh::before{display:none!important}' });
+      // Tap rings (`]`, the queued horse's ::before, a picker's invisible select grown 8 px each side) are hit area, not content:
+      // off while measuring. The sky's clouds drift past its clipped sides.
+      const ring = Object.assign(document.createElement('style'), { textContent: 'button::after,.pk::after,.hqh::before{display:none!important}.pk select{inset:0!important;width:100%!important}' });
       B.append(ring);
       for (const e of [r, ...r.querySelectorAll('*')]) {
         if (e.closest('svg, .hr') || !seen(e)) continue;
