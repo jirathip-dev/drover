@@ -216,21 +216,18 @@ body:not(.unf) .ask.lt{display:none}
 .later{display:flex;align-items:center;gap:var(--s4);margin:var(--s2) 0;padding:var(--s2);border:1px solid var(--r);border-radius:8px;background:color-mix(in srgb,var(--r) 15%,transparent)}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
 /* #162: a fleet card: a bordered box with a 3 px top bar in the fleet's colour --fk (an accent token; red means "needs
-   you", so it is never a bar). The header: name in the colour, drive dot + age, then [drive now] [pause] [config]. */
+   you", so it is never a bar). The header: name in the colour, need-you count, [drive now] [pause] [config]; then the drive line (.dp). */
 .fc{--fk:var(--l);margin:var(--s3) 0;border:1px solid #30363d;border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
 .k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
 .fh{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit)}
 .fn{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--s2);white-space:nowrap;overflow:hidden}
 .fn>b{color:var(--fk)}
-.fn .ds{font-size:var(--fs-meta);color:var(--mute);overflow:hidden;text-overflow:ellipsis}
-.fn i{font-style:normal}
 .fh>.btns{padding-bottom:var(--s1)}
-.fm{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
 .fc>details.q:last-of-type{background:none}
 /* `done today: N` and the paused line get a chevron: a row that opens shows it opens. */
 .cv{font-style:normal;color:var(--mute)}.cv::before{content:"▸"}[open]>summary .cv::before{content:"▾"}
 .fc>.done{border-bottom:0;border-top:1px solid var(--line)}
-.fc>.done>summary{display:flex;gap:var(--s2);color:var(--mute);font-size:var(--fs-meta)}
+.fc>.done>summary{display:flex;gap:var(--s2);color:var(--mute);font-size:var(--fs-meta)}.fc>.done>summary>span{flex:1}
 .fc>.done>p{margin:0 0 var(--s1);font-size:var(--fs-meta)}
 /* A paused fleet: one grey line, its bar muted; [resume] on the right (paired devices only); a tap peeks its rows. */
 .fc.off{--fk:var(--mute);border-bottom:1px solid #30363d;padding-bottom:0;color:var(--mute)}
@@ -254,5 +251,8 @@ body:not(.unf) .ask.lt{display:none}
 .cs .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
 .cs .rk{font-size:var(--fs-meta);color:var(--mute)}
 .cs .soon{padding:var(--s2);border:1px dashed #30363d;border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
-/* #166: a driven fleet's result line under its header; a tap lists each action in plain words, a tap on one its code. */
-.dp summary{display:flex}.dp ul{margin:0;padding-left:var(--s4);color:var(--fg)}.dp code{font-size:var(--fs-meta)}
+/* #166, #162 A: a card's second line, the drive state in the pass's colour: one full-width line that ellipsises (no
+   7ch grid column); a tap lists the stall check, lanes, serial and each action in plain words, a tap on one its code. */
+.dp summary{display:flex;align-items:center;gap:var(--s2)}.dp>summary{font-size:var(--fs-meta)}
+.dp>summary>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dp>summary>i{font-style:normal}
+.dp ul{margin:0 0 var(--s2);padding-left:var(--s4);color:var(--fg);font-size:var(--fs-meta)}.dp code{font-size:var(--fs-meta)}

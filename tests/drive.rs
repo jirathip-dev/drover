@@ -484,7 +484,10 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
         String::from_utf8_lossy(&res).into_owned()
     };
     let page = get(&s);
-    assert!(page.contains("<button>Drive now</button>") && page.contains("<i class=a>●</i> drive · no pass yet"));
+    assert!(
+        page.contains("<button>Drive now</button>")
+            && page.contains("<details class=\"dp a\"><summary><i>●</i><span>drive · no pass yet</span>")
+    );
     let i = page.find("name=mtime value=").unwrap() + 17;
     let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=drive&fleet=sendmeter&mtime={mtime}");
@@ -505,7 +508,9 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
         "{res}"
     );
     assert!(r.called("herdr agent start sendmeter-impl-12"));
-    assert!(get(&s).contains("<i class=g>●</i> drive · 0s ago"));
+    assert!(
+        get(&s).contains("<details class=\"dp g\"><summary><i>●</i><span>drive · 0s ago · started 1 · merged 0</span>")
+    );
 }
 
 /// #140: a drive pass's lines as one toast, per action, then the refusals by code.

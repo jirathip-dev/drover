@@ -249,21 +249,27 @@ fn enc(s: &str) -> String {
         .collect()
 }
 
-/// #166: a driven fleet's result line under its header: `⟳ driving…`, else its last pass coloured by
-/// `drive::result`; a tap lists each action in plain words, a tap on one its raw code.
-fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str) -> String {
-    if crate::drive::running(ctx, fleet) {
-        return "<p class=\"dp m\">⟳ driving…</p>".into();
-    }
-    let Some(e) = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet) else {
-        return String::new();
+/// #166, #162 A: a fleet card's second line: `⟳ driving…`, else the last pass's age and result in its colour
+/// (`drive::result`), or `orch` when not driven; a tap lists `meta` (stall check, lanes, serial), then each action
+/// in plain words, a tap on one its raw code.
+fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, driven: bool, meta: &[String]) -> String {
+    let pass = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet);
+    let (tone, line) = match (driven, pass) {
+        (false, _) => ("m", "orch".to_string()),
+        _ if crate::drive::running(ctx, fleet) => ("m", "⟳ driving…".to_string()),
+        (true, None) => ("a", "drive · no pass yet".to_string()),
+        (true, Some(e)) => {
+            let (tone, line) = crate::drive::result(e);
+            let rest = line.split_once(" · ").map_or("", |r| r.1).to_string();
+            (
+                tone,
+                format!("drive · {} ago · {rest}", age(ctx.now.saturating_sub(e.ts))),
+            )
+        }
     };
-    let (tone, line) = crate::drive::result(e);
-    let acts = e
-        .data
-        .get("actions")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
+    let acts = pass
+        .filter(|_| driven)
+        .and_then(|e| e.data.get("actions").and_then(serde_json::Value::as_array).cloned())
         .unwrap_or_default();
     let items: String = acts
         .iter()
@@ -282,13 +288,14 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str) -> String {
             )
         })
         .collect();
-    let items = if items.is_empty() {
+    let items = if items.is_empty() && pass.is_some() && driven {
         "<li>nothing was due</li>".into()
     } else {
         items
     };
+    let meta: String = meta.iter().map(|m| format!("<li>{}</li>", esc(m))).collect();
     format!(
-        "<details class=\"dp {tone}\"><summary>{} · tap for details</summary><ul>{items}</ul></details>",
+        "<details class=\"dp {tone}\"><summary><i>●</i><span>{}</span><i class=cv></i></summary><ul>{meta}{items}</ul></details>",
         esc(&line)
     )
 }
@@ -1433,14 +1440,6 @@ impl<'a> Server<'a> {
                 continue;
             }
             // Green: the last drive pass is under 10 min old; amber: older or none; grey: orch-driven.
-            let (dot, ds) = match fc.driven().then(|| crate::drive::last_pass(ctx, f)) {
-                None => ("m", "orch".to_string()),
-                Some(None) => ("a", "drive · no pass yet".to_string()),
-                Some(Some(t)) => {
-                    let a = now.saturating_sub(t);
-                    (if a < 600 { "g" } else { "a" }, format!("drive · {} ago", age(a)))
-                }
-            };
             let drive = if fc.driven() {
                 button("drive", "Drive now")
             } else {
@@ -1462,15 +1461,10 @@ impl<'a> Server<'a> {
                 meta.push(format!("serial {busy}/{}", fc.serial_max.unwrap_or(1)));
             }
             cards.push((!need.is_empty(), format!(
-                "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b><span class=ds><i class={dot}>●</i> {ds}</span>{need}</span>\
-                 <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div><p class=fm>{}</p>{}{body}</div>",
+                "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
+                 <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{body}</div>",
                 button("pause", "Pause"),
-                meta.join(" · "),
-                if fc.driven() {
-                    drive_line(ctx, events, f)
-                } else {
-                    String::new()
-                }
+                drive_line(ctx, events, f, fc.driven(), &meta),
             )));
         }
         cards.sort_by_key(|c| !c.0);
