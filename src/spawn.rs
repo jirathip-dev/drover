@@ -316,32 +316,39 @@ pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
 }
 
-/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, else the package ones);
-/// the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it clones within
-/// one; elsewhere `--reflink=always` fails instead.
+/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for
+/// `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it
+/// clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the
+/// clone lands beside it and renames in only while the name is free.
 pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
     use std::os::unix::fs::MetadataExt;
     let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
     let (t, mut done, mut errs) = (std::time::Instant::now(), vec![], vec![]);
     for d in dirs {
-        let locks: &[&str] = if d == "target" {
-            &["Cargo.lock"]
-        } else {
-            &["package-lock.json", "pnpm-lock.yaml"]
+        let locks: &[&str] = match d.as_str() {
+            "target" => &["Cargo.lock"],
+            "node_modules" => &["package-lock.json", "pnpm-lock.yaml"],
+            _ => {
+                errs.push(format!("{d}: not target or node_modules"));
+                continue;
+            }
         };
-        let src = local.join(d);
-        if !src.is_dir() || !lockfiles_match(locks, local, wt) {
+        let (src, dst, tmp) = (local.join(d), wt.join(d), wt.join(format!(".{d}.clone")));
+        if !src.is_dir() || dst.exists() || !lockfiles_match(locks, local, wt) {
             continue;
         }
-        let (src, dst) = (src.to_string_lossy(), wt.to_string_lossy());
+        let (s, t) = (src.to_string_lossy(), tmp.to_string_lossy());
         let res = match cfg!(target_os = "macos") {
             true if dev(local) != dev(wt) => Err(anyhow::anyhow!("another volume, no clone")),
-            true => ok(r, "cp", &["-cR", &src, &dst]),
-            false => ok(r, "cp", &["-R", "--reflink=always", &src, &dst]),
+            true => ok(r, "cp", &["-cR", &s, &t]),
+            false => ok(r, "cp", &["-R", "--reflink=always", &s, &t]),
         };
-        match res {
-            Ok(_) => done.push(d),
-            Err(e) => errs.push(format!("{d}: {e:#}")),
+        match res.and_then(|_| Ok(std::fs::rename(&tmp, &dst)?)) {
+            Ok(()) => done.push(d),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                errs.push(format!("{d}: {e:#}"));
+            }
         }
     }
     let secs = t.elapsed().as_secs();
@@ -588,40 +595,43 @@ pub fn spawn(
         }
         herdr::exec(r, &herdr::rename_argv(&pane, &p.agent))?;
     }
-    let kicked = h.kick(r, &p, &pane);
-    let mut d = lane_data(&p, &pane, ws);
-    d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
-    d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
-    d["update"] = json!(o.update);
-    if let Some(h) = sha.filter(|h| !h.is_empty()) {
-        d["sha"] = json!(h);
+    // #185: a new lane's clone runs beside the kick and pane clean-up, once the lane has started; a failure is logged.
+    let mut dirs: Vec<String> = f.clone_build.clone();
+    dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
+    dirs.sort();
+    dirs.dedup();
+    let dirs = if reopen { &[][..] } else { &dirs[..] };
+    let (res, cloned) = std::thread::scope(|s| {
+        let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
+        let res = (|| -> Result<bool> {
+            let kicked = h.kick(r, &p, &pane);
+            let mut d = lane_data(&p, &pane, ws);
+            d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
+            d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
+            d["update"] = json!(o.update);
+            if let Some(h) = sha.filter(|h| !h.is_empty()) {
+                d["sha"] = json!(h);
+            }
+            event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
+            let confirmed = kicked?;
+            // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
+            if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
+                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
+                    let _ = herdr::close(r, old);
+                    event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
+                }
+            }
+            pj["pane"] = json!(pane);
+            pj["confirmed"] = json!(confirmed);
+            print_plan(out, &pj, o.json)?;
+            Ok(confirmed)
+        })();
+        (res, c.join().ok().flatten())
+    });
+    if let Some(d) = cloned {
+        event("build-cloned", d)?;
     }
-    event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
-
-    // #185: after the lane starts, so the clone never delays it; a failure is logged and the spawn stands.
-    let dirs: Vec<String> = f
-        .clone_build
-        .iter()
-        .cloned()
-        .chain(f.clone_node_modules.then(|| "node_modules".into()))
-        .collect();
-    if !reopen {
-        if let Some(d) = clone_build(r, &dirs, &f.local_path(), &p.worktree) {
-            event("build-cloned", d)?;
-        }
-    }
-    let confirmed = kicked?;
-    // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
-    if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
-        if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-            let _ = herdr::close(r, old);
-            event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
-        }
-    }
-    pj["pane"] = json!(pane);
-    pj["confirmed"] = json!(confirmed);
-    print_plan(out, &pj, o.json)?;
-    Ok(confirmed)
+    res
 }
 
 /// #107: the pane of the lane's agent (its planned name, or `unnamed`) in its worktree that no `spawn` logged: adopt it.

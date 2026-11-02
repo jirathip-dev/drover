@@ -139,20 +139,28 @@ fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     assert_eq!(clone(&r), None, "mismatch: no clone");
     assert!(!r.called("cp "));
     std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
+    std::fs::create_dir(wt.join(".target.clone")).unwrap(); // what the faked `cp` would have made
     let d = clone(&r).unwrap();
     assert_eq!((d["dirs"].clone(), d["errors"].clone()), (json!(["target"]), json!([])));
-    let calls = r.calls.borrow();
+    assert!(wt.join("target").is_dir() && !wt.join(".target.clone").exists());
+    let calls = r.calls.borrow().clone();
     assert_eq!(calls.len(), 1, "node_modules has no lockfile: {calls:?}");
-    assert!(calls[0].ends_with(&format!(" {} {}", local.join("target").display(), wt.display())));
+    let (src, tmp) = (local.join("target"), wt.join(".target.clone"));
+    assert!(calls[0].ends_with(&format!(" {} {}", src.display(), tmp.display())));
     let flag = if cfg!(target_os = "macos") {
         "cp -cR "
     } else {
         "cp -R --reflink=always "
     };
     assert!(calls[0].starts_with(flag), "{}", calls[0]);
+    assert_eq!(clone(&r), None, "the lane has its own target: never cloned over");
+    std::fs::remove_dir(wt.join("target")).unwrap();
     let d = clone(&Fake::default()).unwrap();
     assert_eq!(d["dirs"], json!([]));
     assert!(d["errors"][0].as_str().unwrap().starts_with("target: "), "{d}");
+    let d = herdsman::spawn::clone_build(&r, &["targt".into()], &local, &wt).unwrap();
+    assert_eq!(d["errors"], json!(["targt: not target or node_modules"]));
+    assert_eq!(r.count("cp "), 1);
 }
 
 /// #185: a reopened worktree keeps its own build folders.
@@ -196,14 +204,22 @@ fn reopen_spawn_clones_no_build_folder() {
     assert!(ev.iter().any(|e| e.kind == "spawn") && !ev.iter().any(|e| e.kind == "build-cloned"));
 }
 
-/// `Fake`, plus `herdr worktree create` checks out `Cargo.lock` into the new lane like the real one.
-struct Checkout<'a>(&'a Fake, std::path::PathBuf);
+/// `Fake`, plus `herdr worktree create` checks out `Cargo.lock` into the new lane like the real one, and the kick's
+/// `herdr agent wait` holds until `cp` ran (the third field: it did), which a clone run before or after it never does.
+struct Checkout<'a>(&'a Fake, std::path::PathBuf, std::sync::atomic::AtomicBool);
 
 impl herdsman::runner::Runner for Checkout<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
         if prog == "herdr" && args.starts_with(&["worktree".into(), "create".into()]) {
             std::fs::create_dir_all(&self.1).unwrap();
             std::fs::write(self.1.join("Cargo.lock"), "a").unwrap();
+        }
+        if prog == "herdr" && args.starts_with(&["agent".into(), "wait".into()]) {
+            let t = std::time::Instant::now();
+            while !self.0.called("cp ") && t.elapsed().as_secs() < 5 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            self.2.store(self.0.called("cp "), std::sync::atomic::Ordering::SeqCst);
         }
         self.0.run(prog, args)
     }
@@ -245,7 +261,9 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
         .reply("herdr agent start", "{}")
         .reply("herdr agent wait", "{}")
         .once_err("cp ", 1, "clonefile failed");
-    let (code, out) = run(&c, &Checkout(&f, wt), &["spawn", "sendmeter", "12", "impl"]);
+    let ck = Checkout(&f, wt, Default::default());
+    let (code, out) = run(&c, &ck, &["spawn", "sendmeter", "12", "impl"]);
+    assert!(ck.2.into_inner(), "the clone runs beside the kick, not before it");
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert_eq!(f.count("cp "), 1, "one clone attempt, never a fallback copy");
     assert!(

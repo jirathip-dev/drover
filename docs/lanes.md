@@ -35,11 +35,12 @@ one per lane, e.g. `[fleet.herdsman.env] CARGO_TARGET_DIR = "~/.cache/herdsman/t
 lock makes it safe; lanes queue on it). Node fleets: pnpm's store is already shared; for npm set
 `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
-for `target`, `package-lock.json` and `pnpm-lock.yaml` for any other folder. It runs once the lane has
-started and logs `build-cloned {dirs, secs, errors}`. With no clone available (another volume; Linux
-without reflinks) it skips and logs the error, never a full copy. A clone costs about 0 disk until
-written, though `du` and the Host disk row still count it at full size. `clone_node_modules = true` is
-the old spelling of `clone_build = ["node_modules"]`, kept for one release.
+for `target`, `package-lock.json` and `pnpm-lock.yaml` for `node_modules`; other names are logged and skipped.
+It runs beside the kick once the lane has started, never over a folder the lane already has, and logs
+`build-cloned {dirs, secs, errors}`. With no clone available (another volume; Linux without reflinks) it skips
+and logs the error, never a full copy. The worktree budget and Host disk row count blocks used (`du -k`), not
+apparent size. `clone_node_modules = true` is the old spelling of `clone_build = ["node_modules"]`, kept for
+one release.
 
 `herdsman close <agent>` closes the pane of a herdr agent that is not a herdsman lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
