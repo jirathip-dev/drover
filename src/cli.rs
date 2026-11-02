@@ -229,7 +229,7 @@ enum Cmd {
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
-    /// Remove worktree + pane of merged or closed-issue lanes (never live, dirty or unpushed ones); dry run unless --yes
+    /// Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes
     Clean {
         fleet: Option<String>,
         /// Only this agent's worktree; refuses UNSAFE_CLEAN with the reason
@@ -238,6 +238,9 @@ enum Cmd {
         /// Actually remove
         #[arg(long)]
         yes: bool,
+        /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
+        #[arg(long)]
+        orphans: bool,
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
@@ -363,8 +366,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`).
-pub const HELP_AGENT_MAX: usize = 203;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`).
+pub const HELP_AGENT_MAX: usize = 204;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -704,8 +707,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
-                Cmd::Clean { fleet, lane, yes } => {
+                Cmd::Clean {
+                    fleet,
+                    lane,
+                    yes,
+                    orphans,
+                } => {
                     check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
+                    if lane.is_none() {
+                        check::orphans(ctx, &cfg, out, orphans && yes)?;
+                    }
                 }
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,

@@ -518,6 +518,11 @@ pub fn spawn(
     if let Some(gb) = host::free_gb(r).filter(|g| *g < min) {
         return refused("DISK_LOW", format!("{gb:.1} GB free < {min}; `herdsman clean --yes`"));
     }
+    // #164: the last drive pass's worktree walk (drive frees the idlest lanes' build folders first).
+    let budget = cfg.limits.worktree_budget_gb;
+    if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| *g > budget) {
+        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
+    }
     let mut hs = host::sample(r);
     host::window(&ctx.state, &mut hs);
     let mem = cfg.limits.min_free_mem_gb;
