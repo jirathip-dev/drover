@@ -85,7 +85,7 @@ for (let i = 1; i <= 14; i++) { await touch('touchMove', r[1] + 30 * i); await s
 await touch('touchEnd');
 await sleep(800);
 await cmd('Page.stopScreencast');
-const [hidden, seen] = await js("[document.querySelector('#sheet').hidden, [...seen]]");
+const [hidden, seen] = await js("[!document.querySelector('#sheet').matches('.on'), [...seen]]");
 c.kill();
 if (frames.length < 5) fail(`${frames.length} screencast frames, too few to judge`);
 const share = frames.map(black), worst = share.indexOf(Math.max(...share));
