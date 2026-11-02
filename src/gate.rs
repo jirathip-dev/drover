@@ -69,14 +69,26 @@ pub fn verdict(
         return refused("STALE_SHA", format!("{branch} head is {head}, not {sha}"));
     }
     let v = if pass { "PASS" } else { "FAIL" };
-    let round = st.as_ref().map_or(1, |s| s.rounds + u32::from(!s.reviewed(&head)));
-    let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round});
+    // #173: a review lane's verdict is its check stage's; any other (CI red while ready) is the gate's, and counts
+    // against the rounds of the check its fix goes back to.
+    let p = f.flow();
+    let stage = match st.as_ref() {
+        Some(s) if s.state.starts_with("review") && s.check.is_some() => s.stage.as_str(),
+        _ => p.gate(),
+    };
+    let lp = p.loop_of(stage);
+    let round = st.as_ref().map_or(1, |s| {
+        let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == lp);
+        s.stage_rounds.get(lp).copied().unwrap_or_default() + u32::from(new)
+    });
+    let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
+        "stage": stage, "loop": lp});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, Some(issue), "verdict", data),
     )?;
-    let limit = cfg.limits.review_rounds + st.as_ref().map_or(0, |s| s.extra);
+    let limit = rounds(f, lp) + st.as_ref().map_or(0, |s| s.extra);
     writeln!(out, "recorded {v} for {fleet}#{issue} @ {head} (round {round}/{limit})")?;
     if !pass && round >= limit {
         let d = json!({"reason": format!("review rounds ran out ({round}/{limit})"), "findings": body});
@@ -99,7 +111,7 @@ pub fn verdict(
     }
     // #128: the verdict is the reviewer's only work: remove its worktree and close its pane, or keep a dirty one.
     let events = read(&ctx.state)?;
-    let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && e.str("role") == Some("rev");
+    let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
     let rev = events.iter().rfind(is_rev);
     let Some((e, wt)) = rev.and_then(|e| Some((e, e.str("worktree").filter(|w| Path::new(w).exists())?))) else {
         return Ok(());
@@ -131,7 +143,7 @@ pub fn verdict(
 fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
     let mut h = head;
     loop {
-        if let Some((_, v)) = s.verdicts.iter().rev().find(|(x, _)| x.eq_ignore_ascii_case(h)) {
+        if let Some((_, v, _)) = s.verdicts.iter().rev().find(|(x, ..)| x.eq_ignore_ascii_case(h)) {
             return v == "PASS";
         }
         let up = events
@@ -185,8 +197,14 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     gh::not_green(&gh::required(rollup, required)).map_or(Ok(()), |m| Err(format!("{prefix}{m}")))
 }
 
-/// Pure merge gate. Returns the head sha that may be merged.
-pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, limit: u32) -> Result<String, Refusal> {
+/// A check stage's review rounds (`[limits] review_rounds` in the built-in pipeline); unset: no limit.
+fn rounds(f: &Fleet, stage: &str) -> u32 {
+    f.flow().get(stage).and_then(|s| s.rounds).unwrap_or(u32::MAX)
+}
+
+/// Pure merge gate: every check stage's PASS at the head, within its rounds (`over`: past them). Returns the head sha
+/// that may be merged.
+pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Result<String, Refusal> {
     let integration = f.integration.as_str();
     let base = pr["baseRefName"].as_str().unwrap_or_default();
     if is_main(integration) || is_main(base) {
@@ -209,7 +227,8 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, limit: u32) -> Resul
             "no review verdict recorded; run a reviewer and `herdsman verdict`",
         ));
     }
-    let Some((_, v)) = verdicts.iter().rev().find(|(s, _)| s.eq_ignore_ascii_case(&head)) else {
+    let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(&head);
+    let Some((_, v, _)) = verdicts.iter().rev().find(at) else {
         return Err(refuse(
             "STALE_VERDICT",
             format!("no verdict for head {head}; re-review the current head"),
@@ -218,12 +237,21 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, limit: u32) -> Resul
     if v != "PASS" {
         return Err(refuse("VERDICT_FAIL", format!("verdict for {head} is {v}")));
     }
-    let (rounds, limit) = st.map_or((0, limit), |s| (s.rounds, limit.saturating_add(s.extra)));
-    if rounds > limit {
-        return Err(refuse(
-            "ROUND_LIMIT",
-            format!("review rounds ran out ({rounds}/{limit})"),
-        ));
+    // #173: a 2-check pipeline merges only with a PASS from each at this head.
+    for c in f.flow().checks() {
+        let last = verdicts.iter().rev().filter(at).find(|x| x.2 == c.name);
+        match last.map(|x| x.1.as_str()) {
+            Some("PASS") => {}
+            Some(v) => return Err(refuse("VERDICT_FAIL", format!("{} verdict for {head} is {v}", c.name))),
+            None => return Err(refuse("STALE_VERDICT", format!("no {} PASS for head {head}", c.name))),
+        }
+        let (n, extra) = st.map_or((0, 0), |s| {
+            (s.stage_rounds.get(&c.name).copied().unwrap_or_default(), s.extra)
+        });
+        let limit = rounds(f, &c.name).saturating_add(extra);
+        if n > limit && !over {
+            return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}/{limit})")));
+        }
     }
     ci_green(&pr["statusCheckRollup"], &f.required_checks)
         .map_err(|m| refuse("CI_NOT_GREEN", format!("{m} at {head}")))?;
@@ -263,16 +291,16 @@ pub fn merge(
     let h = pr["headRefOid"].as_str().unwrap_or_default();
     let st = st.map(|mut s| {
         if !h.is_empty() && !s.reviewed(h) && crate::overlap::pure(r, f, &s, h) {
-            s.verdicts.push((h.into(), "PASS".into()));
+            s.verdicts
+                .extend(f.flow().checks().map(|c| (h.into(), "PASS".into(), c.name.clone())));
         }
         s
     });
     let num = pr["number"].as_u64().unwrap_or_default().to_string();
-    let lim = cfg.limits.review_rounds;
     let res = if pr.get("error").is_some() {
         Err(refuse("NO_PR", format!("no open PR for branch {branch} in {}", f.repo)))
     } else {
-        gate(f, &pr, st.as_ref(), if over { u32::MAX } else { lim })
+        gate(f, &pr, st.as_ref(), over)
     };
     let serial = || crate::queue::serial(&read(&ctx.state).unwrap_or_default(), fleet).contains(&issue);
     let res = match res {

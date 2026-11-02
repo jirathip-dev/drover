@@ -301,6 +301,78 @@ body:not(.unf) .ask.lt{display:none}
 .dp summary{display:flex;align-items:center;gap:var(--s2)}.dp>summary{font-size:var(--fs-meta)}
 .dp>summary>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dp>summary>i{font-style:normal}
 .dp ul{margin:0 0 var(--s2);padding-left:var(--s4);color:var(--fg);font-size:var(--fs-meta)}.dp code{font-size:var(--fs-meta)}
+/* #173: the pipeline group (in a fleet's [config] sheet) and the card's current stage. */
+/* Stage kinds: a glyph in a fixed colour. ▲ build (pushes code) amber, ◆ check (PASS/FAIL) purple, ◫ gate
+   (herdsman's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
+.kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
+/* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
+   park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).
+   serve.js writes grid-row / grid-area / the column list inline (no px). */
+.pg{--ln:calc(var(--s4) + var(--s2));display:grid;min-width:0;margin:var(--s2) 0;line-height:var(--ln)}
+.pg>*{position:relative;min-width:0;margin:0}
+/* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome
+   that leaves the spine. Every line is one line: it ellipsises, the full text is its title. */
+.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:#161b22;border:solid #30363d;border-width:0 1px;white-space:nowrap;overflow:hidden}
+.nb.t{border-top-width:1px;border-radius:6px 6px 0 0}.nb.b{border-bottom-width:1px;border-radius:0 0 6px 6px}.nb.t.b{border-radius:6px}
+.nb>b{font-weight:600}
+.nb>.tag{margin-left:auto;line-height:1.5}
+.nb .dt,.nb.po>span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta);color:var(--mute)}
+.nb .dt.r{color:var(--r)}
+.nb.po>span b{font-weight:400}
+/* An outcome leaving the box: its word in its colour, then a leader to the box edge, where its rail picks it up.
+   Right = back into a loop (grey); left = out of rounds, to park (red, dashed). */
+.nb.po::after{content:"";flex:1 0 var(--s2);margin-right:-1ch;border-top:1px solid var(--mute)}
+.nb.po.l::after{display:none}
+.nb.po.l::before{content:"";flex:0 0 1ch;margin-left:-1ch;border-top:1px dashed var(--r)}
+.nb.end{border-color:#30363d}
+/* Errors: a broken stage gets a red edge; an unreachable one is dashed and dimmed. */
+.nb.bad{border-color:var(--r)}
+.nb.dead{border-style:dashed;border-color:var(--r)}.nb.dead>:not(.dt){opacity:.55}
+/* The spine: the main outcome (push / PASS / ok) straight down to the next stage, its word beside the arrow. */
+.pl{grid-column:2;padding-left:4ch;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl>b{font-weight:400;margin-right:1ch}
+.pl::before{content:"";position:absolute;left:2ch;top:0;bottom:0;border-left:1px solid var(--mute)}
+.pl::after{content:"▾";position:absolute;left:2ch;bottom:0;translate:-50% 35%;line-height:1;color:var(--mute)}
+.pl.no::before,.pl.no::after,.pl.pn::before,.pl.pn::after{display:none}
+.pl.pn{padding-left:1ch;white-space:normal}
+.nl{grid-column:2;display:flex;gap:var(--s2);padding-left:1ch;white-space:nowrap;overflow:hidden}
+.nl>i{position:relative;left:.5ch}
+/* Rails. .ea: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
+   .ey: the rail itself, middle of its first row to middle of its last. */
+.ea::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
+.ea.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;font-size:var(--fs);line-height:1;color:var(--mute)}
+.ey::before{content:"";position:absolute;left:50%;top:calc(var(--ln) / 2);bottom:calc(var(--ln) / 2);border-left:1px solid var(--mute)}
+.ea.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
+.ea.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
+.ey.l::before{border-left:2px dashed var(--r)}
+.ek{z-index:1}.ek::before{content:"";position:absolute;inset:15% 0;background:var(--bg)}
+/* A loop target's header names the rail that joins it. */
+.nb>.lp{margin-left:auto;font-size:var(--fs-meta);color:var(--mute)}.nb>.tag~.lp{margin-left:0}
+.ea{z-index:2}
+/* The pipeline group: a status line, the graph, the source; side by side when there is room for both. */
+.pp .pv{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.pp .pw2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:0 var(--s4);align-items:start}
+.pp .lg{margin:var(--s1) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+.pp .lg i{font-style:normal}
+.tm{border:0;margin:var(--s2) 0}
+.tm>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);font-size:var(--fs-meta);color:var(--mute)}
+.tm pre{margin:0;padding:var(--s2);background:#161b22;border:1px solid #30363d;border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+/* A refused pipeline: what stops, then one line per broken rule, each with its place in fleet.toml. */
+.pe{margin:var(--s1) 0 var(--s2);padding:0 var(--s2);border:1px solid var(--r);border-radius:6px}
+.pe>p{margin:var(--s2) 0}
+.pe ol{margin:0 0 var(--s2);padding:0;list-style:none}
+.pe li{padding:var(--s1) 0;border-top:1px solid var(--line)}
+.pe li>b{font-weight:400;margin-right:1ch}
+.pe li>.at{font-size:var(--fs-meta);color:var(--mute);margin-left:1ch}
+.pe .qn{color:var(--fg)}
+/* The card's "where it is now": queued ─ stages ─ merge, wrapping; the current stage lit in its kind's colour,
+   a check that PASSed at the head ticked. Under it, one 11 px line: the round and what it waits on. */
+.ps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) 0;margin:var(--s2) 0 0;color:var(--mute)}
+.ps .sx{font-style:normal;padding:0 .5ch}
+.pt{display:inline-flex;gap:.5ch;padding:0 var(--s1);border:1px solid transparent;border-radius:4px;white-space:nowrap}
+.pt.dn{color:var(--fg)}
+.pt.on{--kc:var(--mute);color:var(--fg);border-color:var(--kc);background:color-mix(in srgb,var(--kc) 16%,transparent)}
+.pt.on.kb{--kc:var(--a)}.pt.on.kc{--kc:var(--p)}.pt.on.kg{--kc:var(--c)}
 /* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: unfilled per #58, accent text
    and underline, a fleet chip in its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
 .fd{display:inline-block;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fk,transparent);flex:none}
