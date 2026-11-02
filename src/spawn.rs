@@ -108,7 +108,6 @@ pub struct Plan {
     /// Claude lanes: the account name and the shell assignment exporting its token.
     pub account: Option<(String, String)>,
     pub env: std::collections::BTreeMap<String, String>,
-    /// #187: `HERDSMAN_PORT`, for the lane's dev servers.
     pub port: u16,
     /// The only MCP servers the lane gets, and the lane-local file Claude reads them from.
     pub mcp: serde_json::Map<String, Value>,
@@ -119,20 +118,11 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env` (`$HERDSMAN_PORT` expands) and an account's
-    /// `CLAUDE_CODE_OAUTH_TOKEN` in the pane's shell.
+    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env` and an account's token in the pane's shell.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
-        let (lane, port) = (
-            format!("HERDSMAN_LANE='{}'", self.lane),
-            format!("HERDSMAN_PORT={}", self.port),
-        );
-        let mut c = herdr::run_argv(pane, &["export", &lane, &port]);
-        let v = |v: &str| {
-            expand(v)
-                .display()
-                .to_string()
-                .replace("$HERDSMAN_PORT", &self.port.to_string())
-        };
+        let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
+        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
+        let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
         c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| a.1.clone()));
         c
@@ -182,19 +172,14 @@ pub fn lane_title(head: &str, issue_title: &str) -> String {
     }
 }
 
-/// #187: `key` (`<fleet>/<branch>`) hashed (FNV-1a) into `range` (`lo-hi`, default 41000-41999); a `taken` port moves
-/// to the next free one.
+/// #187: `<fleet>/<branch>` hashed (FNV-1a) into `range` (default 41000-41999); a `taken` port takes the next free one.
 pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
-    let parse = |r: &str| -> Option<(u16, u16)> {
-        let (a, b) = r.split_once('-')?;
-        Some((a.trim().parse().ok()?, b.trim().parse().ok()?)).filter(|(a, b)| a <= b)
-    };
-    let (lo, hi) = range.and_then(parse).unwrap_or((41000, 41999));
+    let r = range.and_then(|r| r.split_once('-'));
+    let r = r.and_then(|(a, b)| Some((a.trim().parse::<u16>().ok()?, b.trim().parse::<u16>().ok()?)));
+    let (lo, hi) = r.filter(|(a, b)| a <= b).unwrap_or((41000, 41999));
     let n = u32::from(hi - lo) + 1;
-    let h = key
-        .bytes()
-        .fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
-        % n;
+    let fnv = |h: u32, b: u8| (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    let h = key.bytes().fold(0x811c_9dc5, fnv) % n;
     let at = |i: u32| lo + u16::try_from((h + i) % n).unwrap_or_default();
     (0..n).map(at).find(|p| !taken.contains(p)).unwrap_or(at(0))
 }
@@ -558,6 +543,11 @@ pub fn spawn(
     let min = cfg.limits.min_free_gb;
     if let Some(gb) = host::free_gb(r).filter(|g| *g < min) {
         return refused("DISK_LOW", format!("{gb:.1} GB free < {min}; `herdsman clean --yes`"));
+    }
+    // #164: the last drive pass's worktree walk (drive frees the idlest lanes' build folders first).
+    let budget = cfg.limits.worktree_budget_gb;
+    if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| *g > budget) {
+        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
     }
     let mut hs = host::sample(r);
     host::window(&ctx.state, &mut hs);

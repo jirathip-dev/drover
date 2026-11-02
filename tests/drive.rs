@@ -136,6 +136,15 @@ fn review_spawns_rev_at_the_pushed_head() {
         "herdr worktree create --cwd /tmp/does-not-matter/sendmeter --branch rev-12-r1 --base origin/issue-12"
     ));
     assert_eq!(state(&c), "review(1)");
+    // The reviewer's pane is live (idle, no verdict yet): nothing to do.
+    let rev = c.worktrees.join("sendmeter/rev-12-r1");
+    let r = fake(&agents(&[
+        ("sendmeter-impl-12", "idle", &wt.to_string_lossy(), "w9:p1"),
+        ("sendmeter-rev-12-r1", "idle", &rev.to_string_lossy(), "w9:p2"),
+    ]))
+    .reply("gh pr view issue-12", &pr(&head, "pending"))
+    .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
+    .reply("git -C", "");
     idle(&c, &r);
 }
 
@@ -978,7 +987,8 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
     // The label shows on the PR: the next pass doesn't re-add it.
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &labelled_pr(&head, &["merge-ready"]))
-        .reply("gh pr edit", "");
+        .reply("gh pr edit", "")
+        .reply("git -C", "");
     idle(&c, &r);
     assert!(!r.called("gh pr edit"));
     // The head moved past the PASS (a fresh PR read, as after 60 s): the label comes off, and is never added back.
@@ -1257,4 +1267,143 @@ fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
     assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
     assert!(out.contains("alpha #5 start: REFUSED HOST_BUSY"), "{out}");
     assert_eq!(state(&c), "review(1)");
+}
+
+// --- #214: conflicts get their update lane, catch-ups every pass, a lost reviewer is replaced, no silent block ---
+
+#[test]
+fn a_ready_conflicting_pr_gets_its_update_lane_and_no_merge_attempt() {
+    let c = setup("drive-conflict-first");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
+    std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
+    let head = sha("abc");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "CONFLICTING", "DIRTY"))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict", "conflict"], "{out}");
+    assert!(!r.called("gh pr merge"), "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+}
+
+#[test]
+fn a_merge_that_fails_on_a_conflict_gets_the_update_lane() {
+    let c = setup("drive-merge-conflict");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    // GitHub's cached `mergeable` lags: the merge itself finds the conflict.
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "MERGEABLE", "CLEAN"))
+        .once_err(
+            "gh pr merge 100",
+            1,
+            "Pull request #100 is not mergeable: the merge commit cannot be cleanly created.",
+        )
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["merge", "conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+}
+
+#[test]
+fn auto_update_runs_in_a_pass_with_no_merge() {
+    let c = setup("drive-catch-up");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("a1");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let wt = c.state.with_file_name("update-sendmeter");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "pending"))
+        .reply("git -C /tmp/does-not-matter/sendmeter rev-parse", &format!("{head}\n"))
+        .reply(
+            &format!("git -C {} rev-parse HEAD", wt.display()),
+            &format!("{}\n", sha("b2")),
+        )
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert!(steps.is_empty(), "{out}");
+    assert!(!r.called("gh pr merge"), "{out}");
+    assert!(out.contains("sendmeter #12 auto-updated: a100000 → b200000"), "{out}");
+    assert!(r.called(&format!("git -C {} push -q origin HEAD:issue-12", wt.display())));
+}
+
+#[test]
+fn an_exited_reviewer_without_a_verdict_gets_a_new_review_round() {
+    let c = setup("drive-rev-lost");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("b4e191c");
+    let rev = c.worktrees.join("sendmeter/rev-12-r1");
+    std::fs::create_dir_all(&rev).unwrap();
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "pane": "w9:r", "workspace": "w9",
+        "worktree": rev, "branch": "rev-12-r1", "sha": head});
+    ev(&c, 20, "spawn", d);
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("git -C", "");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(
+        out.contains("reviewer exited without a verdict: reviewing again"),
+        "{out}"
+    );
+    assert!(!out.contains("head moved"), "{out}");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
+    let all = read(&c.state).unwrap();
+    assert!(all.iter().any(|e| e.kind == "lane-lost"), "{out}");
+}
+
+#[test]
+fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() {
+    for (name, mergeable, step) in [
+        ("drive-blocked-conflict", "CONFLICTING", "conflict"),
+        ("drive-blocked-review", "MERGEABLE", "review"),
+    ] {
+        let c = setup(name);
+        lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+        let head = sha("abc");
+        ev(
+            &c,
+            30,
+            "verdict",
+            json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+        );
+        ev(&c, 40, "blocked", json!({"code": "BASE_MISMATCH", "reason": "?"}));
+        let r = fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &stale_pr(&head, mergeable, "DIRTY"))
+            .reply("git -C", "");
+        let (out, steps) = drive(&c, &r);
+        assert_eq!(steps, [step], "{out}");
+    }
+    let c = setup("drive-blocked-no-pr");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 40, "blocked", json!({"code": "NO_PR", "reason": "no open PR"}));
+    let r = fake(NO_AGENTS).reply("git -C", "");
+    let (out, _) = drive(&c, &r);
+    assert!(
+        out.contains("sendmeter #12 no-action: nothing to do (blocked)"),
+        "{out}"
+    );
+    idle(&c, &r);
+    assert_eq!(
+        read(&c.state).unwrap().iter().filter(|e| e.kind == "no-action").count(),
+        1
+    );
 }

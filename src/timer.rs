@@ -152,6 +152,17 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         herdr::status(r).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
         crate::check::check(ctx, cfg, r, out)?;
+        // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
+        let at = ctx.state.with_file_name("clean.at");
+        let last = std::fs::read_to_string(&at)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok());
+        if last.is_none_or(|t| ctx.now >= t + 3600) {
+            let _ = std::fs::write(&at, ctx.now.to_string());
+            if let Err(e) = crate::check::clean(ctx, cfg, r, out, None, (None, None), true) {
+                writeln!(out, "clean: {e:#}")?;
+            }
+        }
         drive::drive(ctx, cfg, r, out, None, false)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
@@ -313,21 +324,20 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
     rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
-        // #160: the worktree total `check` stored (bytes, when); never a `du` on the request path.
-        let du = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).unwrap_or_default();
-        let mut n = du.split_whitespace();
-        let (b, at) = (
-            n.next().and_then(|b| b.parse::<f64>().ok()),
-            n.next().and_then(|t| t.parse().ok()),
-        );
-        let wt = match b {
-            Some(b) => format!("worktrees {:.1} GB · {}", b / 1_073_741_824.0, ago(ctx.now, at)),
-            _ => "worktrees not measured yet".into(),
-        };
         let (min, n) = (cfg.limits.min_free_gb, usize::from);
         let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
-        let d = format!("{gb:.0} GB free · {wt}");
-        rows.push(row("disk", t, d, "herdsman clean --yes"));
+        rows.push(row("disk", t, format!("{gb:.0} GB free"), "herdsman clean --yes"));
     }
+    // #164: the worktree total from the last walk (#160: never a `du` here), against the budget; amber from 80 %,
+    // red over (DISK_BUDGET).
+    let budget = cfg.limits.worktree_budget_gb;
+    let du = crate::check::worktree_du(ctx);
+    let (t, d) = du.map_or(("a", "not measured yet".into()), |(gb, at)| {
+        let full = |i: &u8| f64::from(*i) < (gb / budget * 10.0).round();
+        let bar: String = (0..10).map(|i| if full(&i) { '█' } else { '░' }).collect();
+        let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
+        (t, format!("▕{bar}▏ {gb:.1} / {budget} GB · {}", ago(ctx.now, at)))
+    });
+    rows.push(row("fleet disk", t, d, "herdsman clean --yes"));
     rows
 }

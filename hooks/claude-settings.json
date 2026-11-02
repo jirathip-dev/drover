@@ -1,5 +1,7 @@
 {
   "autoMemoryEnabled": false,
+  "attribution": { "commit": "", "pr": "" },
+  "includeCoAuthoredBy": false,
   "hooks": {
     "PreToolUse": [
       {

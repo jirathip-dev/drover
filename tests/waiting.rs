@@ -164,7 +164,10 @@ fn every_case_has_its_who_what_and_next_command() {
     let all = waits(
         &c,
         &r,
-        &[json!({"name": "sendmeter-impl-11", "agent_status": "working"})],
+        &[
+            json!({"name": "sendmeter-impl-11", "agent_status": "working"}),
+            json!({"name": "sendmeter-rev-9-r1", "agent_status": "idle"}),
+        ],
     );
     let t = NOW - 1500;
     let s = |n: &str| Some(format!("herdsman {n}"));
@@ -200,7 +203,14 @@ fn every_case_has_its_who_what_and_next_command() {
         (8, "none", "nothing to do (merged): clean me", t + 20, None),
         (9, "none", "rev idle without a verdict (check the pane)", t + 10, None),
         (10, "none", "idle without pushing (check the pane)", t, None),
-        (12, "none", "rev idle without a verdict (check the pane)", t + 10, None),
+        // #214: #12's reviewer exited (no herdr agent) without a verdict: a new review round.
+        (
+            12,
+            "drive",
+            "reviewer exited without a verdict: reviewing again",
+            t + 10,
+            s("spawn sendmeter 12 rev --supersede"),
+        ),
         (13, "none", "nothing to do (closed): clean me", t, None),
         (
             14,
@@ -304,7 +314,11 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
     );
     let (_, j) = run(&c, &r, &["waiting", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&j).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 7);
+    assert_eq!(v.as_array().unwrap().len(), 9, "#9 and #12's reviewers exited: {out}");
+    assert!(
+        out.contains("sendmeter #12 drive: reviewer exited without a verdict: reviewing again"),
+        "{out}"
+    );
     assert!(
         out.contains(
             "sendmeter #14 drive: verdict written, waiting for drive (next pass ≤ 5 min) to record it (24m) → ?\n"

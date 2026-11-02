@@ -401,7 +401,9 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 }
 
 /// Form ops only a paired device may POST.
-const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park", "reap"];
+const PAIRED_OPS: &[&str] = &[
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap",
+];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
@@ -1079,6 +1081,10 @@ impl<'a> Server<'a> {
                 )?;
                 format!("#{n}: {op}")
             }
+            "orphans" => {
+                let n = crate::check::orphans(ctx, &Config::load(&ctx.config)?, &mut out, true)?;
+                format!("removed {n} orphan folder(s)")
+            }
             "reap" => {
                 let cfg = Config::load(&ctx.config)?;
                 let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
@@ -1366,7 +1372,48 @@ impl<'a> Server<'a> {
                     .unwrap_or_default()
                     .to_string();
                 let chips = s.map_or(String::new(), |s| stage_line(fc, s, &head));
-                let mut card = vec![chips, esc(lane), pr_line(ctx, Some(fc), f, n, s)];
+                // #205: a lane herdr still lists opens its Lanes sheet (serve.js `.ql`); a gone one is muted text.
+                let link = |a: &str, text: String| match ls.iter().find(|l| l.name == a) {
+                    Some(_) => format!("<a href=#lanes class=\"ql nw el\" data-agent=\"{}\">{text}</a>", esc(a)),
+                    None => format!("<span class=\"ql nw el m\">{text}</span>"),
+                };
+                let mut seen = BTreeSet::new();
+                let spawns = events.iter().rev().filter(|e| e.is("spawn", f, n));
+                let qls: Vec<String> = spawns
+                    .filter_map(|e| e.str("agent").filter(|a| seen.insert(*a)).map(|a| (a, e.ts)))
+                    .map(|(a, ts)| {
+                        let st = ls.iter().find(|l| l.name == a).map_or("gone", |l| l.state.as_str());
+                        let (dot, tn) = (
+                            if st == "working" { "●" } else { "○" },
+                            if st == "gone" { "m" } else { tone(st) },
+                        );
+                        link(
+                            a,
+                            format!("<span class={tn}>{dot}</span> {} {st} {}", esc(a), ago(now, ts)),
+                        )
+                    })
+                    .collect();
+                let more = (qls.len() > 5).then(|| {
+                    format!(
+                        "<details class=qm><summary>+{} older</summary>{}</details>",
+                        qls.len() - 5,
+                        qls[5..].concat()
+                    )
+                });
+                let qls = (!qls.is_empty()).then(|| {
+                    format!(
+                        "<div class=qls>{}{}</div>",
+                        qls[..qls.len().min(5)].concat(),
+                        more.unwrap_or_default()
+                    )
+                });
+                // The current lane name links only while herdr lists it; otherwise it stays plain text.
+                let lane = if ls.iter().any(|l| l.name == lane) {
+                    link(lane, esc(lane))
+                } else {
+                    esc(lane)
+                };
+                let mut card = vec![chips, lane, pr_line(ctx, Some(fc), f, n, s)];
                 if is_dead {
                     card.push("<span class=r>dead: the log has this lane open, herdr has no such agent</span>".into());
                 }
@@ -1402,6 +1449,10 @@ impl<'a> Server<'a> {
                     s.unwrap_or_default()
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
+                let row = match (qls, row.strip_suffix("</details>")) {
+                    (Some(q), Some(r)) => format!("{r}{q}</details>"),
+                    _ => row,
+                };
                 let gh = format!(
                     "<span><a href=\"https://github.com/{}/issues/{n}\">#{n}</a></span>",
                     esc(&fc.repo)
@@ -1769,11 +1820,28 @@ impl<'a> Server<'a> {
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
-            let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
-            let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
-            let o = if t == "r" { "▶ " } else { "" };
-            let fl = format!("<span class=\"mt fx\">· floor {min} GB · {wt}</span>");
+            let (min, o) = (lim.min_free_gb, if t == "r" { "▶ " } else { "" });
+            let fl = format!("<span class=\"mt fx\">· floor {min} GB</span>");
             m += &kv("disk", t, &format!("{bar} <b class={t}>{o}{gb:.0} GB free</b> {fl}"));
+        }
+        // #164: the worktree total from the last walk (and its age, #160) against the budget, and folders of no
+        // fleet under the worktree root, removed only from here (paired) or `clean --orphans --yes`.
+        if let Some(c) = cfg {
+            let budget = lim.worktree_budget_gb;
+            let (gb, at) = crate::check::worktree_du(ctx).unzip();
+            let (t, bar, pct) = gauge(gb.unwrap_or(0.0) / budget, "▏");
+            let o = if t == "r" { "▶ " } else { "" };
+            let x = gb.map_or("?".into(), |gb| format!("{gb:.1}"));
+            let at = at.flatten().map_or(String::new(), |at| {
+                format!(" <span class=\"mt fx\">· {} ago</span>", ago(ctx.now, at))
+            });
+            let val = format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {budget} GB</span>{pct}{at}");
+            m += &kv("fleet disk", t, &val);
+            let n = crate::check::orphan_dirs(ctx, c).len();
+            if n > 0 && self.addr.is_some() {
+                let (hid, s) = (hidden("orphans", "", &mtime(ctx)), if n == 1 { "" } else { "s" });
+                m += &format!("<form method=post>{hid}<button data-confirm=\"Remove {n} orphan folder{s} under the worktree root?\">remove orphans</button> <span class=m>{n} folder{s} of no fleet</span></form>");
+            }
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {

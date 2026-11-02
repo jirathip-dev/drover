@@ -14,6 +14,9 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews.
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
 - Check the PR body's evidence names the exact head sha you review; evidence anchored at an
   older sha is stale — flag it.
+- The PR body has a `## For humans` section (2–4 plain lines on what changes for the user,
+  no code identifiers); missing or inaccurate is a `blocking` finding. So is an AI co-author or
+  'generated with' trailer in a commit or the PR body.
 - UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any visual change not in the issue is a FAIL. (docs/ui.md)
 - Budgets are soft. FAIL only for real bloat: duplicated logic, dead code, or a much simpler
   equivalent. Name the lines.

@@ -96,6 +96,23 @@ fn profiles_sync_removes_a_stale_generated_profile() {
     assert!(dir.join("fleet-impl/role.md").exists() && dir.join("fleet-rev/role.md").exists());
 }
 
+/// #198: lanes add no AI co-author: Claude's attribution is off, and every lane's role text says so.
+#[test]
+fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
+    let c = ctx(&tmpdir("spawn-attr"), CONFIG);
+    let (code, out) = run(&c, &Fake::default(), &["profiles", "sync"]);
+    assert_eq!(code, 0, "{out}");
+    let dir = c.config.parent().unwrap().join("claude");
+    let s: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("fleet-impl/settings.json")).unwrap()).unwrap();
+    assert_eq!(s["attribution"], serde_json::json!({"commit": "", "pr": ""}));
+    assert_eq!(s["includeCoAuthoredBy"], false);
+    let role = std::fs::read_to_string(dir.join("fleet-impl/role.md")).unwrap();
+    assert!(role.contains("No AI co-author or 'generated with' trailers in commits or PR bodies"));
+    assert!(role.contains("## For humans"));
+    assert!(herdsman::spawn::role_prompt("rev").contains("## For humans"));
+}
+
 /// #103: `[fleet.<n>] env` is exported into the lane's shell after HERDSMAN_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {

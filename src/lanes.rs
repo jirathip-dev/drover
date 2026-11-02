@@ -19,7 +19,6 @@ pub struct Lane {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub account: Option<String>,
-    /// #187: `:<HERDSMAN_PORT>` from the spawn.
     pub port: Option<String>,
     /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,

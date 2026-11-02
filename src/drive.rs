@@ -214,6 +214,12 @@ pub fn drive(
             lock.display()
         )?);
     };
+    // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
+    if only.is_none() {
+        if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
+            writeln!(out, "budget: {e:#}")?;
+        }
+    }
     let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
     let fleets: Vec<&str> = cfg.fleet.iter().filter(mine).map(|(n, _)| n.as_str()).collect();
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
@@ -282,7 +288,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             .is_some_and(|c| c.starts_with("herdsman verdict "))
     };
     waits.sort_by_key(|(s, w)| (!verdict(w), !rev(w), conflicts.contains_key(&s.issue)));
-    let mut go = true;
+    let (mut go, mut updated) = (true, false);
     for (s, w) in waits
         .iter()
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
@@ -319,6 +325,10 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
                 ("spawn", _) => "respawn",
                 (v, _) => v,
             };
+            if w.what.starts_with("reviewer exited") {
+                let d = json!({"role": args.get(3), "why": "exited without a verdict"});
+                append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
+            }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
@@ -327,21 +337,35 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && f.merge_label.is_none();
             if step == "verdict" && code.is_none() && args[3] == "PASS" && green {
                 merge = true;
-                code = act(
-                    ctx,
-                    cfg,
-                    r,
-                    out,
-                    &events,
-                    (fleet, Some(s.issue), "merge"),
-                    &["merge", fleet, &n],
-                )?;
+                code = if pr["mergeable"] == "CONFLICTING" {
+                    Some("NOT_MERGEABLE")
+                } else {
+                    act(
+                        ctx,
+                        cfg,
+                        r,
+                        out,
+                        &events,
+                        (fleet, Some(s.issue), "merge"),
+                        &["merge", fleet, &n],
+                    )?
+                };
             }
-            if merge && code.is_none() {
+            // #214: a merge that conflicts (known before, or failed on it) gets its `--update` lane instead.
+            if merge && conflicted(fleet, code) {
+                let code = update_lane(ctx, cfg, r, out, &events, fleet, s.issue)?;
+                go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
+            } else if merge && code.is_none() {
+                updated = true;
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
                     writeln!(out, "{fleet} auto-update: {e:#}")?;
                 }
             }
+        } else if s.state == "blocked" && s.last_event != "no-action" {
+            // #214: a block drive has no step for is logged once, never left silent.
+            writeln!(out, "{fleet} #{n} no-action: {}", w.what)?;
+            let d = json!({"why": w.what});
+            append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
         } else if s.state == "ready" && ci == "failed" {
             // Red CI after a PASS is a FAIL at the same head (no new round), the failed checks as the finding.
             let head = pr["headRefOid"].as_str().unwrap_or_default();
@@ -352,7 +376,47 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
         }
     }
+    // #214: clean catch-ups run every pass, not only after a merge.
+    if !updated {
+        if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
+            writeln!(out, "{fleet} auto-update: {e:#}")?;
+        }
+    }
     Ok(go)
+}
+
+/// #214: the merge just tried was refused or failed on a conflict (its words say so).
+fn conflicted(fleet: &str, code: Code) -> bool {
+    let last = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["words"].to_string()));
+    let w = last.unwrap_or_default().to_lowercase();
+    code == Some("NOT_MERGEABLE") || code.is_some() && (w.contains("not mergeable") || w.contains("conflict"))
+}
+
+/// A ready PR's conflict: the `--update` round of the role the gate's `conflict` outcome goes to.
+fn update_lane(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: &[Event],
+    fleet: &str,
+    issue: u64,
+) -> Result<Code> {
+    let p = cfg.fleet(fleet)?.flow();
+    let b = p
+        .next(p.gate(), "conflict")
+        .and_then(|t| p.role(t.0))
+        .unwrap_or(p.start());
+    let n = issue.to_string();
+    act(
+        ctx,
+        cfg,
+        r,
+        out,
+        ev,
+        (fleet, Some(issue), "conflict"),
+        &["spawn", fleet, &n, b, "--supersede", "--update"],
+    )
 }
 
 /// #182: an impl/fix lane idle ≥ 2 min whose open PR head moved past its last review or handoff, CI done there: the
@@ -398,8 +462,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
-        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));
-        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "CAP" | "ALL_CAPPED")) {
+        go &= !matches!(
+            code,
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
+        );
+        if matches!(
+            code,
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "CAP" | "ALL_CAPPED")
+        ) {
             break;
         }
     }
@@ -446,6 +516,9 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         .filter(|s| !s.lane.as_deref().is_some_and(busy))
         .filter_map(|s| Some((open(&s)?, s)))
         .collect();
+    if prs.is_empty() {
+        return Ok(());
+    }
     prs.sort_by_key(|p| p.0);
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
@@ -459,14 +532,8 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         tree(&["add", "-f", "--detach", &wts, &from])?;
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
-        let res = if !clean && s.state == "ready" {
-            let p = f.flow();
-            let b = p
-                .next(p.gate(), "conflict")
-                .and_then(|t| p.role(t.0))
-                .unwrap_or(p.start());
-            let args = ["spawn", fleet, &n, b, "--supersede", "--update"];
-            act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "conflict"), &args).map(drop)
+        let res = if !clean {
+            update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
         } else if clean && to != from {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
                 gh::forget_pr(ctx, fleet, s.issue);
