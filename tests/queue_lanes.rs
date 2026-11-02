@@ -66,4 +66,8 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         page.contains("<p><a href=#lanes class=\"ql nw el\" data-agent=\"impl-3-u1\">impl-3-u1</a></p>"),
         "{page}"
     );
+    // A current lane herdr no longer lists stays plain text.
+    let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
+        .into_owned();
+    assert!(page.contains("<p>impl-3-u1</p>"), "{page}");
 }

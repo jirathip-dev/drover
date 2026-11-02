@@ -1401,8 +1401,13 @@ impl<'a> Server<'a> {
                         more.unwrap_or_default()
                     )
                 });
-                let lane = (!lane.is_empty()).then(|| link(lane, esc(lane)));
-                let mut card = vec![chips, lane.unwrap_or_default(), pr_line(ctx, Some(fc), f, n, s)];
+                // The current lane name links only while herdr lists it; otherwise it stays plain text.
+                let lane = if ls.iter().any(|l| l.name == lane) {
+                    link(lane, esc(lane))
+                } else {
+                    esc(lane)
+                };
+                let mut card = vec![chips, lane, pr_line(ctx, Some(fc), f, n, s)];
                 if is_dead {
                     card.push("<span class=r>dead: the log has this lane open, herdr has no such agent</span>".into());
                 }
