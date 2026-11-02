@@ -22,12 +22,8 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     .into_owned()
 }
 
-#[test]
-fn every_control_passes_the_audit_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
-        return;
-    }
+/// The audited page (two lanes, one blocked on a menu, a queue, the fleet's config and the events spliced in) and the Herd's data.
+fn fixture() -> (String, String) {
     let cfg = format!("models = [\"opus\", \"sonnet\", \"claude-haiku-4-5-20251001\"]\n\n{CONFIG}");
     let c = ctx(&tmpdir("ui-audit"), &cfg);
     for (issue, agent, harness) in [(12, "sendmeter-impl-12", "claude"), (13, "sendmeter-impl-13", "claude")] {
@@ -71,13 +67,21 @@ fn every_control_passes_the_audit_at_390px() {
             "<section id=events></section>",
             &format!("<section id=events>{}</section>", part("/frag?id=events")),
         );
-    let html = &html;
     assert!(
         html.contains("▲ up") && html.contains("class=pick") && html.contains("<select name=model"),
         "fixture has arrows, a menu and pickers"
     );
     let herd = req(&s, "GET", "/herd.json?weather=calm", "", "");
-    let herd = &herd[herd.find("\r\n\r\n").unwrap() + 4..];
+    (html, herd[herd.find("\r\n\r\n").unwrap() + 4..].to_string())
+}
+
+#[test]
+fn every_control_passes_the_audit_at_390px() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let (html, herd) = fixture();
     let d = tmpdir("ui-audit-png");
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
@@ -147,4 +151,71 @@ fn every_control_passes_the_audit_at_390px() {
         );
         assert!(v[2] > 0.0, "{name}: no controls audited");
     }
+}
+
+/// #200: WebKit (the engine of iOS Safari) closing each sheet: the page above it is only ever the page as it was,
+/// dimmed evenly by the fading backdrop, never another colour (iOS flashed it grey: `.out`, the chat blocks' box, on #sheet).
+#[test]
+fn closing_a_sheet_never_repaints_the_page() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let (html, _) = fixture();
+    let file = tmpdir("ui-close").join("page.html");
+    std::fs::write(&file, html).unwrap();
+    let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
+    let mut bad = vec![];
+    for (name, tab, open) in [
+        (
+            "chat",
+            "lanes",
+            "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))",
+        ),
+        // Opened full, it covers the page; at mid the page shows above it.
+        (
+            "config",
+            "queue",
+            "config(document.querySelector('.cfg[data-f=\"sendmeter\"]')); snap('mid')",
+        ),
+        ("legend", "queue", "legend()"),
+    ] {
+        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
+            std::path::Path::new(&p).join(format!("close-{name}.png"))
+        });
+        let o = swift()
+            .args([
+                script,
+                file.to_str().unwrap(),
+                "390",
+                tab,
+                "horse",
+                png.to_str().unwrap(),
+                &format!("{stub}; {open}"),
+                "close()",
+            ])
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout);
+        let v: Vec<f64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
+        assert!(
+            o.status.success() && v.len() == 3 && v[0] >= 5.0,
+            "{name}: {out} {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        if v[1] > 0.02 {
+            bad.push(format!(
+                "{name}: a frame has {:.1} % of the page off its colour",
+                v[1] * 100.0
+            ));
+        }
+        if v[2].abs() > 0.02 {
+            bad.push(format!(
+                "{name}: the page is {:.1} % dimmed after the close",
+                v[2] * 100.0
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "{bad:?}");
 }

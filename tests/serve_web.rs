@@ -412,6 +412,30 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
             "icon-{n}.png dimensions"
         );
     }
+    // #195: the root icons Safari probes are the board's icon bytes, and the page's icon links carry the hash.
+    let body = |p: &str| {
+        let res = s.respond(&format!("GET {p} HTTP/1.1\r\n\r\n"), 1);
+        let at = res.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        (String::from_utf8_lossy(&res[..at]).into_owned(), res[at + 4..].to_vec())
+    };
+    for (path, icon) in [
+        ("/apple-touch-icon.png", "/icon-180.png"),
+        ("/apple-touch-icon-precomposed.png", "/icon-180.png"),
+        ("/favicon.ico", "/icon-192.png"),
+    ] {
+        let (head, png) = body(path);
+        assert!(
+            head.starts_with("HTTP/1.1 200 OK") && head.contains("image/png"),
+            "{path}: {head}"
+        );
+        assert!(png == body(icon).1, "{path}: not the {icon} bytes");
+    }
+    let v = page.split("/a/").nth(1).unwrap().split('/').next().unwrap();
+    assert!(
+        page.contains(&format!("rel=icon href=/icon-192.png?v={v}"))
+            && page.contains(&format!("rel=apple-touch-icon href=/icon-180.png?v={v}")),
+        "{page}"
+    );
     assert!(get(&s, "/manifest.webmanifest").contains("\"display\": \"standalone\""));
     assert!(
         page.contains("rel=manifest href=/manifest.webmanifest")
@@ -956,11 +980,11 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
 fn pair_request_carries_the_optional_approve_hint() {
     let js = include_str!("../assets/serve.js");
     assert!(
-        js.contains("`Approve on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')"),
+        js.contains("`Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')"),
         "the Mac line, hint after ` · `"
     );
     assert!(
-        js.contains("el('p', 'm', `Approve"),
+        js.contains("el('p', 'm', `Waiting"),
         "`el` sets textContent: the hint is never HTML"
     );
     let request = |c: &herdsman::Ctx| {

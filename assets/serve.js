@@ -93,7 +93,7 @@ function frag(id, html) {
 // until the group's status changes.
 const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
-const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx')).map(n => n.textContent).join('').trim();
+const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
 const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
 function groups() {
@@ -213,7 +213,7 @@ document.addEventListener('submit', async e => {
   } catch (err) { toast('error: ' + err.message); }
   if (b) b.ariaBusy = null;
 });
-B.insertAdjacentHTML('beforeend', `<div id=sheet hidden><div class=bd></div><div class=sh role=dialog aria-modal=true>
+B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
 <div class=hd><p><b></b></p></div><div class=top></div><div class=acts><button type=button data-op=stop>Stop</button><button type=button data-op=kill>Kill</button><button type=button data-op=clean>Clean</button><button type=button data-op=close>Close pane</button></div>
 <div class=cf hidden><p></p><button type=button class=yes>Kill</button><button type=button class=no>Cancel</button></div>
 <div class=chat><button type=button class=more hidden>Load more</button><div class=now></div></div>
@@ -223,7 +223,7 @@ B.insertAdjacentHTML('beforeend', `<div id=sheet hidden><div class=bd></div><div
 <form class=reply><textarea name=text rows=1 maxlength=2000 placeholder="Message, or / for commands" aria-label=message></textarea><button>Send</button></form>
 <p class=st></p></div></div>`);
 if (DEMO) sync();
-const S = $('#sheet'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
+const S = $('#sheet'), shown = () => S.classList.contains('on'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
 let agent = null, timer = 0, nopane = false, opane = null;
 // The Lanes row of `agent` (its sheet card), from the needs-you cards and the herd.
 const laneOf = agent => [...$$('.lane')].find(l => l.dataset.agent === agent);
@@ -607,6 +607,7 @@ async function config(b) {
   $('.hd b').textContent = f + ' · config';
   const top = $('.top');
   top.innerHTML = h;
+  top.querySelectorAll('[data-pipe]').forEach(pipeline); // #173
   top.scrollTop = 0;
   tidy(top);
   top.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
@@ -620,13 +621,12 @@ document.addEventListener('change', e => {
   ef.replaceChildren(...s.selectedOptions[0].dataset.e.split(' ').map(v => Object.assign(el('option', '', v), { selected: v === cur })));
   ef.dispatchEvent(new Event('change'));
 });
-// #166: one helper for every sheet (lane chat, legend). The page under it is never touched while it opens or closes:
-// no position change, no scroll reset (iOS repainted the whole page black); `overflow:hidden` on <html> holds it still.
+// #166: one helper for every sheet (lane chat, legend, config). #200: the page under it is never touched while it
+// opens or closes, not even <html>'s overflow (iOS repainted the whole page grey), and the sheet stays in the DOM:
+// shown is `.on` (visible), only transform and opacity animate; the backdrop alone eats the page's touchmove.
 function show(d) {
-  if (shut) { clearTimeout(shut); shut = 0; S.classList.remove('out'); } else {
-    document.documentElement.classList.add('lock');
-    S.hidden = false;
-    S.classList.add('drag');
+  if (shut) { clearTimeout(shut); shut = 0; S.classList.remove('shut'); } else {
+    S.classList.add('on', 'drag');
     pos(sh.offsetHeight, 0);
     void sh.offsetHeight;
     S.classList.remove('drag');
@@ -634,25 +634,28 @@ function show(d) {
   fit();
   snap(d);
 }
-// Only the sheet slides off (200 ms ease-out, none under reduced motion) and the backdrop fades; then it hides.
+// Only the sheet slides off (200 ms ease-out, none under reduced motion) and the backdrop fades; when the slide ends
+// (or 250 ms on) it turns invisible.
 function close() {
-  if (S.hidden || shut) return;
+  if (!shown() || shut) return;
   clearInterval(timer);
   agent = null;
   d0 = null;
   S.classList.remove('drag');
-  S.classList.add('out');
+  S.classList.add('shut');
   pos(sh.offsetHeight);
-  shut = setTimeout(() => {
-    shut = 0;
-    S.hidden = true;
-    S.classList.remove('out');
-    document.documentElement.classList.remove('lock');
-  }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200);
+  shut = setTimeout(hide, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 250);
 }
+function hide() {
+  clearTimeout(shut);
+  shut = 0;
+  S.classList.remove('on', 'shut');
+}
+sh.addEventListener('transitionend', e => { if (shut && e.target === sh && e.propertyName === 'transform') hide(); });
 // #70: the sheet is a full-height box placed by translateY at a detent (`full` stops under the safe area).
 // pos() moves it, fades the backdrop with it, and pads its bottom by the hidden part so the composer shows.
 const DET = { full: 1, mid: .78, half: .5 }, bd = $('.bd');
+bd.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 let at = 'mid', ty = 0, shut = 0, padT = 0, d0 = null, moves = [], to = null, rq = 0;
 const off = d => Math.max(0, S.clientHeight * (1 - DET[d]) - sh.offsetTop);
 function pos(t, pad) {
@@ -676,8 +679,9 @@ function snap(d) {
 const vv = window.visualViewport;
 const kb = () => !!sh.querySelector('input:focus, textarea:focus') || !!vv && vv.height < innerHeight * .75;
 function fit() {
+  if (shut) return;
   if (vv) { S.style.top = vv.offsetTop + 'px'; S.style.height = vv.height + 'px'; }
-  if (!S.hidden && !shut && !d0) snap(kb() ? 'full' : at);
+  if (shown() && !d0) snap(kb() ? 'full' : at);
 }
 if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); }
 sh.addEventListener('focusin', fit);
@@ -767,7 +771,7 @@ document.addEventListener('click', async e => {
   });
 });
 $('.bd').onclick = close;
-addEventListener('keydown', e => { if (e.key === 'Escape' && !S.hidden) close(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && shown()) close(); });
 // #70: the sheet follows the finger 1:1 (light rubber band above full), one move per frame. On release (#166): down
 // past 30 % of its shown height, or flicked down (over 0.5 px/ms in the last 80 ms), closes; flicked up goes one detent
 // up; else it springs back to the nearest detent.
@@ -854,6 +858,7 @@ async function claim() {
   if (agent) poll();
 }
 document.addEventListener('click', async e => {
+  if (e.target.closest('.pairx')) { pairing = false; clearTimeout(ttl); pp.hidden = true; fetch(R + 'pair/cancel', { method: 'POST' }).catch(() => null); return; }
   if (!e.target.closest('.pairb')) { if (e.target.closest('#pairp')) { pairing = false; clearTimeout(ttl); pp.hidden = true; } return; }
   const r = await fetch(R + 'pair/request', { method: 'POST' }).catch(err => ({ ok: false, text: () => 'error: ' + err.message })), s = (await r.text()).trim(), [t, h] = s.split('\n');
   pairing = r.ok;
@@ -861,7 +866,7 @@ document.addEventListener('click', async e => {
   if (!e.target.closest('#pairp')) (e.target.closest('.pairf') || $('header')).after(pp);
   pp.hidden = false;
   clearTimeout(ttl);
-  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Approve on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')));
+  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), el('button', 'pairx', 'cancel'));
   else pp.replaceChildren(el('p', '', s));
   pp.scrollIntoView({ block: 'nearest' });
   if (!r.ok) return;
@@ -874,7 +879,7 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && S.hidden && !typing ? e.touches[0] : null;
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
@@ -900,3 +905,85 @@ addEventListener('touchend', () => {
 // #114: iOS Safari ignores user-scalable=no for pinch.
 addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register(R + 'sw.js').catch(() => {});
+// #173: a fleet's Pipeline group, drawn from its `data-pipe` (serve.rs): the validity line or the broken rules (each
+// with its fleet.toml line), the graph, the legend, the pipeline as fleet.toml text (docs/design/pipeline).
+function pipeline(sec) {
+  const d = JSON.parse(sec.dataset.pipe), S = d.stages, n = d.bad.length;
+  const hint = n ? `<b class=r>BAD_PIPELINE · ${n} error${n === 1 ? '' : 's'}</b>` : d.builtin ? 'built-in · edit fleet.toml' : `fleet.toml:${S[0]?.line ?? 0}`;
+  let h = `<h3>Pipeline<span>${hint}</span></h3>`;
+  if (n) {
+    const li = d.bad.map(b => `<li><b class=r>${b.rule}</b>${esc(b.msg)}<span class=at>fleet.toml:${b.line}</span></li>`).join('');
+    h += `<div class=pe><p>Nothing moves for ${esc(d.fleet)} until fleet.toml is fixed: <span class=qn>drive, spawn, verdict and merge</span> refuse <span class=r>BAD_PIPELINE</span>. Lanes already running keep working. Other fleets are not affected.</p><ol>${li}</ol></div>`;
+  } else {
+    const both = d.checks.length > 1 ? ` · merge needs a PASS from ${d.checks.join(' and ')} at the same head` : '';
+    h += `<p class=pv><span class=g>✓ valid</span> · ${S.length} stages (${esc(S.map(s => s.name).join(', '))}) · every stage reachable, every path ends, every loop has a limit${esc(both)}</p>`;
+  }
+  const head = d.builtin ? `# Built-in: herdsman runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
+  const toml = S.map(s => `\n[[fleet.${d.fleet}.pipeline.stage]]\nname = "${s.name}"\nkind = "${s.kind}"\n${s.role ? `role = "${s.role}"\n` : ''}${s.rounds != null ? `rounds = ${s.rounds}\n` : ''}next = { ${Object.entries(s.next).map(([o, t]) => `${o} = "${t}"`).join(', ')} }\n`).join('');
+  const what = d.builtin ? 'the built-in pipeline' : `[fleet.${d.fleet}.pipeline]`;
+  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
+  sec.innerHTML = h + `<div class=pw2><div>${pgraph(d)}<p class=lg>${lg}</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · ${esc(what)}</span></summary><pre>${esc((head + toml).trim())}</pre></details></div>`;
+}
+// One grid row per text line (`--ln` tall), so a rail meets each line at its middle: column 1 the park rail, 2 the
+// boxes, then one rail per loop target, the shortest span innermost. An outcome off the spine leaves its box on a rail.
+function pgraph(d) {
+  const S = d.stages, base = t => t.split(':')[0], main = k => k === 'build' ? 'push' : k === 'check' ? 'PASS' : 'ok';
+  const W = { PASS: '<b class=g>PASS</b>', ok: '<b class=g>ok</b>', FAIL: '<b class=r>FAIL</b>', ci_red: '<b class=r>CI red</b>', conflict: '<b class=a>conflict</b>' };
+  const word = o => W[o] ?? `<b>${esc(o)}</b>`, K = { build: 'b', check: 'c', gate: 'g' }, G = { b: '▲', c: '◆', g: '◫', x: '!' };
+  const spine = i => S[i + 1]?.name ?? 'merge', off = (i, o, t) => !(o === main(S[i].kind) && t === spine(i));
+  const loops = S.flatMap((s, i) => Object.entries(s.next).filter(([o, t]) => off(i, o, t)).map(([, t]) => base(t)));
+  const reach = [S[0]?.name ?? '', ...S.flatMap(s => Object.values(s.next).map(base))];
+  const rails = {}, park = [], heads = {};
+  let h = '', row = 0;
+  const put = (cls, inner) => { h += `<p class="${cls}" style="grid-row:${++row}">${inner}</p>`; return row; };
+  put('nl st', `<i class=kd>○</i><b>queued</b><span class=m>${d.queued} waiting</span>`);
+  put('pl', '<b>start</b><span>if unblocked · serial slot · host room</span>');
+  S.forEach((s, i) => {
+    const errs = d.bad.filter(b => b.stage === s.name), dead = !reach.includes(s.name), k = K[s.kind] ?? 'x';
+    const tag = (s.here ? `<span class="tag m">${s.here} here</span>` : '') + (loops.includes(s.name) ? `<span class=lp>↺ ${esc(s.name)}</span>` : '');
+    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · herdsman' : esc(s.kind)}</span>${tag}`]];
+    const ci = d.required.length ? d.required.join(' + ') : 'green', from = d.checks.length > 1 ? `from ${d.checks.join(' + ')} ` : '';
+    const dt = esc(s.role ? `role ${s.role} · ${s.run ?? 'not defined'}` : `CI ${ci} · PASS ${from}at head · serial · mergeable`);
+    lines.push([`<span class=dt title="${dt}">${dt}</span>`]);
+    for (const b of errs) { const t = esc(`${b.rule}: ${b.msg}`); lines.push([`<span class="dt r" title="${t}">✗ ${t}</span>`]); }
+    for (const [o, t] of Object.entries(s.next).filter(([o, t]) => off(i, o, t))) {
+      const up = t.endsWith(':update'), to = up ? base(t) : t;
+      const what = to === 'park' ? 'park' : up ? `update in ${to}` : ['FAIL', 'ci_red', 'conflict'].includes(o) ? `fix in ${to}` : to;
+      const lim = ['FAIL', 'conflict'].includes(o) && s.rounds != null ? ` · ≤${s.rounds} rounds, then park` : o === 'ci_red' ? ` · ${s.loop}'s rounds` : '';
+      const tt = esc(what + lim);
+      lines.push([`<span title="${tt}">${word(o)} → ${tt}</span>`, to]);
+    }
+    if (s.rounds != null && (s.kind === 'check' || (s.next.conflict ?? '').endsWith(':update'))) lines.push(['<span><b>out of rounds</b> → park</span>', 'park']);
+    const last = lines.length - 1;
+    lines.forEach(([inner, rail], j) => {
+      const edge = j === 0 ? (last ? ' t' : ' t b') : j === last ? ' b' : '';
+      const r = put('nb' + edge + (rail === 'park' ? ' po l' : rail ? ' po' : '') + (dead ? ' dead' : errs.length ? ' bad' : ''), inner);
+      if (rail === 'park') park.push(r); else if (rail) (rails[rail] ??= []).push(r);
+      if (!j) heads[s.name] = r;
+    });
+    const o = main(s.kind), sp = spine(i);
+    const why = o === 'push' ? 'a new head' : o === 'PASS' ? (i && S[i - 1].kind === 'check' ? 'at the same head' : 'at the exact head') : '';
+    if (s.next[o] === sp) put('pl', `${word(o)}<span>${why}</span>`);
+    else put('pl no', reach.includes(sp) ? '' : `<span class=r>✗ nothing leads to ${esc(sp)}</span>`);
+  });
+  const gone = reach.includes('merge') ? '' : ' dead';
+  const mr = put(`nb t b end${gone}`, `<i class="kd m">✓</i><b>merge</b><span class=m>into ${esc(d.into)}${gone && ' · unreachable'}</span>`);
+  put('nl', '');
+  const pr = put('nb t b end', `<i class="kd x">!</i><b>park</b><span class=m>needs you</span><span class="tag m">${d.parked} here</span>`);
+  put('pl pn', '<span>on its card: one more round, or park for good</span>');
+  const area = (a, b, c, e) => `style="grid-area:${a}/${b}/${c}/${e}"`;
+  const spans = Object.keys(rails).sort().map(t => { const all = [...rails[t], heads[t] ?? 1]; return [t, Math.min(...all), Math.max(...all)]; });
+  spans.sort((a, b) => (a[2] - a[1]) - (b[2] - b[1]));
+  spans.forEach(([t, lo, hi], c) => {
+    const col = c + 3, hd = heads[t] ?? 1;
+    h += `<i class=ey ${area(lo, col, hi + 1, col + 1)}></i><i class="ea in" ${area(hd, 3, hd + 1, col + 1)}></i>`;
+    h += rails[t].map(r => `<i class=ea ${area(r, 3, r + 1, col + 1)}></i>`).join('');
+  });
+  if (park.length) {
+    h += `<i class="ey l" ${area(Math.min(...park), 1, pr + 1, 2)}></i><i class="ea l in" ${area(pr, 1, pr + 1, 2)}></i>`;
+    h += park.map(r => `<i class="ea l" ${area(r, 1, r + 1, 2)}></i>`).join('');
+    h += `<i class=ek ${area(mr, 1, mr + 1, 2)}></i>`; // a gap where the park rail passes merge: never merge → park
+  }
+  const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
+  return `<div class=pg role=img aria-label="${esc(d.fleet)} pipeline: ${esc(S.map(s => s.name).join(', '))}" style="grid-template-columns:2ch minmax(0,1fr)${rep};grid-template-rows:repeat(${row},var(--ln))">${h}</div>`;
+}

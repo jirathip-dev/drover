@@ -56,11 +56,31 @@ jobs:
           c=$(npx -y @puppeteer/browsers@2.6.1 install chrome-headless-shell@156.0.8078.80 --path "$RUNNER_TEMP/chs" | tail -1 | cut -d' ' -f2-)
           test -x "$c" || { echo "::error::chrome-headless-shell install gave no binary: '$c'"; exit 1; }
           echo "CHROME=$c" >> "$GITHUB_ENV"
-      - name: ui audit at 390 px (25 views) and the sheet close screencast (#166)
+      - name: ui audit at 390 px (27 views) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ui-390
           path: ui-390/*.png
+          retention-days: 14
+
+  # #200: the sheet close in WebKit (iOS Safari's engine; Chrome never showed the flash): the page above a closing
+  # sheet keeps its colour. The PNG is each sheet's worst frame.
+  ui-webkit:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: sheet close in WebKit (chat, config, legend)
+        run: |
+          mkdir -p ui-webkit
+          HERDSMAN_SNAPSHOTS=ui-webkit cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
+          test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-webkit
+          path: ui-webkit/*.png
           retention-days: 14

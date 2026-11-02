@@ -26,6 +26,31 @@
     probe.remove();
     if (on.length !== 1) early.push(`${on.length} active tabs, not 1`);
     else if (getComputedStyle(on[0].firstElementChild).backgroundColor !== accent) early.push(`the active tab's fill is ${getComputedStyle(on[0].firstElementChild).backgroundColor}, not the accent ${accent}`);
+    // #183: every Host label is whole on one line, ≥ 1ch before its value, and every value starts at one x (groups
+    // opened for the measure, then put back).
+    const gs = [...$$('#host>.grp')], was = gs.map(g => g.open), xs = new Map();
+    gs.forEach(g => { g.open = true; });
+    for (const k of $$('#host .k')) {
+      const g = document.createRange(), v = k.nextElementSibling, ch = k.parentNode.appendChild(Object.assign(document.createElement('i'), { style: 'position:absolute;width:1ch' }));
+      g.selectNodeContents(k);
+      const lines = new Set([...g.getClientRects()].map(r => Math.round(r.top))).size, end = g.getBoundingClientRect().right, x = v.getBoundingClientRect().left, w = ch.getBoundingClientRect().width;
+      ch.remove();
+      if (lines !== 1 || k.scrollWidth > k.clientWidth) early.push(`Host label "${k.textContent}": ${lines} lines, ${k.scrollWidth}px of text in ${k.clientWidth}px`);
+      if (x - end < w - 0.5) early.push(`Host label "${k.textContent}": its value ${(x - end).toFixed(1)}px after it, under 1ch (${w.toFixed(1)}px)`);
+      xs.set(k.textContent, Math.round(x));
+    }
+    if (new Set(xs.values()).size > 1) early.push(`Host values start at different x: ${[...xs].map(([k, x]) => `${k} ${x}`).join(', ')}`);
+    gs.forEach((g, i) => { g.open = was[i]; });
+  };
+  // #173: a fleet's [config] sheet, scrolled to its Pipeline group.
+  const pipe = async fleet => {
+    tab('queue');
+    const b = [...$$('#queue .cfg')].find(b => b.dataset.f === fleet);
+    if (!b) return early.push(`no [config] button for ${fleet} in the demo`);
+    await config(b);
+    const g = $('#sheet .pp');
+    if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
+    g.scrollIntoView();
   };
   const VIEWS = {
     queue: () => tab('queue'),
@@ -67,6 +92,10 @@
         if (getComputedStyle(c.querySelector('summary')).color !== want) early.push(`.dp.${tone} reads ${getComputedStyle(c.querySelector('summary')).color}, not ${want}`);
       }
     },
+    // #173: the Pipeline group of a fleet's [config] sheet: the built-in one (acme-web), then acme-api's custom
+    // impl → rev → sec → gates.
+    pipeline: () => pipe('acme-web'),
+    'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
@@ -141,9 +170,9 @@
       close();
       await frame();
       const slide = getComputedStyle(sh).transitionDuration;
-      if (S.hidden || !S.matches('.out') || aim() < sh.offsetHeight - 1 || slide !== '0.2s') dragged.push(`a frame after close: hidden ${S.hidden}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
+      if (!shown() || !S.matches('.shut') || aim() < sh.offsetHeight - 1 || slide !== '0.2s') dragged.push(`a frame after close: shown ${shown()}, sliding to ${aim() | 0}px of ${sh.offsetHeight} over ${slide}: no slide`);
       await wait();
-      if (!S.hidden) dragged.push('300 ms after close the sheet is still shown');
+      if (shown()) dragged.push('300 ms after close the sheet is still shown');
       if (!DBG.get('check')) { open($('.lane')); S.classList.add('drag'); snap('half'); } // the screenshot: the sheet at half, unanimated
     },
     host: async () => { // the live Host tab's [enable alerts] (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
@@ -259,7 +288,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.

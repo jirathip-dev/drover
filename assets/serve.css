@@ -104,14 +104,17 @@ main{transition:transform .2s}
 .av.done .px{opacity:.5}
 .av.r .px{filter:sepia(1) saturate(6) hue-rotate(-50deg)}
 @media (prefers-reduced-motion:reduce){.run b,.av .px{animation:none!important}.run b:last-child{visibility:hidden}}
-#sheet{position:fixed;inset:0;z-index:3}
-.bd{position:absolute;inset:0;background:#000a;touch-action:none;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
+/* #200: closed is invisible and untouchable, never display:none; layers only while shown (or sliding off). */
+#sheet{position:fixed;inset:0;z-index:3;visibility:hidden;pointer-events:none;overscroll-behavior:contain}
+#sheet.on{visibility:visible;pointer-events:auto}
+#sheet.on>.sh{will-change:transform}#sheet.on>.bd{will-change:opacity}
+.bd{position:absolute;inset:0;background:#000a;touch-action:none;overscroll-behavior:contain;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
 /* #70: a full-height box placed by translateY (serve.js: half 50 %, mid 78 %, full); it follows the finger
-   (.drag), snaps (.28 s) and slides off to close (.out, #166: .2 s ease-out); the backdrop fades with it. */
-.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid #30363d;border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);will-change:transform}
+   (.drag), snaps (.28 s) and slides off to close (.shut, #166: .2 s ease-out; #200: not .out, the chat blocks' grey box); the backdrop fades with it. */
+.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid #30363d;border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
 .sh.full{border-radius:0}
 #sheet.drag>*{transition:none}
-#sheet.out>*{transition-duration:.2s;transition-timing-function:ease-out}
+#sheet.shut>*{transition-duration:.2s;transition-timing-function:ease-out}
 @media (prefers-reduced-motion:reduce){#sheet>*{transition:none!important}}
 /* The handle: the pill plus the title row, at least 56 px; it alone drags (the chat hands off at its top). */
 .hd{flex:none;min-height:calc(var(--hit) + var(--s3));padding-bottom:var(--s2);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
@@ -141,9 +144,7 @@ button[name=choice],button.pick{display:flex;width:100%;height:auto;min-height:v
 button[name=choice]::after,button.pick::after{inset:calc(-1 * var(--s1)) calc(-1 * var(--s2));align-items:flex-start;padding-top:calc(var(--s1) + (var(--ctl) - 1.35em) / 2)}
 button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .ask small,button[name=choice] small{font-size:var(--fs-meta)}
-/* #43: sheet actions, kill/clean confirm, `/` menu, per-turn transcript, tool calls collapsed; the page locked under the sheet. */
-/* #166: the page stays put and painted under the sheet; no position:fixed body, no scroll reset. */
-.lock,.lock body{overflow:hidden;overscroll-behavior:none}
+/* #43: sheet actions, kill/clean confirm, `/` menu, per-turn transcript, tool calls collapsed. */
 .acts,.cf{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .acts [data-op=kill],.cf .yes{color:var(--r)}
 .cf{border:1px solid var(--r);border-radius:8px;padding:var(--s2)}.cf p{flex-basis:100%;margin:0;font-size:var(--fs-meta)}
@@ -231,25 +232,28 @@ details.q[open]{padding-bottom:var(--s2)}
 .grp[data-t=r]>summary{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent)}
 .grp:is([data-t=a],[data-t=r])>summary :is(.dt,.gs){color:inherit}
 .grp[open]{padding-bottom:var(--s2)}
-/* A row: label (9ch) · gauge (15ch) · value; a row without a gauge spans the last two; meta and fix lines go under. */
-.gr{display:grid;grid-template-columns:9ch 15ch minmax(0,1fr);gap:0 1ch;align-items:baseline;margin:0;padding:var(--s1) 0;border:0}
+/* #183: every row is one grid, label | value | age: the label column is the longest label (`--kw`, set per group, at
+   most 11ch), a value wraps inside its own column; a divider between rows, the first one as far under the header. */
+.gr,.rw>summary{display:grid;grid-template-columns:var(--kw,9ch) minmax(0,1fr) auto;gap:0 1ch;align-items:baseline}
+.gr{margin:0;padding:var(--s1) 0;border:0}
+.grp>summary+*{margin-top:var(--s1)}.grp>:is(.gr,.rw,form)+:is(.gr,.rw,form){border-top:1px solid var(--line)}
 .gr>.k,.rw>summary>.k{color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gr>:is(.w,.x,.mt){grid-column:2/-1}.fx{display:block}
+.gr>:is(.w,.x){grid-column:2/-1}
 .grp .mt{font-size:var(--fs-meta);color:var(--mute)}
 /* The gauge: ▕ + 12 cells + ▏ (disk: its floor tick ┃) in the mono font, ▶ past the limit; filled cells and edges take
-   the status colour, empty ░ cells the muted one. */
-.bar{white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
+   the status colour, empty ░ cells the muted one; a 15ch box at least, so wider fallback glyphs grow it, never spill. */
+.bar{display:inline-block;min-width:15ch;white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
 .bar i{font-style:normal;color:var(--mute)}
 /* A command chip never breaks inside; the whole chip wraps to the next line. */
 .grp code{white-space:nowrap;color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit;overflow-wrap:normal}
 /* A row that opens (a raw line, the accounts): the whole row is the 44 px tap target, the caret on it alone. The raw
    line shows under it, 11 px, wrapping, on the panel colour. */
 .rw{border:0}
-.rw>summary{grid-template-columns:9ch minmax(0,1fr) auto;gap:0 1ch;align-items:baseline;align-content:center;padding:var(--s1) 0}
+.rw>summary{align-content:center;padding:var(--s1) 0}
 .rw>summary>.x{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.rw>summary>.t{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
-.rw>pre{margin:0 0 var(--s2) 10ch;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
-.rw>.sub{margin:0 0 var(--s2) 10ch}.rw>.sub>p{margin:0;padding:var(--s1) 0}
+.rw>summary>.t{align-self:start;line-height:calc(var(--fs) * 1.5);font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
+.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.rw>.sub{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch)}.rw>.sub>p{margin:0;padding:var(--s1) 0}
 .grp form.role{border-top:0}
 /* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
    The line is 28 px controls in 8 px padding: 44 px tall, the rings inside it. */
@@ -297,6 +301,78 @@ body:not(.unf) .ask.lt{display:none}
 .dp summary{display:flex;align-items:center;gap:var(--s2)}.dp>summary{font-size:var(--fs-meta)}
 .dp>summary>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dp>summary>i{font-style:normal}
 .dp ul{margin:0 0 var(--s2);padding-left:var(--s4);color:var(--fg);font-size:var(--fs-meta)}.dp code{font-size:var(--fs-meta)}
+/* #173: the pipeline group (in a fleet's [config] sheet) and the card's current stage. */
+/* Stage kinds: a glyph in a fixed colour. ▲ build (pushes code) amber, ◆ check (PASS/FAIL) purple, ◫ gate
+   (herdsman's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
+.kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
+/* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
+   park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).
+   serve.js writes grid-row / grid-area / the column list inline (no px). */
+.pg{--ln:calc(var(--s4) + var(--s2));display:grid;min-width:0;margin:var(--s2) 0;line-height:var(--ln)}
+.pg>*{position:relative;min-width:0;margin:0}
+/* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome
+   that leaves the spine. Every line is one line: it ellipsises, the full text is its title. */
+.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:#161b22;border:solid #30363d;border-width:0 1px;white-space:nowrap;overflow:hidden}
+.nb.t{border-top-width:1px;border-radius:6px 6px 0 0}.nb.b{border-bottom-width:1px;border-radius:0 0 6px 6px}.nb.t.b{border-radius:6px}
+.nb>b{font-weight:600}
+.nb>.tag{margin-left:auto;line-height:1.5}
+.nb .dt,.nb.po>span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta);color:var(--mute)}
+.nb .dt.r{color:var(--r)}
+.nb.po>span b{font-weight:400}
+/* An outcome leaving the box: its word in its colour, then a leader to the box edge, where its rail picks it up.
+   Right = back into a loop (grey); left = out of rounds, to park (red, dashed). */
+.nb.po::after{content:"";flex:1 0 var(--s2);margin-right:-1ch;border-top:1px solid var(--mute)}
+.nb.po.l::after{display:none}
+.nb.po.l::before{content:"";flex:0 0 1ch;margin-left:-1ch;border-top:1px dashed var(--r)}
+.nb.end{border-color:#30363d}
+/* Errors: a broken stage gets a red edge; an unreachable one is dashed and dimmed. */
+.nb.bad{border-color:var(--r)}
+.nb.dead{border-style:dashed;border-color:var(--r)}.nb.dead>:not(.dt){opacity:.55}
+/* The spine: the main outcome (push / PASS / ok) straight down to the next stage, its word beside the arrow. */
+.pl{grid-column:2;padding-left:4ch;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl>b{font-weight:400;margin-right:1ch}
+.pl::before{content:"";position:absolute;left:2ch;top:0;bottom:0;border-left:1px solid var(--mute)}
+.pl::after{content:"▾";position:absolute;left:2ch;bottom:0;translate:-50% 35%;line-height:1;color:var(--mute)}
+.pl.no::before,.pl.no::after,.pl.pn::before,.pl.pn::after{display:none}
+.pl.pn{padding-left:1ch;white-space:normal}
+.nl{grid-column:2;display:flex;gap:var(--s2);padding-left:1ch;white-space:nowrap;overflow:hidden}
+.nl>i{position:relative;left:.5ch}
+/* Rails. .ea: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
+   .ey: the rail itself, middle of its first row to middle of its last. */
+.ea::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
+.ea.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;font-size:var(--fs);line-height:1;color:var(--mute)}
+.ey::before{content:"";position:absolute;left:50%;top:calc(var(--ln) / 2);bottom:calc(var(--ln) / 2);border-left:1px solid var(--mute)}
+.ea.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
+.ea.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
+.ey.l::before{border-left:2px dashed var(--r)}
+.ek{z-index:1}.ek::before{content:"";position:absolute;inset:15% 0;background:var(--bg)}
+/* A loop target's header names the rail that joins it. */
+.nb>.lp{margin-left:auto;font-size:var(--fs-meta);color:var(--mute)}.nb>.tag~.lp{margin-left:0}
+.ea{z-index:2}
+/* The pipeline group: a status line, the graph, the source; side by side when there is room for both. */
+.pp .pv{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.pp .pw2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:0 var(--s4);align-items:start}
+.pp .lg{margin:var(--s1) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+.pp .lg i{font-style:normal}
+.tm{border:0;margin:var(--s2) 0}
+.tm>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);font-size:var(--fs-meta);color:var(--mute)}
+.tm pre{margin:0;padding:var(--s2);background:#161b22;border:1px solid #30363d;border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+/* A refused pipeline: what stops, then one line per broken rule, each with its place in fleet.toml. */
+.pe{margin:var(--s1) 0 var(--s2);padding:0 var(--s2);border:1px solid var(--r);border-radius:6px}
+.pe>p{margin:var(--s2) 0}
+.pe ol{margin:0 0 var(--s2);padding:0;list-style:none}
+.pe li{padding:var(--s1) 0;border-top:1px solid var(--line)}
+.pe li>b{font-weight:400;margin-right:1ch}
+.pe li>.at{font-size:var(--fs-meta);color:var(--mute);margin-left:1ch}
+.pe .qn{color:var(--fg)}
+/* The card's "where it is now": queued ─ stages ─ merge, wrapping; the current stage lit in its kind's colour,
+   a check that PASSed at the head ticked. Under it, one 11 px line: the round and what it waits on. */
+.ps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) 0;margin:var(--s2) 0 0;color:var(--mute)}
+.ps .sx{font-style:normal;padding:0 .5ch}
+.pt{display:inline-flex;gap:.5ch;padding:0 var(--s1);border:1px solid transparent;border-radius:4px;white-space:nowrap}
+.pt.dn{color:var(--fg)}
+.pt.on{--kc:var(--mute);color:var(--fg);border-color:var(--kc);background:color-mix(in srgb,var(--kc) 16%,transparent)}
+.pt.on.kb{--kc:var(--a)}.pt.on.kc{--kc:var(--p)}.pt.on.kg{--kc:var(--c)}
 /* #170 Events: #162's fleet colour --fk and its dot; chips [all] [important] [● fleet] (pressed: unfilled per #58, accent text
    and underline, a fleet chip in its own colour); sticky time groups; a row is glyph · dot · #N · words (2 lines) · age, opening to links + raw. */
 .fd{display:inline-block;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fk,transparent);flex:none}

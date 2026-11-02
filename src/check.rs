@@ -20,7 +20,7 @@ fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<
     let branch = crate::gate::branch_of(Some(s), s.issue);
     let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).ok()?;
     (pr["state"] == "OPEN").then_some(())?;
-    gate(f, &pr, Some(s), cfg.limits.review_rounds).ok()
+    gate(f, &pr, Some(s), false).ok()
 }
 
 /// `(url, prompt)` when the issue's latest amendment is missing from the lane's `.brief.md` (#101).

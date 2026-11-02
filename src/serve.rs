@@ -42,6 +42,8 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("kitchen/scene.svg", SVG),
 ];
 const SVG: &str = "image/svg+xml";
+const I180: &[u8] = include_bytes!("../assets/icon-180.png");
+const I192: &[u8] = include_bytes!("../assets/icon-192.png");
 /// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
@@ -49,15 +51,23 @@ const FILES: &[(&str, &str, &[u8])] = &[
         "application/manifest+json",
         include_bytes!("../assets/manifest.webmanifest"),
     ),
-    ("icon-180.png", "image/png", include_bytes!("../assets/icon-180.png")),
-    ("icon-192.png", "image/png", include_bytes!("../assets/icon-192.png")),
+    ("icon-180.png", "image/png", I180),
+    ("icon-192.png", "image/png", I192),
     ("icon-512.png", "image/png", include_bytes!("../assets/icon-512.png")),
+    // #195: the root icons Safari probes; a 404 there falls back to another service's icon on the same host.
+    ("apple-touch-icon.png", "image/png", I180),
+    ("apple-touch-icon-precomposed.png", "image/png", I180),
+    ("favicon.ico", "image/png", I192),
 ];
-/// FNV-1a over the assets at build time: their `/a/<hash8>/` path.
+/// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
-    while k < ASSETS.len() {
-        let b = ASSETS[k].2;
+    while k < ASSETS.len() + FILES.len() {
+        let b = if k < ASSETS.len() {
+            ASSETS[k].2
+        } else {
+            FILES[k - ASSETS.len()].2
+        };
         while i < b.len() {
             h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
             i += 1;
@@ -232,6 +242,23 @@ fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
             .filter(|(k, _)| k.trim().eq_ignore_ascii_case(name))
             .map(|(_, v)| v.trim())
     })
+}
+
+/// #199: the asking client's address. Behind `tailscale serve` every peer is loopback: then the forwarded address (the
+/// proxy appends it last) or the tailnet login; those headers count from a loopback peer only.
+fn client(head: &str) -> &str {
+    let peer = header(head, "x-peer").unwrap_or_default();
+    let fwd = header(head, "x-forwarded-for")
+        .and_then(|f| f.rsplit(',').next())
+        .map(str::trim);
+    let fwd = fwd
+        .or_else(|| header(head, "tailscale-user-login"))
+        .filter(|f| !f.is_empty());
+    peer.parse::<std::net::IpAddr>()
+        .is_ok_and(|p| p.is_loopback())
+        .then_some(fwd)
+        .flatten()
+        .unwrap_or(peer)
 }
 
 /// `application/x-www-form-urlencoded` (also the query string) into a map.
@@ -748,13 +775,20 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            ("POST", "/pair/request") => match devices::request(ctx, &kind(head), header(head, "x-peer").unwrap_or_default()) {
+            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out.
+            ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
+                .and_then(|()| devices::request(ctx, &kind(head), client(head)))
+            {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
                     ("200 OK", "text/plain", format!("{code}\n{}\n", hint.replace("{code}", &code)).into_bytes())
                 }
-                Ok(None) => ("429 Too Many Requests", "text/plain", text("3 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Err(e) => fail(e),
+            },
+            ("POST", "/pair/cancel") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default()) {
+                Ok(()) => ("200 OK", "text/plain", text("pairing request cancelled\n")),
                 Err(e) => fail(e),
             },
             ("POST", "/pair/claim") => match self.device(ctx, head) {
@@ -882,7 +916,7 @@ impl<'a> Server<'a> {
                 format!("no menu on {agent}'s pane: menu changed — refreshed; answer with the reply box"),
             );
         };
-        if l.role == "rev" && !q.starts_with("Do you want") {
+        if reviewer(ctx, &fleet, &l.role) && !q.starts_with("Do you want") {
             return refused("REV_READONLY", "reviewer lanes answer permission prompts only");
         }
         if !choice
@@ -912,7 +946,7 @@ impl<'a> Server<'a> {
         let (agent, text) = (g("agent"), g("text"));
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let (fleet, pane) = (&fleet, &pane);
-        if l.role == "rev" {
+        if reviewer(ctx, fleet, &l.role) {
             return refused("REV_READONLY", "reviewer lanes are not steered mid-review");
         }
         let n = text.chars().count();
@@ -1090,8 +1124,8 @@ impl<'a> Server<'a> {
                     &c,
                     f,
                     c.fleet.get(f)?,
-                    self.addr.is_some(),
-                    &mtime(ctx),
+                    (self.addr.is_some(), &mtime(ctx)),
+                    &fold(&events),
                 ))
             }
             _ => None,
@@ -1120,6 +1154,12 @@ impl<'a> Server<'a> {
             if root.is_empty() { " data-root=\"\"" } else { "" },
             if demo { " data-demo=1" } else { "" }
         );
+        // #199: iOS keeps Safari's and the home-screen app's cookies apart.
+        let msg = if !paired && !self.pairb().is_empty() && devices::load(ctx).iter().any(|d| d.code.is_none()) {
+            msg + "<p class=m>Safari and the home-screen app pair separately</p>"
+        } else {
+            msg
+        };
         let msg = if demo {
             "<p class=\"msg a\">Demo with fake data. Install herdsman to run your own.</p>".to_string()
         } else {
@@ -1134,7 +1174,7 @@ impl<'a> Server<'a> {
             "<!doctype html><html lang=en><head><meta charset=utf-8>\
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
-             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png><link rel=apple-touch-icon href={root}icon-180.png>\
+             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css></head>\
              <body data-ts={} data-mode=horse{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
@@ -1178,11 +1218,11 @@ impl<'a> Server<'a> {
             let why = events.iter().rev().find(|e| e.is("needs-human", f, n));
             let why = esc(why.and_then(|e| e.str("reason")).unwrap_or("gate"));
             let m = pr["mergeable"].as_str().unwrap_or("?");
-            let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), u32::MAX).is_ok()) && m == "MERGEABLE";
+            let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE";
             let (line, m) = (pr_line(ctx, fc, f, n, None), m.to_lowercase());
             let fail = esc(crate::events::finding(events, f, n).unwrap_or_default());
             let v = match s.verdicts.last() {
-                Some((sha, v)) if v == "PASS" => {
+                Some((sha, v, _)) if v == "PASS" => {
                     let stale = if pr["headRefOid"].as_str() == Some(sha.as_str()) {
                         ""
                     } else {
@@ -1320,7 +1360,12 @@ impl<'a> Server<'a> {
                 need += usize::from(rank == 0);
                 let a = ago(now, s.map_or(0, |s| s.last_ts));
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
-                let mut card = vec![esc(lane), pr_line(ctx, Some(fc), f, n, s)];
+                let head = gh::cached_pr(ctx, f, n)["headRefOid"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let chips = s.map_or(String::new(), |s| stage_line(fc, s, &head));
+                let mut card = vec![chips, esc(lane), pr_line(ctx, Some(fc), f, n, s)];
                 if is_dead {
                     card.push("<span class=r>dead: the log has this lane open, herdr has no such agent</span>".into());
                 }
@@ -1432,7 +1477,7 @@ impl<'a> Server<'a> {
             if self.export.is_some() {
                 body += &format!(
                     "<template data-cfg=\"{fe}\">{}</template>",
-                    config_sheet(ctx, cfg, f, fc, rw, &mt)
+                    config_sheet(ctx, cfg, f, fc, (rw, &mt), st)
                 );
             }
             let lanes: Vec<&&IssueState> = mine.iter().filter(|s| s.active_lane().is_some()).collect();
@@ -1475,9 +1520,17 @@ impl<'a> Server<'a> {
                 let busy = queue::serial_in_flight(events, st, f).len();
                 meta.push(format!("serial {busy}/{}", fc.serial_max.unwrap_or(1)));
             }
+            // #173: a refused pipeline stops this fleet only; its card says so in red.
+            let bad = match fc.bad.len() {
+                0 => String::new(),
+                n => format!(
+                    "<p class=r>! BAD_PIPELINE · {n} error{} in fleet.toml · nothing moves until it is fixed</p>",
+                    if n == 1 { "" } else { "s" }
+                ),
+            };
             cards.push((!need.is_empty(), format!(
                 "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
-                 <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{body}</div>",
+                 <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{bad}{body}</div>",
                 button("pause", "Pause"),
                 drive_line(ctx, events, f, &meta),
             )));
@@ -1704,8 +1757,11 @@ impl<'a> Server<'a> {
                 _ => String::new(),
             };
             let o = if t == "r" { "▶ " } else { "" };
-            let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
-            m += &hrow(k, t, &(bar + &val), "", "");
+            m += &kv(
+                k,
+                t,
+                &format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}"),
+            );
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
@@ -1714,9 +1770,8 @@ impl<'a> Server<'a> {
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
             let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
             let o = if t == "r" { "▶ " } else { "" };
-            let val =
-                format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
-            m += &hrow("disk", t, &(bar + &val), "", "");
+            let fl = format!("<span class=\"mt fx\">· floor {min} GB · {wt}</span>");
+            m += &kv("disk", t, &format!("{bar} <b class={t}>{o}{gb:.0} GB free</b> {fl}"));
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
@@ -1748,7 +1803,7 @@ impl<'a> Server<'a> {
         // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {
-            let fix = [String::new(), format!("<span class=\"mt fx\">→ {}</span>", chips(fix))];
+            let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
             s += &kv(
                 k,
                 t,
@@ -1865,8 +1920,17 @@ impl<'a> Server<'a> {
                 a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
-        let head = "<summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
-        let grp = |(n, rows): (&str, String)| format!("<details class=grp>{}{rows}</details>", head.replace("{}", n));
+        // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
+        let ks = [&m, &s, &f, &a].map(|g| {
+            g.split("<span class=k>")
+                .skip(1)
+                .map(|k| k.split('<').next().unwrap_or_default().chars().count())
+                .max()
+                .unwrap_or(0)
+        });
+        let head = "<details class=grp style=--kw:@ch><summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
+        let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
+        let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
         let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
         gs.map(grp).concat()
     }
@@ -2117,7 +2181,7 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
             })
         ));
     }
-    if let Some((s, (_, v))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
+    if let Some((s, (_, v, _))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
         parts.push(format!("rev <span class={}>{}</span> r{}", tone(v), esc(v), s.rounds));
     }
     parts.join(" · ")
@@ -2150,7 +2214,33 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
 
 /// #162: a fleet's [config] sheet: GENERAL, LIMITS, ROLES (the `set` pickers when `rw`), ALERTS, HOSTS / NEEDS.
 /// Only the role pickers write (through `set`); the rest is read-only, edited in the config file named on top.
-fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str) -> String {
+fn config_sheet(
+    ctx: &Ctx,
+    cfg: &Config,
+    fleet: &str,
+    fc: &crate::config::Fleet,
+    (rw, mt): (bool, &str),
+    st: &States,
+) -> String {
+    let tag = |role: &str| {
+        let on: Vec<String> = fc
+            .flow()
+            .stage
+            .iter()
+            .filter(|s| s.role.as_deref() == Some(role))
+            .map(|s| format!("{}: {}", s.kind, s.name))
+            .collect();
+        let on = if role == "design" {
+            "owner only".into()
+        } else {
+            on.join(", ")
+        };
+        if on.is_empty() {
+            String::new()
+        } else {
+            format!("<span class=\"tag m\">{}</span> ", esc(&on))
+        }
+    };
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
     let path = path.strip_prefix(&home).map_or(path.clone(), |p| format!("~{p}"));
@@ -2227,9 +2317,17 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
             },
         ),
     ];
+    let rounds = |n: u32, on: &str| {
+        if fc.flow().builtin {
+            format!("{n} <span class=m>→ {on}, see Pipeline</span>{all}")
+        } else {
+            format!("<span class=m>n/a (pipeline)</span>{all}")
+        }
+    };
     let limits = [
-        ("review rounds", format!("{}{all}", l.review_rounds)),
-        ("update rounds", format!("{}{all}", l.update_rounds)),
+        // #173: the built-in pipeline's defaults; a fleet with its own pipeline sets them per stage.
+        ("review rounds", rounds(l.review_rounds, "rev's rounds")),
+        ("update rounds", rounds(l.update_rounds, "gates' rounds")),
         ("stall after", format!("{} min{all}", l.stall_minutes)),
         ("ask default", format!("{} min{all}", l.ask_default_minutes)),
         (
@@ -2270,14 +2368,15 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
     let roles: String = fc
         .role
         .iter()
-        .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt))
+        .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt).replacen("</b> ", &format!("</b> {}", tag(name)), 1))
         .collect();
     format!(
-        "<p class=cp><span class=m>config</span> {}</p>{}{}<section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>{roles}\
+        "<p class=cp><span class=m>config</span> {}</p>{}{}{}<section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>{roles}\
          <p class=rk>profile, accounts, mcp: {edit}</p></section>{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
          <p class=soon>Which hosts this fleet's lanes may run on, matched by host tags against the issue's needs. Shown here once #157 lands.</p></section>",
         esc(&path),
         group("General", &edit, &general),
+        pipeline_group(fleet, fc, st),
         group("Limits", &edit, &limits),
         group("Alerts", &edit, &alerts),
     )
@@ -2576,6 +2675,107 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
         h += "</div>";
     }
     h
+}
+
+/// A check role's lane (`rev`, or #173 any check stage's): read-only from the page.
+fn reviewer(ctx: &Ctx, fleet: &str, role: &str) -> bool {
+    let cfg = Config::load(&ctx.config).ok();
+    role == "rev" || cfg.and_then(|c| Some(c.fleet.get(fleet)?.family(role) == "rev")) == Some(true)
+}
+
+/// #173: where an issue is in its fleet's pipeline: (stage, the mode or round its chip shows); `None` off the graph.
+fn stage_at<'a>(fc: &'a crate::config::Fleet, s: &'a IssueState) -> Option<(&'a str, String)> {
+    let p = fc.flow();
+    let build = p.stage_of(s.build.as_deref().unwrap_or(p.start()));
+    let n = s.state.split(['(', ')']).nth(1).unwrap_or_default();
+    match s.state.split('(').next()? {
+        "impl" => Some((build, String::new())),
+        "fix" if s.updating => Some((build, "update".into())),
+        "fix" => Some((build, "fix".into())),
+        "review" => Some((s.stage.as_str(), format!("r{n}"))),
+        "ready" | "blocked" => Some((p.gate(), String::new())),
+        _ => None,
+    }
+}
+
+/// Kind → (glyph class, glyph): ▲ build, ◆ check, ◫ gate, ✓ merge, ! park.
+fn glyph(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "build" => ("b", "▲"),
+        "check" => ("c", "◆"),
+        "gate" => ("g", "◫"),
+        "merge" => ("m", "✓"),
+        _ => ("x", "!"),
+    }
+}
+
+/// #173: the card's "where it is now": `○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`, the current stage lit, the stages
+/// before it plain, a check with a PASS at the PR head ticked.
+fn stage_line(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> String {
+    let Some((at, mode)) = stage_at(fc, s) else {
+        return String::new();
+    };
+    let p = fc.flow();
+    let pos = p.stage.iter().position(|x| x.name == at).unwrap_or(0);
+    let chips = p.stage.iter().enumerate().map(|(i, x)| {
+        let (k, g) = glyph(&x.kind);
+        let ok = x.kind == "check"
+            && s.verdicts
+                .iter()
+                .rev()
+                .find(|v| v.2 == x.name && v.0 == head)
+                .is_some_and(|v| v.1 == "PASS");
+        let tick = if ok && i != pos { "<b class=g>✓</b>" } else { "" };
+        let cls = match i.cmp(&pos) {
+            std::cmp::Ordering::Less => "pt dn".to_string(),
+            std::cmp::Ordering::Equal => format!("pt on k{k}"),
+            std::cmp::Ordering::Greater => "pt".into(),
+        };
+        let name = if i == pos && !mode.is_empty() {
+            format!("{} · {mode}", x.name)
+        } else {
+            x.name.clone()
+        };
+        format!(
+            "<span class=\"{cls}\"><i class=\"kd {k}\">{g}</i>{}{tick}</span>",
+            esc(&name)
+        )
+    });
+    let all: Vec<String> = std::iter::once("<span class=\"pt dn\"><i class=kd>○</i></span>".to_string())
+        .chain(chips)
+        .chain(["<span class=pt><i class=\"kd m\">✓</i>merge</span>".to_string()])
+        .collect();
+    format!("<span class=ps>{}</span>", all.join("<i class=sx>─</i>"))
+}
+
+/// #173: the fleet's Pipeline group as data (`data-pipe`); serve.js draws it to docs/design/pipeline: the validity line
+/// or the broken rules, the graph with `n here` per stage, the legend, the pipeline as fleet.toml text.
+fn pipeline_group(fleet: &str, fc: &crate::config::Fleet, st: &States) -> String {
+    let p = fc.flow();
+    let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == fleet && !s.done()).collect();
+    let count = |f: &dyn Fn(&IssueState) -> bool| mine.iter().filter(|s| f(s)).count();
+    let stages: Vec<serde_json::Value> = (p.stage.iter())
+        .map(|s| {
+            let run = s.role.as_deref().and_then(|r| fc.role.get(r)).map(|r| {
+                let m = r.model.as_deref().unwrap_or("default");
+                format!("{} · {m} · effort {}", r.harness, r.effort.as_deref().unwrap_or("none"))
+            });
+            let here = count(&|x| stage_at(fc, x).is_some_and(|a| a.0 == s.name));
+            json!({"name": s.name, "kind": s.kind, "role": s.role, "run": run, "next": s.next, "rounds": s.rounds,
+                "line": s.line, "here": here, "loop": p.loop_of(&s.name)})
+        })
+        .collect();
+    let bad: Vec<serde_json::Value> = (fc.bad.iter())
+        .map(|b| json!({"rule": b.rule, "msg": b.msg, "stage": b.stage, "line": b.line}))
+        .collect();
+    let checks: Vec<&str> = p.checks().map(|c| c.name.as_str()).collect();
+    let d = json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
+        "checks": checks, "required": fc.required_checks, "queued": count(&|s| s.state == "queued"),
+        "parked": count(&|s| s.state == "needs-human")});
+    format!(
+        "<section class=\"cg pp\" data-pipe=\"{}\"><h3>Pipeline</h3></section>",
+        esc(&d.to_string())
+    )
 }
 
 /// #170: an event as pretty JSON, a multi-line string as its first line and `… (N more lines)`, 160 chars at most.

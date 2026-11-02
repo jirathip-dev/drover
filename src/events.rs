@@ -223,8 +223,13 @@ pub struct IssueState {
     pub last_event: String,
     /// Latest agent per role (impl, rev).
     pub lanes: BTreeMap<String, String>,
-    /// (sha, PASS|FAIL) in log order.
-    pub verdicts: Vec<(String, String)>,
+    /// (sha, PASS|FAIL, the check stage whose rounds it counts) in log order; logs before #173: `rev`.
+    pub verdicts: Vec<(String, String, String)>,
+    /// #173: the pipeline stage of the latest spawn, the latest check and build roles, review rounds per check stage.
+    pub stage: String,
+    pub check: Option<String>,
+    pub build: Option<String>,
+    pub stage_rounds: BTreeMap<String, u32>,
 }
 
 /// Per-issue state, keyed by (fleet, issue).
@@ -236,6 +241,14 @@ pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
         .iter()
         .rev()
         .find(|e| e.kind == "spawn" && e.str("agent") == Some(agent))
+}
+
+/// #173: a check stage's spawn (logs before #173: a `rev` one).
+pub fn checks(e: &Event) -> bool {
+    e.data
+        .get("check")
+        .and_then(Value::as_bool)
+        .unwrap_or(e.str("role") == Some("rev"))
 }
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
@@ -327,7 +340,11 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 if let (Some(r), Some(a)) = (e.str("role"), e.str("agent")) {
                     s.lanes.insert(r.into(), a.into());
                 }
-                let rev = e.str("role") == Some("rev");
+                // #173: a check stage's spawn says so; before, only `rev` reviewed.
+                let role = e.str("role").unwrap_or_default();
+                let rev = checks(e);
+                s.stage = e.str("stage").unwrap_or(role).into();
+                *if rev { &mut s.check } else { &mut s.build } = Some(role.into());
                 if !rev {
                     s.branch = e.str("branch").map(String::from).or(s.branch.take());
                     s.updating = e.data.get("update") == Some(&Value::Bool(true));
@@ -337,8 +354,9 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 } else {
                     String::new()
                 };
+                let n = s.stage_rounds.get(&s.stage).copied().unwrap_or_default();
                 s.state = match (rev, s.rounds) {
-                    (true, n) => format!("review({}){u}", n + u32::from(!s.updating)),
+                    (true, _) => format!("review({}){u}", n + u32::from(!s.updating)),
                     (false, 0) => "impl".into(),
                     (false, n) => format!("fix({n}){u}"),
                 };
@@ -349,13 +367,20 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                 // A round is a distinct reviewed sha; re-recording one does not burn another.
                 // #123: a PASSed update round is an update; a FAILed merge-only check is a normal round.
                 let new = u32::from(!s.reviewed(sha));
+                // #173: a check stage counts its own reviews; a gate's (CI red) those of the check its fix goes to.
+                let lp = e.str("loop").or(e.str("stage")).unwrap_or("rev").to_string();
+                let mine = |x: &(String, String, String)| x.0.eq_ignore_ascii_case(sha) && x.2 == lp;
+                let new_here = u32::from(!s.verdicts.iter().any(mine));
+                if !(s.updating && v == "PASS") {
+                    *s.stage_rounds.entry(lp.clone()).or_default() += new_here;
+                }
                 *if s.updating && v == "PASS" {
                     &mut s.updates
                 } else {
                     &mut s.rounds
                 } += new;
                 s.updating = false;
-                s.verdicts.push((sha.into(), v.clone()));
+                s.verdicts.push((sha.into(), v.clone(), lp));
                 s.state = if v == "PASS" {
                     "ready".into()
                 } else {
@@ -375,12 +400,13 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
             // Back to the state before the killed lane: queued / fix(n) for an impl, impl / fix(n) for a review.
             "lane-killed" if e.str("role").and_then(|r| s.lanes.get(r)).map(String::as_str) == e.str("agent") => {
                 let role = e.str("role").unwrap_or_default();
+                let chk = s.check.as_deref() == Some(role);
                 s.lanes.remove(role);
                 s.lane = None;
-                if role == "impl" && s.state == "impl" || role == "rev" && s.state.starts_with("review") {
+                if s.build.as_deref() == Some(role) && s.state == "impl" || chk && s.state.starts_with("review") {
                     s.state = if s.rounds > 0 {
                         format!("fix({})", s.rounds)
-                    } else if role == "rev" {
+                    } else if chk {
                         "impl".into()
                     } else {
                         "queued".into()
@@ -396,7 +422,7 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
 impl IssueState {
     /// A verdict was already recorded for this sha.
     pub fn reviewed(&self, sha: &str) -> bool {
-        self.verdicts.iter().any(|(s, _)| s.eq_ignore_ascii_case(sha))
+        self.verdicts.iter().any(|(s, ..)| s.eq_ignore_ascii_case(sha))
     }
 
     /// Merged, or closed on GitHub: no lane, alert or queue slot any more.
@@ -407,20 +433,34 @@ impl IssueState {
     /// The lane that should be working now: impl in impl/fix, rev in review; none once ready, blocked or merged.
     pub fn active_lane(&self) -> Option<(&str, &str)> {
         let role = if self.state.starts_with("review") {
-            "rev"
+            self.check.as_deref()?
         } else if self.state == "impl" || self.state.starts_with("fix") {
-            "impl"
+            self.build.as_deref()?
         } else {
             return None;
         };
-        self.lanes.get(role).map(|a| (role, a.as_str()))
+        self.lanes.get_key_value(role).map(|(r, a)| (r.as_str(), a.as_str()))
     }
 
-    /// The event log still has an open lane for this role.
-    pub fn unfinished(&self, role: &str) -> bool {
-        match role {
-            "rev" => self.state.starts_with("review"),
-            _ => self.lanes.contains_key(role) && !self.done(),
+    /// The event log still has an open lane for this role (`check`: a check stage's).
+    pub fn unfinished(&self, role: &str, check: bool) -> bool {
+        if check {
+            self.state.starts_with("review")
+        } else {
+            self.lanes.contains_key(role) && !self.done()
+        }
+    }
+
+    /// #173: the check lane (the latest check role's agent).
+    pub fn check_lane(&self) -> Option<&String> {
+        self.lanes.get(self.check.as_deref()?)
+    }
+
+    /// #173: the shown state: a check stage other than `rev` shows `<stage>(n)` for `review(n)`.
+    pub fn shown(&self) -> String {
+        match self.state.strip_prefix("review") {
+            Some(n) if self.check.is_some() && self.stage != "rev" => format!("{}{n}", self.stage),
+            _ => self.state.clone(),
         }
     }
 }
@@ -440,7 +480,7 @@ pub fn status_line(s: &IssueState, now: u64) -> String {
         "{:<12} #{:<5} {:<12} {lane:<24} {}",
         s.fleet,
         s.issue,
-        s.state,
+        s.shown(),
         age(now.saturating_sub(s.last_ts))
     )
 }
