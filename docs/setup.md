@@ -241,8 +241,9 @@ Replies, answers and lane actions need a paired phone. You never type on the pho
    your own way to the panel, e.g. `"or send 'pair {code}' to the owner"`). `herdsman serve pending` lists the open requests.
 3. The phone flips to "paired as iPhone Safari" by itself.
 
-A code works once, for 10 minutes. At most 3 requests are open at a time, 2 per address
-(behind `tailscale serve` every phone comes from `127.0.0.1`, so they share that limit). The
+A code works once, for 10 minutes. At most 4 requests are open at a time, 2 per address
+(behind `tailscale serve` every phone comes from `127.0.0.1`, so the forwarded address counts instead);
+tapping Pair again replaces your own open request. The
 device cookie only goes to the browser that tapped Pair, so someone else who sees the code
 can't use it. The log records `pair-request` and `pair-approve` with the device label, never
 the code or the token. `herdsman serve pair` now only prints these steps.
