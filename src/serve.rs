@@ -1745,6 +1745,7 @@ impl<'a> Server<'a> {
             o(&l.model),
             o(&l.effort),
             o(&l.account),
+            o(&l.port),
             a.clone(),
         ];
         let mut card = vec![
