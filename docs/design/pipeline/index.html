@@ -1,0 +1,426 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pipeline graph mockup</title>
+<!-- #173 design mockup: the pipeline as a node graph in #162's [config] sheet, a custom pipeline, a validation error,
+     and the issue card's "where it is now" line. serve.css is the board's, unchanged; the rules below are #162's
+     (not merged yet) plus the #173 ones, existing tokens only, and move to serve.css in phase 2.
+     Static: `#` the default pipeline, `#custom`, `#error`, `#card`. -->
+<link rel=stylesheet href=../../../assets/serve.css>
+<style>
+/* Mockup only: each view drawn in the page flow, the sheet at its full detent, so a screenshot shows all of it. */
+.view{display:none}
+body:not(.v-custom,.v-error,.v-card) #v-default,.v-custom #v-custom,.v-error #v-error,.v-card #v-card{display:block}
+.sh{position:static;transform:none;padding:0}
+
+/* ---- from #162 (design-162, not in serve.css yet) ---- */
+.fc{--fk:var(--l);margin:var(--s3) 0;border:1px solid #30363d;border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
+.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fh{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit)}
+.fh>.fn{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--s2);white-space:nowrap;overflow:hidden}
+.fn>b{color:var(--fk)}
+.fn .ds{font-size:var(--fs-meta);color:var(--mute);overflow:hidden;text-overflow:ellipsis}
+.fn .ds i{font-style:normal}
+.fh>.btns{gap:var(--s4);padding-bottom:var(--s1)}
+.fm{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.cv{font-style:normal;color:var(--mute)}.cv::before{content:"▸"}[open]>summary .cv::before{content:"▾"}
+.sh.cs{border-top:3px solid var(--fk)}
+.cs .hd p{display:flex;align-items:baseline;gap:var(--s2)}.cs .hd b{color:var(--fk)}
+.cs .body{flex:1;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;padding-bottom:var(--s4)}
+.cg{border-top:1px solid var(--line);padding:var(--s1) 0 var(--s2)}
+.cg>h3{display:flex;align-items:center;gap:var(--s2);min-height:var(--ctl);margin:0;font-size:var(--fs-meta);font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--fg)}
+.cg>h3>span{margin-left:auto;letter-spacing:0;text-transform:none;color:var(--mute)}
+.kv2{display:grid;grid-template-columns:15ch minmax(0,1fr);gap:var(--s1) var(--s2);align-items:baseline;margin:0}
+.kv2>dt{font-size:var(--fs-meta);color:var(--mute)}
+.kv2>dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.kv2 .tag{margin-left:var(--s1)}
+.cs form.role{flex-direction:column;align-items:stretch;gap:var(--s1);padding:var(--s2) 0}
+.cs form.role:first-of-type{border-top:0}
+.cs .rh{display:flex;align-items:baseline;gap:var(--s2);margin:0}
+.cs .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
+.cs .rk{margin:0;font-size:var(--fs-meta);color:var(--mute)}
+
+/* ---- proposed for serve.css (#173) ---- */
+/* Stage kinds: a glyph in a fixed colour. ▲ build (pushes code) amber, ◆ check (PASS/FAIL) purple, ◫ gate
+   (herdsman's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
+.kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
+/* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
+   park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).
+   serve.rs writes grid-row / grid-area / the column list inline (no px). */
+.pg{--ln:calc(var(--s4) + var(--s2));display:grid;min-width:0;margin:var(--s2) 0;line-height:var(--ln)}
+.pg>*{position:relative;min-width:0;margin:0}
+/* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome
+   that leaves the spine. Every line is one line: it ellipsises, the full text is its title. */
+.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:#161b22;border:solid #30363d;border-width:0 1px;white-space:nowrap;overflow:hidden}
+.nb.t{border-top-width:1px;border-radius:6px 6px 0 0}.nb.b{border-bottom-width:1px;border-radius:0 0 6px 6px}.nb.t.b{border-radius:6px}
+.nb>b{font-weight:600}
+.nb>.tag{margin-left:auto;line-height:1.5}
+.nb .dt,.nb.po>span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta);color:var(--mute)}
+.nb .dt.r{color:var(--r)}
+.nb.po>span b{font-weight:400}
+/* An outcome leaving the box: its word in its colour, then a leader to the box edge, where its rail picks it up.
+   Right = back into a loop (grey); left = out of rounds, to park (red, dashed). */
+.nb.po::after{content:"";flex:1 0 var(--s2);margin-right:-1ch;border-top:1px solid var(--mute)}
+.nb.po.l::after{display:none}
+.nb.po.l::before{content:"";flex:0 0 1ch;margin-left:-1ch;border-top:1px dashed var(--r)}
+.nb.end{border-color:#30363d}
+/* Errors: a broken stage gets a red edge; an unreachable one is dashed and dimmed. */
+.nb.bad{border-color:var(--r)}
+.nb.dead{border-style:dashed;border-color:var(--r)}.nb.dead>:not(.dt){opacity:.55}
+/* The spine: the main outcome (push / PASS / ok) straight down to the next stage, its word beside the arrow. */
+.pl{grid-column:2;padding-left:4ch;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl>b{font-weight:400;margin-right:1ch}
+.pl::before{content:"";position:absolute;left:2ch;top:0;bottom:0;border-left:1px solid var(--mute)}
+.pl::after{content:"▾";position:absolute;left:2ch;bottom:0;translate:-50% 35%;line-height:1;color:var(--mute)}
+.pl.no::before,.pl.no::after,.pl.pn::before,.pl.pn::after{display:none}
+.pl.pn{padding-left:1ch;white-space:normal}
+.nl{grid-column:2;display:flex;gap:var(--s2);padding-left:1ch;white-space:nowrap;overflow:hidden}
+.nl>i{position:relative;left:.5ch}
+/* Rails. .ex: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
+   .ey: the rail itself, middle of its first row to middle of its last. .ek: a gap where a line crosses a rail. */
+.ex::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
+.ex.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;line-height:1;color:var(--mute)}
+.ey::before{content:"";position:absolute;left:50%;top:calc(var(--ln) / 2);bottom:calc(var(--ln) / 2);border-left:1px solid var(--mute)}
+.ex.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
+.ex.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
+.ey.l::before{border-left-style:dashed;border-color:var(--r)}
+.ek{z-index:1}.ek::before{content:"";position:absolute;left:25%;right:25%;top:25%;bottom:25%;background:var(--bg)}
+.ex{z-index:2}
+/* The pipeline group: a status line, the graph, the source; side by side when there is room for both. */
+.pp .pv{margin:0 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.pp .pw2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:0 var(--s4);align-items:start}
+.pp .lg{margin:var(--s1) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+.pp .lg i{font-style:normal}
+.tm{border:0;margin:var(--s2) 0}
+.tm>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);font-size:var(--fs-meta);color:var(--mute)}
+.tm pre{margin:0;padding:var(--s2);background:#161b22;border:1px solid #30363d;border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.tm pre s{text-decoration:none;color:var(--g)}
+/* A refused pipeline: what stops, then one line per broken rule, each with its place in fleet.toml. */
+.pe{margin:var(--s1) 0 var(--s2);padding:0 var(--s2);border:1px solid var(--r);border-radius:6px}
+.pe>p{margin:var(--s2) 0}
+.pe ol{margin:0 0 var(--s2);padding:0;list-style:none}
+.pe li{padding:var(--s1) 0;border-top:1px solid var(--line)}
+.pe li>b{font-weight:400;margin-right:1ch}
+.pe li>.at{font-size:var(--fs-meta);color:var(--mute);margin-left:1ch}
+.pe .qn{color:var(--fg)}
+/* The card's "where it is now": queued ─ stages ─ merge, wrapping; the current stage lit in its kind's colour,
+   a check that PASSed at the head ticked. Under it, one 11 px line: the round and what it waits on. */
+.ps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) 0;margin:var(--s2) 0 0;color:var(--mute)}
+.ps .sx{font-style:normal;padding:0 .5ch}
+.pt{display:inline-flex;gap:.5ch;padding:0 var(--s1);border:1px solid transparent;border-radius:4px;white-space:nowrap}
+.pt.dn{color:var(--fg)}
+.pt.on{--kc:var(--mute);color:var(--fg);border-color:var(--kc);background:color-mix(in srgb,var(--kc) 16%,transparent)}
+.pt.on.kb{--kc:var(--a)}.pt.on.kc{--kc:var(--p)}.pt.on.kg{--kc:var(--c)}
+.pw{margin:var(--s1) 0 var(--s2)!important;font-size:var(--fs-meta);color:var(--mute)}
+</style></head>
+<body data-ts=1793585112 data-mode=glyph>
+
+<!-- ============ 1 · the default pipeline in herdsman's [config] sheet (live data, 2026-11-02 09:05) ============ -->
+<div id=v-default class=view>
+<div class="sh full cs k-l" role=dialog aria-label="herdsman config">
+ <div class=hd><p><b>herdsman</b><span>· config</span></p></div>
+ <div class=body>
+  <section class=cg><h3>General<span>edit fleet.toml</span></h3><dl class=kv2>
+   <dt>repo</dt><dd>jirathip-dev/herdsman</dd>
+   <dt>integration</dt><dd>staging</dd>
+   <dt>driver</dt><dd>herdsman <span class=m>(herdsman drive)</span></dd>
+  </dl></section>
+  <section class="cg pp"><h3>Pipeline<span>built-in · edit fleet.toml</span></h3>
+   <p class=pv><span class=g>✓ valid</span> · 3 stages · every stage reachable, every path ends, every loop has a limit</p>
+   <div class=pw2>
+    <div>
+<div class=pg role=img aria-label="herdsman pipeline: queued, impl, rev, gates, merge; FAIL, CI red and conflict loop back to impl; out of rounds goes to park" style="grid-template-columns:2ch minmax(0,1fr) repeat(1,2ch);grid-template-rows:repeat(20,var(--ln))">
+<p class="nl st" style="grid-row:1"><i class=kd>○</i><b>queued</b><span class=m>7 waiting</span></p>
+<p class=pl style="grid-row:2"><b>start</b><span>if unblocked · serial slot · host room</span></p>
+<p class="nb t" style="grid-row:3"><i class="kd b">▲</i><b>impl</b><span class=m>build</span><span class="tag m">6 here</span></p>
+<p class="nb b" style="grid-row:4"><span class=dt title="role impl · claude · opus-5-5 · effort none">role impl · claude · opus-5-5 · effort none</span></p>
+<p class=pl style="grid-row:5"><b>push</b><span>a new head</span></p>
+<p class="nb t" style="grid-row:6"><i class="kd c">◆</i><b>rev</b><span class=m>check</span><span class="tag m">1 here</span></p>
+<p class="nb" style="grid-row:7"><span class=dt title="role rev · claude · sonnet-5-5 · effort none">role rev · claude · sonnet-5-5 · effort none</span></p>
+<p class="nb po" style="grid-row:8"><span><b class=r>FAIL</b> → fix in impl · ≤3 rounds</span></p>
+<p class="nb po l b" style="grid-row:9"><span><b>3rd FAIL</b> → park</span></p>
+<p class=pl style="grid-row:10"><b class=g>PASS</b><span>at the exact head</span></p>
+<p class="nb t" style="grid-row:11"><i class="kd g">◫</i><b>gates</b><span class=m>gate · herdsman</span><span class="tag m">1 here</span></p>
+<p class="nb" style="grid-row:12"><span class=dt title="CI green · PASS at head · serial · mergeable">CI green · PASS at head · serial · mergeable</span></p>
+<p class="nb po" style="grid-row:13"><span><b class=r>CI red</b> → fix in impl</span></p>
+<p class="nb po" style="grid-row:14"><span><b class=a>conflict</b> → update in impl · ≤3</span></p>
+<p class="nb po l b" style="grid-row:15"><span><b>4th conflict</b> → park</span></p>
+<p class=pl style="grid-row:16"><b class=g>ok</b><span></span></p>
+<p class="nb t b end" style="grid-row:17"><i class="kd m">✓</i><b>merge</b><span class=m>into staging</span></p>
+<p class="nb t b end" style="grid-row:19"><i class="kd x">!</i><b>park</b><span class=m>needs you</span><span class="tag m">0 here</span></p>
+<p class="pl pn" style="grid-row:20"><span>on its card: one more round, or park for good</span></p>
+<i class=ey style="grid-area:3/3/15/4"></i>
+<i class="ex in" style="grid-area:3/3/4/4"></i>
+<i class="ex" style="grid-area:8/3/9/4"></i>
+<i class="ex" style="grid-area:13/3/14/4"></i>
+<i class="ex" style="grid-area:14/3/15/4"></i>
+<i class="ey l" style="grid-area:9/1/20/2"></i>
+<i class="ex l in" style="grid-area:19/1/20/2"></i>
+<i class="ex l" style="grid-area:9/1/10/2"></i>
+<i class="ex l" style="grid-area:15/1/16/2"></i>
+</div>
+     <p class=lg><i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman's own · <i class="kd m">✓</i> <i class="kd x">!</i> ends</p>
+    </div>
+    <details class=tm data-wide><summary><i class=cv></i><span>fleet.toml · the built-in pipeline</span></summary><pre><span class=m># Built-in: herdsman runs this while fleet.toml has no
+# [[fleet.herdsman.pipeline.stage]]. Copy it there to change it.</span>
+[[fleet.herdsman.pipeline.stage]]
+name = <s>"impl"</s>
+kind = <s>"build"</s>          <span class=m># pushes code</span>
+role = <s>"impl"</s>
+next = { push = <s>"rev"</s> }
+
+[[fleet.herdsman.pipeline.stage]]
+name = <s>"rev"</s>
+kind = <s>"check"</s>          <span class=m># PASS or FAIL at the head</span>
+role = <s>"rev"</s>
+rounds = 3              <span class=m># today's [limits] review_rounds</span>
+next = { PASS = <s>"gates"</s>, FAIL = <s>"impl"</s> }
+
+[[fleet.herdsman.pipeline.stage]]
+name = <s>"gates"</s>
+kind = <s>"gate"</s>           <span class=m># herdsman's own checks</span>
+rounds = 3              <span class=m># today's [limits] update_rounds</span>
+next = { ok = <s>"merge"</s>, ci_red = <s>"impl"</s>, conflict = <s>"impl:update"</s> }</pre></details>
+   </div>
+  </section>
+  <section class=cg><h3>Limits<span>edit fleet.toml</span></h3><dl class=kv2>
+   <dt>review rounds</dt><dd>3 <span class=m>→ rev's rounds, see Pipeline</span><span class="tag m">all fleets</span></dd>
+   <dt>update rounds</dt><dd>3 <span class=m>(default) → gates' rounds</span><span class="tag m">all fleets</span></dd>
+   <dt>stall after</dt><dd>30 min<span class="tag m">all fleets</span></dd>
+  </dl></section>
+  <p class=fm>Roles · Alerts · Hosts as in #162.</p>
+ </div>
+</div>
+</div>
+
+<!-- ============ 2 · a custom pipeline: impl → rev → sec → gates → merge (atlas; illustrative) ============ -->
+<div id=v-custom class=view>
+<div class="sh full cs k-a" role=dialog aria-label="atlas config">
+ <div class=hd><p><b>atlas</b><span>· config</span></p></div>
+ <div class=body>
+  <section class="cg pp"><h3>Pipeline<span>fleet.toml:44</span></h3>
+   <p class=pv><span class=g>✓ valid</span> · 4 stages · merge needs a PASS from rev and sec at the same head</p>
+   <div class=pw2>
+    <div>
+<div class=pg role=img aria-label="atlas pipeline: queued, impl, rev, sec, gates, merge; FAIL in rev or sec, CI red and conflict loop back to impl; out of rounds goes to park" style="grid-template-columns:2ch minmax(0,1fr) repeat(1,2ch);grid-template-rows:repeat(25,var(--ln))">
+<p class="nl st" style="grid-row:1"><i class=kd>○</i><b>queued</b><span class=m>4 waiting</span></p>
+<p class=pl style="grid-row:2"><b>start</b><span>if unblocked · serial slot · host room</span></p>
+<p class="nb t" style="grid-row:3"><i class="kd b">▲</i><b>impl</b><span class=m>build</span><span class="tag m">5 here</span></p>
+<p class="nb b" style="grid-row:4"><span class=dt title="role impl · claude · opus-5-5 · high">role impl · claude · opus-5-5 · high</span></p>
+<p class=pl style="grid-row:5"><b>push</b><span>a new head</span></p>
+<p class="nb t" style="grid-row:6"><i class="kd c">◆</i><b>rev</b><span class=m>check</span><span class="tag m">2 here</span></p>
+<p class="nb" style="grid-row:7"><span class=dt title="role rev · claude · sonnet-5-5 · high">role rev · claude · sonnet-5-5 · high</span></p>
+<p class="nb po" style="grid-row:8"><span><b class=r>FAIL</b> → fix in impl · ≤3 rounds</span></p>
+<p class="nb po l b" style="grid-row:9"><span><b>3rd FAIL</b> → park</span></p>
+<p class=pl style="grid-row:10"><b class=g>PASS</b><span>at the exact head</span></p>
+<p class="nb t" style="grid-row:11"><i class="kd c">◆</i><b>sec</b><span class=m>check</span><span class="tag m">1 here</span></p>
+<p class="nb" style="grid-row:12"><span class=dt title="role sec · claude · opus-5-5 · high">role sec · claude · opus-5-5 · high</span></p>
+<p class="nb po" style="grid-row:13"><span><b class=r>FAIL</b> → fix in impl · ≤2 rounds</span></p>
+<p class="nb po l b" style="grid-row:14"><span><b>2nd FAIL</b> → park</span></p>
+<p class=pl style="grid-row:15"><b class=g>PASS</b><span>at the same head</span></p>
+<p class="nb t" style="grid-row:16"><i class="kd g">◫</i><b>gates</b><span class=m>gate · herdsman</span><span class="tag m">1 here</span></p>
+<p class="nb" style="grid-row:17"><span class=dt title="CI quality · PASS from rev + sec at head · serial · mergeable">CI quality · PASS from rev + sec at head · serial · mergeable</span></p>
+<p class="nb po" style="grid-row:18"><span><b class=r>CI red</b> → fix in impl</span></p>
+<p class="nb po" style="grid-row:19"><span><b class=a>conflict</b> → update in impl · ≤3</span></p>
+<p class="nb po l b" style="grid-row:20"><span><b>4th conflict</b> → park</span></p>
+<p class=pl style="grid-row:21"><b class=g>ok</b><span></span></p>
+<p class="nb t b end" style="grid-row:22"><i class="kd m">✓</i><b>merge</b><span class=m>into staging</span></p>
+<p class="nb t b end" style="grid-row:24"><i class="kd x">!</i><b>park</b><span class=m>needs you</span><span class="tag m">2 here</span></p>
+<p class="pl pn" style="grid-row:25"><span>on its card: one more round, or park for good</span></p>
+<i class=ey style="grid-area:3/3/20/4"></i>
+<i class="ex in" style="grid-area:3/3/4/4"></i>
+<i class="ex" style="grid-area:8/3/9/4"></i>
+<i class="ex" style="grid-area:13/3/14/4"></i>
+<i class="ex" style="grid-area:18/3/19/4"></i>
+<i class="ex" style="grid-area:19/3/20/4"></i>
+<i class="ey l" style="grid-area:9/1/25/2"></i>
+<i class="ex l in" style="grid-area:24/1/25/2"></i>
+<i class="ex l" style="grid-area:9/1/10/2"></i>
+<i class="ex l" style="grid-area:14/1/15/2"></i>
+<i class="ex l" style="grid-area:20/1/21/2"></i>
+</div>
+     <p class=lg><i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman's own · <i class="kd m">✓</i> <i class="kd x">!</i> ends</p>
+    </div>
+    <details class=tm data-wide><summary><i class=cv></i><span>fleet.toml · [fleet.atlas.pipeline]</span></summary><pre>[[fleet.atlas.pipeline.stage]]
+name = <s>"impl"</s>
+kind = <s>"build"</s>
+role = <s>"impl"</s>
+next = { push = <s>"rev"</s> }
+
+[[fleet.atlas.pipeline.stage]]
+name = <s>"rev"</s>
+kind = <s>"check"</s>
+role = <s>"rev"</s>
+rounds = 3
+next = { PASS = <s>"sec"</s>, FAIL = <s>"impl"</s> }
+
+[[fleet.atlas.pipeline.stage]]
+name = <s>"sec"</s>
+kind = <s>"check"</s>
+role = <s>"sec"</s>
+rounds = 2
+next = { PASS = <s>"gates"</s>, FAIL = <s>"impl"</s> }
+
+[[fleet.atlas.pipeline.stage]]
+name = <s>"gates"</s>
+kind = <s>"gate"</s>
+rounds = 3
+next = { ok = <s>"merge"</s>, ci_red = <s>"impl"</s>, conflict = <s>"impl:update"</s> }
+
+<span class=m># A new role: any name. Its prompt is the check prompt
+# (rev.md) plus this file.</span>
+[fleet.atlas.role.sec]
+harness = <s>"claude"</s>
+profile = <s>"fleet-sec"</s>
+model = <s>"claude-opus-5-5"</s>
+effort = <s>"high"</s>
+prompt = <s>"~/.config/herdsman/prompts/sec.md"</s></pre></details>
+   </div>
+  </section>
+  <section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>
+   <form method=post class=role><p class=rh><b>impl</b><span class=m>fleet-impl</span><span class="tag m">build: impl</span></p>
+    <span class=rp><label class=pk title=claude><span>claude ▾</span><select name=harness aria-label=harness><option selected>claude</option><option>hermes</option><option>dsh</option></select></label><label class=pk title=claude-opus-5-5><span>opus ▾</span><select name=model aria-label=model><option selected>claude-opus-5-5</option><option>claude-sonnet-5-5</option></select></label><label class=pk title=high><span>high ▾</span><select name=effort aria-label=effort><option selected>high</option></select></label><button><span>set</span></button></span></form>
+   <form method=post class=role><p class=rh><b>rev</b><span class=m>fleet-rev</span><span class="tag m">check: rev</span></p>
+    <span class=rp><label class=pk title=claude><span>claude ▾</span><select name=harness aria-label=harness><option selected>claude</option></select></label><label class=pk title=claude-sonnet-5-5><span>sonnet ▾</span><select name=model aria-label=model><option>claude-opus-5-5</option><option selected>claude-sonnet-5-5</option></select></label><label class=pk title=high><span>high ▾</span><select name=effort aria-label=effort><option selected>high</option></select></label><button><span>set</span></button></span></form>
+   <form method=post class=role><p class=rh><b>sec</b><span class=m>fleet-sec</span><span class="tag m">check: sec</span></p>
+    <span class=rp><label class=pk title=claude><span>claude ▾</span><select name=harness aria-label=harness><option selected>claude</option></select></label><label class=pk title=claude-opus-5-5><span>opus ▾</span><select name=model aria-label=model><option selected>claude-opus-5-5</option><option>claude-sonnet-5-5</option></select></label><label class=pk title=high><span>high ▾</span><select name=effort aria-label=effort><option selected>high</option></select></label><button><span>set</span></button></span>
+    <p class=rk>prompt: the check prompt + ~/.config/herdsman/prompts/sec.md</p></form>
+   <p class=rk>design: conductor only, never a stage</p>
+  </section>
+ </div>
+</div>
+</div>
+
+<!-- ============ 3 · a refused pipeline (atlas after a bad edit; illustrative) ============ -->
+<div id=v-error class=view>
+<div class="fc k-a">
+ <div class=fh><span class=fn><b>atlas</b><span class=ds><i class=r>●</i> drive refused</span><span class="tag r">! 1 needs you</span></span>
+  <span class=btns><form method=post><button disabled><span>drive now</span></button></form><button type=button onclick="location.hash=''"><span>config</span></button></span></div>
+ <p class=fm><span class=r>! BAD_PIPELINE · 4 errors in fleet.toml · nothing moves until it is fixed</span></p>
+ <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#2911</span><span><span class=a title="impl = being built">impl</span></span><span class=m>28m</span><span class=tl>iOS: offline banner when the readings stream drops</span></summary></details>
+</div>
+<div class="sh full cs k-a" role=dialog aria-label="atlas config">
+ <div class=hd><p><b>atlas</b><span>· config</span></p></div>
+ <div class=body>
+  <section class="cg pp"><h3>Pipeline<span class=r>BAD_PIPELINE · 4 errors</span></h3>
+   <div class=pe>
+    <p>Nothing moves for atlas until fleet.toml is fixed: <span class=qn>drive, spawn, verdict and merge</span> refuse <span class=r>BAD_PIPELINE</span>. Lanes already running keep working. Other fleets are not affected.</p>
+    <ol>
+     <li><b class=r>unreachable</b>stage <span class=qn>gates</span> can't be reached: no outcome leads to it<span class=at>fleet.toml:69</span></li>
+     <li><b class=r>no end</b>stage <span class=qn>qa</span> can't reach an end (nor can impl, rev, docs): every path comes back to qa<span class=at>fleet.toml:57</span></li>
+     <li><b class=r>no limit</b>loop <span class=qn>qa → docs → qa</span> has no round limit: set <span class=qn>rounds</span> on qa<span class=at>fleet.toml:61</span></li>
+     <li><b class=r>no role</b>stage <span class=qn>docs</span>: role <span class=qn>writer</span> is not defined; add [fleet.atlas.role.writer]<span class=at>fleet.toml:66</span></li>
+    </ol>
+   </div>
+   <div class=pw2>
+    <div>
+<div class=pg role=img aria-label="atlas pipeline with 4 errors: gates unreachable, qa cannot reach an end, loop qa docs qa has no round limit, role writer missing" style="grid-template-columns:2ch minmax(0,1fr) repeat(2,2ch);grid-template-rows:repeat(32,var(--ln))">
+<p class="nl st" style="grid-row:1"><i class=kd>○</i><b>queued</b><span class=m>4 waiting</span></p>
+<p class=pl style="grid-row:2"><b>start</b><span>if unblocked · serial slot · host room</span></p>
+<p class="nb t" style="grid-row:3"><i class="kd b">▲</i><b>impl</b><span class=m>build</span></p>
+<p class="nb b" style="grid-row:4"><span class=dt title="role impl · claude · opus-5-5 · high">role impl · claude · opus-5-5 · high</span></p>
+<p class=pl style="grid-row:5"><b>push</b><span>a new head</span></p>
+<p class="nb t" style="grid-row:6"><i class="kd c">◆</i><b>rev</b><span class=m>check</span></p>
+<p class="nb" style="grid-row:7"><span class=dt title="role rev · claude · sonnet-5-5 · high">role rev · claude · sonnet-5-5 · high</span></p>
+<p class="nb po" style="grid-row:8"><span><b class=r>FAIL</b> → fix in impl · ≤3 rounds</span></p>
+<p class="nb po l b" style="grid-row:9"><span><b>3rd FAIL</b> → park</span></p>
+<p class=pl style="grid-row:10"><b class=g>PASS</b><span></span></p>
+<p class="nb t bad" style="grid-row:11"><i class="kd c">◆</i><b>qa</b><span class=m>check</span></p>
+<p class="nb bad" style="grid-row:12"><span class=dt title="role qa · claude · sonnet-5-5 · high">role qa · claude · sonnet-5-5 · high</span></p>
+<p class="nb bad" style="grid-row:13"><span class="dt r" title="no end: every path from qa comes back to qa">✗ no end: every path from qa comes back to qa</span></p>
+<p class="nb bad" style="grid-row:14"><span class="dt r" title="no limit: loop qa → docs → qa">✗ no limit: loop qa → docs → qa</span></p>
+<p class="nb po b bad" style="grid-row:15"><span><b class=r>FAIL</b> → fix in impl</span></p>
+<p class=pl style="grid-row:16"><b class=g>PASS</b><span></span></p>
+<p class="nb t bad" style="grid-row:17"><i class="kd b">▲</i><b>docs</b><span class=m>build</span></p>
+<p class="nb bad" style="grid-row:18"><span class=dt title="role writer · not defined">role writer · not defined</span></p>
+<p class="nb bad" style="grid-row:19"><span class="dt r" title="no role: writer is not in [fleet.atlas.role]">✗ no role: writer is not in [fleet.atlas.role]</span></p>
+<p class="nb po b bad" style="grid-row:20"><span><b>push</b> → qa</span></p>
+<p class="pl no" style="grid-row:21"><span class=r>✗ nothing leads to gates</span></p>
+<p class="nb t dead" style="grid-row:22"><i class="kd g">◫</i><b>gates</b><span class=m>gate · herdsman</span></p>
+<p class="nb dead" style="grid-row:23"><span class=dt title="CI quality · PASS at head · serial · mergeable">CI quality · PASS at head · serial · mergeable</span></p>
+<p class="nb dead" style="grid-row:24"><span class="dt r" title="unreachable: no outcome leads here">✗ unreachable: no outcome leads here</span></p>
+<p class="nb po dead" style="grid-row:25"><span><b class=r>CI red</b> → fix in impl</span></p>
+<p class="nb po dead" style="grid-row:26"><span><b class=a>conflict</b> → update in impl · ≤3</span></p>
+<p class="nb po l b dead" style="grid-row:27"><span><b>4th conflict</b> → park</span></p>
+<p class=pl style="grid-row:28"><b class=g>ok</b><span></span></p>
+<p class="nb t b end dead" style="grid-row:29"><i class="kd m">✓</i><b>merge</b><span class=m>into staging · unreachable</span></p>
+<p class="nb t b end" style="grid-row:31"><i class="kd x">!</i><b>park</b><span class=m>needs you</span></p>
+<p class="pl pn" style="grid-row:32"><span>on its card: one more round, or park for good</span></p>
+<i class=ey style="grid-area:11/3/21/4"></i>
+<i class="ex in" style="grid-area:11/3/12/4"></i>
+<i class=ey style="grid-area:3/4/27/5"></i>
+<i class="ex in" style="grid-area:3/3/4/5"></i>
+<i class="ex" style="grid-area:8/3/9/5"></i>
+<i class="ex" style="grid-area:15/3/16/5"></i>
+<i class=ek style="grid-area:15/3/16/4"></i>
+<i class="ex" style="grid-area:20/3/21/4"></i>
+<i class="ex" style="grid-area:25/3/26/5"></i>
+<i class="ex" style="grid-area:26/3/27/5"></i>
+<i class="ey l" style="grid-area:9/1/32/2"></i>
+<i class="ex l in" style="grid-area:31/1/32/2"></i>
+<i class="ex l" style="grid-area:9/1/10/2"></i>
+<i class="ex l" style="grid-area:27/1/28/2"></i>
+</div>
+     <p class=lg><i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman's own · <i class="kd m">✓</i> <i class="kd x">!</i> ends</p>
+    </div>
+    <details class=tm data-wide><summary><i class=cv></i><span>fleet.toml · [fleet.atlas.pipeline], the broken lines</span></summary><pre><span class=m>44</span> [[fleet.atlas.pipeline.stage]]
+<span class=m>45</span> name = <s>"impl"</s>
+<span class=m>  …</span>
+<span class=m>50</span> [[fleet.atlas.pipeline.stage]]
+<span class=m>51</span> name = <s>"rev"</s>
+<span class=m>  …</span>
+<span class=r>55</span> next = { PASS = <s>"qa"</s>, FAIL = <s>"impl"</s> }   <span class=r># was "gates"</span>
+
+<span class=r>57</span> [[fleet.atlas.pipeline.stage]]
+<span class=r>58</span> name = <s>"qa"</s>
+<span class=m>59</span> kind = <s>"check"</s>
+<span class=m>60</span> role = <s>"qa"</s>
+<span class=r>61</span> next = { PASS = <s>"docs"</s>, FAIL = <s>"impl"</s> }   <span class=r># no rounds</span>
+
+<span class=r>63</span> [[fleet.atlas.pipeline.stage]]
+<span class=r>64</span> name = <s>"docs"</s>
+<span class=m>65</span> kind = <s>"build"</s>
+<span class=r>66</span> role = <s>"writer"</s>
+<span class=m>67</span> next = { push = <s>"qa"</s> }
+
+<span class=r>69</span> [[fleet.atlas.pipeline.stage]]
+<span class=r>70</span> name = <s>"gates"</s>
+<span class=m>  …</span></pre></details>
+   </div>
+  </section>
+ </div>
+</div>
+</div>
+
+<!-- ============ 4 · the issue card's "where it is now" (herdsman live 09:05; atlas illustrative) ============ -->
+<div id=v-card class=view>
+<header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i><button id=rf type=button aria-label=refresh><i>↻</i></button></header>
+<main><section id=queue>
+<div class="fc k-l">
+ <div class=fh><span class=fn><b>herdsman</b><span class=ds><i class=g>●</i> drive · 2m ago</span></span>
+  <span class=btns><form method=post><button><span>drive now</span></button></form><form method=post><button><span>pause</span></button></form><button type=button onclick="location.hash=''"><span>config</span></button></span></div>
+ <p class=fm>7 lanes · 7 queued</p>
+ <details class="q d0" data-q open><summary><i class=gt><b class=a>●</b></i><span>#168</span><span><span class=a title="impl = being built">impl</span></span><span class=m>59m</span><span class=tl>Spawn: admit on sustained swap + pressure, a MEM_LOW floor, a pid drive lock</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt on kb"><i class="kd b">▲</i>impl</span><i class=sx>─</i><span class="pt"><i class="kd c">◆</i>rev</span><i class=sx>─</i><span class="pt"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>building · not pushed yet</p><p>herdsman-impl-168</p></div></details>
+ <details class="q d0" data-q open><summary><i class=gt><b class=a>●</b></i><span>#165</span><span><span class=a title="review(n) = being reviewed, round n">review(1)</span></span><span class=m>5m</span><span class=tl>Waiting: a STALE_VERDICT block starts a review of the new head</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt"><i class="kd b">▲</i>impl</span><i class=sx>─</i><span class="pt on kc"><i class="kd c">◆</i>rev · r1</span><i class=sx>─</i><span class="pt"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>review round 1 of 3 · waiting for its verdict</p><p>herdsman-rev-165-r1</p></div></details>
+ <details class="q d0" data-q open><summary><i class=gt><b class=g>✓</b></i><span>#141</span><span><span class=g title="ready = passed, waiting to merge">ready</span></span><span class=m>44m</span><span class=tl>Host tab: 4 glanceable groups (machine/services/fleets/alerts) with status dots + gauge bars</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt dn"><i class="kd b">▲</i>impl</span><i class=sx>─</i><span class="pt dn"><i class="kd c">◆</i>rev<b class=g>✓</b></span><i class=sx>─</i><span class="pt on kg"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>rev <span class=g>PASS</span> r1 at the head · waiting for CI</p><p><a href=#>PR #167</a> · CI <span class=a>…</span> · rev <span class=g>PASS</span> r1</p></div></details>
+ <details class="q d0" data-q open><summary><i class=gt><b class=a>●</b></i><span>#149</span><span><span class=a title="fix(n) = fixing review findings, round n">fix(1)+u1</span></span><span class=m>5m</span><span class=tl>No-orch gaps: add the fleet's pass label on PASS at exact head, and auto-mark serial</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt on kb"><i class="kd b">▲</i>impl · update</span><i class=sx>─</i><span class="pt"><i class="kd c">◆</i>rev</span><i class=sx>─</i><span class="pt"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>update round 1 of 3 · rev <span class=g>PASS</span> r1 was for 0d1357f; the merged head gets a new review</p><p><a href=#>PR #159</a> · CI <span class=g>✓</span> · conflicts with staging</p></div></details>
+</div>
+<div class="fc k-a">
+ <div class=fh><span class=fn><b>atlas</b><span class=ds><i class=g>●</i> drive · 2m ago</span></span>
+  <span class=btns><form method=post><button><span>drive now</span></button></form><form method=post><button><span>pause</span></button></form><button type=button onclick="location.hash='custom'"><span>config</span></button></span></div>
+ <p class=fm>stall check: #2909 in 9m · 8 lanes · serial 3/3</p>
+ <details class="q d0" data-q open><summary><i class=gt><b class=a>●</b></i><span>#2909</span><span><span class=a title="sec(n) = security review, round n">sec(1)</span></span><span class=m>12m</span><span class=tl>Dashboard: site cards load in one request</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt dn"><i class="kd b">▲</i>impl</span><i class=sx>─</i><span class="pt dn"><i class="kd c">◆</i>rev<b class=g>✓</b></span><i class=sx>─</i><span class="pt on kc"><i class="kd c">◆</i>sec · r1</span><i class=sx>─</i><span class="pt"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>rev <span class=g>PASS</span> r2 at 9c41e0a · sec round 1 of 2 · waiting for its verdict</p><p>atlas-sec-2909-r1</p></div></details>
+ <details class="q d0" data-q open><summary><i class=gt><b class=a>●</b></i><span>#2911</span><span><span class=a title="fix(n) = fixing review findings, round n">fix(1)</span></span><span class=m>6m</span><span class=tl>iOS: offline banner when the readings stream drops</span></summary><div class=cd><p class=ps><span class="pt dn"><i class=kd>○</i></span><i class=sx>─</i><span class="pt on kb"><i class="kd b">▲</i>impl · fix</span><i class=sx>─</i><span class="pt"><i class="kd c">◆</i>rev</span><i class=sx>─</i><span class="pt"><i class="kd c">◆</i>sec</span><i class=sx>─</i><span class="pt"><i class="kd g">◫</i>gates</span><i class=sx>─</i><span class="pt"><i class="kd m">✓</i>merge</span></p><p class=pw>sec <span class=r>FAIL</span> r1 · fix round 1 · then rev and sec again</p><p>atlas-impl-2911</p></div></details>
+</div>
+</section></main>
+<nav><a href=#card class=on>Queue</a><a href=#card>Lanes</a><a href=#card>Host</a><a href=#card>Events</a></nav>
+</div>
+
+<script>
+// Mockup only: the hash picks the view; the source opens beside the graph when there is room for both.
+const show = () => {
+  document.body.className = location.hash ? 'v-' + location.hash.slice(1) : '';
+  for (const d of document.querySelectorAll('details[data-wide]')) d.open = innerWidth >= 900;
+};
+addEventListener('hashchange', show); show();
+</script>
+</body></html>
