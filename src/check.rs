@@ -868,7 +868,14 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         return Err(Snap::Secret(hit));
     }
     if commit {
-        git(&["commit", "-q", "--no-verify", "-m", msg]).map_err(undo)?;
+        // A host with no git identity still saves: herdsman signs only when none is configured.
+        let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
+        let id: &[&str] = if unset {
+            &["-c", "user.name=herdsman", "-c", "user.email=herdsman@localhost"]
+        } else {
+            &[]
+        };
+        git(&[id, &["commit", "-q", "--no-verify", "-m", msg]].concat()).map_err(undo)?;
     }
     git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
     Ok(())

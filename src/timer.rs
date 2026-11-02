@@ -157,7 +157,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok());
         if last.is_none_or(|t| ctx.now >= t + 3600) {
-            std::fs::write(&at, ctx.now.to_string())?;
+            let _ = std::fs::write(&at, ctx.now.to_string());
             if let Err(e) = crate::check::clean(ctx, cfg, r, out, None, (None, None), true) {
                 writeln!(out, "clean: {e:#}")?;
             }
