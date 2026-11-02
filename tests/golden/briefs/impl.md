@@ -9,6 +9,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 
 - No host changes: no brew/cask installs, no browser or driver installs, no launchd,
   Docker or /Applications changes. Ask the human instead.
+- Never run or script containers (docker, colima, orb, podman, `supabase start`, …): the lane hook
+  refuses them (`deny_commands`); use the repo's non-container test path or ask the owner.
 - Never merge, never push to the integration branch or main, never edit fleet or
   harness config. Merging happens only through `herdsman merge` (hooks enforce this).
 

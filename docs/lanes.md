@@ -87,6 +87,32 @@ issue and PR comments, `gh pr review`, `git push` to main, master, staging or th
 integration branch, and edits to fleet and Hermes profile config. Reviewer lanes are
 read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`.
 
+### Denied commands (#216)
+
+The hook also refuses every `deny_commands` entry run as a command word: in a pipeline, after `&&`
+or `;`, inside `$( )`, through `sh|bash|zsh -c`, `env`, `sudo`, `exec`, `xargs`, `nice`, `timeout`,
+`eval`, `then`/`do`/`{`, past their flags (`sudo -u root`), after `VAR=…`, or by full path
+(`/usr/local/bin/docker`). Matching is lexical and best-effort: `D=docker; $D ps`, `ssh h docker ps`
+or `open /Applications/Docker.app` pass. An entry is a command word (`"docker"`) or a command plus
+subcommand prefix (`"supabase start"`, `"git push --force"`); an entry ending in `=` (`"DOCKER_HOST="`)
+refuses that assignment. `{ cmd = "…", why = "…" }` makes `why` the whole message; a bare entry says
+``REFUSED NO_COMMAND: lanes never run `<cmd>` ``. The same word as an argument (`grep docker file`) passes.
+
+The default (`[limits] deny_commands`, listed in `assets/deny_commands.toml`) is the owner's
+no-containers rule: `docker`, `docker-compose`, `podman`, `nerdctl`, `colima`, `orb`, `orbctl`,
+`limactl`, `supabase start`, `supabase db start`, `DOCKER_HOST=…` and `open -a Docker|OrbStack`, each
+refused with `REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the repo's
+non-container test path, or ask the conductor.` `[fleet.<n>] deny_commands` replaces the list (`[]` turns
+it off, noted on every config load), `deny_commands_add` extends whichever applies. The board's [config]
+sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the message) and shows on Events.
+
+Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
+`herdsman hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
+the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,
+`*.zsh`, `justfile` and `Makefile` lines that start with the command, e.g. recipe lines; not
+`package.json` scripts, nor `.github/workflows`, where CI may use Docker) running a denied command. A dsh
+lane can still run one directly.
+
 ## Drive
 
 Every fleet is driven by herdsman itself (#155: no orchestrator lane; `spawn <fleet> - orch` refuses

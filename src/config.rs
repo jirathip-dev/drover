@@ -150,6 +150,10 @@ pub struct Fleet {
     /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
     pub form_categories: Option<Vec<String>>,
     pub form_rounds: Option<u32>,
+    /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
+    pub deny_commands: Option<Vec<Deny>>,
+    #[serde(default)]
+    pub deny_commands_add: Vec<Deny>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -206,12 +210,37 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
+    pub deny_commands: Vec<Deny>,
     /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
     pub fast_secs: u64,
     pub slow_secs: u64,
     /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
+}
+
+/// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Deny {
+    Cmd(String),
+    Why { cmd: String, why: String },
+}
+
+impl Deny {
+    pub fn cmd(&self) -> &str {
+        match self {
+            Deny::Cmd(c) | Deny::Why { cmd: c, .. } => c,
+        }
+    }
+    /// The hook's message: `why` verbatim, else `REFUSED NO_COMMAND`.
+    pub fn reason(&self) -> String {
+        match self {
+            Deny::Cmd(c) => format!("REFUSED NO_COMMAND: lanes never run `{c}` (deny_commands); ask the owner"),
+            Deny::Why { why, .. } => why.clone(),
+        }
+    }
 }
 
 impl Default for Limits {
@@ -227,6 +256,11 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
+            deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
+                .ok()
+                .and_then(|mut t| t.remove("deny_commands")?.try_into().ok())
+                .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
             form_categories: [
@@ -347,6 +381,9 @@ impl Config {
             if !(1..=8).contains(&f.serial_label().chars().count()) {
                 bail!("fleet.{name}.serial_label: must be 1 to 8 characters");
             }
+            if f.deny_commands.as_ref().is_some_and(Vec::is_empty) {
+                eprintln!("herdsman: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
+            }
             if let Some(k) = f.color.as_deref().filter(|k| !COLORS.contains(k)) {
                 bail!("fleet.{name}.color: \"{k}\" must be one of {COLORS:?}");
             }
@@ -437,6 +474,15 @@ impl Fleet {
             let h = crate::devices::sha256(name.as_bytes());
             COLORS[usize::from_str_radix(&h[..2], 16).unwrap_or(0) % COLORS.len()]
         })
+    }
+    /// #216: the lane hook's deny list: `deny_commands`, else `[limits]`'s, plus `deny_commands_add`.
+    pub fn deny(&self, limits: &Limits) -> Vec<Deny> {
+        let mut d = self
+            .deny_commands
+            .clone()
+            .unwrap_or_else(|| limits.deny_commands.clone());
+        d.extend(self.deny_commands_add.iter().cloned());
+        d
     }
     pub fn serial_label(&self) -> &str {
         self.serial_label.as_deref().unwrap_or("serial")
