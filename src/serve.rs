@@ -2369,7 +2369,7 @@ fn pipeline_group(fleet: &str, fc: &crate::config::Fleet, st: &States) -> String
         format!("[fleet.{fleet}.pipeline]")
     };
     h + &format!(
-        "<div class=pw2><div>{}<p class=lg><i class=\"kd b\">▲</i> build pushes code · <i class=\"kd c\">◆</i> check: PASS or FAIL · <i class=\"kd g\">◫</i> gate: herdsman's own · <i class=\"kd m\">✓</i> <i class=\"kd x\">!</i> ends</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · {}</span></summary><pre>{}</pre></details></div></section>",
+        "<div class=pw2><div>{}<p class=lg><i class=\"kd b\">▲</i> build pushes code · <i class=\"kd c\">◆</i> check: PASS or FAIL · <i class=\"kd g\">◫</i> gate: herdsman's own · <i class=\"kd m\">✓</i> merged · <i class=\"kd x\">!</i> parked</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · {}</span></summary><pre>{}</pre></details></div></section>",
         pipeline_graph(fleet, fc, &mine),
         esc(&what),
         esc((src + &toml).trim())
@@ -2397,6 +2397,17 @@ fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) 
         "check" => "PASS",
         _ => "ok",
     };
+    // An outcome off the spine (the main one to the next stage) leaves its box on a rail.
+    let spine = |i: usize| p.stage.get(i + 1).map_or("merge", |x| x.name.as_str());
+    let off = |i: usize, o: &str, t: &str| !(o == main(&p.stage[i].kind) && t == spine(i));
+    let loops: Vec<&str> = (p.stage.iter().enumerate())
+        .flat_map(|(i, s)| {
+            s.next
+                .iter()
+                .filter(move |(o, t)| off(i, o, t))
+                .map(|t| t.1.split(':').next().unwrap_or(t.1))
+        })
+        .collect();
     let reach: Vec<&str> = std::iter::once(p.stage.first().map_or("", |s| s.name.as_str()))
         .chain(
             p.stage
@@ -2435,11 +2446,14 @@ fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) 
             s.kind.clone()
         };
         let n = here(&s.name);
-        let tag = if n > 0 {
+        let mut tag = if n > 0 {
             format!("<span class=\"tag m\">{n} here</span>")
         } else {
             String::new()
         };
+        if loops.contains(&s.name.as_str()) {
+            tag += &format!("<span class=lp>↺ {}</span>", esc(&s.name));
+        }
         lines.push((
             format!(
                 "<i class=\"kd {k}\">{g}</i><b>{}</b><span class=m>{}</span>{tag}",
@@ -2477,12 +2491,8 @@ fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) 
             let t = esc(&format!("{}: {}", b.rule, b.msg));
             lines.push((format!("<span class=\"dt r\" title=\"{t}\">✗ {t}</span>"), None));
         }
-        let spine = p.stage.get(i + 1).map_or("merge", |x| x.name.as_str());
-        for (o, t) in s
-            .next
-            .iter()
-            .filter(|(o, t)| !(o.as_str() == main(&s.kind) && t.as_str() == spine))
-        {
+        let spine = spine(i);
+        for (o, t) in s.next.iter().filter(|(o, t)| off(i, o, t)) {
             let (to, update) = t.strip_suffix(":update").map_or((t.as_str(), false), |b| (b, true));
             let what = match (to, update, o.as_str()) {
                 ("park", ..) => "park".to_string(),
@@ -2554,7 +2564,7 @@ fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) 
     let gone = if reach.contains(&"merge") { "" } else { " dead" };
     let into = esc(&fc.integration);
     let un = if gone.is_empty() { "" } else { " · unreachable" };
-    put(
+    let mr = put(
         &mut h,
         &format!("nb t b end{gone}"),
         &format!("<i class=\"kd m\">✓</i><b>merge</b><span class=m>into {into}{un}</span>"),
@@ -2595,6 +2605,8 @@ fn pipeline_graph(fleet: &str, fc: &crate::config::Fleet, mine: &[&IssueState]) 
         for r in &park {
             h += &format!("<i class=\"ex l\" {}></i>", area(*r, 1, r + 1, 2));
         }
+        // A gap where the park rail passes merge, so it never reads as merge → park.
+        h += &format!("<i class=ek {}></i>", area(mr, 1, mr + 1, 2));
     }
     let rep = if spans.is_empty() {
         String::new()
