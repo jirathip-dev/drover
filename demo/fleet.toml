@@ -39,3 +39,13 @@ integration = "staging"
 harness = "claude"
 model = "sonnet"
 effort = "high"
+
+[fleet.acme-ios]
+repo = "acme-example/acme-ios"
+local = "/srv/acme/acme-ios"
+integration = "staging"
+paused = true
+
+[fleet.acme-ios.role.impl]
+harness = "claude"
+model = "opus"
