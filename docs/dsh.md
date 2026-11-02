@@ -2,7 +2,7 @@
 
 `harness = "dsh"` runs [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) (third-party,
 public beta) over DeepSeek Harness in a lane pane. Only the **reviewer** role is
-piloted; no dsh orchestrator or implementer until that passes.
+piloted; no dsh implementer until that passes.
 
 ```toml
 [fleet.app.role.rev]

@@ -201,6 +201,9 @@
     events: () => tab('events'),
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
+    // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.
+    'herd-kitchen': () => { herd(true); light = 'day'; ranch(); setTimeout(() => { if ($('#hp1 .horse') || !$('.hr .rs pattern')) early.push('kitchen: not its chefs and counter scene'); }, 500); },
+    'herd-nodone': () => { herd(true); light = 'day'; ranch(); setTimeout(() => { if (!$('#hp3 .horse-done') || $('#hp1 .horse')) early.push("nodone: done is not farm's horse, or the rest not chefs"); }, 500); },
     // #71: Auto is night before 07:00 and from 19:00; [A] cycles auto → day → night, each stored; a fresh load of the
     // page on this phone (an iframe: virtual time runs no reload) comes back at the last tap, night: the night shot.
     'herd-night': async () => {
@@ -247,7 +250,7 @@
   };
   let toasted = null, drove = null, href = null;
   const dragged = [];
-  const HP = { herd1: 0, herd2: 1, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
+  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
   const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px

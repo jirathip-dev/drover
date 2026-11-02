@@ -19,14 +19,29 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SW: &str = include_str!("../assets/sw.js");
+macro_rules! th {
+    ($f:literal, $t:expr) => {
+        (
+            concat!("themes/", $f),
+            $t,
+            include_bytes!(concat!("../assets/themes/", $f)),
+        )
+    };
+}
 /// #57: served under `/a/<VER>/` as immutable (the SW precaches them); the page links them.
 const ASSETS: &[(&str, &str, &[u8])] = &[
     ("serve.css", "text/css", include_bytes!("../assets/serve.css")),
     ("herd.css", "text/css", include_bytes!("../assets/herd.css")),
     ("serve.js", "text/javascript", include_bytes!("../assets/serve.js")),
     ("herd.js", "text/javascript", include_bytes!("../assets/herd.js")),
-    ("horses.svg", "image/svg+xml", include_bytes!("../assets/horses.svg")),
+    // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
+    th!("farm/sprites.svg", SVG),
+    th!("farm/theme.json", JSON),
+    th!("kitchen/sprites.svg", SVG),
+    th!("kitchen/theme.json", JSON),
+    th!("kitchen/scene.svg", SVG),
 ];
+const SVG: &str = "image/svg+xml";
 /// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
@@ -41,7 +56,7 @@ const FILES: &[(&str, &str, &[u8])] = &[
 /// FNV-1a over the assets at build time: their `/a/<hash8>/` path.
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
-    while k < 5 {
+    while k < ASSETS.len() {
         let b = ASSETS[k].2;
         while i < b.len() {
             h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
@@ -92,7 +107,9 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     std::thread::scope(|sc| {
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
-            *lock(&h) = host::sample(r);
+            let mut hs = host::sample(r);
+            host::window(&ctx.state, &mut hs);
+            *lock(&h) = hs;
             std::thread::sleep(Duration::from_secs(10));
         });
         sc.spawn(move || loop {
@@ -250,15 +267,14 @@ fn enc(s: &str) -> String {
 }
 
 /// #166, #162 A: a fleet card's second line: `⟳ driving…`, else the last pass's age and result in its colour
-/// (`drive::result`), or `orch` when not driven; a tap lists `meta` (stall check, lanes, serial), then each action
+/// (`drive::result`); a tap lists `meta` (stall check, lanes, serial), then each action
 /// in plain words, a tap on one its raw code.
-fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, driven: bool, meta: &[String]) -> String {
+fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, meta: &[String]) -> String {
     let pass = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet);
-    let (tone, line) = match (driven, pass) {
-        (false, _) => ("m", "orch".to_string()),
+    let (tone, line) = match pass {
         _ if crate::drive::running(ctx, fleet) => ("m", "⟳ driving…".to_string()),
-        (true, None) => ("a", "drive · no pass yet".to_string()),
-        (true, Some(e)) => {
+        None => ("a", "drive · no pass yet".to_string()),
+        Some(e) => {
             let (tone, line) = crate::drive::result(e);
             let rest = line.split_once(" · ").map_or("", |r| r.1).to_string();
             (
@@ -268,7 +284,6 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, driven: bool, meta: &[St
         }
     };
     let acts = pass
-        .filter(|_| driven)
         .and_then(|e| e.data.get("actions").and_then(serde_json::Value::as_array).cloned())
         .unwrap_or_default();
     let items: String = acts
@@ -288,7 +303,7 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, driven: bool, meta: &[St
             )
         })
         .collect();
-    let items = if items.is_empty() && pass.is_some() && driven {
+    let items = if items.is_empty() && pass.is_some() {
         "<li>nothing was due</li>".into()
     } else {
         items
@@ -458,11 +473,7 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
 
 /// The lane's wait reason while herdr shows it idle, done or unknown.
 fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::waiting::Waiting> {
-    let w = waits
-        .iter()
-        .find(|w| w.lane == l.name)
-        .cloned()
-        .or_else(|| crate::waiting::orch(waits, l.fleet.as_deref()?).filter(|_| l.role == "orch"));
+    let w = waits.iter().find(|w| w.lane == l.name).cloned();
     w.filter(|_| matches!(l.state.as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
@@ -713,6 +724,10 @@ impl<'a> Server<'a> {
                 let weather = form(query).get("weather").filter(|_| loopback).cloned();
                 self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, j.to_string().into_bytes()))
             }
+            ("GET", p) if p.starts_with("/theme/") => match THEME.iter().find(|f| p == format!("/theme/{f}")) {
+                Some(f) => theme(ctx, f).0.map_or(("404 Not Found", "text/plain", text("not in this theme\n")), |b| ("200 OK", if f.ends_with("json") { JSON } else { SVG }, b)),
+                None => ("404 Not Found", "text/plain", text("not a theme file\n")),
+            },
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
                 let a = ASSETS.iter().find(|a| p == format!("/a/{VER:08x}/{}", a.0)).inspect(|_| cache = "public, max-age=31536000, immutable");
@@ -1439,12 +1454,7 @@ impl<'a> Server<'a> {
                 )));
                 continue;
             }
-            // Green: the last drive pass is under 10 min old; amber: older or none; grey: orch-driven.
-            let drive = if fc.driven() {
-                button("drive", "Drive now")
-            } else {
-                String::new()
-            };
+            let drive = button("drive", "Drive now");
             let stall = cfg.limits.stall_minutes * 60;
             let live = lanes.iter().filter(|s| gone(s).is_none());
             let next = live.map(|s| ((s.last_ts + stall).saturating_sub(now), s.issue)).min();
@@ -1464,7 +1474,7 @@ impl<'a> Server<'a> {
                 "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
                  <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{body}</div>",
                 button("pause", "Pause"),
-                drive_line(ctx, events, f, fc.driven(), &meta),
+                drive_line(ctx, events, f, &meta),
             )));
         }
         cards.sort_by_key(|c| !c.0);
@@ -1544,6 +1554,7 @@ impl<'a> Server<'a> {
                 load_per_cpu: Some(k * lim.load_per_cpu),
                 pressure: Some(p.into()),
                 swapout: Some(0.0),
+                ..Host::default()
             },
         );
         let host = json!({"load": h.load_per_cpu, "limit": lim.load_per_cpu, "pressure": h.pressure, "swapouts": h.swapout, "swap_limit": lim.swapout_rate, "gate": host::admit(&h, lim).err()});
@@ -1667,13 +1678,26 @@ impl<'a> Server<'a> {
         let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
         let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
         let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
-        for (k, x, l, p) in [
-            ("load/cpu", hs.load_per_cpu, lim.load_per_cpu, 2),
-            ("swap-out", hs.swapout, lim.swapout_rate, 0),
+        // #168: swap-out's gauge is the window's median (the rule, with pressure warn/critical); `now` is one sample.
+        let avg = hs.swap_median.map_or("?".into(), |m| format!("{m:.0}"));
+        for (k, x, g, l, p) in [
+            ("load/cpu", hs.load_per_cpu, hs.load_per_cpu, lim.load_per_cpu, 2),
+            (
+                "swap-out",
+                hs.swapout,
+                hs.swap_median.or(hs.swapout),
+                lim.swapout_rate,
+                0,
+            ),
         ] {
-            let (t, bar, pct) = gauge(x.unwrap_or(0.0) / l, "▏");
+            let (t, bar, pct) = gauge(g.unwrap_or(0.0) / l, "▏");
             let x = x.map_or("?".into(), |x| format!("{x:.p$}"));
-            let unit = ["", " <span class=mt>pages/2s</span>"][usize::from(p == 0)];
+            let unit = match p {
+                0 => format!(
+                    " now · {avg} avg <span class=mt>pages/2s · held on the avg with pressure warn/critical</span>"
+                ),
+                _ => String::new(),
+            };
             let o = if t == "r" { "▶ " } else { "" };
             let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
             m += &hrow(k, t, &(bar + &val), "", "");
@@ -1683,7 +1707,7 @@ impl<'a> Server<'a> {
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
-            let (wt, min) = (esc(wt.rsplit(" · ").next().unwrap_or_default()), lim.min_free_gb);
+            let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
             let o = if t == "r" { "▶ " } else { "" };
             let val =
                 format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
@@ -1708,6 +1732,17 @@ impl<'a> Server<'a> {
                 &format!("<b class={t}>{}</b>{}", esc(d), fix[usize::from(*t != "g")]),
             );
         }
+        // #172: the Herd's theme; amber when its theme.json is invalid (farm shows).
+        let (_, name, ok) = theme(ctx, "theme.json");
+        let bad = format!(
+            "<b class=a>farm</b> <span class=mt>`{}` has no valid theme.json</span>",
+            esc(&name)
+        );
+        s += &if ok {
+            kv("theme", "g", &format!("<b>{}</b>", esc(&name)))
+        } else {
+            kv("theme", "a", &bad)
+        };
         if let Some(c) = cfg.filter(|c| !c.accounts.names.is_empty()) {
             let capped = |a: &&String| crate::access::capped_until(c, events, a, ctx.now).is_some();
             let all = c.accounts.names.len();
@@ -1756,17 +1791,14 @@ impl<'a> Server<'a> {
         // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
-            let orch = rows.iter().find(|s| s.0 == format!("drive {name}"));
-            let od = orch.map_or(String::new(), |o| o.2.replace("orch · ", ""));
             let (t, w, x) = match last {
                 _ if fc.paused => ("m", "paused", format!("`herdsman resume {name}` starts it again")),
-                Some(e) if fc.driven() => in_words(e, fc.serial_label()),
-                _ if fc.driven() => ("m", "nothing yet", String::new()),
-                _ => (orch.map_or("a", |o| o.1), "orch", od),
+                Some(e) => in_words(e, fc.serial_label()),
+                None => ("m", "nothing yet", String::new()),
             };
             let sep = [" · ", " "][usize::from(t == "g" || x.is_empty())];
             let val = format!("<span class=x><b class={t}>{w}</b>{sep}{}</span>", chips(&x));
-            let e = last.filter(|_| fc.driven() && !fc.paused);
+            let e = last.filter(|_| !fc.paused);
             let ago = e.map_or(String::new(), |e| age(ctx.now.saturating_sub(e.ts)));
             let raw = e
                 .and_then(|e| e.str("result"))
@@ -1913,6 +1945,31 @@ impl Runner for Canned {
     fn sleep(&self, _: u64) {}
 }
 
+/// #172: the files a theme folder may hold; `/theme/<file>` serves nothing else.
+const THEME: [&str; 3] = ["sprites.svg", "theme.json", "scene.svg"];
+/// The active theme's `file` (`<config dir>/themes/<name>/`, then the built-in `<name>`, then farm's), the theme's
+/// name and whether its theme.json parses; it does not (or no such theme) → farm.
+fn theme(ctx: &Ctx, file: &str) -> (Option<Vec<u8>>, String, bool) {
+    let name = Config::load(&ctx.config)
+        .ok()
+        .and_then(|c| c.serve.theme)
+        .unwrap_or_else(|| "farm".into());
+    let get = |n: &str, f: &str| {
+        let own = ctx.config.with_file_name("themes").join(n).join(f);
+        let built = ASSETS
+            .iter()
+            .find(|a| a.0 == format!("themes/{n}/{f}"))
+            .map(|a| a.2.to_vec());
+        (!n.contains(['/', '\\', '.']))
+            .then(|| std::fs::read(own).ok())
+            .flatten()
+            .or(built)
+    };
+    let ok = get(&name, "theme.json").is_some_and(|j| serde_json::from_slice::<serde_json::Map<_, _>>(&j).is_ok());
+    let n = if ok { name.as_str() } else { "farm" };
+    (get(n, file).or_else(|| get("farm", file)), name, ok)
+}
+
 /// `serve --export <dir> [--demo]` (#39, docs/serve.md): the page and its files as static files with relative URLs.
 pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> Result<()> {
     let canned = if demo {
@@ -1952,7 +2009,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         page
     };
     std::fs::create_dir_all(dir.join("lane"))?;
-    std::fs::create_dir_all(dir.join(&v))?;
+    std::fs::create_dir_all(dir.join("theme"))?;
     let files = [
         ("index.html", page.as_bytes()),
         ("herd.json", herd.as_bytes()),
@@ -1964,7 +2021,13 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         .chain(FILES.iter().map(|f| (f.0.to_string(), f.2)))
         .chain(ASSETS.iter().map(|a| (v.clone() + a.0, a.2)))
     {
+        std::fs::create_dir_all(dir.join(&name).with_file_name(""))?;
         std::fs::write(dir.join(name), body)?;
+    }
+    for f in THEME {
+        theme(ctx, f)
+            .0
+            .map_or(Ok(()), |b| std::fs::write(dir.join("theme").join(f), b))?;
     }
     let (cfg, st) = (Config::load(&ctx.config)?, fold(&events));
     for l in s
@@ -2114,14 +2177,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         ("repo", esc(&fc.repo)),
         ("local", esc(&fc.local)),
         ("integration", esc(&fc.integration)),
-        (
-            "driver",
-            if fc.driven() {
-                "herdsman <span class=m>(herdsman drive)</span>".into()
-            } else {
-                "orch".into()
-            },
-        ),
+        ("driver", "herdsman <span class=m>(herdsman drive)</span>".into()),
         (
             "default effort",
             format!(

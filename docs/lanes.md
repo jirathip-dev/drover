@@ -1,8 +1,7 @@
 # Lanes, hooks and notifiers
 
-A lane is one agent working one issue in its own worktree and herdr pane: `impl`, `rev`,
-`orch` (the fleet's orchestrator, `herdsman spawn <fleet> - orch`) or the owner-only
-`design`. Agents get their usage doc from `herdsman help --agent`.
+A lane is one agent working one issue in its own worktree and herdr pane: `impl`, `rev`
+or the owner-only `design`. No lane runs the fleet: `herdsman drive` does ([Drive](#drive)). Agents get their usage doc from `herdsman help --agent`.
 
 ## Typical flow
 
@@ -19,8 +18,10 @@ herdsman clean --yes                  # reclaim merged or closed-issue lanes
 
 `herdsman spawn` refuses before creating anything:
 
-- `HOST_BUSY`: memory pressure warn or worse, swap-out rate or load per CPU over
-  `[limits]`. `--force` overrides and logs an `override` event.
+- `HOST_BUSY`: memory pressure warn or worse, load per CPU over `[limits]`, or a sustained
+  swap-out rate (the median of the last 5 samples) over `[limits]` while pressure is warn or worse;
+  one spike admits. `--force` overrides and logs an `override` event.
+- `MEM_LOW`: free + inactive memory under `[limits] min_free_mem_gb` (default 2 GB); a lane needs about 0.5–1.5 GB.
 - `DISK_LOW`: free disk on `/` under `[limits] min_free_gb` (default 10 GB). `herdsman clean --yes`
   frees the build folders (`target/`, `node_modules/`, `.next/`, `dist/`) of merged or closed lanes,
   even kept ones (never a live lane's, never one git tracks), and reports the bytes freed (approximate: a
@@ -41,7 +42,7 @@ never touching files or worktrees, and logs a passive `closed-other`; a logged l
 (state, unpushed commits, dirty files, open PR); with `--yes` it commits dirty files as `wip: kill
 snapshot`, pushes the branch to `wip/<agent>-<yyyymmdd-hhmm>` (never main/staging, never force;
 refused `SECRET_IN_WIP` when the diff has a secret-looking value), closes the pane and logs
-`lane-killed`. The worktree stays (an orch's checkout is never snapshotted); a killed impl goes back
+`lane-killed`. The worktree stays; a killed impl goes back
 to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawnable.
 `herdsman clean <fleet> --lane <agent>` applies `clean`'s safety to one lane and refuses
 `UNSAFE_CLEAN` with the reason.
@@ -74,7 +75,8 @@ read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`
 
 ## Drive
 
-A fleet with `driver = "herdsman"` (default `"orch"`) has no orchestrator lane: `herdsman drive [fleet]`
+Every fleet is driven by herdsman itself (#155: no orchestrator lane; `spawn <fleet> - orch` refuses
+`NO_ORCH`, and a leftover `driver` key is ignored, noted by `herdsman doctor`). `herdsman drive [fleet]`
 does one pass, from cron after `herdsman check` ([setup.md](setup.md)) or the board's **Drive now**
 (paired devices only). Per issue, at most one step a pass, through the same gates as the CLI:
 

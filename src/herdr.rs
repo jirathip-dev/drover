@@ -181,10 +181,6 @@ pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {
     ])
 }
 
-pub fn workspace_create_argv(local: &str, label: &str) -> Vec<String> {
-    argv(&["workspace", "create", "--cwd", local, "--label", label, "--no-focus"])
-}
-
 pub fn worktree_create_argv(local: &str, branch: &str, base: &str, path: &str, label: &str) -> Vec<String> {
     argv(&[
         "worktree",
@@ -212,11 +208,14 @@ pub fn worktree_remove(r: &dyn Runner, ws: &str) -> Result<bool> {
     Ok(exec(r, &argv(&["worktree", "remove", "--workspace", ws]))?.code == 0)
 }
 
-/// Pick an idle shell pane in the workspace, splitting one off if all are busy.
-pub fn free_pane(r: &dyn Runner, ws: &str, wt: &Path) -> Result<String> {
+/// Pick an idle shell pane in the workspace other than `skip`, splitting one off if all are busy.
+pub fn free_pane(r: &dyn Runner, ws: &str, wt: &Path, skip: Option<&str>) -> Result<String> {
     let panes = json(r, &argv(&["pane", "list", "--workspace", ws]))?;
     let list = panes["result"]["panes"].as_array().cloned().unwrap_or_default();
-    if let Some(p) = list.iter().find(|p| p["agent"].is_null()) {
+    if let Some(p) = list
+        .iter()
+        .find(|p| p["agent"].is_null() && p["pane_id"].as_str() != skip)
+    {
         return Ok(p["pane_id"].as_str().unwrap_or_default().into());
     }
     let first = list

@@ -7,17 +7,13 @@ allowed_hosts = ["<mac>.<tailnet>.ts.net"]   # `tailscale serve` proxies the pag
 # approve_hint = "or send 'pair {code}' to the owner"   # appended to the pairing panel's Mac line
 # tailscale_https_port = 8443   # `herdsman setup` runs `tailscale serve --bg --https=<port> http://<addr>`
 # launchd_label = "dev.herdsman.serve"   # the board job `herdsman setup` writes (or adopts)
+# theme = "kitchen"   # the Herd's theme: farm (default), kitchen or <config dir>/themes/<name>/ (docs/serve.md)
 
 [fleet.api]
 repo = "acme/api"
 local = "~/Projects/api"
 integration = "staging"          # herdsman merge target; main is never a target
 # paused = true                  # `herdsman pause|resume api`: no next, impl/rev spawns refuse PAUSED
-# driver = "herdsman"            # `herdsman drive` runs the loop (cron); default "orch" (an AI orch lane)
-
-[fleet.api.role.orch]
-harness = "hermes"
-profile = "lane-orch"
 
 [fleet.api.role.impl]
 harness = "claude"
@@ -70,10 +66,6 @@ cmd = "notify <chat>:<thread>"   # e.g. one thread per repo
 # cmd = "hermes send -q -t telegram:<chat_id>:<thread_id>"   # or Hermes, to Telegram
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing"]
 
-[fleet.web.role.orch]
-harness = "hermes"
-profile = "lane-orch"
-
 [fleet.web.role.impl]
 harness = "hermes"
 profile = "lane-impl"
@@ -113,6 +105,7 @@ ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long t
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
+min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
 
 [[notify]]

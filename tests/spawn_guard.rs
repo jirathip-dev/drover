@@ -1,5 +1,5 @@
 //! M2 spawn gates: host load (HOST_BUSY), duplicate guard (LANE_LIVE,
-//! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the orch lane.
+//! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the NO_ORCH refusal (#155).
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -68,16 +68,50 @@ fn host_busy_on_memory_pressure() {
     }
 }
 
+/// #168: one swap spike with normal pressure admits; a sustained median with warn pressure refuses.
 #[test]
-fn host_busy_on_swapout_rate() {
-    let d = tmpdir("host-swap");
-    let c = ctx(&d, CONFIG);
-    let r = happy(&c, NO_AGENTS)
-        .once("vm_stat", 0, "Swapouts: 100.\n")
-        .once("vm_stat", 0, "Swapouts: 5100.\n");
-    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
-    assert!(out.contains("swap-out 5000"), "{out}");
+fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
+    let swap = |prev: &str, level: &str| {
+        let d = tmpdir("host-swap");
+        let c = ctx(&d, CONFIG);
+        std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+        std::fs::write(c.state.with_file_name("swapouts"), prev).unwrap();
+        let r = happy(&c, NO_AGENTS)
+            .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, level)
+            .once("vm_stat", 0, "Swapouts: 100.\n")
+            .once("vm_stat", 0, "Swapouts: 5100.\n");
+        (c, r)
+    };
+    let (c, r) = swap("0 0 0 0", "1");
+    assert_eq!(spawn(&c, &r, &[]).0, 0, "a spike with normal pressure admits");
     assert!(r.called("sleep 2"), "two samples 2 s apart");
+    let (c, r) = swap("0 0 0 0", "2");
+    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
+    assert!(!out.contains("swap-out"), "a spike's median is low: {out}");
+    let (c, r) = swap("4000 5000 6000 3000", "2");
+    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
+    assert!(out.contains("swap-out median 5000 pages/2s > 2000"), "{out}");
+    let w = std::fs::read_to_string(c.state.with_file_name("swapouts")).unwrap();
+    assert_eq!(w, "4000 5000 6000 3000 5000", "the window keeps the last 5");
+}
+
+/// #168: free + inactive memory under `[limits] min_free_mem_gb` (default 2) refuses MEM_LOW.
+#[test]
+fn mem_low_under_the_floor() {
+    let d = tmpdir("mem-low");
+    let c = ctx(&d, CONFIG);
+    let vm = |pages: u64| {
+        format!("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: {pages}.\nPages inactive: {pages}.\nSwapouts: 100.\n")
+    };
+    let r = happy(&c, NO_AGENTS)
+        .once("vm_stat", 0, &vm(32768))
+        .once("vm_stat", 0, &vm(32768));
+    let out = assert_refused(&c, &r, &[], "MEM_LOW");
+    assert!(out.contains("only 1.0 GB of memory free (floor 2 GB)"), "{out}");
+    let r = happy(&c, NO_AGENTS)
+        .once("vm_stat", 0, &vm(65536))
+        .once("vm_stat", 0, &vm(98304));
+    assert_eq!(spawn(&c, &r, &[]).0, 0, "3 GB free admits");
 }
 
 /// #103: a fake `df` under `[limits] min_free_gb` (default 10) refuses DISK_LOW; at or over it admits.
@@ -301,38 +335,28 @@ fn hermes_kick_retries_after_dropped_first_prompt() {
     assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], true);
 }
 
-// --- orch lane ---
+// --- #155: no orch lane ---
 
 #[test]
-fn orch_lane_spawns_without_issue() {
-    let d = tmpdir("orch");
-    let c = ctx(&d, CONFIG);
-    let r = happy(&c, NO_AGENTS);
-    let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "-", "orch"]);
-    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
-    assert!(r.called("herdr workspace create --cwd /tmp/does-not-matter/sendmeter --label sendmeter-orch"));
-    assert!(r.called("herdr agent start sendmeter-orch --kind hermes --pane w9:p1 --timeout 90000 -- -p fleet-orch"));
-    assert!(!r.called("gh issue view") && !r.called("herdr worktree"));
-    let brief = std::fs::read_to_string(c.state.parent().unwrap().join("orch-sendmeter.md")).unwrap();
-    assert!(
-        brief.contains("# ROLE: ORCHESTRATOR") && brief.contains("integration branch: `staging`"),
-        "{brief}"
-    );
-    let ev = read(&c.state).unwrap();
-    let s = ev.iter().find(|e| e.kind == "spawn").unwrap();
-    assert_eq!((s.issue, s.str("role")), (None, Some("orch")));
-    // A second orch while the first is live: LANE_LIVE.
-    let r = happy(&c, &agents(&[("sendmeter-orch", "idle", "/x", "w9:p1")]));
-    let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "-", "orch"]);
-    assert_eq!(exit, 3, "{out}");
-    assert!(out.contains("REFUSED LANE_LIVE"), "{out}");
-    // orch takes no issue; impl needs one.
+fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
+    let c = ctx(&tmpdir("no-orch"), CONFIG);
+    for issue in ["-", "12"] {
+        let r = happy(&c, NO_AGENTS);
+        let (exit, out) = run(&c, &r, &["spawn", "sendmeter", issue, "orch"]);
+        assert_eq!(exit, 3, "{out}");
+        assert_eq!(
+            out.trim(),
+            "REFUSED NO_ORCH: herdsman drives fleets itself; see herdsman timer"
+        );
+        assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
+    }
+    assert!(read(&c.state).unwrap_or_default().is_empty());
     assert_eq!(
-        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "12", "orch"]).0,
+        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "-", "impl"]).0,
         1
     );
     assert_eq!(
-        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "-", "impl"]).0,
+        run(&c, &happy(&c, NO_AGENTS), &["spawn", "sendmeter", "12", "boss"]).0,
         1
     );
 }
@@ -581,4 +605,30 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
             assert!(closed);
         }
     }
+}
+
+/// #168: `agent_pane_busy` closes a finished lane's pane and retries once on a fresh one; no error.
+#[test]
+fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
+    let d = tmpdir("pane-busy");
+    let c = ctx(&d, CONFIG);
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-11", "worktree": "/elsewhere", "pane": "w9:p1"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(11), "spawn", d0)).unwrap();
+    let busy = r#"{"error":{"code":"agent_pane_busy","message":"agent target pane w9:p1 is not an available shell"}}"#;
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, busy)
+        .reply("herdr pane close w9:p1", "{}")
+        .once(
+            "herdr pane split w9:p1",
+            0,
+            r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+        );
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(r.count("herdr agent start"), 2, "retried once");
+    let ev = read(&c.state).unwrap();
+    let b = ev.iter().find(|e| e.kind == "pane-busy").expect("logged");
+    assert_eq!((b.str("pane"), b.data["closed"].clone()), (Some("w9:p1"), json!(true)));
+    let s = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
+    assert_eq!(s.str("pane"), Some("w9:p2"));
 }

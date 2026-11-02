@@ -97,13 +97,16 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
         q.contains(&format!("[<a href=\"{GH}/issues/17\">issue</a>] · no PR read yet")),
         "{q}"
     );
-    // The tick (`check`) reads the issue branch's latest run; a render only reads that cache.
+    // The tick (its `drive` pass, #155) reads the issue branch's latest run; a render only reads that cache.
     let url = format!("{GH}/actions/runs/99");
-    let r = Fake::default().reply("gh pr view", "").reply(
-        "gh run list -R jirathip-dev/sendmeter --branch issue-17",
-        &format!("[{{\"url\":\"{url}\"}}]"),
-    );
-    run(&c, &r, &["check"]);
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("gh pr view", "")
+        .reply(
+            "gh run list -R jirathip-dev/sendmeter --branch issue-17",
+            &format!("[{{\"url\":\"{url}\"}}]"),
+        );
+    run(&c, &r, &["drive"]);
     assert!(
         r.called("gh run list -R jirathip-dev/sendmeter --branch issue-17 --limit 1 --json url"),
         "{:?}",

@@ -42,7 +42,7 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
 | `pause` / `resume` | hold a fleet: `next` offers nothing, impl/rev spawns refuse `PAUSED` |
 | `queue` / `next` | ordered work queue; the first issue ready to start |
 | `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
-| `check` / `ask` / `answer` / `asks` | alerts (stall, dead lane, unmerged ready, silent orch hold); ask for a decision, answer it |
+| `check` / `ask` / `answer` / `asks` | alerts (stall, dead lane, unmerged ready, waiting ask); ask for a decision, answer it |
 | `clean` / `stop` / `kill` / `close` | reclaim merged or closed lanes; Esc an agent; close its pane, unpushed work to `wip/` first (dry runs unless `--yes`); close a non-lane agent's pane |
 | `set` / `profiles` | switch a role's harness or model; write per-role folders and hooks |
 | `accounts` | Claude accounts: cap, usage, lane-hours, lanes; DeepSeek balance ([docs](docs/providers.md)) |
@@ -56,8 +56,8 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
   head sha. A new commit makes the old verdict stale. A fleet's `required_checks` narrows
   "green CI" to those check names, latest run of each.
 - **Round limit.** At most 3 review rounds (`[limits].review_rounds`), then `needs-human`.
-- **Host-load admission.** `spawn` refuses with `HOST_BUSY` under memory pressure, swap-out
-  or high load. `--force` overrides and is logged. `DISK_LOW` under `[limits] min_free_gb` free.
+- **Host-load admission.** `spawn` refuses `HOST_BUSY` under memory pressure, sustained swap-out
+  or high load (`--force` overrides, logged), `DISK_LOW`/`MEM_LOW` under `[limits] min_free_gb`/`min_free_mem_gb`.
 - **Protected branches.** Merges go only to the integration branch, never main.
   `herdsman protection` checks that GitHub protection is on.
 - **The lane hook.** Every lane runs a pre-tool hook that blocks `gh pr merge`, issue and PR

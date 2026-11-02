@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const ROLES: [&str; 4] = ["orch", "impl", "rev", "design"];
+pub const ROLES: [&str; 3] = ["impl", "rev", "design"];
 /// #162: the accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
 pub const COLORS: [&str; 5] = ["l", "p", "c", "g", "a"];
 
@@ -58,6 +58,8 @@ pub struct Serve {
     pub launchd_label: Option<String>,
     pub addr: Option<String>,
     pub tailscale_https_port: Option<u16>,
+    /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
+    pub theme: Option<String>,
 }
 
 impl Serve {
@@ -124,7 +126,7 @@ pub struct Fleet {
     /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
-    /// #92: who runs the loop, `"orch"` (an AI lane, the default) or `"herdsman"` (`herdsman drive`).
+    /// #155: ignored (`herdsman drive` runs every fleet); `herdsman doctor` notes it until the clean-up removes it.
     pub driver: Option<String>,
     /// #103: exported into every lane (`~/` expands); `clone_node_modules` APFS-clones `local`'s on a lockfile match.
     #[serde(default)]
@@ -179,6 +181,8 @@ pub struct Limits {
     pub swapout_rate: f64,
     /// `herdsman spawn` refuses `DISK_LOW` under this many GB free on `/`.
     pub min_free_gb: f64,
+    /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
+    pub min_free_mem_gb: f64,
     /// Default reasoning effort for roles that set none.
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
@@ -194,6 +198,7 @@ impl Default for Limits {
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
+            min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
         }
@@ -217,7 +222,7 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40), a stuck orch (#46) and needs-human (#130).
+/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "blocked",
     "stall",
@@ -226,7 +231,6 @@ pub const WEBPUSH_ON: &[&str] = &[
     "merged",
     "needs-decision",
     "needs-human",
-    "orch-stuck",
     "ask-waiting",
     "decision-undelivered",
     "state-write-failed",
@@ -334,9 +338,6 @@ impl Config {
 }
 
 impl Fleet {
-    pub fn driven(&self) -> bool {
-        self.driver.as_deref() == Some("herdsman")
-    }
     /// #162: the card colour: `color`, else `sha256(name)[0] % 5` over `COLORS` (the horse coats' hash).
     pub fn color(&self, name: &str) -> &str {
         self.color.as_deref().unwrap_or_else(|| {
