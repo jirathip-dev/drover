@@ -113,6 +113,14 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
     assert!(herdsman::spawn::role_prompt("rev").contains("## For humans"));
 }
 
+/// #226: a reviewer never FAILs on an older commit's trailer; the fix would be a forbidden force-push.
+#[test]
+fn rev_role_flags_new_commit_trailers_only() {
+    let rev = herdsman::spawn::role_prompt("rev");
+    assert!(rev.contains("new commits only, never force-push"), "{rev}");
+    assert!(herdsman::spawn::role_prompt("impl").contains("never rewrite history or force-push"));
+}
+
 /// #103: `[fleet.<n>] env` is exported into the lane's shell after HERDSMAN_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {

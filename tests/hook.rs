@@ -12,8 +12,13 @@ fn hook_in(lane: Option<&str>, role: &str, input: Value) -> String {
 
 /// `herdsman hook` as `role` with each lane var set (`Some`) or unset (`None`).
 fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: Value) -> String {
+    hook_cfg(CONFIG, vars, role, input).0
+}
+
+/// `herdsman hook` under fleet.toml `cfg`: its stdout and the temp dir (`state/events.jsonl`).
+fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) -> (String, std::path::PathBuf) {
     let d = tmpdir("hook");
-    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    std::fs::write(d.join("fleet.toml"), cfg).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
     cmd.env_remove("HERDSMAN_LANE").env_remove("FLEET_LANE");
     for (k, v) in vars {
@@ -37,7 +42,7 @@ fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: Value) -> String {
         .unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
-    String::from_utf8(out.stdout).unwrap()
+    (String::from_utf8(out.stdout).unwrap(), d)
 }
 
 fn hook_as(role: &str, input: Value) -> String {
@@ -373,4 +378,132 @@ fn ai_coauthor_trailer_is_spotted() {
     assert_eq!(push_dir(&push).as_deref(), Some("/r"));
     let log_only = json!({"tool_name": "Bash", "cwd": "/w", "tool_input": {"command": "git log"}});
     assert_eq!(push_dir(&log_only), None);
+}
+
+const NO_CONTAINERS: &str = "herdsman: REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the \
+                             repo's non-container test path, or ask the conductor.";
+
+/// #216: every default entry is denied as a command word: plain, `sh -c`, `env`, `sudo`, a full path, a pipeline,
+/// `&&`, `$( )`; the same words as arguments, and other `supabase` subcommands, are allowed.
+#[test]
+fn container_commands_are_denied_as_command_words() {
+    for c in [
+        "docker ps",
+        "docker-compose up -d",
+        "podman run x",
+        "nerdctl ps",
+        "colima start",
+        "orb start",
+        "orbctl status",
+        "limactl list",
+        "supabase start",
+        "supabase db start",
+    ] {
+        for cmd in [
+            c.to_string(),
+            format!("bash -c '{c}'"),
+            format!("sh -c \"cd /x && {c}\""),
+            format!("env FOO=1 {c}"),
+            format!("sudo {c}"),
+            format!("/usr/local/bin/{c}"),
+            format!("cat x | {c} | tee y"),
+            format!("cargo test; {c}"),
+            format!("echo $({c})"),
+            format!("sudo -u root {c}"),
+            format!("sudo -n {c}"),
+            format!("env -u X {c}"),
+            format!("nice -n 5 {c}"),
+            format!("timeout 5 {c}"),
+            format!("if true; then {c}; fi"),
+            format!("{{ {c}; }}"),
+            format!("eval \"{c}\""),
+            format!("\\{c}"),
+        ] {
+            assert_eq!(bash(&cmd).as_deref(), Some(NO_CONTAINERS), "{cmd}");
+        }
+    }
+    for cmd in [
+        "DOCKER_HOST=unix:///x.sock cargo test",
+        "env DOCKER_HOST=tcp://h:2375 make",
+        "open -a Docker",
+        "open -a OrbStack",
+        "open -a Docker.app",
+        "export DOCKER_HOST=tcp://h:2375",
+        "supabase --debug start",
+    ] {
+        assert_eq!(bash(cmd).as_deref(), Some(NO_CONTAINERS), "{cmd}");
+    }
+    for cmd in [
+        "supabase migration new x",
+        "grep docker file",
+        "rg -n 'docker ps' src",
+        "echo docker",
+        "git commit -m 'drop docker'",
+        "open -a Safari",
+        "orbit run",
+    ] {
+        assert_eq!(bash(cmd), None, "{cmd} allowed");
+    }
+}
+
+#[test]
+fn container_commands_are_allowed_outside_a_lane() {
+    for input in shapes("Bash", json!({"command": "docker ps"})) {
+        assert_eq!(hook_in(None, "impl", input.clone()), "");
+        assert_eq!(hook_in(Some(""), "impl", input), "");
+    }
+}
+
+/// #216: `[fleet.<n>] deny_commands` replaces the list (empty = off), `deny_commands_add` extends it, `why` is the
+/// message; each denial is logged `hook-denied`.
+#[test]
+fn deny_commands_override_per_fleet_and_log_denials() {
+    let run = |fleet_toml: &str, cmd: &str| {
+        let cfg = format!(
+            "{CONFIG}\n[fleet.other]\nrepo = \"o/r\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\n{fleet_toml}"
+        );
+        let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
+        let (out, d) = hook_cfg(&cfg, &[("HERDSMAN_LANE", Some("other:7:impl"))], "impl", input);
+        let reason = serde_json::from_str::<Value>(&out).ok().map(|v| {
+            v["hookSpecificOutput"]["permissionDecisionReason"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        });
+        (
+            reason,
+            std::fs::read_to_string(d.join("state/events.jsonl")).unwrap_or_default(),
+        )
+    };
+    let (r, log) = run("", "docker ps");
+    assert_eq!(r.as_deref(), Some(NO_CONTAINERS), "the default applies");
+    let ev: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        (ev["type"].as_str(), ev["fleet"].as_str(), ev["issue"].as_u64()),
+        (Some("hook-denied"), Some("other"), Some(7))
+    );
+    assert_eq!(ev["rule"].as_str(), Some(&NO_CONTAINERS["herdsman: ".len()..]));
+
+    assert_eq!(
+        run("deny_commands = []", "docker ps").0,
+        None,
+        "empty list turns it off"
+    );
+    let replace =
+        r#"deny_commands = ["git push --force", { cmd = "npm publish", why = "REFUSED NO_PUBLISH: ask the owner" }]"#;
+    assert_eq!(run(replace, "docker ps").0, None, "replaced");
+    let r = run(replace, "cd x && git push --force origin issue-7").0.unwrap();
+    assert!(
+        r.contains("REFUSED NO_COMMAND: lanes never run `git push --force`"),
+        "{r}"
+    );
+    assert_eq!(run(replace, "git push origin issue-7").0, None);
+    assert_eq!(
+        run(replace, "npm publish").0.as_deref(),
+        Some("herdsman: REFUSED NO_PUBLISH: ask the owner")
+    );
+    let add = r#"deny_commands_add = ["terraform apply"]"#;
+    assert!(run(add, "terraform apply -auto-approve").0.is_some());
+    assert_eq!(run(add, "docker ps").0.as_deref(), Some(NO_CONTAINERS), "defaults kept");
+    assert_eq!(run(add, "terraform plan").0, None);
 }

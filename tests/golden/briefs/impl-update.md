@@ -9,6 +9,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 
 - No host changes: no brew/cask installs, no browser or driver installs, no launchd,
   Docker or /Applications changes. Ask the human instead.
+- Never run or script containers (docker, colima, orb, podman, `supabase start`, …): the lane hook
+  refuses them (`deny_commands`); use the repo's non-container test path or ask the owner.
 - Never merge, never push to the integration branch or main, never edit fleet or
   harness config. Merging happens only through `herdsman merge` (hooks enforce this).
 
@@ -31,7 +33,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Start any dev server on `$HERDSMAN_PORT`, never a fixed port.
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
-- No AI co-author or 'generated with' trailers in commits or PR bodies.
+- No AI co-author or 'generated with' trailers in commits or PR bodies. Fix the PR body by editing
+  it; never rewrite history or force-push to drop an old commit's trailer.
 - Every PR body has a `## For humans` section: 2–4 plain-English lines on what changes for the
   user or operator, no code identifiers. `herdsman merge` copies it into the merge commit.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was

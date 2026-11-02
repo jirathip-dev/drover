@@ -913,6 +913,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         branches,
         paths,
         reviewer,
+        deny: deny_list(ctx),
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -920,6 +921,9 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .map(|s| s.trim().to_string())
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
+        if policy.deny.iter().any(|d| d.reason() == reason) {
+            lane_event(ctx, "hook-denied", json!({"rule": reason}));
+        }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
     } else if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
@@ -934,17 +938,26 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
         return;
     };
     eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
+    lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
+}
+
+/// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
+fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let mut it = lane.split(':');
     let (fleet, issue) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
-    let d = json!({"lane": lane, "line": trailer});
+    d["lane"] = json!(lane);
     if let Ok(cfg) = Config::load(&ctx.config) {
-        let _ = emit(
-            &ctx.state,
-            &cfg,
-            Event::new(ctx.now, fleet, issue, "coauthor-trailer", d),
-        );
+        let _ = emit(&ctx.state, &cfg, Event::new(ctx.now, fleet, issue, kind, d));
     }
+}
+
+/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown).
+fn deny_list(ctx: &Ctx) -> Vec<crate::config::Deny> {
+    let cfg = Config::load(&ctx.config).unwrap_or_default();
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let f = cfg.fleet.get(lane.split(':').next().unwrap_or_default());
+    f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits))
 }
 
 /// main, master, staging and every fleet's integration branch.
@@ -978,7 +991,19 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             return Ok(1);
         }
     }
+    // #216: no added script line may run a `deny_commands` entry (CI workflows may use Docker).
+    let deny = deny_list(ctx);
     for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+        let specs = ["*.sh", "*.bash", "*.zsh", "*justfile", "*Justfile", "*Makefile"];
+        let mut args = vec!["log", "-p", "--format=", sha, "--not", "--remotes", "--"];
+        args.extend(specs.iter().chain(&[":!.github/workflows"]));
+        let diff = runner::ok(r, "git", &args).unwrap_or_default();
+        let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
+        if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
+            lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
+            writeln!(out, "herdsman: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
+            return Ok(1);
+        }
         coauthor_warn(ctx, r, ".", sha);
     }
     Ok(0)

@@ -28,7 +28,10 @@ summary>span{min-width:0}
 details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lane{border-bottom:1px solid var(--line)}
 /* #205: an open Queue card's lanes, newest first: one-line 44 px tap rows; `+N older` expands. */
-.ql{display:block;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
+.ql{display:block;max-width:100%;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
+/* #218: a lane line in the card: the name ellipsises first, `state age` stays at the right (the inline line overflowed the card). */
+.qls .ql{display:flex;gap:1ch}.ql>:first-child{flex:none}.ql .qn{min-width:0;overflow:hidden;text-overflow:ellipsis}.ql .qa{flex:none;margin-left:auto}
+.ch{margin:var(--s2) 0 0;font-size:var(--fs-meta);font-weight:700;letter-spacing:.08em;color:var(--mute)}
 .qm{border:0}.qm>summary{display:block}
 .lr{display:grid;grid-template-columns:48px minmax(0,1fr) max-content;gap:0 var(--s2);align-items:center;width:100%;text-align:left;background:none;border:0;border-radius:0;padding:var(--s1) 0}
 .lr>span{min-width:0}
@@ -140,6 +143,7 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 .ask{border:1px solid var(--r);background:color-mix(in srgb,var(--r) 15%,transparent);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}
 .ask b{color:var(--r)}.ask form{display:flex;flex-wrap:wrap;gap:var(--s4)}.ask input[name=text]{flex:1;min-width:8em;font:inherit;font-size:var(--fs-input)}
 .ask form button[name]{order:-1}
+.pend{border:1px solid var(--line);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}.pend p{margin:0} /* #217: a tapped needs-you card */
 .ask>button{display:flex;width:fit-content;margin:var(--s4) 0}
 /* #63 amendment A, the one exception to the 28 px rule: a choice is a sentence, not a label. Full width, wrapping,
    at most 4 lines (then an ellipsis; the full text is its title), the brackets on the first line, stacked 8 px apart.

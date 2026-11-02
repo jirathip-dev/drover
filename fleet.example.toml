@@ -112,6 +112,9 @@ min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
+# deny_commands = ["docker", "supabase start", { cmd = "git push --force", why = "REFUSED NO_FORCE: ask the owner" }]
+# Commands the lane hook refuses (default: the container set in assets/deny_commands.toml). A fleet's
+# `deny_commands` replaces it (`[]` = off), its `deny_commands_add` extends it; see docs/lanes.md.
 fast_secs = 60       # `herdsman timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
 slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 
