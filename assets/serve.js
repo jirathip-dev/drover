@@ -294,7 +294,7 @@ function tree(p, rows, end) {
     const ch = t => el('p', 'ch', t), hist = ls && ls.querySelector(':scope>.qm');
     if (lk) { cd.insertBefore(lk, ls || cd.querySelector(':scope>.btns')); lk.before(ch('LINKS')); }
     if (cd.firstElementChild !== lk?.previousElementSibling) cd.prepend(ch('STATUS'));
-    if (ls) ls.before(ch(`LANES (${ls.querySelectorAll('.ql').length})`));
+    if (ls) ls.before(ch(`LANES (${ls.querySelectorAll(':scope>.ql').length})`));
     if (hist) ls.after(ch('HISTORY'), hist);
     p.insertBefore(d, end);
     walk(kids.get(d), depth ? [...pre, last ? '<i>  </i>' : '<i class=p>│ </i>'] : [], depth + 1);

@@ -65,7 +65,7 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true;
       d.open = true;
-      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['herdsman-impl-157-queue-card-lane-overflow', 'synergy-rev-2940-r1-settings-contrast-audit', 'herdsman-impl-205-queue-card-lanes-newest-first'];
+      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['herdsman-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'herdsman-impl-205-queue-card-lanes-newest-first'];
       if (ls.length !== 3) early.push(`#38 lists ${ls.length} lanes, not 3`);
       ls.forEach((l, i) => { l.querySelector('.qn').textContent = long[i]; if (l.dataset.agent) l.dataset.agent = long[i]; });
       const hs = [...d.querySelectorAll('.cd>.ch')].map(h => h.textContent).join(', ');
