@@ -68,16 +68,50 @@ fn host_busy_on_memory_pressure() {
     }
 }
 
+/// #168: one swap spike with normal pressure admits; a sustained median with warn pressure refuses.
 #[test]
-fn host_busy_on_swapout_rate() {
-    let d = tmpdir("host-swap");
-    let c = ctx(&d, CONFIG);
-    let r = happy(&c, NO_AGENTS)
-        .once("vm_stat", 0, "Swapouts: 100.\n")
-        .once("vm_stat", 0, "Swapouts: 5100.\n");
-    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
-    assert!(out.contains("swap-out 5000"), "{out}");
+fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
+    let swap = |prev: &str, level: &str| {
+        let d = tmpdir("host-swap");
+        let c = ctx(&d, CONFIG);
+        std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+        std::fs::write(c.state.with_file_name("swapouts"), prev).unwrap();
+        let r = happy(&c, NO_AGENTS)
+            .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, level)
+            .once("vm_stat", 0, "Swapouts: 100.\n")
+            .once("vm_stat", 0, "Swapouts: 5100.\n");
+        (c, r)
+    };
+    let (c, r) = swap("0 0 0 0", "1");
+    assert_eq!(spawn(&c, &r, &[]).0, 0, "a spike with normal pressure admits");
     assert!(r.called("sleep 2"), "two samples 2 s apart");
+    let (c, r) = swap("0 0 0 0", "2");
+    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
+    assert!(!out.contains("swap-out"), "a spike's median is low: {out}");
+    let (c, r) = swap("4000 5000 6000 3000", "2");
+    let out = assert_refused(&c, &r, &[], "HOST_BUSY");
+    assert!(out.contains("swap-out median 5000 pages/2s > 2000"), "{out}");
+    let w = std::fs::read_to_string(c.state.with_file_name("swapouts")).unwrap();
+    assert_eq!(w, "4000 5000 6000 3000 5000", "the window keeps the last 5");
+}
+
+/// #168: free + inactive memory under `[limits] min_free_mem_gb` (default 2) refuses MEM_LOW.
+#[test]
+fn mem_low_under_the_floor() {
+    let d = tmpdir("mem-low");
+    let c = ctx(&d, CONFIG);
+    let vm = |pages: u64| {
+        format!("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: {pages}.\nPages inactive: {pages}.\nSwapouts: 100.\n")
+    };
+    let r = happy(&c, NO_AGENTS)
+        .once("vm_stat", 0, &vm(32768))
+        .once("vm_stat", 0, &vm(32768));
+    let out = assert_refused(&c, &r, &[], "MEM_LOW");
+    assert!(out.contains("only 1.0 GB of memory free (floor 2 GB)"), "{out}");
+    let r = happy(&c, NO_AGENTS)
+        .once("vm_stat", 0, &vm(65536))
+        .once("vm_stat", 0, &vm(98304));
+    assert_eq!(spawn(&c, &r, &[]).0, 0, "3 GB free admits");
 }
 
 /// #103: a fake `df` under `[limits] min_free_gb` (default 10) refuses DISK_LOW; at or over it admits.
@@ -609,4 +643,30 @@ fn lane_live_on_an_idle_unlogged_pane_names_its_age_and_the_way_out() {
         out.contains("stale pane w6N5:p1 (idle 3h): herdsman adopt or --supersede"),
         "{out}"
     );
+}
+
+/// #168: `agent_pane_busy` closes a finished lane's pane and retries once on a fresh one; no error.
+#[test]
+fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
+    let d = tmpdir("pane-busy");
+    let c = ctx(&d, CONFIG);
+    let d0 = json!({"role": "impl", "agent": "sendmeter-impl-11", "worktree": "/elsewhere", "pane": "w9:p1"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(11), "spawn", d0)).unwrap();
+    let busy = r#"{"error":{"code":"agent_pane_busy","message":"agent target pane w9:p1 is not an available shell"}}"#;
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, busy)
+        .reply("herdr pane close w9:p1", "{}")
+        .once(
+            "herdr pane split w9:p1",
+            0,
+            r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+        );
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(r.count("herdr agent start"), 2, "retried once");
+    let ev = read(&c.state).unwrap();
+    let b = ev.iter().find(|e| e.kind == "pane-busy").expect("logged");
+    assert_eq!((b.str("pane"), b.data["closed"].clone()), (Some("w9:p1"), json!(true)));
+    let s = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
+    assert_eq!(s.str("pane"), Some("w9:p2"));
 }
