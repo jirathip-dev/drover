@@ -274,6 +274,57 @@ fn pre_push_refuses_protected_branches_and_reviewer_pushes() {
     assert!(out.contains("reviewers are read-only"), "{out}");
 }
 
+/// #216: dsh has no pre-tool hook, so the pre-push guard refuses a push that adds a script line running a
+/// `deny_commands` entry; `.github/workflows` are not scanned (CI may use Docker).
+#[test]
+fn pre_push_refuses_scripts_that_start_containers() {
+    let d = tmpdir("dsh-prepush-deny");
+    let c = ctx(&d, &dsh_config());
+    let line = format!(
+        "refs/heads/issue-12 {} refs/heads/issue-12 {}\n",
+        "a".repeat(40),
+        "0".repeat(40)
+    );
+    let push = |diff: &str| {
+        let r = Fake::default().reply("git log -p", diff);
+        let mut out = Vec::new();
+        let args = ["herdsman", "hook", "--role", "impl", "--git-pre-push"]
+            .map(String::from)
+            .to_vec();
+        let code = herdsman::main_with(args, &c, &r, &mut out, &mut line.as_bytes());
+        let scanned = r
+            .calls
+            .borrow()
+            .iter()
+            .find(|l| l.starts_with("git log -p"))
+            .cloned()
+            .unwrap();
+        (code, String::from_utf8(out).unwrap(), scanned)
+    };
+    let (code, out, scanned) = push("+++ b/scripts/test.sh\n+set -e\n+docker compose up -d db\n");
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("REFUSED NO_CONTAINERS"), "{out}");
+    assert!(
+        scanned.contains("*.sh") && scanned.contains("*.zsh") && scanned.contains(":!.github/workflows"),
+        "{scanned}"
+    );
+    assert_eq!(
+        push("+++ b/scripts/test.sh\n+cargo test\n-docker ps\n").0,
+        0,
+        "removed lines pass"
+    );
+    assert_eq!(push("+++ b/justfile\n+\tsupabase migration new x\n").0, 0);
+    assert_eq!(
+        push("+++ b/Makefile\n+db:\n+\tdocker run -d pg\n").0,
+        1,
+        "a recipe line"
+    );
+    assert!(
+        !scanned.contains("package.json"),
+        "JSON scripts are not command lines: {scanned}"
+    );
+}
+
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
     Command::new("git")
         .arg("-C")
