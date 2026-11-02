@@ -213,7 +213,7 @@ document.addEventListener('submit', async e => {
   } catch (err) { toast('error: ' + err.message); }
   if (b) b.ariaBusy = null;
 });
-B.insertAdjacentHTML('beforeend', `<div id=sheet hidden><div class=bd></div><div class=sh role=dialog aria-modal=true>
+B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
 <div class=hd><p><b></b></p></div><div class=top></div><div class=acts><button type=button data-op=stop>Stop</button><button type=button data-op=kill>Kill</button><button type=button data-op=clean>Clean</button><button type=button data-op=close>Close pane</button></div>
 <div class=cf hidden><p></p><button type=button class=yes>Kill</button><button type=button class=no>Cancel</button></div>
 <div class=chat><button type=button class=more hidden>Load more</button><div class=now></div></div>
@@ -223,7 +223,7 @@ B.insertAdjacentHTML('beforeend', `<div id=sheet hidden><div class=bd></div><div
 <form class=reply><textarea name=text rows=1 maxlength=2000 placeholder="Message, or / for commands" aria-label=message></textarea><button>Send</button></form>
 <p class=st></p></div></div>`);
 if (DEMO) sync();
-const S = $('#sheet'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
+const S = $('#sheet'), shown = () => S.classList.contains('on'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
 let agent = null, timer = 0, nopane = false, opane = null;
 // The Lanes row of `agent` (its sheet card), from the needs-you cards and the herd.
 const laneOf = agent => [...$$('.lane')].find(l => l.dataset.agent === agent);
@@ -620,13 +620,12 @@ document.addEventListener('change', e => {
   ef.replaceChildren(...s.selectedOptions[0].dataset.e.split(' ').map(v => Object.assign(el('option', '', v), { selected: v === cur })));
   ef.dispatchEvent(new Event('change'));
 });
-// #166: one helper for every sheet (lane chat, legend). The page under it is never touched while it opens or closes:
-// no position change, no scroll reset (iOS repainted the whole page black); `overflow:hidden` on <html> holds it still.
+// #166: one helper for every sheet (lane chat, legend, config). #200: the page under it is never touched while it
+// opens or closes, not even <html>'s overflow (iOS repainted the whole page grey), and the sheet stays in the DOM:
+// shown is `.on` (visible), only transform and opacity animate; the backdrop alone eats the page's touchmove.
 function show(d) {
-  if (shut) { clearTimeout(shut); shut = 0; S.classList.remove('out'); } else {
-    document.documentElement.classList.add('lock');
-    S.hidden = false;
-    S.classList.add('drag');
+  if (shut) { clearTimeout(shut); shut = 0; S.classList.remove('shut'); } else {
+    S.classList.add('on', 'drag');
     pos(sh.offsetHeight, 0);
     void sh.offsetHeight;
     S.classList.remove('drag');
@@ -634,25 +633,28 @@ function show(d) {
   fit();
   snap(d);
 }
-// Only the sheet slides off (200 ms ease-out, none under reduced motion) and the backdrop fades; then it hides.
+// Only the sheet slides off (200 ms ease-out, none under reduced motion) and the backdrop fades; when the slide ends
+// (or 250 ms on) it turns invisible.
 function close() {
-  if (S.hidden || shut) return;
+  if (!shown() || shut) return;
   clearInterval(timer);
   agent = null;
   d0 = null;
   S.classList.remove('drag');
-  S.classList.add('out');
+  S.classList.add('shut');
   pos(sh.offsetHeight);
-  shut = setTimeout(() => {
-    shut = 0;
-    S.hidden = true;
-    S.classList.remove('out');
-    document.documentElement.classList.remove('lock');
-  }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 200);
+  shut = setTimeout(hide, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 250);
 }
+function hide() {
+  clearTimeout(shut);
+  shut = 0;
+  S.classList.remove('on', 'shut');
+}
+sh.addEventListener('transitionend', e => { if (shut && e.target === sh && e.propertyName === 'transform') hide(); });
 // #70: the sheet is a full-height box placed by translateY at a detent (`full` stops under the safe area).
 // pos() moves it, fades the backdrop with it, and pads its bottom by the hidden part so the composer shows.
 const DET = { full: 1, mid: .78, half: .5 }, bd = $('.bd');
+bd.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 let at = 'mid', ty = 0, shut = 0, padT = 0, d0 = null, moves = [], to = null, rq = 0;
 const off = d => Math.max(0, S.clientHeight * (1 - DET[d]) - sh.offsetTop);
 function pos(t, pad) {
@@ -676,8 +678,9 @@ function snap(d) {
 const vv = window.visualViewport;
 const kb = () => !!sh.querySelector('input:focus, textarea:focus') || !!vv && vv.height < innerHeight * .75;
 function fit() {
+  if (shut) return;
   if (vv) { S.style.top = vv.offsetTop + 'px'; S.style.height = vv.height + 'px'; }
-  if (!S.hidden && !shut && !d0) snap(kb() ? 'full' : at);
+  if (shown() && !d0) snap(kb() ? 'full' : at);
 }
 if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); }
 sh.addEventListener('focusin', fit);
@@ -767,7 +770,7 @@ document.addEventListener('click', async e => {
   });
 });
 $('.bd').onclick = close;
-addEventListener('keydown', e => { if (e.key === 'Escape' && !S.hidden) close(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && shown()) close(); });
 // #70: the sheet follows the finger 1:1 (light rubber band above full), one move per frame. On release (#166): down
 // past 30 % of its shown height, or flicked down (over 0.5 px/ms in the last 80 ms), closes; flicked up goes one detent
 // up; else it springs back to the nearest detent.
@@ -875,7 +878,7 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && S.hidden && !typing ? e.touches[0] : null;
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
