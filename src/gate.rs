@@ -128,7 +128,9 @@ pub fn verdict(
     let ws = e.str("workspace").unwrap_or_default();
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),
-        None => check::remove(r, cfg, fleet, wt, ws).and_then(|()| herdr::close(r, pane).map(drop)),
+        None => check::reap(ctx, cfg, r, (fleet, Some(issue)), wt)
+            .and_then(|_| check::remove(r, cfg, fleet, wt, ws))
+            .and_then(|()| herdr::close(r, pane).map(drop)),
     };
     let kind = if gone.is_ok() { "lane-closed" } else { "lane-kept" };
     let reason = gone.map_or_else(|why| format!("{wt}: {why:#}"), |()| "verdict recorded".into());
@@ -432,7 +434,13 @@ pub fn needs_human(
             }
             crate::events::append(&ctx.state, &ev("round-extended"))?;
         }
-        _ => crate::events::append(&ctx.state, &ev("parked"))?,
+        _ => {
+            crate::events::append(&ctx.state, &ev("parked"))?;
+            // #186: a parked issue's lanes are closed: reap what they left (a live agent's worktree is spared).
+            if let Ok(a) = herdr::agents(r) {
+                check::leftovers(ctx, cfg, r, &a, true)?;
+            }
+        }
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())

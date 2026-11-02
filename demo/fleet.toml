@@ -70,3 +70,13 @@ name = "gates"
 kind = "gate"
 rounds = 3
 next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }
+
+[fleet.acme-ios]
+repo = "acme-example/acme-ios"
+local = "/srv/acme/acme-ios"
+integration = "staging"
+paused = true
+
+[fleet.acme-ios.role.impl]
+harness = "claude"
+model = "opus"
