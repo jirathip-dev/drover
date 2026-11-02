@@ -93,7 +93,7 @@ function frag(id, html) {
 // until the group's status changes.
 const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
-const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx')).map(n => n.textContent).join('').trim();
+const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
 const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
 function groups() {
@@ -857,6 +857,7 @@ async function claim() {
   if (agent) poll();
 }
 document.addEventListener('click', async e => {
+  if (e.target.closest('.pairx')) { pairing = false; clearTimeout(ttl); pp.hidden = true; fetch(R + 'pair/cancel', { method: 'POST' }).catch(() => null); return; }
   if (!e.target.closest('.pairb')) { if (e.target.closest('#pairp')) { pairing = false; clearTimeout(ttl); pp.hidden = true; } return; }
   const r = await fetch(R + 'pair/request', { method: 'POST' }).catch(err => ({ ok: false, text: () => 'error: ' + err.message })), s = (await r.text()).trim(), [t, h] = s.split('\n');
   pairing = r.ok;
@@ -864,7 +865,7 @@ document.addEventListener('click', async e => {
   if (!e.target.closest('#pairp')) (e.target.closest('.pairf') || $('header')).after(pp);
   pp.hidden = false;
   clearTimeout(ttl);
-  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Approve on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')));
+  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), el('button', 'pairx', 'cancel'));
   else pp.replaceChildren(el('p', '', s));
   pp.scrollIntoView({ block: 'nearest' });
   if (!r.ok) return;
