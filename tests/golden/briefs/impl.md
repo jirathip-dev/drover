@@ -28,6 +28,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
 - After three attempts in one diagnostic class without progress, stop and report.
+- Start any dev server on `$HERDSMAN_PORT`, never a fixed port.
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was
@@ -56,8 +57,6 @@ verify. You are judged on the diff against the acceptance criteria, not on effor
 ## Issue #12: Fix the meter
 
 AC: it {works} \ `ok`
-
-Start any dev server on `$HERDSMAN_PORT` (this lane's own port); never a fixed port.
 
 ## Output contract
 

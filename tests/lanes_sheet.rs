@@ -116,6 +116,16 @@ fn lanes_group_by_state_then_repo_with_counts() {
     assert!(lanes.contains("<p>impl · round 0 · claude · "), "{lanes}");
 }
 
+/// #187: a lane's card shows the `HERDSMAN_PORT` its spawn logged.
+#[test]
+fn lane_card_shows_its_port() {
+    let (c, r) = fixture("port");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "port": 41234});
+    append(&c.state, &Event::new(900_800, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let page = req(&Server::new(&c, &r, None), "GET", "/", "", "", T);
+    assert!(section(&page, "lanes").contains(" · :41234 · "), "{page}");
+}
+
 #[test]
 fn sheet_transcript_is_the_masked_pane_tail() {
     let (c, r) = fixture("tail");

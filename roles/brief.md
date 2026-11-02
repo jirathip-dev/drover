@@ -6,8 +6,6 @@
 
 {body}
 
-{fix}Start any dev server on `$HERDSMAN_PORT` (this lane's own port); never a fixed port.
-
-## Output contract
+{fix}## Output contract
 
 {contract}

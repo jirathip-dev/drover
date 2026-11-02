@@ -131,7 +131,7 @@ pub struct Fleet {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub clone_node_modules: bool,
-    /// #187: `HERDSMAN_PORT` range, `"<lo>-<hi>"`; unset = 41000-41999.
+    /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
 }
 
