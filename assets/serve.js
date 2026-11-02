@@ -11,6 +11,7 @@ function tab(t) {
   $$('main>section').forEach(s => s.hidden = s.id !== t);
   $$('nav a').forEach(a => a.classList.toggle('on', a.hash === '#' + t));
   put('tab', t);
+  $('.qhelp').hidden = t !== 'queue';
   // #60: the live page leaves the Events body out; it loads when the tab opens.
   if (t === 'events' && !$('#events').childElementCount) part('frag?id=events').then(h => h && frag('events', h));
 }
@@ -18,16 +19,6 @@ function tab(t) {
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
 // A form POST of `data` (an object or FormData) to `path`.
 const post = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
-// A `details[data-src]` row (a fleet's role forms) loads its body when opened, and again on each refresh.
-async function load(d) {
-  const h = await part(d.dataset.src);
-  if (h === null) return;
-  d.querySelectorAll(':scope>:not(summary)').forEach(n => n.remove());
-  d.insertAdjacentHTML('beforeend', h);
-  d.dataset.on = 1;
-  tidy(d);
-}
-document.addEventListener('toggle', e => { if (e.target.matches('details[data-src]') && e.target.open) load(e.target); }, true);
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); });
 // A tapped alert opens `/?issue=N#tab`: that tab, the issue's row open.
 const t0 = location.hash.slice(1) || get('tab'), DBG = new URLSearchParams(location.search), want = DBG.get('issue');
@@ -47,7 +38,7 @@ function sync(s) {
   rf.classList.toggle('spin', s === 'a' || busy);
   $('#stale').hidden = s !== 'r';
   $('#stale').textContent = 'last update ' + new Date(last).toTimeString().slice(0, 5);
-  $$('form button, form select, .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
+  $$('form button, form select:not([data-off]), .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
   if (DEMO) $$('input, textarea, .acts button').forEach(b => b.disabled = true);
 }
 function pulse() { dot.classList.remove('p'); void dot.offsetWidth; dot.classList.add('p'); }
@@ -164,7 +155,6 @@ async function refresh() {
   try {
     const j = await (await fetch(R + 'frags', { cache: 'no-store' })).json();
     for (const id in j) frag(id, j[id]);
-    $$('details[data-src][open]').forEach(load);
     herdPull();
     busy = false;
     sync(live() ? 'g' : 'a');
@@ -250,7 +240,7 @@ const word = t => { const w = t.trim().split(/[\s·]/)[0].replace(/\(\d+\)/, '(n
 const hint = t => HINT[word(t)] ? `${word(t)} = ${HINT[word(t)]}` : '';
 const tip = e => { const h = hint(e.textContent); if (h) e.title = h; };
 // #115: a fleet's rows as a `git log --graph`: a row blocked by a row in view hangs off it (│ ├─ └─), children in queue
-// order, depth-first; past depth 3 it clamps (┆─, `on #b`), so the gutter is at most 6 columns. A blocker out of view is
+// order, depth-first; past depth 2 it clamps (#162: drawn at depth 2, `after #b`), so the gutter is at most 4 columns. A blocker out of view is
 // a `! #b` tag, a --serial issue the lock and its fleet's label. The card sits in a box; ▲/▼ move among siblings.
 function graph(root) {
   for (const p of new Set([...root.querySelectorAll('details.q')].map(d => d.parentNode))) {
@@ -269,12 +259,12 @@ function tree(p, rows, end) {
   const par = d => { let x = up(d); const seen = new Set([d]); while (x && !seen.has(x)) { seen.add(x); x = up(x); } return x ? null : up(d); };
   rows.forEach(d => (par(d) ? kids.get(par(d)) : roots).push(d));
   const walk = (list, pre, depth) => list.forEach((d, i) => {
-    const last = i === list.length - 1, deep = depth > 3, st = d.querySelector('summary>span:nth-of-type(2)'), s = st.textContent;
+    const last = i === list.length - 1, deep = depth > 2, st = d.querySelector('summary>span:nth-of-type(2)'), s = st.textContent;
     const dot = st.className === 'r' || /^(⏸|needs)/.test(s) ? '!' : s === 'ready' ? '✓' : /^(impl|review|fix)/.test(s) ? '●' : '○';
-    const elbow = !depth ? '' : deep ? '<i class=c>┆─</i>' : last ? '<i class=e>└─</i>' : '<i class=t>├─</i>';
-    const k = kids.get(d).length && depth < 3 ? ' k' : '';
-    d.classList.add('d' + Math.min(depth, 3));
-    d.querySelector('summary').insertAdjacentHTML('afterbegin', `<i class=gt>${pre.slice(0, 2).join('')}${elbow}<b class="${st.className}${k}">${dot}</b></i>`);
+    const elbow = !depth ? '' : last || deep ? '<i class=e>└─</i>' : '<i class=t>├─</i>';
+    const k = kids.get(d).length && depth < 2 ? ' k' : '';
+    d.classList.add('d' + Math.min(depth, 2));
+    d.querySelector('summary').insertAdjacentHTML('afterbegin', `<i class=gt>${pre.slice(0, 1).join('')}${elbow}<b class="${st.className}${k}">${dot}</b></i>`);
     const w = el('span', '');
     st.replaceWith(w);
     w.append(st);
@@ -282,7 +272,7 @@ function tree(p, rows, end) {
     const tag = (cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
     if (d.dataset.s) tag('tag m', '🔒' + d.dataset.s, 'serial: one lane at a time');
     if (d.dataset.b && !par(d)) tag('tag r', '! #' + d.dataset.b);
-    if (deep) tag('m', 'on #' + d.dataset.b);
+    if (deep) tag('m', 'after #' + d.dataset.b);
     const cd = el('div', 'cd');
     cd.append(...[...d.children].filter(c => c.tagName !== 'SUMMARY'));
     d.append(cd);
@@ -589,7 +579,7 @@ function open(e) {
   hist = []; tail = [];
   $('.live').hidden = true;
   say(rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other ? null : true);
-  sh.classList.remove('lg');
+  sh.className = 'sh';
   show(kb() ? 'full' : 'mid');
   poll();
   if (!other && !B.dataset.ro && !DEMO) cleanable();
@@ -599,13 +589,37 @@ function open(e) {
 // the dots, and each fleet's serial mark with the paths it guards (none without serial_paths).
 function legend() {
   agent = null;
-  sh.classList.add('lg');
+  sh.className = 'sh lg';
   $('.hd b').textContent = 'what the marks mean';
   const serial = new Set([...$$('#queue [data-sp]')].map(f => `🔒${f.dataset.s} one at a time: touches ${f.dataset.sp}`));
   const dots = ['● a lane is on it', '○ waiting', '✓ ready', '! needs you'];
   $('.top').replaceChildren(...Object.entries(HINT).map(([w, h]) => el('p', '', `${w} = ${h}`)), ...[...dots, ...serial].map(t => el('p', '', t)));
   show('mid');
 }
+// #162: [config] shows the fleet's settings in the same sheet, the lane parts hidden and its bar in the fleet's colour.
+// The page loads it (`frag?id=config`); an export carries it inline (`template[data-cfg]`).
+async function config(b) {
+  const f = b.dataset.f, t = [...$$('template[data-cfg]')].find(t => t.dataset.cfg === f);
+  const h = t ? t.innerHTML : await part('frag?id=config&fleet=' + encodeURIComponent(f));
+  if (h === null) return toast('error: cannot read the config');
+  agent = null;
+  sh.className = 'sh lg cs ' + [...b.closest('.fc').classList].find(c => c.startsWith('k-'));
+  $('.hd b').textContent = f + ' · config';
+  const top = $('.top');
+  top.innerHTML = h;
+  top.scrollTop = 0;
+  tidy(top);
+  top.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
+  show('full');
+}
+// A role's effort list follows its harness (each harness option's data-e).
+document.addEventListener('change', e => {
+  const s = e.target, ef = s.name === 'harness' && s.form.elements.effort;
+  if (!ef) return;
+  const cur = ef.value;
+  ef.replaceChildren(...s.selectedOptions[0].dataset.e.split(' ').map(v => Object.assign(el('option', '', v), { selected: v === cur })));
+  ef.dispatchEvent(new Event('change'));
+});
 // #166: one helper for every sheet (lane chat, legend). The page under it is never touched while it opens or closes:
 // no position change, no scroll reset (iOS repainted the whole page black); `overflow:hidden` on <html> holds it still.
 function show(d) {
@@ -736,6 +750,7 @@ setInterval(() => $$('.ask .cd').forEach(c => {
 }), 1000);
 document.addEventListener('click', async e => {
   if (e.target.closest('.qhelp')) return legend();
+  if (e.target.closest('.cfg')) return config(e.target.closest('.cfg'));
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
   if (b.classList.contains('lr')) return open(b.parentNode);

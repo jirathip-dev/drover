@@ -40,22 +40,24 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the row; the check keeps the needs cards
     },
-    // #92: the demo's `driver = "herdsman"` fleet (docs): its heading and `driver: herdsman · last pass …` line, moved
-    // to the top (a scrolled view shoots blank).
+    // #92: the demo's `driver = "herdsman"` fleet (docs): its card with the `drive · …` line and [drive now], moved to the
+    // top (a scrolled view shoots blank).
     'queue-drive': () => {
       tab('queue');
-      const p = [...$$('#queue p.m')].find(p => p.textContent.startsWith('driver:'));
-      $('#queue').prepend(p.previousElementSibling, p);
+      $('#queue').prepend([...$$('#queue .fc')].find(c => c.querySelector('.dp li details'))); // the fleet with a pass, not `drive · no pass yet`
     },
+    // #162: the [config] sheet of the fleet that needs you (acme-api): every group, the role pickers.
+    config: () => { tab('queue'); config($('#queue .cfg')); },
     // #166: the driven fleet's result line in its 3 colours: the demo's amber pass (open, an action's code open), then
-    // green and red copies, moved to the top; each must read in its colour.
+    // green and red copies under it, its card moved to the top; each must read in its colour.
     'queue-result': () => {
       tab('queue');
-      const d = $('#queue details.dp');
+      const d = [...$$('#queue details.dp')].find(d => d.querySelector('li details'));
       if (!d) return early.push('no drive result line in the demo');
-      const copy = (tone, text) => { const c = d.cloneNode(true); c.className = 'dp ' + tone; c.querySelector('summary').textContent = text; return c; };
-      const all = [d, copy('g', '07:46 · started 1 · merged 1 · tap for details'), copy('r', '07:51 · started 0 · merged 0 · 1 failed · tap for details')];
-      $('#queue').prepend(d.previousElementSibling.previousElementSibling, d.previousElementSibling, ...all);
+      const copy = (tone, text) => { const c = d.cloneNode(true); c.className = 'dp ' + tone; c.querySelector('summary>span').textContent = text; return c; };
+      const all = [d, copy('g', 'drive · 4m ago · started 1 · merged 1'), copy('r', 'drive · 2m ago · started 0 · merged 0 · 1 failed')];
+      d.after(...all.slice(1));
+      $('#queue').prepend(d.closest('.fc'));
       d.open = true;
       d.querySelector('li details').open = true;
       if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the lines; the check keeps the needs cards
@@ -257,7 +259,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -314,8 +316,18 @@
         if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis') bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
       }
       // #68: no box holds more than it shows unless it ellipsises (or scrolls by design); nothing past the screen's right edge.
-      // Tap rings (`]`, the queued horse's ::before) are hit area, not content: off while measuring. The sky's clouds drift past its clipped sides.
-      const ring = Object.assign(document.createElement('style'), { textContent: 'button::after,.pk::after,.hqh::before{display:none!important}' });
+      // Tap rings (`]`, the queued horse's ::before, a picker's invisible select grown 8 px each side) are hit area, not content:
+      // off while measuring. The sky's clouds drift past its clipped sides.
+      // #162 A: a summary's widest text box is at least half its row (a 7ch grid column once squeezed a 1-line summary into
+      // 14); a text run straight in a grid/flex summary counts only when it wraps.
+      for (const s of [...r.querySelectorAll('summary')].filter(seen)) {
+        const box = e => { while (['inline', 'contents'].includes(getComputedStyle(e).display)) e = e.parentElement; return e.getBoundingClientRect().width; };
+        const run = t => { const g = document.createRange(); g.selectNodeContents(t); return new Set([...g.getClientRects()].map(x => Math.round(x.top))).size > 1 ? g.getBoundingClientRect().width : Infinity; };
+        const texts = [...s.querySelectorAll('*'), s].flatMap(e => [...e.childNodes].filter(n => n.nodeType === 3 && n.data.trim()));
+        const w = Math.max(0, ...texts.map(t => t.parentElement === s ? run(t) : box(t.parentElement)));
+        if (texts.length && w < s.getBoundingClientRect().width / 2) bad.push(`summary "${s.textContent.trim().slice(0, 24)}": widest text box ${w | 0}px of its ${s.getBoundingClientRect().width | 0}px row`);
+      }
+      const ring = Object.assign(document.createElement('style'), { textContent: 'button::after,.pk::after,.hqh::before{display:none!important}.pk select{inset:0!important;width:100%!important}' });
       B.append(ring);
       for (const e of [r, ...r.querySelectorAll('*')]) {
         if (e.closest('svg, .hr') || !seen(e)) continue;
