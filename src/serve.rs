@@ -2266,9 +2266,12 @@ fn config_sheet(
             },
         ),
     ];
-    let rounds = |n: u32, on: &str| match !fc.flow().builtin {
-        true => format!("<span class=m>n/a (pipeline)</span>{all}"),
-        false => format!("{n} <span class=m>→ {on}, see Pipeline</span>{all}"),
+    let rounds = |n: u32, on: &str| {
+        if fc.flow().builtin {
+            format!("{n} <span class=m>→ {on}, see Pipeline</span>{all}")
+        } else {
+            format!("<span class=m>n/a (pipeline)</span>{all}")
+        }
     };
     let limits = [
         // #173: the built-in pipeline's defaults; a fleet with its own pipeline sets them per stage.

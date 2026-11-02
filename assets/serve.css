@@ -336,7 +336,7 @@ body:not(.unf) .ask.lt{display:none}
 /* Rails. .ex: a line across the row's middle from the box edge to its rail; .in adds the arrowhead into a box.
    .ey: the rail itself, middle of its first row to middle of its last. */
 .ex::before{content:"";position:absolute;left:0;right:1ch;top:50%;border-top:1px solid var(--mute)}
-.ex.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;scale:1.6;line-height:1;color:var(--mute)}
+.ex.in::after{content:"◂";position:absolute;left:0;top:50%;translate:-20% -52%;font-size:var(--fs);line-height:1;color:var(--mute)}
 .ey::before{content:"";position:absolute;left:50%;top:calc(var(--ln) / 2);bottom:calc(var(--ln) / 2);border-left:1px solid var(--mute)}
 .ex.l::before{left:1ch;right:0;border-top-style:dashed;border-color:var(--r)}
 .ex.l.in::after{content:"▸";left:auto;right:0;translate:0 -52%;color:var(--r)}
