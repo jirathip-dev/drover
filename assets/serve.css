@@ -223,6 +223,7 @@ details.q[open]{padding-bottom:var(--s2)}
 .grp{border-bottom:1px solid var(--line)}
 .grp>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:0 var(--s1);white-space:nowrap}
 .grp>summary .dt{flex:none;width:var(--s2);height:var(--s2);border-radius:50%;background:currentColor;color:var(--g)}
+.grp[data-t=m]>summary .dt{color:var(--mute)}
 .grp>summary .gn{flex:none;font-weight:700;letter-spacing:.08em}
 .grp>summary .gs{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--mute);font-size:var(--fs-meta)}
 .grp[open]>summary .gs{visibility:hidden}

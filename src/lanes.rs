@@ -26,6 +26,9 @@ pub struct Lane {
     pub pane: Option<String>,
     /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
     pub parked: Option<String>,
+    /// #157: the `[hosts]` host it runs on, when fleet.toml has hosts, and its herdr machine (none: this one).
+    pub host: Option<String>,
+    pub machine: Option<String>,
 }
 
 /// Join `herdr agent list` rows with the log. `ws` maps workspace id -> label.
@@ -55,6 +58,8 @@ pub fn join(
         let mut l = Lane {
             state: s("agent_status").unwrap_or("unknown").into(),
             pane: pane.map(String::from),
+            host: s("host").map(String::from),
+            machine: s("machine").map(String::from),
             ..Lane::default()
         };
         if let Some(e) = sp {
@@ -86,6 +91,7 @@ pub fn join(
             continue;
         };
         if let Some(e) = spawns.iter().find(|e| e.str("agent") == Some(agent)) {
+            let r = &crate::hosts::On::of(r, Some(e));
             let wt = e
                 .str("worktree")
                 .filter(|wt| crate::spawn::dirty(r, Path::new(wt)).is_none());
@@ -107,6 +113,13 @@ pub fn join(
     out
 }
 
+impl Lane {
+    /// #157: `r` on the lane's host.
+    pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
+        crate::hosts::On::new(r, self.machine.as_deref())
+    }
+}
+
 fn from_spawn(e: &Event, l: Lane) -> Lane {
     let s = |k: &str| e.str(k).map(String::from);
     Lane {
@@ -118,6 +131,8 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         effort: s("effort"),
         account: s("account"),
         since: e.ts,
+        host: s("host").or(l.host),
+        machine: s("machine").or(l.machine),
         ..l
     }
 }

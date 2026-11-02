@@ -295,10 +295,10 @@ pub fn scan(
             (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).unwrap_or_default(),
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
-        let wt = last_spawn(events, &lane)
-            .and_then(|e| e.str("worktree"))
-            .filter(|_| s.state != "merged");
-        let git = wt.and_then(|wt| ok(r, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok());
+        let sp = last_spawn(events, &lane);
+        let wt = sp.and_then(|e| e.str("worktree")).filter(|_| s.state != "merged");
+        let on = crate::hosts::On::of(r, sp);
+        let git = wt.and_then(|wt| ok(&on, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok());
         let head = git
             .as_deref()
             .and_then(|g| g.trim().split_once(' '))
@@ -312,10 +312,14 @@ pub fn scan(
                 .and_then(|m| m.modified())
                 .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(spawn.map_or(0, |e| e.ts)))
         };
+        // #157: on another host the rev spawn removed any older verdict.md, so one there is this round's.
+        let there = crate::hosts::On::of(r, spawn);
         let word = path
             .as_ref()
-            .filter(|p| fresh(p))
-            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|p| match there.machine {
+                Some(_) => there.read(std::path::Path::new(p)),
+                None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
+            })
             .map(|v| v.lines().next().unwrap_or_default().trim().to_string());
         // In review, `head` is the one the rev lane was spawned at (logged since #92; else its worktree's).
         let at = spawn

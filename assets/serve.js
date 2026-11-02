@@ -100,7 +100,7 @@ function groups() {
   const host = $('#host'), rank = t => ({ r: 0, a: 1 })[t] ?? 2;
   [...host.querySelectorAll(':scope>.grp')].map(g => {
     const rows = [...g.querySelectorAll('[data-t]')], w = Math.min(2, ...rows.map(r => rank(r.dataset.t))), s = sget(gname(g));
-    g.dataset.t = 'rag'[w];
+    g.dataset.t = rows.length && rows.every(r => r.dataset.t === 'm') ? 'm' : 'rag'[w]; // #157: an offline or off host is grey
     g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
     g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
     return [w, g];

@@ -25,6 +25,7 @@ pub mod harness;
 pub mod herdr;
 pub mod hook;
 pub mod host;
+pub mod hosts;
 pub mod lanes;
 pub mod overlap;
 pub mod pipeline;
@@ -336,7 +337,8 @@ pub fn answer(
         );
     }
     let agent = ask.str("agent").unwrap_or_default();
-    let pane = events::last_spawn(&events, agent).and_then(|e| e.str("pane"));
+    let sp = events::last_spawn(&events, agent);
+    let (pane, r) = (sp.and_then(|e| e.str("pane")), &crate::hosts::On::of(r, sp)); // #157: on the lane's host
     emit(
         &ctx.state,
         cfg,

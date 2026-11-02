@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # #141 gate 2: the Host tab's two fixtures, exported beside the demo as <site>/busy and <site>/healthy for
 # scripts/ui-audit.sh. Each is a copy of demo/ with a webpush device and 42 GB free; busy: load/cpu 4.24 over 2.5,
-# herdr half updated, docs' drive refused SERIAL_BUSY; healthy: load/cpu 1.84, docs' drive started #10.
+# herdr half updated, docs' drive refused SERIAL_BUSY; healthy: load/cpu 1.84, docs' drive started #10; hosts (#157): healthy
+# with two `[hosts]`, mini (every lane on it) and bazzite (offline, last seen 33m).
 # Usage: scripts/host-fixtures.sh [site-dir] [herdsman-binary]
 set -euo pipefail
 site=${1:-site} bin=${2:-./target/release/herdsman}
-for fx in busy healthy; do
+for fx in busy healthy hosts; do
   d=$(mktemp -d)
   cp -R demo/. "$d"
   python3 - "$d" "$fx" <<'EOF'
@@ -30,6 +31,13 @@ with open(f"{d}/events.jsonl", "a") as f:
 toml = open(f"{d}/fleet.toml").read().replace("[fleet.docs]\n", '[fleet.docs]\nserial_label = "database"\n')
 # #183: a paused fleet with an 11-char name, the longest label the Host tab's label column fits.
 toml += '\n[fleet.acme-mobile]\nrepo = "acme-example/acme-mobile"\nlocal = "/srv/acme/acme-mobile"\nintegration = "staging"\npaused = true\n'
+if fx == "hosts":
+    toml += '\n[hosts.mini]\ntags = ["fast"]\n\n[hosts.bazzite]\nmachine = "bazzite"\n'
+    seen = {"mini": {"tags": ["os:macos", "arch:arm64", "xcode"], "home": "/Users/demo", "probed": ts, "seen": ts, "up": True, "load": 1.84, "mem": 9.5, "disk": 42.0},
+            "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/demo", "probed": ts - 1980, "seen": ts - 1980, "up": False}}
+    json.dump(seen, open(f"{d}/hosts.json", "w"))
+    evs = [json.loads(l) for l in open(f"{d}/events.jsonl") if l.strip()]
+    open(f"{d}/events.jsonl", "w").write("".join(json.dumps({**e, "host": "mini"} if e["type"] == "spawn" else e) + "\n" for e in evs))
 open(f"{d}/fleet.toml", "w").write(toml + '\n[[notify]]\ntype = "webpush"\nsub = "mailto:demo@example.com"\n')
 import os
 os.makedirs(f"{d}/webpush", exist_ok=True)

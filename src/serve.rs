@@ -401,7 +401,9 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 }
 
 /// Form ops only a paired device may POST.
-const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park", "reap"];
+const PAIRED_OPS: &[&str] = &[
+    "unpair", "answer", "drive", "override", "extend", "park", "reap", "host",
+];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
@@ -909,7 +911,8 @@ impl<'a> Server<'a> {
             f.get("choice").map_or("", String::as_str),
         );
         let (l, fleet, pane) = self.lane(ctx, agent)?;
-        let screen = || herdr::read(self.r, &pane);
+        let on = l.on(self.r);
+        let screen = || herdr::read(&on, &pane);
         let Some((q, opts)) = lanes::pending(&screen()?).filter(|p| l.harness == "claude" && !p.1.is_empty()) else {
             return refused(
                 "BAD_VALUE",
@@ -929,7 +932,7 @@ impl<'a> Server<'a> {
         if f.get("h") != Some(&seen(&q, &opts).to_string()) {
             return refused("STALE", "menu changed — refreshed");
         }
-        herdr::keys(self.r, &pane, choice)?;
+        herdr::keys(&on, &pane, choice)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         self.r.sleep(1);
@@ -956,7 +959,7 @@ impl<'a> Server<'a> {
         if text.chars().any(|c| (c < ' ' && c != '\n') || c == '\x7f') {
             return refused("BAD_VALUE", "a message has no control characters (newlines are fine)");
         }
-        herdr::reply(self.r, l.harness == "dsh", agent, pane, text)?;
+        herdr::reply(&l.on(self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
         append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
         Ok(format!("sent to {agent}"))
@@ -998,7 +1001,7 @@ impl<'a> Server<'a> {
             .lanes(ctx.now, &cfg, &events, &fold(&events))?
             .into_iter()
             .find(|l| Some(&l.name) == q.get("agent"))?;
-        let screen = herdr::recent(&self.cached(ctx.now, 5), l.pane.as_deref()?, "200").ok()?;
+        let screen = herdr::recent(&l.on(&self.cached(ctx.now, 5)), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
         let file = lanes::log(&ctx.state, &l.name).filter(|_| self.export.is_none());
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
@@ -1083,6 +1086,11 @@ impl<'a> Server<'a> {
                 let cfg = Config::load(&ctx.config)?;
                 let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
                 format!("reaped {n} leftover process(es)")
+            }
+            "host" => {
+                let on = g("to") == "on";
+                crate::hosts::toggle(ctx, &mut out, g("host"), on, "web")?;
+                format!("{} {}", g("host"), if on { "on" } else { "off" })
             }
             "unpair" => {
                 let mut all = devices::load(ctx);
@@ -1251,7 +1259,7 @@ impl<'a> Server<'a> {
         let screen = l
             .pane
             .as_ref()
-            .and_then(|p| herdr::read(&self.cached(ctx.now, 2), p).ok())
+            .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
         let c = lanes::prompt(&screen).unwrap_or_default();
@@ -1542,7 +1550,8 @@ impl<'a> Server<'a> {
     /// herdr's agents joined with the log (None when herdr cannot be read).
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.herdr_json(now, "agent")?;
-        let agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
+        let mut agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
+        agents.extend(crate::hosts::remote_agents(cfg, &self.cached(now, 30)));
         let wsl = self.herdr_json(now, "workspace").unwrap_or_default();
         let ws: BTreeMap<String, String> = wsl["result"]["workspaces"]
             .as_array()
@@ -1583,7 +1592,7 @@ impl<'a> Server<'a> {
             all.iter().filter(|l| l.fleet.as_ref() == f).map(|l| {
                 let (title, tone, shown, a) = view(ctx, l, &waits);
                 json!({"name": l.name, "issue": l.issue, "title": title, "role": l.role, "harness": l.harness,
-                       "model": l.model, "effort": l.effort, "account": l.account, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name)})
+                       "model": l.model, "effort": l.effort, "account": l.account, "host": l.host, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name)})
             }).collect()
         };
         let queued = |f: &String| -> Vec<_> {
@@ -1662,7 +1671,7 @@ impl<'a> Server<'a> {
         let screen = l
             .pane
             .as_ref()
-            .and_then(|p| herdr::read(&self.cached(ctx.now, 30), p).ok());
+            .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 30)), p).ok());
         let (title, tone, shown, a) = view(ctx, l, waits);
         let issue = l.issue.map(|n| format!("#{n}")).unwrap_or_default();
         let round = s.map(|s| {
@@ -1676,6 +1685,7 @@ impl<'a> Server<'a> {
         let o = |v: &Option<String>| v.clone().unwrap_or_default();
         let facts = [
             l.role.clone(),
+            o(&l.host),
             o(&round),
             l.harness.clone(),
             o(&l.model),
@@ -1920,6 +1930,34 @@ impl<'a> Server<'a> {
                 a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
+        // #157: one group per `[hosts]` host (gauges from the last `check`); an offline or off host is grey.
+        let mut hg = vec![];
+        let seen = crate::hosts::cached(ctx);
+        for (c, (name, h)) in cfg.into_iter().flat_map(|c| c.hosts.iter().map(move |h| (c, h))) {
+            let s = seen.get(name).cloned().unwrap_or_default();
+            let lanes = crate::hosts::lanes_on(c, events, name);
+            let (t, words) = crate::hosts::shown(h, &s, lanes.len(), ctx.now);
+            let to = if h.enabled { "off" } else { "on" };
+            let rw = usize::from(self.addr.is_some() && self.export.is_none());
+            let btn = [String::new(), format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button>{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(name))][rw].clone();
+            let mut g = kv("state", t, &format!("<b class={t}>{}</b>{btn}", esc(&words)));
+            let grey = |x: &'static str| if h.enabled && s.up { x } else { "m" };
+            let gauges = [
+                ("load/cpu", s.load.map(|x| (x / lim.load_per_cpu, format!("{x:.2}")))),
+                ("memory", s.mem.map(|x| (lim.min_free_mem_gb / x, format!("{x:.1} GB")))),
+                ("disk", s.disk.map(|x| (lim.min_free_gb / x, format!("{x:.0} GB free")))),
+            ];
+            for (k, v) in gauges.into_iter().filter(|_| s.up) {
+                let Some((x, val)) = v else { continue };
+                let (t, bar, _) = gauge(x, "▏");
+                g += &kv(k, grey(t), &format!("{bar} <b class={t}>{val}</b>"));
+            }
+            let tags = crate::hosts::tags(h, Some(&s)).join(" ");
+            g += &kv("tags", "m", &format!("<span class=mt>{}</span>", esc(&tags)));
+            let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
+            g += &kv("lanes", grey("g"), &esc(&ls));
+            hg.push((name.as_str(), g));
+        }
         // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
         let ks = [&m, &s, &f, &a].map(|g| {
             g.split("<span class=k>")
@@ -1932,7 +1970,7 @@ impl<'a> Server<'a> {
         let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
         let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
         let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
-        gs.map(grp).concat()
+        gs.map(grp).concat() + &hg.into_iter().map(grp).collect::<String>()
     }
 }
 
