@@ -127,9 +127,12 @@ pub struct Fleet {
     pub paused: bool,
     /// #155: ignored (`herdsman drive` runs every fleet); `herdsman doctor` notes it until the clean-up removes it.
     pub driver: Option<String>,
-    /// #103: exported into every lane (`~/` expands); `clone_node_modules` APFS-clones `local`'s on a lockfile match.
+    /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// #185: build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
+    #[serde(default)]
+    pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
     /// #173: `[fleet.<n>.pipeline]`; `Config::parse` fills in the built-in one when absent.

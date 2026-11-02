@@ -199,8 +199,12 @@ pub fn worktree_create_argv(local: &str, branch: &str, base: &str, path: &str, l
     ])
 }
 
-pub fn worktree_open_argv(local: &str, path: &str) -> Vec<String> {
-    argv(&["worktree", "open", "--cwd", local, "--path", path])
+pub fn worktree_open_argv(local: &str, path: &str, label: &str) -> Vec<String> {
+    argv(&["worktree", "open", "--cwd", local, "--path", path, "--label", label])
+}
+
+pub fn workspace_rename(r: &dyn Runner, ws: &str, label: &str) -> Result<Out> {
+    exec(r, &argv(&["workspace", "rename", ws, label]))
 }
 
 /// Remove the lane's worktree through herdr (by its workspace); false when herdr would not.
