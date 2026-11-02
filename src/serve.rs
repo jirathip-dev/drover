@@ -374,7 +374,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 }
 
 /// Form ops only a paired device may POST.
-const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park"];
+const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park", "reap"];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
@@ -1045,6 +1045,11 @@ impl<'a> Server<'a> {
                 )?;
                 format!("#{n}: {op}")
             }
+            "reap" => {
+                let cfg = Config::load(&ctx.config)?;
+                let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
+                format!("reaped {n} leftover process(es)")
+            }
             "unpair" => {
                 let mut all = devices::load(ctx);
                 all.retain(|d| d.hash != g("hash"));
@@ -1712,6 +1717,24 @@ impl<'a> Server<'a> {
             let val =
                 format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
             m += &hrow("disk", t, &(bar + &val), "", "");
+        }
+        // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
+        let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
+            crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
+        });
+        if !left.is_empty() {
+            let pids = left.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",");
+            let kb: f64 = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids]).map_or(0.0, |s| {
+                s.split_whitespace().filter_map(|k| k.parse::<f64>().ok()).sum()
+            });
+            let n = left.len();
+            let btn = format!("<form method=post>{}<button data-confirm=\"TERM, then KILL, {n} leftover process(es)?\">reap</button></form>", hidden("reap", "", &mtime(ctx)));
+            let btn = if self.addr.is_some() { btn } else { String::new() };
+            let val = format!(
+                "<b class=a>{n} running</b> <span class=mt>{:.0} MB · in closed lanes' worktrees</span>{btn}",
+                kb / 1024.0
+            );
+            m += &kv("leftovers", "a", &val);
         }
         m += &match (cfg, host::admit(&hs, lim)) {
             (None, _) => String::new(),
