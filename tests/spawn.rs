@@ -350,6 +350,16 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     // #24: the lane's shell exports HERDSMAN_LANE before the harness starts, arming `herdsman hook`.
     assert!(r.index("herdr pane run w9:p1 export").unwrap() < r.index("herdr agent start").unwrap());
+    // #194: a reopened worktree keeps the lane's name, not herdr's branch label.
+    let open = r
+        .calls
+        .borrow()
+        .iter()
+        .find(|c| c.starts_with("herdr worktree open"))
+        .cloned()
+        .unwrap();
+    assert!(open.ends_with("--label sendmeter-impl-12"), "{open}");
+    assert!(r.called("herdr workspace rename w9 sendmeter-impl-12"));
     // #19: the title comes from the spec fetched at spawn, not a stale or missing cache.
     let calls = r.calls.borrow();
     let start = calls.iter().find(|c| c.starts_with("herdr agent start")).unwrap();

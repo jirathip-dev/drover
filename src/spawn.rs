@@ -558,7 +558,7 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let open = herdr::worktree_open_argv(&local, &wt);
+        let open = herdr::worktree_open_argv(&local, &wt, &p.agent);
         let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
@@ -595,6 +595,7 @@ pub fn spawn(
     let ws = created["result"]["workspace"]["workspace_id"]
         .as_str()
         .context("herdr: no workspace_id")?;
+    herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     if let Some(d) = p.brief.parent() {
         std::fs::create_dir_all(d)?;
     }
