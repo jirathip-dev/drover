@@ -44,7 +44,7 @@
     // top (a scrolled view shoots blank).
     'queue-drive': () => {
       tab('queue');
-      $('#queue').prepend([...$$('#queue .fc')].find(c => c.querySelector('.dp>summary')?.textContent.includes('drive ·')));
+      $('#queue').prepend([...$$('#queue .fc')].find(c => c.querySelector('.dp li details'))); // the fleet with a pass, not `drive · no pass yet`
     },
     // #162: the [config] sheet of the fleet that needs you (acme-api): every group, the role pickers.
     config: () => { tab('queue'); config($('#queue .cfg')); },
@@ -52,7 +52,7 @@
     // green and red copies under it, its card moved to the top; each must read in its colour.
     'queue-result': () => {
       tab('queue');
-      const d = [...$$('#queue details.dp')].find(d => d.querySelector('summary').textContent.includes('drive ·'));
+      const d = [...$$('#queue details.dp')].find(d => d.querySelector('li details'));
       if (!d) return early.push('no drive result line in the demo');
       const copy = (tone, text) => { const c = d.cloneNode(true); c.className = 'dp ' + tone; c.querySelector('summary>span').textContent = text; return c; };
       const all = [d, copy('g', 'drive · 4m ago · started 1 · merged 1'), copy('r', 'drive · 2m ago · started 0 · merged 0 · 1 failed')];
