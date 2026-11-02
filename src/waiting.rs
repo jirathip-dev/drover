@@ -126,8 +126,17 @@ pub fn waiting_on(
         Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
         // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
         Some("STALE_VERDICT") if s.state == "blocked" => "stale",
+        // #214: blocked with an open PR is no resting state: a conflict is updated, anything else reviewed again.
+        _ if s.state == "blocked" && pr["state"] == "OPEN" => {
+            if how.is_empty() {
+                "stale"
+            } else {
+                "ready"
+            }
+        }
         _ => s.state.split('(').next().unwrap_or_default(),
     };
+    let at_head = |h: &str| h.eq_ignore_ascii_case(base) || h.eq_ignore_ascii_case(pushed);
     match st {
         // #173: a PASS that goes on to another check: that check reviews the same head.
         "ready" if next_check.is_some() => {
@@ -167,7 +176,7 @@ pub fn waiting_on(
         // The exact command, or none (no nudge) while the verdict word or the head sha is unknown.
         "review" => match rev {
             // #92: a verdict is for the head the rev lane was spawned at; a moved PR head gets a fresh reviewer.
-            Some(_) if head.is_some_and(|h| !pushed.is_empty() && h.0 != base) => {
+            Some(_) if head.is_some_and(|h| !pushed.is_empty() && !at_head(h.0)) => {
                 let what = format!(
                     "review was for {:.7}, head moved to {pushed:.7} (not a clean merge): review again",
                     head.unwrap_or_default().0
@@ -176,7 +185,7 @@ pub fn waiting_on(
                 w("drive", &what, s.last_ts, cmd("spawn", &format!(" {c} --supersede")))
             }
             Some((path, v)) => {
-                let at = head.is_some_and(|h| h.0 == base);
+                let at = head.is_some_and(|h| at_head(h.0));
                 let next = (matches!(v, "PASS" | "FAIL") && at).then(|| {
                     format!(
                         "herdsman verdict {f} {n} {v} --sha {} --file {path}",
@@ -350,6 +359,13 @@ pub fn scan(
         });
         let ev = ev.as_deref().unwrap_or(events);
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        // #214: a reviewer whose lane exited (no herdr agent) without a verdict gets a new review round.
+        if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a["name"] == lane.as_str()) {
+            let c = s.check.as_deref().unwrap_or("rev");
+            w.who = "drive";
+            w.what = "reviewer exited without a verdict: reviewing again".into();
+            w.next_cmd = Some(format!("herdsman spawn {} {} {c} --supersede", s.fleet, s.issue));
+        }
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.
         if let Some(l) = f
             .merge_label

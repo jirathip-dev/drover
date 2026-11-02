@@ -540,6 +540,11 @@ pub fn spawn(
         Some(pl) => pl.refusal.clone(),
         None => crate::hosts::gate(ctx, cfg, &on).1,
     };
+    // #164: the last drive pass's walk of this host's worktrees (drive frees the idlest lanes' build folders first).
+    let budget = cfg.limits.worktree_budget_gb;
+    if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| on.machine.is_none() && *g > budget) {
+        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
+    }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => event(
             "override",

@@ -1,6 +1,6 @@
 //! The clap CLI, `herdsman help --agent` and dispatch to the modules.
 use crate::config::{home, Config};
-use crate::events::{fold, read, status_line};
+use crate::events::{emit, fold, read, status_line, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
@@ -235,7 +235,7 @@ enum Cmd {
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
-    /// Remove worktree + pane of merged or closed-issue lanes (never live, dirty or unpushed ones); dry run unless --yes
+    /// Remove worktree + pane of merged or closed-issue lanes (never live ones; unsaved work goes to `wip/` first, kept on a secret) and list orphan folders; dry run unless --yes
     Clean {
         fleet: Option<String>,
         /// Only this agent's worktree; refuses UNSAFE_CLEAN with the reason
@@ -244,6 +244,9 @@ enum Cmd {
         /// Actually remove
         #[arg(long)]
         yes: bool,
+        /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
+        #[arg(long)]
+        orphans: bool,
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
@@ -390,8 +393,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`).
-pub const HELP_AGENT_MAX: usize = 217;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`).
+pub const HELP_AGENT_MAX: usize = 218;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -479,7 +482,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hook {
             role,
             git_pre_push: true,
-        } => return pre_push(ctx, out, stdin, role.as_deref() == Some("rev")),
+        } => return pre_push(ctx, r, out, stdin, role.as_deref() == Some("rev")),
         Cmd::Hook {
             role,
             git_pre_push: false,
@@ -748,8 +751,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
-                Cmd::Clean { fleet, lane, yes } => {
+                Cmd::Clean {
+                    fleet,
+                    lane,
+                    yes,
+                    orphans,
+                } => {
                     check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
+                    if lane.is_none() {
+                        check::orphans(ctx, &cfg, out, orphans && yes)?;
+                    }
                 }
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
@@ -905,8 +916,30 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
+    } else if let Some(dir) = hook::push_dir(&input) {
+        coauthor_warn(ctx, r, &dir, "HEAD");
     }
     Ok(())
+}
+
+/// #198: warn (never block) when an unpushed commit carries an AI `Co-Authored-By:`; logged `coauthor-trailer`.
+fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
+    let msgs = runner::ok(r, "git", &["-C", dir, "log", rev, "--not", "--remotes", "--format=%B"]);
+    let Some(trailer) = msgs.as_deref().ok().and_then(hook::ai_coauthor) else {
+        return;
+    };
+    eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let mut it = lane.split(':');
+    let (fleet, issue) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
+    let d = json!({"lane": lane, "line": trailer});
+    if let Ok(cfg) = Config::load(&ctx.config) {
+        let _ = emit(
+            &ctx.state,
+            &cfg,
+            Event::new(ctx.now, fleet, issue, "coauthor-trailer", d),
+        );
+    }
 }
 
 /// main, master, staging and every fleet's integration branch.
@@ -919,7 +952,7 @@ fn protected_branches(ctx: &Ctx) -> Vec<String> {
 }
 
 /// git `pre-push` hook for dsh lanes: exit 1 refuses a protected-branch push, or any reviewer push.
-fn pre_push(ctx: &Ctx, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
+fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     let branches = protected_branches(ctx);
@@ -939,6 +972,9 @@ fn pre_push(ctx: &Ctx, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool
             )?;
             return Ok(1);
         }
+    }
+    for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+        coauthor_warn(ctx, r, ".", sha);
     }
     Ok(0)
 }

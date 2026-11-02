@@ -358,3 +358,19 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "herdsman spawn x 1 impl"), None);
     assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }
+
+/// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
+#[test]
+fn ai_coauthor_trailer_is_spotted() {
+    use herdsman::hook::{ai_coauthor, push_dir};
+    let log = "fix: x\n\nCo-Authored-By: Jane <j@x.io>\n    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n";
+    assert_eq!(
+        ai_coauthor(log),
+        Some("Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
+    );
+    assert_eq!(ai_coauthor("fix: x\n\nCo-Authored-By: Jane <j@x.io>\n"), None);
+    let push = json!({"tool_name": "Bash", "cwd": "/w", "tool_input": {"command": "cargo fmt && git -C /r push -u origin issue-1"}});
+    assert_eq!(push_dir(&push).as_deref(), Some("/r"));
+    let log_only = json!({"tool_name": "Bash", "cwd": "/w", "tool_input": {"command": "git log"}});
+    assert_eq!(push_dir(&log_only), None);
+}

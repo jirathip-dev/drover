@@ -57,7 +57,7 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
   "green CI" to those check names, latest run of each.
 - **Round limit.** At most 3 review rounds (`[limits].review_rounds`), then `needs-human`.
 - **Host-load admission.** `spawn` refuses `HOST_BUSY` under memory pressure, sustained swap-out
-  or high load (`--force` overrides, logged), `DISK_LOW`/`MEM_LOW` under `[limits] min_free_gb`/`min_free_mem_gb`.
+  or high load (`--force` overrides, logged), `DISK_LOW`/`MEM_LOW` under `[limits] min_free_gb`/`min_free_mem_gb`, `DISK_BUDGET` (docs/lanes.md).
 - **Protected branches.** Merges go only to the integration branch, never main.
   `herdsman protection` checks that GitHub protection is on.
 - **The lane hook.** Every lane runs a pre-tool hook that blocks `gh pr merge`, issue and PR
