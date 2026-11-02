@@ -1705,8 +1705,11 @@ impl<'a> Server<'a> {
                 _ => String::new(),
             };
             let o = if t == "r" { "▶ " } else { "" };
-            let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
-            m += &hrow(k, t, &(bar + &val), "", "");
+            m += &kv(
+                k,
+                t,
+                &format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}"),
+            );
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
@@ -1715,9 +1718,8 @@ impl<'a> Server<'a> {
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
             let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
             let o = if t == "r" { "▶ " } else { "" };
-            let val =
-                format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
-            m += &hrow("disk", t, &(bar + &val), "", "");
+            let fl = format!("<span class=\"mt fx\">· floor {min} GB · {wt}</span>");
+            m += &kv("disk", t, &format!("{bar} <b class={t}>{o}{gb:.0} GB free</b> {fl}"));
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
@@ -1749,7 +1751,7 @@ impl<'a> Server<'a> {
         // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {
-            let fix = [String::new(), format!("<span class=\"mt fx\">→ {}</span>", chips(fix))];
+            let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
             s += &kv(
                 k,
                 t,
@@ -1866,8 +1868,17 @@ impl<'a> Server<'a> {
                 a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
-        let head = "<summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
-        let grp = |(n, rows): (&str, String)| format!("<details class=grp>{}{rows}</details>", head.replace("{}", n));
+        // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
+        let ks = [&m, &s, &f, &a].map(|g| {
+            g.split("<span class=k>")
+                .skip(1)
+                .map(|k| k.split('<').next().unwrap_or_default().chars().count())
+                .max()
+                .unwrap_or(0)
+        });
+        let head = "<details class=grp style=--kw:@ch><summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
+        let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
+        let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
         let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
         gs.map(grp).concat()
     }
