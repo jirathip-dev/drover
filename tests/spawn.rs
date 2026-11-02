@@ -94,6 +94,14 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("fleet-impl/settings.json")).unwrap()).unwrap();
     assert_eq!(s["attribution"], serde_json::json!({"commit": "", "pr": ""}));
     assert_eq!(s["includeCoAuthoredBy"], false);
+    // #223: lanes don't inherit the user's IDE/LSP plugins (tsserver ~2 GB per lane).
+    for p in ["typescript-lsp", "pyright-lsp", "swift-lsp", "vercel"] {
+        assert_eq!(
+            s["enabledPlugins"][format!("{p}@claude-plugins-official")],
+            false,
+            "{p}"
+        );
+    }
     let role = std::fs::read_to_string(dir.join("fleet-impl/role.md")).unwrap();
     assert!(role.contains("No AI co-author or 'generated with' trailers in commits or PR bodies"));
     assert!(role.contains("## For humans"));

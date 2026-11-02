@@ -201,6 +201,8 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
+    pub idle_reap_minutes: u64,
 }
 
 impl Default for Limits {
@@ -216,6 +218,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            idle_reap_minutes: 10,
         }
     }
 }

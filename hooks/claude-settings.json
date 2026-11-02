@@ -2,6 +2,12 @@
   "autoMemoryEnabled": false,
   "attribution": { "commit": "", "pr": "" },
   "includeCoAuthoredBy": false,
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": false,
+    "swift-lsp@claude-plugins-official": false,
+    "vercel@claude-plugins-official": false
+  },
   "hooks": {
     "PreToolUse": [
       {
