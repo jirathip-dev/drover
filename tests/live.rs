@@ -77,7 +77,7 @@ fn live_pushes_one_frag_per_changed_section() {
     assert_eq!(got.matches("event: frag").count(), 1, "{got}");
     let v: serde_json::Value = serde_json::from_str(&frags[0][6..]).unwrap();
     assert_eq!(v["id"], "events", "{v}");
-    assert!(v["html"].as_str().unwrap().contains("Last 50 events"));
+    assert!(v["html"].as_str().unwrap().contains("aria-label=\"filter events\""));
 }
 
 #[test]
