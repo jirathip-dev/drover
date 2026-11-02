@@ -176,7 +176,7 @@ function connect() {
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
   es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
   es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
-  es.addEventListener('toast', e => toast(JSON.parse(e.data))); // #140: a background drive/override/extend finished
+  es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
     es = null;
@@ -206,16 +206,20 @@ function toast(text) {
 if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
 // (#65, #140: no navigation); the tapped button spins until the reply. The plain form POST is the no-JS fallback.
+const PEND = { extend: 'one more round · starting a lane…', park: 'park · closing its lanes…', override: 'merge anyway · merging…' };
+const pend = (card, op) => { card.outerHTML = `<div class=pend data-n=${card.dataset.n}><p class=m>⟳ ${PEND[op]}</p></div>`; };
 document.addEventListener('submit', async e => {
   const f = e.target, b = e.submitter, c = b && b.dataset.confirm;
   if (c && !confirm(c)) return e.preventDefault(); // #130: merge anyway
   if (!f.elements.op) return;
   e.preventDefault();
   if (b) b.ariaBusy = 'true';
+  const d = new FormData(f, b), k = b && b.name === 'op' && b.closest('#needs>.ask');
+  if (k && PEND[b.value]) pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
   try {
-    const r = await post('', new FormData(f, b));
-    toast(r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim());
-    refresh();
+    const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
+    toast(m);
+    if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
   } catch (err) { toast('error: ' + err.message); }
   if (b) b.ariaBusy = null;
 });
@@ -289,6 +293,13 @@ function tree(p, rows, end) {
     cd.querySelectorAll('.btns').forEach(b => b.parentNode.remove());
     old.forEach(f => f.remove());
     if (fs.length) { const line = el('p', 'btns'); line.append(...fs); cd.append(line); }
+    // #218: the card in sections: STATUS (stage, lane, notes), LINKS, LANES (n) newest first, HISTORY (+N older).
+    const ls = cd.querySelector(':scope>.qls'), lk = [...cd.children].find(c => c.matches('p') && c.querySelector('a[href*="/issues/"]'));
+    const ch = t => el('p', 'ch', t), hist = ls && ls.querySelector(':scope>.qm');
+    if (lk) { cd.insertBefore(lk, ls || cd.querySelector(':scope>.btns')); lk.before(ch('LINKS')); }
+    if (cd.firstElementChild !== lk?.previousElementSibling) cd.prepend(ch('STATUS'));
+    if (ls) ls.before(ch(`LANES (${ls.querySelectorAll(':scope>.ql').length})`));
+    if (hist) ls.after(ch('HISTORY'), hist);
     p.insertBefore(d, end);
     walk(kids.get(d), depth ? [...pre, last ? '<i>  </i>' : '<i class=p>│ </i>'] : [], depth + 1);
   });
@@ -474,7 +485,7 @@ function blocks(lines, harness, busy) {
 // The longest suffix of a that is a prefix of b (as text): two reads' overlap.
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
-const lane = q => fetch(DEMO ? 'lane/' + encodeURIComponent(agent) + '.json' : R + 'lane?agent=' + encodeURIComponent(agent) + '&lines=200' + q);
+const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200' + q);
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
 let hist = [], tail = [], nlive = 0, harness = '', spin = false;
@@ -590,6 +601,23 @@ function open(e) {
   poll();
   if (!other && !B.dataset.ro && !DEMO) cleanable();
   timer = setInterval(poll, 5000);
+}
+// #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
+// first, then a sheet of its own; a gone lane shows its stored transcript, read-only. No transcript: a toast.
+async function byName(q) {
+  const a = q.dataset.agent, row = !('gone' in q.dataset) && laneOf(a);
+  if (row) return open(row);
+  const r = await lane('', a).catch(() => null);
+  if (!r || (!r.ok && r.status !== 401)) return toast(`lane ${a} is gone`);
+  const x = el('div');
+  x.innerHTML = '<div class=card><p class="nw el"></p></div>';
+  x.querySelector('p').textContent = q.textContent.trim();
+  Object.assign(x.dataset, { agent: a, role: /-rev-/.test(a) ? 'rev' : 'impl' });
+  open(x);
+  if ('gone' in q.dataset) {
+    $$('[data-op=stop], [data-op=kill], .reply').forEach(b => b.hidden = true);
+    say('lane gone: its last stored transcript', null);
+  }
 }
 // #115 amendment A: [?] shows the legend in the same sheet, its lane parts hidden (`.lg`): a line per state from HINT,
 // the dots, and each fleet's serial mark with the paths it guards (none without serial_paths).
@@ -762,8 +790,8 @@ document.addEventListener('click', async e => {
   if (e.target.closest('.qhelp')) return legend();
   if (e.target.closest('.cfg')) return config(e.target.closest('.cfg'));
   // #205: a lane in an open Queue card opens its Lanes sheet in place; closing returns to the card.
-  const q = e.target.closest('a.ql'), ql = q && laneOf(q.dataset.agent);
-  if (q) { e.preventDefault(); return ql && open(ql); }
+  const q = e.target.closest('a.ql');
+  if (q) { e.preventDefault(); return byName(q); }
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
   if (b.classList.contains('lr')) return open(b.parentNode);

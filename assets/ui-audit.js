@@ -56,16 +56,35 @@
     queue: () => tab('queue'),
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
-    'queue-lanes': () => {
+    // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
+    // in view, the sections read STATUS, LINKS, LANES (3); a tap on a lane no Lanes row lists opens the sheet by its name.
+    'queue-lanes': async () => {
       tab('queue');
       const d = [...$$('#queue details.q')].find(d => d.querySelector('summary a')?.textContent === '#38');
       if (!d) return early.push('no acme-web #38 row in the demo');
+      $('#queue').prepend(d);
+      if (!DBG.get('check')) $('#needs').hidden = true;
       d.open = true;
-      d.scrollIntoView();
-      const ls = [...d.querySelectorAll('.qls>.ql')];
+      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['herdsman-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'herdsman-impl-205-queue-card-lanes-newest-first'];
       if (ls.length !== 3) early.push(`#38 lists ${ls.length} lanes, not 3`);
-      for (const l of ls) if (l.getBoundingClientRect().height !== 44 || getComputedStyle(l).textOverflow !== 'ellipsis') early.push(`lane "${l.textContent}": ${l.getBoundingClientRect().height}px, not one 44 px line with an ellipsis`);
-      if (ls.some(l => l.textContent.includes(' gone ') && l.matches('a'))) early.push('a gone lane is a link');
+      ls.forEach((l, i) => { l.querySelector('.qn').textContent = long[i]; if (l.dataset.agent) l.dataset.agent = long[i]; });
+      const hs = [...d.querySelectorAll('.cd>.ch')].map(h => h.textContent).join(', ');
+      if (hs !== 'STATUS, LINKS, LANES (3)') early.push(`#38 sections "${hs}", not STATUS, LINKS, LANES (3)`);
+      for (const l of ls) {
+        const n = l.querySelector('.qn'), a = l.querySelector('.qa'), r = l.getBoundingClientRect();
+        if (r.height !== 44 || getComputedStyle(n).textOverflow !== 'ellipsis' || n.scrollWidth <= n.clientWidth) early.push(`lane "${l.textContent}": ${r.height}px, not one 44 px line, its name cut by an ellipsis`);
+        if (a.getBoundingClientRect().right > r.right + 1 || a.scrollWidth > a.clientWidth) early.push(`lane "${l.textContent}": its age pushed out of the line`);
+      }
+      if (ls.some(l => l.textContent.includes(' gone ') && l.matches('a:not([data-gone])'))) early.push('a gone lane is a link');
+      // The tap: the Lanes tab never lists this name, its transcript read answers; the sheet opens on it.
+      const q = ls.find(l => l.matches('a')), name = q?.dataset.agent;
+      window.fetch = u => String(u).includes(encodeURIComponent(name)) ? Promise.resolve(new Response('{"harness":"claude","lines":[],"live":0}')) : F(u);
+      q?.click();
+      await wait();
+      window.fetch = F;
+      if (!shown() || $('.hd b').textContent !== name) early.push(`tap on ${name}: sheet ${shown() ? 'shows ' + $('.hd b').textContent : 'not opened'}`);
+      close();
+      await wait();
     },
     // #139: the demo's acme-web #46 row, its ask decided by default, re-answered through [change] (3 long choices),
     // opened and moved to the top (a scrolled view shoots blank).
@@ -238,6 +257,16 @@
       frag('needs', cards.map(c => c.outerHTML).join(''));
       want('a changed card', '2 need you ▸later all', 1);
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
+    },
+    // #217 gate 2: a tapped [one more round]: the needs-human card is one muted pending line with no buttons, at the top.
+    'needs-pending': () => {
+      tab('queue');
+      const c = [...$$('#needs>.ask[data-n]')].find(c => /needs you/.test(c.textContent));
+      if (!c) return early.push('no needs-human card in the demo');
+      $('#needs').prepend(c);
+      pend(c, 'extend');
+      const p = $('#needs>.pend');
+      if (!p || p.querySelector('button,form') || p.textContent !== '⟳ one more round · starting a lane…') early.push(`pending card: ${p ? p.outerHTML : 'none'}`);
     },
     // #170 gate 2: [important] in all 5 time groups, a red glyph, its first row open; no fold holds clean and a failure.
     events: () => {

@@ -42,6 +42,7 @@ DSH 0.2.1-rc.3 / dsh-TUI 0.17.0 document no pre-tool hook, so the Claude
 | `gh pr merge`, `gh api …/merge` | hook denies | **not enforced** by herdsman; `herdsman merge` stays the only gate herdsman honours, and GitHub branch protection is the backstop |
 | `gh issue/pr comment`, `gh pr review`, `gh api` comment writes | hook denies | **not enforced** |
 | Edits to fleet config, the event log, fleet-operations, Hermes profiles | hook denies | **not enforced** for non-reviewer roles (`danger-full-access`); reviewers' sandbox keeps them outside the writable root |
+| `deny_commands` (#216: containers by default) | hook denies | **not enforced** at run time; the role prompt states it, and the `pre-push` hook refuses a push adding a script line that runs one (`.github/workflows` excluded; same bypasses) |
 | Hook inert outside fleet lanes (`HERDSMAN_LANE`) | yes | n/a: the `pre-push` hook only exists in fleet lane worktrees and always applies there |
 
 Server-side protection is the real backstop; turn it on for every fleet repo's main and staging.

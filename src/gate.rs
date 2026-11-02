@@ -471,24 +471,37 @@ pub fn needs_human(
     op: &str,
     (spawn, by): (bool, &str),
 ) -> Result<()> {
-    // Only from needs-human: a stale card or a double tap never parks a merged issue or extends twice.
-    let state = issue_state(ctx, fleet, n)?.map(|s| s.state);
-    if state.as_deref() != Some("needs-human") {
-        let s = state.as_deref().unwrap_or("unknown");
-        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {s}, not needs-human"));
+    // Only from needs-human (#217: or a failed extend's card): a stale card or a double tap never parks a merged
+    // issue or extends twice.
+    let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
+    let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
+    if state != "needs-human" && last != "extend-failed" {
+        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
     match op {
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
-            if spawn {
+            // #217: the decision is logged first (the card goes at once); a failed spawn is drive's next due step.
+            // Under drive.lock: a pass meanwhile would start the same round; a running pass leaves it to the next.
+            let held = crate::drive::hold(ctx, r, fleet);
+            if state == "needs-human" {
+                let d = json!({"by": by, "spawn": spawn});
+                crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
+            }
+            if spawn && held.is_none() {
+                writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
+            } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,
                     ..Default::default()
                 };
-                crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o)?;
+                if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o) {
+                    let d = json!({"by": by, "reason": format!("{e:#}")});
+                    crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "extend-failed", d))?;
+                    return Err(e);
+                }
             }
-            crate::events::append(&ctx.state, &ev("round-extended"))?;
         }
         _ => {
             crate::events::append(&ctx.state, &ev("parked"))?;

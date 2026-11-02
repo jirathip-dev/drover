@@ -1536,3 +1536,117 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
         1
     );
 }
+
+/// Notes, at each command run, whether the log already holds `round-extended` and drive.lock is held.
+struct Spy<'a>(Fake, &'a herdsman::Ctx, std::sync::Mutex<Vec<bool>>);
+impl herdsman::runner::Runner for Spy<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let held = self.1.state.parent().unwrap().join("drive.lock").exists();
+        let logged = held && read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
+        self.2.lock().unwrap().push(logged);
+        self.0.run(prog, args)
+    }
+}
+
+/// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
+/// with the reason, and the next drive pass starts the recorded round as its fix step. The spawn runs under
+/// drive.lock, so no pass starts the same round meanwhile.
+#[test]
+fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
+    let c = setup("drive-extend");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
+        ev(
+            &c,
+            ts,
+            "verdict",
+            json!({"verdict": "FAIL", "sha": sha(p), "body": "FAIL"}),
+        );
+    }
+    ev(&c, 14, "needs-human", json!({"code": "ROUND_LIMIT"}));
+    let base = || {
+        fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+            .reply("git -C", "")
+    };
+    let busy = Fake {
+        replies: base().replies,
+        ..Default::default()
+    }
+    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let spy = Spy(busy, &c, Default::default());
+    let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
+    assert!(code == 3 && out.contains("REFUSED HOST_BUSY"), "{out}");
+    let seen = spy.2.lock().unwrap().clone();
+    assert!(
+        !seen.is_empty() && seen.iter().all(|&l| l),
+        "a command ran before the decision or outside drive.lock: {seen:?}"
+    );
+    let all = read(&c.state).unwrap();
+    let failed = all
+        .iter()
+        .find(|e| e.kind == "extend-failed")
+        .expect("no extend-failed");
+    assert!(
+        failed.str("reason").unwrap().starts_with("REFUSED HOST_BUSY"),
+        "{failed:?}"
+    );
+    assert_eq!(state(&c), "fix(3)");
+
+    let r = base();
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["fix"], "{out}");
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+}
+
+/// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the
+/// pass could start it too); the next pass starts it.
+#[test]
+fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
+    let c = setup("drive-extend-lock");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    let lock = c.state.parent().unwrap().join("drive.lock");
+    std::fs::write(&lock, "").unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+        .reply("git -C", "");
+    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
+    assert!(code == 0 && out.contains("the next pass starts the round"), "{out}");
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(lock.exists(), "the pass's lock is left alone");
+    assert_eq!(
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "round-extended")
+            .count(),
+        1
+    );
+
+    std::fs::remove_file(&lock).unwrap();
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["fix"], "{out}");
+    assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+}
+
+/// #217 review round 2: `extend --no-spawn` leaves the live lane alone; no drive pass supersedes it for the round.
+#[test]
+fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
+    let c = setup("drive-extend-no-spawn");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
+    let live = agents(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy(), "w9:p1")]);
+    let r = fake(&live)
+        .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+        .reply("git -C", "");
+    let (code, out) = run(&c, &r, &["extend", "sendmeter", "12", "--no-spawn"]);
+    assert_eq!(code, 0, "{out}");
+    let (out, steps) = drive(&c, &r);
+    assert!(!steps.iter().any(|s| s == "fix"), "{out}");
+    assert!(
+        !r.called("herdr agent start sendmeter-impl-12") && !r.called("herdr pane close"),
+        "{:?}",
+        r.calls.borrow()
+    );
+}

@@ -142,8 +142,8 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     assert!(!get(&s, "/", &cookie).contains("data-n=12"), "parked: no card");
 }
 
-/// Finding 1/2 of the first review: the card ops act only on a needs-human issue, and a refused
-/// `[one more round]` spawn logs no `round-extended`, so a retry still grants exactly one.
+/// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
+/// `round-extended` first; a refused spawn logs `extend-failed` and brings the card back, and a retry grants no more.
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");
@@ -173,9 +173,20 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     for _ in 0..2 {
         let res = post("extend");
         assert!(res.contains("REFUSED%20PAUSED"), "PAUSED refuses the spawn: {res}");
+        let k = card(&get(&s, "/", &cookie)).to_string();
+        assert!(
+            k.contains("REFUSED PAUSED") && k.contains("value=extend"),
+            "the card is back: {k}"
+        );
     }
-    assert_eq!(extended(), 0, "a refused spawn logs no extra round");
-    assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 0);
+    assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
+    assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
+    let failed = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "extend-failed")
+        .count();
+    assert_eq!(failed, 2);
 
     append(&c.state, &Event::new(40, "sendmeter", Some(12), "merged", json!({}))).unwrap();
     for op in ["park", "extend", "override"] {
@@ -185,5 +196,44 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     assert_eq!(
         fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].state,
         "merged"
+    );
+}
+
+/// #217: a recorded extension with no lane yet is one muted pending line: no form, no buttons.
+#[test]
+fn a_recorded_extension_is_a_pending_line_without_buttons() {
+    let c = fixture("nh-pending", "FAIL");
+    append(
+        &c.state,
+        &Event::new(
+            40,
+            "sendmeter",
+            Some(12),
+            "round-extended",
+            json!({"by": "owner", "spawn": true}),
+        ),
+    )
+    .unwrap();
+    let r = runner();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "", NOW);
+    let page = get(&s, "/", &cookie);
+    assert!(!page.contains("<div class=ask data-n=12>"), "no needs-you card");
+    let a = page.find("<div class=pend data-n=12>").expect("no pending line");
+    let p = &page[a..a + page[a..].find("</div>").unwrap()];
+    assert!(p.contains("⟳ one more round · starting a lane…"), "{p}");
+    assert!(!p.contains("<form") && !p.contains("<button"), "{p}");
+
+    // Logs before #217 wrote `round-extended` right after its spawn: that lane exists, nothing is pending.
+    let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
+    append(&c.state, &Event::new(41, "sendmeter", Some(12), "spawn", spawn)).unwrap();
+    append(
+        &c.state,
+        &Event::new(42, "sendmeter", Some(12), "round-extended", json!({"by": "owner"})),
+    )
+    .unwrap();
+    assert!(
+        !get(&s, "/", &cookie).contains("class=pend"),
+        "an old-order extension is not pending"
     );
 }
