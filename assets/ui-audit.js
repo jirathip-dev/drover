@@ -17,6 +17,16 @@
   };
   const canned = async (status, text, then) => { window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status })) : F(u, o); then(); await wait(); };
   const mid = what => early.push(...measure().outliers.map(o => `${what}: ${o}`));
+  // #141 gate 2: Host groups go red, amber, green down the tab; one tab is active, its label on the accent fill.
+  const ranked = () => {
+    const t = [...$$('#host>.grp')].map(g => 'rag'.indexOf(g.dataset.t));
+    if (t.length !== 4 || t.some((x, i) => x < 0 || (i && x < t[i - 1]))) early.push(`Host groups not ranked by status: ${t}`);
+    const on = $$('nav a.on'), probe = B.appendChild(Object.assign(document.createElement('i'), { style: 'color:var(--l)' }));
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
+    if (on.length !== 1) early.push(`${on.length} active tabs, not 1`);
+    else if (getComputedStyle(on[0].firstElementChild).backgroundColor !== accent) early.push(`the active tab's fill is ${getComputedStyle(on[0].firstElementChild).backgroundColor}, not the accent ${accent}`);
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
@@ -136,13 +146,15 @@
       if (!S.hidden) dragged.push('300 ms after close the sheet is still shown');
       if (!DBG.get('check')) { open($('.lane')); S.classList.add('drag'); snap('half'); } // the screenshot: the sheet at half, unanimated
     },
-    host: async () => { // the live Host tab's Alerts (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
+    host: async () => { // the live Host tab's [enable alerts] (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
       tab('host');
+      ranked();
       const push = Object.assign(document.createElement('button'), { id: 'push', type: 'button', textContent: 'Enable alerts' });
       push.dataset.key = 'AA';
-      const row = Object.assign(document.createElement('p'), { className: 'kv', textContent: 'on · 1 device · last sent 3m ago' }); // #87
-      $('#host').append(Object.assign(document.createElement('h2'), { textContent: 'Alerts' }), row, push);
-      tidy($('#host'));
+      const al = [...$$('#host>.grp')].find(g => g.querySelector('.gn').textContent === 'ALERTS');
+      al.open = true;
+      al.append(push);
+      tidy(al);
       Object.defineProperty(window, 'Notification', { value: { requestPermission: async () => 'granted' } });
       const sub = { toJSON: () => ({ endpoint: 'e', keys: { p256dh: 'p', auth: 'a' } }) };
       Object.defineProperty(navigator, 'serviceWorker', { value: { ready: Promise.resolve({ pushManager: { subscribe: async () => sub } }) } });
@@ -154,6 +166,13 @@
       if (!$('#push').disabled || st() !== 'pair this phone first') early.push(`unpaired: [enable alerts] disabled ${$('#push').disabled}, p.st "${st()}"`);
       $('#push').hidden = false;
       // `--screenshot` captures the document's top: the shot drops the needs cards so Alerts is in it (the check keeps them).
+      if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
+    },
+    // #141 gate 2: the busy and healthy fixtures (scripts/host-fixtures.sh), as the tab first shows them.
+    'host-ranked': () => {
+      tab('host');
+      ranked();
+      if (location.pathname.includes('/healthy/') && $$('#host>.grp:is([open],:not([data-t=g]))').length) early.push('healthy: a group is open or not green');
       if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
     },
     // #154: three needs-you cards through the live path (frag): [later] on one → `1 need you ▸` and 2 cards; [later all]

@@ -79,13 +79,36 @@ function frag(id, html) {
   nu.innerHTML = html;
   tidy(nu);
   morph(el, nu);
+  if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
   rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
   last = Date.now();
   alerts();
+  badge();
   if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
+// #141: the Host groups. A group takes its worst row's status (grey rows don't count); problems go first (red, then
+// amber) and start open, the header summing up the rows at that status. A tap's open/closed holds for the session
+// until the group's status changes.
+const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
+const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
+const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx')).map(n => n.textContent).join('').trim();
+const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
+const gname = g => 'host:' + g.querySelector('.gn').textContent;
+function groups() {
+  const host = $('#host'), rank = t => ({ r: 0, a: 1 })[t] ?? 2;
+  [...host.querySelectorAll(':scope>.grp')].map(g => {
+    const rows = [...g.querySelectorAll('[data-t]')], w = Math.min(2, ...rows.map(r => rank(r.dataset.t))), s = sget(gname(g));
+    g.dataset.t = 'rag'[w];
+    g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
+    g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
+    return [w, g];
+  }).sort((a, b) => a[0] - b[0]).forEach(([, g]) => host.append(g));
+}
+document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
+// #141: `[queue·N]`, N the needs-you cards above the tabs.
+function badge() { const n = $$('#needs .ask').length; $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : ''); }
 // #68: buttons hold labels, never sentences: a control's runtime result is an 11 px `p.st` under it (red on error).
 function note(b, msg, ok) {
   let s = b.nextElementSibling;
@@ -106,6 +129,8 @@ function alerts() {
 // Also shows the sheet's Pair button (open() hides it again).
 function unpaired() { nopair = true; alerts(); $('.pairf').hidden = false; $$('[data-op=close]').forEach(b => b.hidden = true); }
 alerts();
+groups();
+badge();
 document.addEventListener('click', async e => {
   const b = e.target.closest('#push');
   if (!b) return;

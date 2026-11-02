@@ -223,7 +223,10 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
             && page.contains("herdsman lane-hours"),
         "{page}"
     );
-    assert!(page.contains("deepseek · USD 2.28 · <b class=a>low</b>"), "{page}");
+    assert!(
+        page.contains("<span class=w>USD 2.28 · <b class=a>low</b></span>"),
+        "{page}"
+    );
     assert_no_leaks(&c, &r, &[&out], &page);
 
     // `check` alerts once per crossing below warn_below.
@@ -418,7 +421,7 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
     .into_owned();
     assert!(
         page.contains(&format!(
-            "<p class=m>deepseek · key not found in {}</p>",
+            "<span class=k>deepseek</span><span class=w>key not found in {}</span>",
             missing.display()
         )),
         "{page}"
