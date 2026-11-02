@@ -964,25 +964,16 @@ impl<'a> Server<'a> {
             }
             // #130: a needs-human card's buttons.
             op @ ("override" | "extend" | "park") => {
-                let (cfg, n) = (Config::load(&ctx.config)?, g("issue").parse().context("no issue")?);
-                // Only from needs-human: a stale card or a double tap never parks a merged issue or extends twice.
-                let state = fold(&read(&ctx.state)?).remove(&(fleet.into(), n)).map(|s| s.state);
-                if state.as_deref() != Some("needs-human") {
-                    bail!("#{n} is {}, not needs-human", state.as_deref().unwrap_or("unknown"));
-                }
-                let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": "owner"}));
-                let o = crate::spawn::Opts {
-                    supersede: true,
-                    ..Default::default()
-                };
-                match op {
-                    "override" => crate::gate::merge(ctx, &cfg, self.r, &mut out, fleet, n, true)?,
-                    "extend" => {
-                        crate::spawn::spawn(ctx, &cfg, self.r, &mut out, (fleet, Some(n), "impl"), &o)?;
-                        append(&ctx.state, &ev("round-extended"))?;
-                    }
-                    _ => append(&ctx.state, &ev("parked"))?,
-                }
+                let n = g("issue").parse().context("no issue")?;
+                crate::gate::needs_human(
+                    ctx,
+                    &Config::load(&ctx.config)?,
+                    self.r,
+                    &mut out,
+                    (fleet, n),
+                    op,
+                    (true, "owner"),
+                )?;
                 format!("#{n}: {op}")
             }
             "unpair" => {
