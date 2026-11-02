@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub const TICK: &str = "dev.herdsman.tick";
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
+const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
 
@@ -151,7 +152,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         herdr::status(r).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
         crate::check::check(ctx, cfg, r, out)?;
-        drive::drive(ctx, cfg, r, out, None)
+        drive::drive(ctx, cfg, r, out, None, false)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {
@@ -314,7 +315,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let shown = |(c, s, _): &(String, String, bool)| format!("client {c}, server {s}");
     let d = v.as_ref().map_or("not on PATH, or no server".into(), shown);
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
-    rows.push(row(herdr::BIN, t, d, herdr::BIN));
+    rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
         // #160: the worktree total `check` stored (bytes, when); never a `du` on the request path.
         let du = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).unwrap_or_default();
@@ -327,7 +328,8 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
             Some(b) => format!("worktrees {:.1} GB · {}", b / 1_073_741_824.0, ago(ctx.now, at)),
             _ => "worktrees not measured yet".into(),
         };
-        let t = ["g", "a", "r"][usize::from(gb < host::AMBER_FREE_GB) + usize::from(gb < cfg.limits.min_free_gb)];
+        let (min, n) = (cfg.limits.min_free_gb, usize::from);
+        let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
         let d = format!("{gb:.0} GB free · {wt}");
         rows.push(row("disk", t, d, "herdsman clean --yes"));
     }

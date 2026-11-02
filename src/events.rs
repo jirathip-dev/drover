@@ -252,6 +252,7 @@ pub const PASSIVE: &[&str] = &[
     "orch-nudged",
     "orch-stuck",
     "driven",
+    "drive-pass",
     "amended",
     "closed-other",
     "conflict-predicted",
