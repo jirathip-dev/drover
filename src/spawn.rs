@@ -397,7 +397,22 @@ pub fn spawn(
         .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
         .collect();
     let mut dup = vec![];
-    if !live.is_empty() {
+    // #182: an idle pane no spawn logged names its last activity (the issue's last event) and the way out.
+    let stale = live.iter().all(|a| a["agent_status"] != "working") && orphan(&agents, &events, &p, true).is_some();
+    if stale {
+        let last = events
+            .iter()
+            .rfind(|e| e.fleet == fleet && e.issue == Some(issue) && !crate::events::PASSIVE.contains(&e.kind.as_str()))
+            .map_or(0, |e| e.ts);
+        let idle = crate::events::age(ctx.now.saturating_sub(last));
+        dup.push((
+            "LANE_LIVE",
+            format!(
+                "stale pane {} (idle {idle}): herdsman adopt or --supersede",
+                names.join(", ")
+            ),
+        ));
+    } else if !live.is_empty() {
         dup.push(("LANE_LIVE", format!("live agent(s) {names:?} in {wt}")));
     }
     if let Some(s) = fold(&events)
@@ -426,7 +441,10 @@ pub fn spawn(
         return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
     }
     if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
-        return refused(code, format!("{msg}; `--supersede` replaces it"));
+        return refused(
+            code,
+            format!("{msg}{}", if stale { "" } else { "; `--supersede` replaces it" }),
+        );
     }
 
     lane_admit(f, &events, fleet, issue, role)?;
@@ -534,17 +552,23 @@ pub fn spawn(
             return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
         }
         // Under load herdr can time out while the harness still comes up: keep it as the lane.
-        if !herdr::failed_with(&start, "timeout") {
-            bail!("herdr agent start failed: {}", start.stderr.trim());
-        }
-        if herdr::harness_in(r, &pane).is_none() {
-            let _ = herdr::close(r, &pane);
-            bail!(
-                "herdr agent start timed out and no harness came up; closed pane {pane}: {}",
+        // #182: any other failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
+        let why = if !herdr::failed_with(&start, "timeout") {
+            Some(format!("herdr agent start failed: {}", start.stderr.trim()))
+        } else if herdr::harness_in(r, &pane).is_none() {
+            Some(format!(
+                "herdr agent start timed out and no harness came up: {}",
                 start.stderr.trim()
-            );
+            ))
+        } else {
+            herdr::ok(r, &herdr::rename_argv(&pane, &p.agent))
+                .err()
+                .map(|e| format!("{e:#}"))
+        };
+        if let Some(why) = why {
+            let _ = herdr::close(r, &pane);
+            bail!("{why}; closed pane {pane}");
         }
-        herdr::exec(r, &herdr::rename_argv(&pane, &p.agent))?;
     }
     let kicked = h.kick(r, &p, &pane);
     let mut d = lane_data(&p, &pane, ws);

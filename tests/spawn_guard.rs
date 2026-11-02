@@ -572,3 +572,41 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
         }
     }
 }
+
+// --- #182: a failed spawn leaves no zombie pane ---
+
+#[test]
+fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
+    let d = tmpdir("rename-fail");
+    let c = ctx(&d, CONFIG);
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once("herdr pane get w9:p1", 0, PANE_HERMES)
+        .once_err("herdr agent rename w9:p1 sendmeter-impl-12", 1, "agent rename failed");
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out}");
+    assert!(r.called("herdr pane close w9:p1"), "{:?}", r.calls.borrow());
+    assert!(read(&c.state).unwrap().is_empty(), "nothing logged");
+    // The pane is gone: the next pass spawns, no LANE_LIVE.
+    let (exit, out) = spawn(&c, &happy(&c, NO_AGENTS), &[]);
+    assert_eq!(exit, 0, "{out}");
+}
+
+#[test]
+fn lane_live_on_an_idle_unlogged_pane_names_its_age_and_the_way_out() {
+    let d = tmpdir("dup-stale");
+    let c = ctx(&d, CONFIG);
+    let d = json!({"code": "CI_NOT_GREEN", "reason": "r"});
+    append(
+        &c.state,
+        &Event::new(c.now - 3 * 3600, "sendmeter", Some(12), "blocked", d),
+    )
+    .unwrap();
+    let w = wt(&c).to_string_lossy().into_owned();
+    let list = json!({"result": {"agents": [{"agent_status": "idle", "cwd": w, "pane_id": "w6N5:p1"}]}}).to_string();
+    let out = assert_refused(&c, &happy(&c, &list), &[], "LANE_LIVE");
+    assert!(
+        out.contains("stale pane w6N5:p1 (idle 3h): herdsman adopt or --supersede"),
+        "{out}"
+    );
+}
