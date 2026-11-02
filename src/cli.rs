@@ -91,6 +91,19 @@ enum Cmd {
         #[arg(long)]
         owner_override: bool,
     },
+    /// Owner/orch only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`
+    Extend {
+        fleet: String,
+        issue: u64,
+        /// Who approved it, as the log shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+        /// Record the extra round only; leave the live lane alone (no impl spawn)
+        #[arg(long)]
+        no_spawn: bool,
+    },
+    /// Owner/orch only: park a needs-human issue (its card's [park]); the card clears
+    Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
     Ask {
         fleet: String,
@@ -355,8 +368,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`).
-pub const HELP_AGENT_MAX: usize = 195;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`).
+pub const HELP_AGENT_MAX: usize = 203;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -711,6 +724,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     owner_override: o,
                 } => gate::merge(ctx, &cfg, r, out, &fleet, issue, o)?,
+                Cmd::Extend {
+                    fleet,
+                    issue,
+                    by,
+                    no_spawn,
+                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by))?,
+                Cmd::Park { fleet, issue } => {
+                    gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;
+                }
                 Cmd::Brief { fleet, issue } => {
                     let v = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, issue, false)?;
                     let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();

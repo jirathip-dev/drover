@@ -316,3 +316,38 @@ pub fn merge(
     }
     Ok(())
 }
+
+/// #130: a needs-human card's `override` / `extend` / `park`; #151: `herdsman extend|park` (`spawn: false` = `--no-spawn`).
+pub fn needs_human(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    op: &str,
+    (spawn, by): (bool, &str),
+) -> Result<()> {
+    // Only from needs-human: a stale card or a double tap never parks a merged issue or extends twice.
+    let state = issue_state(ctx, fleet, n)?.map(|s| s.state);
+    if state.as_deref() != Some("needs-human") {
+        let s = state.as_deref().unwrap_or("unknown");
+        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {s}, not needs-human"));
+    }
+    let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
+    match op {
+        "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
+        "extend" => {
+            if spawn {
+                let o = crate::spawn::Opts {
+                    supersede: true,
+                    ..Default::default()
+                };
+                crate::spawn::spawn(ctx, cfg, r, out, (fleet, Some(n), "impl"), &o)?;
+            }
+            crate::events::append(&ctx.state, &ev("round-extended"))?;
+        }
+        _ => crate::events::append(&ctx.state, &ev("parked"))?,
+    }
+    writeln!(out, "#{n}: {op}")?;
+    Ok(())
+}
