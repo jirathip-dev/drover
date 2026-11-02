@@ -36,6 +36,11 @@ lock makes it safe; lanes queue on it). Node fleets: pnpm's store is already sha
 `npm_config_cache`. `clone_node_modules = true` APFS-clones (`cp -cR`) the local checkout's
 `node_modules` into a new lane when `package-lock.json` and `pnpm-lock.yaml` match.
 
+Every lane gets `HERDSMAN_PORT` (#187): a stable hash of `<fleet>/<branch>` into the fleet's `port_range`
+(default `"41000-41999"`), the next free one if a lane of an open issue already holds it; the spawn event
+logs it and the Lanes tab shows it (`:41234`). Lanes start dev servers on it, never a fixed port; `env`
+values expand it: `[fleet.web.env] PORT = "$HERDSMAN_PORT"`. `scripts/ui-audit.sh` serves on it when set.
+
 `herdsman close <agent>` closes the pane of a herdr agent that is not a herdsman lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
 (use stop, kill or clean). `herdsman stop <agent>` sends Esc (logs `stop`). `herdsman kill <agent>` prints what is lost

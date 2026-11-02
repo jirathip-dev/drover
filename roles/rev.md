@@ -9,6 +9,7 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews.
   implementer's claims. Rerun the tests yourself.
 - Check correctness, edge cases, test quality (would each regression test go RED on the old
   code?), scope creep, leaked secrets, repo conventions.
+- Start any dev server on `$HERDSMAN_PORT`, never a fixed port.
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
 - Check the PR body's evidence names the exact head sha you review; evidence anchored at an

@@ -1,8 +1,14 @@
 //! AC5: spawn launches the right harness with the synced profile.
 mod common;
 use common::*;
-use herdsman::events::{fold, read};
-use serde_json::Value;
+use herdsman::events::{append, fold, read, Event};
+use herdsman::spawn::lane_port;
+use serde_json::{json, Value};
+
+/// #187: issue 12's impl lane port with nothing taken.
+fn port12() -> String {
+    format!("HERDSMAN_PORT={}", lane_port(None, "sendmeter/issue-12", &[]))
+}
 
 fn plan(c: &herdsman::Ctx, r: &Fake, role: &str) -> Value {
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", role, "--dry-run", "--json"]);
@@ -26,7 +32,14 @@ fn claude_role_dry_run_uses_synced_profile() {
     let p = plan(&c, &r, "impl");
     assert_eq!(
         words(&p["commands"][2])[1..],
-        ["pane", "run", "<pane>", "export", "HERDSMAN_LANE='sendmeter:12:impl'"]
+        [
+            "pane",
+            "run",
+            "<pane>",
+            "export",
+            "HERDSMAN_LANE='sendmeter:12:impl'",
+            &port12()
+        ]
     );
     let start = words(&p["commands"][3]);
     let prof = c.config.parent().unwrap().join("claude/fleet-impl");
@@ -99,9 +112,69 @@ fn fleet_env_is_exported_into_the_lane() {
         [
             "export".to_string(),
             "HERDSMAN_LANE='sendmeter:12:impl'".into(),
+            port12(),
             format!("CARGO_TARGET_DIR='{home}/.cache/herdsman/target/sendmeter'"),
             "npm_config_cache='/c/npm'".into(),
         ]
+    );
+}
+
+/// #187: the same fleet and branch always hash to the same port, inside the range; the dry run shows it.
+#[test]
+fn lane_port_is_stable_per_fleet_and_branch() {
+    let p = lane_port(None, "sendmeter/issue-12", &[]);
+    assert_eq!(p, lane_port(None, "sendmeter/issue-12", &[]));
+    assert!((41000..=41999).contains(&p), "{p}");
+    assert_ne!(
+        p,
+        lane_port(None, "other/issue-12", &[]),
+        "the fleet is part of the key"
+    );
+    assert!((5000..=5009).contains(&lane_port(Some("5000-5009"), "a/b", &[])));
+    let c = ctx(&tmpdir("spawn-port"), CONFIG);
+    assert_eq!(plan(&c, &Fake::default(), "impl")["port"], p);
+}
+
+/// #187: a port a live lane holds moves to the next free one (wrapping); the lane's own earlier spawn is no collision.
+#[test]
+fn lane_port_collision_takes_the_next_free_one() {
+    let p = lane_port(Some("7000-7001"), "f/b", &[]);
+    let other = if p == 7000 { 7001 } else { 7000 };
+    assert_eq!(lane_port(Some("7000-7001"), "f/b", &[p]), other);
+    assert_eq!(
+        lane_port(Some("7000-7001"), "f/b", &[7000, 7001]),
+        p,
+        "a full range keeps the hash"
+    );
+
+    let cfg = CONFIG.replace(
+        "[fleet.sendmeter.role.impl]",
+        "port_range = \"7000-7001\"\n\n[fleet.sendmeter.role.impl]",
+    );
+    let c = ctx(&tmpdir("spawn-port-taken"), &cfg);
+    let mine = plan(&c, &Fake::default(), "impl")["port"].as_u64().unwrap();
+    let spawn = |n: u64, branch: &str| {
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": branch, "port": mine});
+        append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", d)).unwrap();
+    };
+    spawn(12, "issue-12");
+    assert_eq!(plan(&c, &Fake::default(), "impl")["port"], mine, "its own lane");
+    spawn(13, "issue-13");
+    assert_eq!(plan(&c, &Fake::default(), "impl")["port"], 14001 - mine);
+}
+
+/// #187: `$HERDSMAN_PORT` in a fleet's env expands to the lane's port.
+#[test]
+fn fleet_env_expands_herdsman_port() {
+    let cfg = CONFIG.replace(
+        "[fleet.sendmeter.role.impl]",
+        "[fleet.sendmeter.env]\nPORT = \"$HERDSMAN_PORT\"\nVITE = \"http://127.0.0.1:$HERDSMAN_PORT/\"\n\n[fleet.sendmeter.role.impl]",
+    );
+    let c = ctx(&tmpdir("spawn-env-port"), &cfg);
+    let p = lane_port(None, "sendmeter/issue-12", &[]);
+    assert_eq!(
+        words(&plan(&c, &Fake::default(), "impl")["commands"][2])[7..],
+        [format!("PORT='{p}'"), format!("VITE='http://127.0.0.1:{p}/'")]
     );
 }
 
@@ -131,7 +204,11 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
     let p = plan(&c, &Fake::default(), "rev");
     assert_eq!(
         words(&p["commands"][2])[4..],
-        ["export", "HERDSMAN_LANE='sendmeter:12:rev'"]
+        [
+            "export".to_string(),
+            "HERDSMAN_LANE='sendmeter:12:rev'".into(),
+            format!("HERDSMAN_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[]))
+        ]
     );
     let start = words(&p["commands"][3]);
     assert_eq!(
@@ -206,6 +283,13 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
         (st.state.as_str(), st.lane.as_deref()),
         ("impl", Some("sendmeter-impl-12"))
     );
+    // #187: the spawn event records the lane's port.
+    let ev = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "spawn")
+        .unwrap();
+    assert_eq!(ev.data["port"], lane_port(None, "sendmeter/issue-12", &[]));
 }
 
 #[test]
