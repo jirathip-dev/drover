@@ -152,6 +152,8 @@ pub struct Fleet {
     pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
+    /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
+    pub port_range: Option<String>,
     /// #164: build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
     #[serde(default)]
     pub build_dirs: Vec<String>,
@@ -224,6 +226,9 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
+    pub fast_secs: u64,
+    pub slow_secs: u64,
 }
 
 impl Default for Limits {
@@ -239,6 +244,8 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            fast_secs: 60,
+            slow_secs: 300,
         }
     }
 }

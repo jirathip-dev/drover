@@ -195,7 +195,12 @@ enum Cmd {
         cmd: PushCmd,
     },
     /// One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron
-    Drive { fleet: Option<String> },
+    Drive {
+        fleet: Option<String>,
+        /// #212: only record verdicts and merge PASS + green (the every-minute job); no lane starts
+        #[arg(long)]
+        fast: bool,
+    },
     /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it
     #[command(hide = true)]
     CapCheck {
@@ -711,7 +716,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false)?,
+                Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let all = crate::waiting::scan(
                         ctx,
