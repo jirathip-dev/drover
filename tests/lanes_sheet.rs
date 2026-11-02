@@ -472,9 +472,9 @@ fn page_has_no_dash_placeholders() {
     let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
-    // #60: and the parts the page loads on demand (role forms, Events).
+    // #60: and the parts the page loads on demand ([config] sheet, Events).
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    for part in ["/frag?id=roles&fleet=sendmeter", "/frag?id=events"] {
+    for part in ["/frag?id=config&fleet=sendmeter", "/frag?id=events"] {
         let p = req(&s, "GET", part, "", "", T);
         html += &p[p.find("\r\n\r\n").unwrap()..];
     }

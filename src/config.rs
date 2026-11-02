@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const ROLES: [&str; 3] = ["impl", "rev", "design"];
+/// #162: the accent tokens a fleet card's bar takes (`--l` blue … `--a` amber); red means "needs you", so it is left out.
+pub const COLORS: [&str; 5] = ["l", "p", "c", "g", "a"];
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -133,6 +135,8 @@ pub struct Fleet {
     pub clone_node_modules: bool,
     /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
+    /// #162: the Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -279,6 +283,9 @@ impl Config {
             if !(1..=8).contains(&f.serial_label().chars().count()) {
                 bail!("fleet.{name}.serial_label: must be 1 to 8 characters");
             }
+            if let Some(k) = f.color.as_deref().filter(|k| !COLORS.contains(k)) {
+                bail!("fleet.{name}.color: \"{k}\" must be one of {COLORS:?}");
+            }
             if f.notify.iter().any(|n| !n.webpush() && n.cmd.trim().is_empty()) {
                 bail!("fleet.{name}.notify: cmd must not be empty");
             }
@@ -333,6 +340,13 @@ impl Config {
 }
 
 impl Fleet {
+    /// #162: the card colour: `color`, else `sha256(name)[0] % 5` over `COLORS` (the horse coats' hash).
+    pub fn color(&self, name: &str) -> &str {
+        self.color.as_deref().unwrap_or_else(|| {
+            let h = crate::devices::sha256(name.as_bytes());
+            COLORS[usize::from_str_radix(&h[..2], 16).unwrap_or(0) % COLORS.len()]
+        })
+    }
     pub fn serial_label(&self) -> &str {
         self.serial_label.as_deref().unwrap_or("serial")
     }
