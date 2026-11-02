@@ -338,7 +338,7 @@ fn services_rows_go_green_amber_and_red() {
     );
 }
 
-/// #160: a 10 s `du` never reaches a request: the page and the roles fragment answer at once; `check` stores the total.
+/// #160: a 10 s `du` never reaches a request: the page and the config fragment answer at once; `check` stores the total.
 #[test]
 fn slow_du_never_blocks_the_board() {
     struct SlowDu(Fake);
@@ -353,7 +353,7 @@ fn slow_du_never_blocks_the_board() {
     let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
     let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    for path in ["/", "/frag?id=roles&fleet=sendmeter"] {
+    for path in ["/", "/frag?id=config&fleet=sendmeter"] {
         let t = std::time::Instant::now();
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), c.now);
         assert!(t.elapsed().as_millis() < 500, "{path} took {:?}", t.elapsed());

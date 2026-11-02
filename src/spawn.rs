@@ -472,6 +472,7 @@ pub fn spawn(
                 herdr::close(r, pane)?;
             }
         }
+        crate::check::reap(ctx, cfg, r, (fleet, Some(issue)), &wt)?; // #186: before the new lane starts
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         event(
             "supersede",
