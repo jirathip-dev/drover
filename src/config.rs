@@ -209,6 +209,9 @@ pub struct Limits {
     pub ask_default_minutes: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
+    /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
+    pub fast_secs: u64,
+    pub slow_secs: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -252,6 +255,8 @@ impl Default for Limits {
                 .ok()
                 .and_then(|mut t| t.remove("deny_commands")?.try_into().ok())
                 .unwrap_or_default(),
+            fast_secs: 60,
+            slow_secs: 300,
         }
     }
 }

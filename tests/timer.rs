@@ -29,11 +29,11 @@ fn job_files_match_their_goldens() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/timer");
     for mac in [true, false] {
         for (label, args, every) in [
-            ("dev.herdsman.tick", &["/x/herdsman", "tick"][..], true),
+            ("dev.herdsman.tick", &["/x/herdsman", "tick"][..], 300),
             (
                 "dev.herdsman.serve",
                 &["/x/herdsman", "serve", "--addr", "127.0.0.1:7777"][..],
-                false,
+                0,
             ),
         ] {
             for (p, text) in herdsman::timer::files(&c, label, args, path, every, mac) {
@@ -70,14 +70,27 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(
         run(&c, &r, &["timer", "install", "--no-load"]).1,
-        "= already dev.herdsman.tick\n"
+        "= already dev.herdsman.tick\n= already dev.herdsman.fast\n"
     );
+    // #212: the fast job runs `drive --fast` every `fast_secs` (60); systemd keeps the interval in its .timer.
+    let fast = std::fs::read_to_string(job(&c, "dev.herdsman.fast")).unwrap();
+    let every = match MAC {
+        true => fast.clone(),
+        false => std::fs::read_to_string(c.home.join(".config/systemd/user/dev.herdsman.fast.timer")).unwrap(),
+    };
+    assert!(fast.contains("--fast") && every.contains("60"), "{fast}\n{every}");
 
     let (code, out) = run(&c, &r, &["timer", "remove"]);
-    assert_eq!((code, out.as_str()), (0, "✓ removed dev.herdsman.tick\n"));
-    assert!(!job(&c, "dev.herdsman.tick").exists());
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "✓ removed dev.herdsman.tick\n✓ removed dev.herdsman.fast\n")
+    );
+    assert!(!job(&c, "dev.herdsman.tick").exists() && !job(&c, "dev.herdsman.fast").exists());
     assert!(r.called("launchctl bootout") || r.called("systemctl --user disable --now dev.herdsman.tick.timer"));
-    assert_eq!(run(&c, &r, &["timer", "remove"]).1, "= no dev.herdsman.tick job\n");
+    assert_eq!(
+        run(&c, &r, &["timer", "remove"]).1,
+        "= no dev.herdsman.tick job\n= no dev.herdsman.fast job\n"
+    );
 }
 
 #[test]
@@ -95,9 +108,18 @@ fn install_loads_and_prints_the_command() {
         out.starts_with("✗ dev.herdsman.tick: ") && out.contains(&format!("→ {cmd}")),
         "{out}"
     );
-    let r = host(Fake::default()).reply(cmd, "");
+    // launchd's bootstrap prefix covers both jobs; systemd enables each job's own .timer.
+    let fast = if MAC {
+        cmd
+    } else {
+        "systemctl --user enable --now dev.herdsman.fast.timer"
+    };
+    let r = host(Fake::default()).reply(cmd, "").reply(fast, "");
     let (code, out) = run(&c, &r, &["timer", "install"]);
     assert_eq!((code, out.starts_with(&format!("✓ {cmd}"))), (0, true), "{out}");
+    let fast_line = out.lines().nth(1).unwrap_or_default();
+    assert!(fast_line.starts_with(&format!("✓ {fast}")), "{out}");
+    assert!(fast_line.contains("dev.herdsman.fast"), "{out}");
     let (_, out) = run(&c, &r, &["timer", "status"]);
     assert_eq!(out, "dev.herdsman.tick: not loaded · tick ran never\n");
 }
@@ -162,9 +184,9 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
     assert!(e.str("reason").unwrap().starts_with("herdr: "), "{e:?}");
 }
 
-/// The four step lines `setup` prints before doctor's rows.
+/// The five step lines `setup` prints before doctor's rows.
 fn steps(out: &str) -> Vec<&str> {
-    out.lines().take(4).collect()
+    out.lines().take(5).collect()
 }
 
 #[test]
@@ -189,12 +211,13 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let (_, out) = run(&c, &r, &["setup"]);
     let s = steps(&out);
     assert!(s[0].starts_with("✓ ") && s[0].contains("dev.herdsman.tick"), "{out}");
-    assert!(s[1].starts_with("✓ ") && s[1].contains("dev.herdsman.serve"), "{out}");
-    assert_eq!(s[2], "= tailscale serve skipped: tailscale is not on PATH");
-    assert_eq!(s[3], "✓ profiles synced");
+    assert!(s[1].starts_with("✓ ") && s[1].contains("dev.herdsman.fast"), "{out}");
+    assert!(s[2].starts_with("✓ ") && s[2].contains("dev.herdsman.serve"), "{out}");
+    assert_eq!(s[3], "= tailscale serve skipped: tailscale is not on PATH");
+    assert_eq!(s[4], "✓ profiles synced");
     assert!(
         out.lines()
-            .skip(4)
+            .skip(5)
             .any(|l| l.contains(" doctor") || l.contains(" herdr — ")),
         "{out}"
     );
@@ -226,15 +249,15 @@ fn setup_adopts_a_serve_job_under_another_label() {
     );
     if MAC {
         assert_eq!(
-            steps(&out)[1],
+            steps(&out)[2],
             format!("= adopted {} (re-labelling is manual: docs/setup.md)", theirs.display())
         );
         assert!(!job(&c, "dev.herdsman.serve").exists());
     } else {
-        assert!(steps(&out)[1].contains("dev.herdsman.serve"), "{out}");
+        assert!(steps(&out)[2].contains("dev.herdsman.serve"), "{out}");
     }
     assert_eq!(
-        steps(&out)[2],
+        steps(&out)[3],
         "= tailscale serve skipped: [serve] tailscale_https_port is unset"
     );
 }
