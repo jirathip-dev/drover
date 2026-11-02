@@ -314,7 +314,7 @@ fn services_rows_go_green_amber_and_red() {
         "{page}"
     );
     assert!(
-        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b><span class=\"mt fx\">→ herdsman timer install</span>"),
+        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
         "{page}"
     );
 }
