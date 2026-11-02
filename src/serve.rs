@@ -1582,7 +1582,8 @@ impl<'a> Server<'a> {
             let (t, bar, pct) = gauge(x.unwrap_or(0.0) / l, "▏");
             let x = x.map_or("?".into(), |x| format!("{x:.p$}"));
             let unit = ["", " <span class=mt>pages/2s</span>"][usize::from(p == 0)];
-            let val = format!("<span><b class={t}>{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
+            let o = if t == "r" { "▶ " } else { "" };
+            let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
             m += &hrow(k, t, &(bar + &val), "", "");
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
@@ -1591,8 +1592,9 @@ impl<'a> Server<'a> {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
             let (wt, min) = (esc(wt.rsplit(" · ").next().unwrap_or_default()), lim.min_free_gb);
+            let o = if t == "r" { "▶ " } else { "" };
             let val =
-                format!("<span><b class={t}>{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
+                format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
             m += &hrow("disk", t, &(bar + &val), "", "");
         }
         m += &match (cfg, host::admit(&hs, lim)) {
@@ -1724,13 +1726,13 @@ impl<'a> Server<'a> {
 }
 
 /// #141: a 12-cell text gauge of `x` (value ÷ limit; disk: floor ÷ free): (status, the bar, how far past the limit).
-/// Green under 80 %, amber to 100 %, red past it with `▶`; `end` closes it (disk's floor tick).
+/// Green under 80 %, amber to 100 %, red past it (the value then leads with `▶`); `end` closes it (disk's floor tick).
 fn gauge(x: f64, end: &str) -> (&'static str, String, String) {
     let t = ["g", "a", "r"][usize::from(x >= 0.8) + usize::from(x > 1.0)];
     let n = (1..=12).filter(|i| f64::from(*i) <= x * 12.0 + 0.5).count();
-    let (full, empty, over) = ("█".repeat(n), "░".repeat(12 - n), if x > 1.0 { "▶" } else { "" });
+    let (full, empty) = ("█".repeat(n), "░".repeat(12 - n));
     let pct = Some(x).filter(|x| *x > 1.0).map(|x| format!(" ({:.0}%)", x * 100.0));
-    let bar = format!("<span class=\"bar {t}\">▕{full}<i>{empty}</i>{end}{over}</span>");
+    let bar = format!("<span class=\"bar {t}\">▕{full}<i>{empty}</i>{end}</span>");
     (t, bar, pct.unwrap_or_default())
 }
 
