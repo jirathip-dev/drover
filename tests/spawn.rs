@@ -64,6 +64,25 @@ fn claude_role_dry_run_uses_synced_profile() {
     assert!(read(&c.state).unwrap().is_empty(), "dry-run logs nothing");
 }
 
+/// #155: `profiles sync` removes a generated Claude profile no role names (the retired `fleet-orch`), nothing else.
+#[test]
+fn profiles_sync_removes_a_stale_generated_profile() {
+    let c = ctx(&tmpdir("spawn-stale"), CONFIG);
+    let dir = c.config.parent().unwrap().join("claude");
+    for (p, f) in [("fleet-orch", "role.md"), ("mine", "notes.md")] {
+        std::fs::create_dir_all(dir.join(p)).unwrap();
+        std::fs::write(dir.join(p).join(f), "x").unwrap();
+    }
+    let (code, out) = run(&c, &Fake::default(), &["profiles", "sync"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("removed stale {}", dir.join("fleet-orch").display())),
+        "{out}"
+    );
+    assert!(!dir.join("fleet-orch").exists() && dir.join("mine/notes.md").exists());
+    assert!(dir.join("fleet-impl/role.md").exists() && dir.join("fleet-rev/role.md").exists());
+}
+
 /// #103: `[fleet.<n>] env` is exported into the lane's shell after HERDSMAN_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {
@@ -334,7 +353,7 @@ fn invalid_effort_is_refused_at_config_load() {
     }
 }
 
-/// #19: Claude lanes get `--name "<fleet> · <role> #<issue> · <short title>"`; orch is `<fleet> · orch`.
+/// #19: Claude lanes get `--name "<fleet> · <role> #<issue> · <short title>"`.
 #[test]
 fn claude_dry_run_names_every_role() {
     let d = tmpdir("spawn-name");
@@ -370,7 +389,6 @@ fn claude_dry_run_names_every_role() {
     assert_eq!(dry("12", "impl"), "sendmeter · impl #12 · fix the meter");
     assert_eq!(dry("12", "rev"), "sendmeter · rev #12 r1 · fix the meter");
     assert_eq!(dry("12", "design"), "sendmeter · design #12 · fix the meter");
-    assert_eq!(dry("-", "orch"), "sendmeter · orch");
     // No cached spec (a dry run never calls GitHub): the head alone.
     assert_eq!(dry("13", "impl"), "sendmeter · impl #13");
 }

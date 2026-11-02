@@ -13,7 +13,7 @@ header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:var(-
 header b{flex:1}
 a{color:var(--l)}
 .m{color:var(--mute)}.g{color:var(--g)}.a{color:var(--a)}.r{color:var(--r)}
-h2{font-size:var(--fs);margin:var(--s4) 0 var(--s1);display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+h2{font-size:var(--fs);margin:var(--s4) 0 var(--s1);display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4)}
 h2>span:first-child{flex:1}
 p{margin:var(--s2) 0}
 .tag{border:1px solid currentColor;border-radius:4px;padding:0 var(--s1);font-size:var(--fs-meta)}

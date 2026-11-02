@@ -146,7 +146,10 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(
         (w.who, w.what.as_str()),
-        ("orch", "pushed 6a258db, waiting for orch to spawn review")
+        (
+            "drive",
+            "pushed 6a258db, waiting for drive (next pass ≤ 5 min) to spawn review"
+        )
     );
     assert_eq!(w.next_cmd.as_deref(), Some("herdsman spawn sendmeter 12 rev"));
 }

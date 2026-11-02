@@ -215,7 +215,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
         return Ok("no device has alerts on".into());
     }
     let k = vapid(log)?;
-    let tab = if matches!(ev.kind.as_str(), "stall" | "lane-dead" | "orch-stuck") {
+    let tab = if matches!(ev.kind.as_str(), "stall" | "lane-dead") {
         "lanes"
     } else {
         "queue"
