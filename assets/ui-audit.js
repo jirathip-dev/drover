@@ -17,10 +17,11 @@
   };
   const canned = async (status, text, then) => { window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status })) : F(u, o); then(); await wait(); };
   const mid = what => early.push(...measure().outliers.map(o => `${what}: ${o}`));
-  // #141 gate 2: Host groups go red, amber, green down the tab; one tab is active, its label on the accent fill.
+  // #141 gate 2: Host groups go red, amber, green down the tab (#157: then grey hosts, a group each past the 4); one tab
+  // is active, its label on the accent fill.
   const ranked = () => {
-    const t = [...$$('#host>.grp')].map(g => 'rag'.indexOf(g.dataset.t));
-    if (t.length !== 4 || t.some((x, i) => x < 0 || (i && x < t[i - 1]))) early.push(`Host groups not ranked by status: ${t}`);
+    const t = [...$$('#host>.grp')].map(g => 'ragm'.indexOf(g.dataset.t));
+    if (t.length < 4 || t.length !== 4 + $$('#host>.grp.h').length || t.some((x, i) => x < 0 || (i && x < t[i - 1]))) early.push(`Host groups not ranked by status: ${t}`);
     const on = $$('nav a.on'), probe = B.appendChild(Object.assign(document.createElement('i'), { style: 'color:var(--l)' }));
     const accent = getComputedStyle(probe).color;
     probe.remove();

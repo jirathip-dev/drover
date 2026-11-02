@@ -1970,7 +1970,8 @@ impl<'a> Server<'a> {
         let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
         let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
         let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
-        gs.map(grp).concat() + &hg.into_iter().map(grp).collect::<String>()
+        let hosts: String = hg.into_iter().map(grp).collect(); // #157: `.h`, a host's group (serve.js greys it)
+        gs.map(grp).concat() + &hosts.replace("<details class=grp", "<details class=\"grp h\"")
     }
 }
 
