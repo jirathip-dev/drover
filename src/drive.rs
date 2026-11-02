@@ -10,8 +10,42 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-/// A lock older than this belongs to a pass that died; the next pass takes it over.
-const STALE_LOCK_SECS: u64 = 1800;
+/// #168: a lock without a live pid older than this belongs to a pass that died; the next pass takes it over.
+const STALE_LOCK_SECS: u64 = 600;
+
+/// #168: `drive.lock` holds the pass's pid; dropping the guard (error or panic included) removes it.
+struct Lock(std::path::PathBuf);
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The lock, unless a live pass holds it: a dead pid's lock is stale at once, one without a pid after `STALE_LOCK_SECS`.
+fn take(r: &dyn Runner, lock: &Path) -> Option<Lock> {
+    let pid = std::fs::read_to_string(lock).unwrap_or_default();
+    let pid = pid.trim();
+    let age = lock
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok());
+    let dead = if pid.is_empty() {
+        age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS)
+    } else {
+        ok(r, "kill", &["-0", pid]).is_err()
+    };
+    if dead {
+        let _ = std::fs::remove_file(lock);
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock)
+        .ok()?;
+    let _ = write!(f, "{}", std::process::id());
+    Some(Lock(lock.into()))
+}
 
 /// `<state dir>/drive-<fleet>.last`: the time of the fleet's last pass (the board's `last pass`).
 pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
@@ -58,27 +92,13 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only:
     std::fs::create_dir_all(state_dir(ctx))?;
     let _ = std::fs::write(ctx.state.with_file_name("drive.at"), ctx.now.to_string());
     let lock = state_dir(ctx).join("drive.lock");
-    let age = |p: &Path| {
-        p.metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-    };
-    if age(&lock).is_some_and(|a| a.as_secs() > STALE_LOCK_SECS) {
-        let _ = std::fs::remove_file(&lock);
-    }
-    if std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)
-        .is_err()
-    {
+    let Some(_held) = take(r, &lock) else {
         return Ok(writeln!(
             out,
             "drive: another pass holds {}; nothing done",
             lock.display()
         )?);
-    }
+    };
     let mine = |(n, f): &(&String, &crate::config::Fleet)| f.driven() && only.is_none_or(|o| o == n.as_str());
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
@@ -86,7 +106,6 @@ pub fn drive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, only:
         res = res.and(pass(ctx, cfg, r, out, name, start).map(|more| start = more));
         let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
     }
-    let _ = std::fs::remove_file(&lock);
     res
 }
 
@@ -146,8 +165,8 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, "impl"])?;
-        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "ALL_CAPPED"));
-        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "CAP" | "ALL_CAPPED")) {
+        go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "ALL_CAPPED"));
+        if matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "CAP" | "ALL_CAPPED")) {
             break;
         }
     }

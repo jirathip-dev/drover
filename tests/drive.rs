@@ -466,6 +466,32 @@ fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
     assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), Some(c.now));
 }
 
+/// #168: a lock with a dead pid is taken over at once, a live pid's is respected; the pass's pid is written.
+#[test]
+fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
+    let c = setup("drive-pid");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let lock = c.state.parent().unwrap().join("drive.lock");
+    std::fs::write(&lock, "4242").unwrap();
+    let live = fake(NO_AGENTS).reply("git -C", "").reply("kill -0 4242", "");
+    let (out, steps) = drive(&c, &live);
+    assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(&lock).unwrap(),
+        "4242",
+        "a live pass's lock stays"
+    );
+    let dead = fake(NO_AGENTS).reply("git -C", "").once("kill -0 4242", 1, "");
+    let gone = || assert!(!lock.exists(), "released after the pass");
+    assert_eq!(drive(&c, &dead).1, ["start"]);
+    gone();
+    // The guard releases the lock when the pass fails, too.
+    std::fs::write(&lock, "4242").unwrap();
+    let bad = Fake::default().once("kill -0 4242", 1, "");
+    assert!(run(&c, &bad, &["drive"]).0 != 0);
+    gone();
+}
+
 #[test]
 fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let c = setup("drive-web");

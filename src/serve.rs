@@ -92,7 +92,9 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     std::thread::scope(|sc| {
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
-            *lock(&h) = host::sample(r);
+            let mut hs = host::sample(r);
+            host::window(&ctx.state, &mut hs);
+            *lock(&h) = hs;
             std::thread::sleep(Duration::from_secs(10));
         });
         sc.spawn(move || loop {
@@ -1452,6 +1454,7 @@ impl<'a> Server<'a> {
                 load_per_cpu: Some(k * lim.load_per_cpu),
                 pressure: Some(p.into()),
                 swapout: Some(0.0),
+                ..Host::default()
             },
         );
         let host = json!({"load": h.load_per_cpu, "limit": lim.load_per_cpu, "pressure": h.pressure, "swapouts": h.swapout, "swap_limit": lim.swapout_rate, "gate": host::admit(&h, lim).err()});
@@ -1570,19 +1573,24 @@ impl<'a> Server<'a> {
     fn host_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> String {
         let hs = self.sample();
         let limits = cfg.map(|c| &c.limits);
-        let lim =
-            |f: &dyn Fn(&crate::config::Limits) -> f64| limits.map_or(String::new(), |l| format!(" (limit {})", f(l)));
+        let lim = |f: &dyn Fn(&crate::config::Limits) -> String| {
+            limits.map_or(String::new(), |l| format!(" (limit {})", f(l)))
+        };
         let v = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
         let gate = limits.map(|l| host::admit(&hs, l));
         let mut h = format!(
             "<h2>Host</h2><p class=kv>load/cpu <b>{}</b>{}</p><p class=kv>memory pressure <b class={}>{}</b></p>\
-             <p class=kv>swap-out <b>{}</b> pages/2s{}</p>",
+             <p class=kv>swap-out <b>{}</b> now · <b>{}</b> median pages/2s{}</p>",
             v(hs.load_per_cpu, 2),
-            lim(&|l| l.load_per_cpu),
+            lim(&|l| l.load_per_cpu.to_string()),
             tone(hs.pressure.as_deref().unwrap_or("?")),
             esc(hs.pressure.as_deref().unwrap_or("?")),
             v(hs.swapout, 0),
-            lim(&|l| l.swapout_rate),
+            v(hs.swap_median, 0),
+            lim(&|l| format!(
+                "{} on the median of the last samples, with pressure warn/critical",
+                l.swapout_rate
+            )),
         );
         h += &match gate {
             Some(Ok(())) => "<p class=kv>spawn gate <b class=g>admits</b></p>".into(),

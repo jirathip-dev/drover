@@ -486,7 +486,14 @@ pub fn spawn(
     if let Some(gb) = host::free_gb(r).filter(|g| *g < min) {
         return refused("DISK_LOW", format!("{gb:.1} GB free < {min}; `herdsman clean --yes`"));
     }
-    if let Err(why) = host::admit(&host::sample(r), &cfg.limits) {
+    let mut hs = host::sample(r);
+    host::window(&ctx.state, &mut hs);
+    let mem = cfg.limits.min_free_mem_gb;
+    if let Some(gb) = hs.free_mem_gb.filter(|g| *g < mem) {
+        let why = format!("only {gb:.1} GB of memory free (floor {mem} GB); a lane needs about 0.5–1.5 GB");
+        return refused("MEM_LOW", format!("{why}; retry when a lane finishes"));
+    }
+    if let Err(why) = host::admit(&hs, &cfg.limits) {
         if !o.force {
             return refused("HOST_BUSY", format!("{why}; retry later or pass --force"));
         }
@@ -568,10 +575,19 @@ pub fn spawn(
     }
     std::fs::write(&p.brief, brief_text).context("writing the brief")?;
     h.prepare(ctx, r, &p)?;
-    let pane = herdr::free_pane(r, ws, &p.worktree)?;
+    let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
     pj = plan_json(ctx, f, &p);
     herdr::ok(r, &p.lane_cmd(&pane))?;
-    let start = herdr::exec(r, &p.start_cmd(ctx, &pane))?;
+    let mut start = herdr::exec(r, &p.start_cmd(ctx, &pane))?;
+    // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
+    if herdr::failed_with(&start, "agent_pane_busy") {
+        let lane = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane));
+        let closed = lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
+        event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
+        pane = herdr::free_pane(r, ws, &p.worktree, Some(&pane))?;
+        herdr::ok(r, &p.lane_cmd(&pane))?;
+        start = herdr::exec(r, &p.start_cmd(ctx, &pane))?;
+    }
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {

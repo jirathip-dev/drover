@@ -113,6 +113,7 @@ ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long t
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
+min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
 
 [[notify]]
