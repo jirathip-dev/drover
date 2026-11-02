@@ -46,3 +46,7 @@
 {"ts":1793426000,"fleet":"acme-api","issue":22,"type":"verdict","verdict":"PASS","sha":"2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b","round":4,"body":"PASS\n\nnon-blocking: docs/api.md could link the spec\n"}
 {"ts":1793426100,"fleet":"acme-api","issue":22,"type":"needs-human","code":"ROUND_LIMIT","reason":"review rounds ran out (4/3)"}
 {"ts":1793429550,"fleet":"docs","type":"drive-pass","by":"auto","started":1793429550,"ended":1793429556,"at":"07:41","actions":[{"issue":10,"step":"start","outcome":"waiting","code":"HOST_BUSY","words":"Mac busy (load/cpu 4.60 > 2.5)"},{"issue":9,"step":"review","outcome":"waiting","code":"CI_NOT_GREEN","words":"waiting for CI"}]}
+{"ts":1793429530,"fleet":"acme-web","type":"clean","why":"merged"}
+{"ts":1793429541,"fleet":"acme-web","issue":46,"type":"notify-failed","cmd":"curl -fsS https://ntfy.sh/demo","event":"needs-decision","error":"timed out after 15s"}
+{"ts":1793429600,"fleet":"acme-web","type":"clean","why":"merged"}
+{"ts":1793429600,"fleet":"acme-web","type":"clean","why":"merged"}

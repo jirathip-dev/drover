@@ -112,7 +112,7 @@ fn month_day(month: &str, day: &str) -> Option<(u64, u64)> {
 }
 
 /// `(month 1-12, day)` of a day number since 1970-01-01 (Hinnant's `civil_from_days`).
-fn civil_month_day(days: u64) -> (u64, u64) {
+pub(crate) fn civil_month_day(days: u64) -> (u64, u64) {
     let doe = (days + 719_468) % 146_097;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
