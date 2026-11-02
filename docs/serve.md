@@ -95,7 +95,7 @@ nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPI
 use; `serve pending` lists requests). The approval is logged, so the waiting page's live Events frag
 changes and the page POSTs `/pair/claim`, which keeps the same cookie for a year. At most 3 requests
 are open, 2 per peer address, and a new code never repeats an open one. Only the token's SHA-256 is kept, in `<state>/serve/devices.json`
-(0600); the Host tab lists paired devices with a Remove button.
+(0600); the Host tab's ALERTS group lists paired devices with a Remove button.
 The panel reads `Approve on the Mac: herdsman serve approve <code>`. An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.
 `approve_hint = "or send 'pair {code}' to the owner"`; `/pair/request` returns it as a second line and
@@ -215,7 +215,7 @@ every subscribed device.
 The subscribe tells the truth (#87): with a webpush notifier it pushes one "alerts are on" test to
 that device alone and answers `alerts on` (or why the test push failed); without one it still keeps
 the subscription but answers, under the button, "alerts are saved but off: add `[[notify]] type =
-"webpush"` to fleet.toml (docs/serve.md)". The Host tab's Alerts row reads `on · 1 device · last
+"webpush"` to fleet.toml (docs/serve.md)". The Host tab's ALERTS `push` row reads `on · 1 device · last
 sent 3m ago`, `off: no webpush notifier`, or `on · last failure: <reason>` while a webpush
 `notify-failed` is newer than the last delivery. Each delivery logs one passive `push-sent` with the
 device count only (no endpoint, no key). `herdsman check` logs one `alerts-off` (again only when the
@@ -228,6 +228,18 @@ logged, printed or served; the page gets only the public key and each device's l
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client). CI's deps gate fails on any other direct dependency.
+
+## Host tab (#141)
+
+Four groups: MACHINE (load/cpu, swap-out, memory, disk, the spawn gate), SERVICES (board, tick, herdr, accounts,
+deepseek), FLEETS (each fleet's last `herdsman drive` result in plain words, the raw line on tap) and ALERTS (push,
+alert devices, paired devices). A group takes its worst row's status, red over amber over green (a paused fleet is
+grey and counts as none); problem groups go first and open, green ones collapse to one summary line. A tap's
+open/closed holds for the browser session until the group's status changes (`sessionStorage`, `host:<GROUP>`).
+Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %, amber to 100 %, red past it with
+`▶` and the percentage); disk's gauge fills as free space nears `min_free_gb`, its floor the closing tick. The words
+come from one table in `src/serve.rs` (`WORDS`, golden-tested in tests/host_words.rs). The tab bar is
+`[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
 
 ## Static export and the public demo
 

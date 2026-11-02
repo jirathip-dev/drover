@@ -56,8 +56,15 @@ button:disabled,.pk:has(:disabled){color:var(--mute);opacity:.6}
 input,textarea{font-size:var(--fs-input)}
 .ev,.kv{padding:var(--s2) 0}
 nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--bg);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
-nav a{flex:1;text-align:center;line-height:calc(var(--hit) + var(--s2));color:var(--mute);text-decoration:none}
-nav a.on{color:var(--fg);box-shadow:inset 0 2px var(--g)}
+/* #141: bracket tabs; the active one a pressed key (accent fill, dark text, a 2 px accent bar over its cell); `·N` in
+   red is the needs-you count (dark on the fill). The whole cell (52 px) is the tap target. */
+nav a{flex:1;display:flex;align-items:center;justify-content:center;min-height:calc(var(--hit) + var(--s2));line-height:1;color:var(--mute);text-decoration:none}
+nav a>span{display:inline-flex;align-items:center;height:var(--ctl);padding:0 .5ch;white-space:nowrap}
+nav a>span::before{content:"["}nav a>span::after{content:"]"}
+nav a .n{color:var(--r);font-weight:700}
+nav a.on{box-shadow:inset 0 2px var(--l)}
+nav a.on>span{background:var(--l);color:var(--bg)}
+nav a.on .n{color:inherit}
 #stale{color:var(--r);font-size:var(--fs-meta)}
 .tl{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lh{text-align:right}
@@ -212,6 +219,40 @@ details.q[open]{padding-bottom:var(--s2)}
 .qh{display:flex;justify-content:flex-end;margin:var(--s2) 0 0}
 .sh.lg :is(.acts,.cf,.chat,.live,.pairf,.cmds,.reply,.st){display:none}
 .sh.lg .top{max-height:none;border:0}
+/* #141: the Host tab's groups. A group's 44 px header: one status dot, the name, a one-line summary (hidden while open),
+   the caret; a problem group's header takes its colour on a 12 % tint. serve.js ranks and opens them. */
+.grp{border-bottom:1px solid var(--line)}
+.grp>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:0 var(--s1);white-space:nowrap}
+.grp>summary .dt{flex:none;width:var(--s2);height:var(--s2);border-radius:50%;background:currentColor;color:var(--g)}
+.grp>summary .gn{flex:none;font-weight:700;letter-spacing:.08em}
+.grp>summary .gs{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--mute);font-size:var(--fs-meta)}
+.grp[open]>summary .gs{visibility:hidden}
+.cv{flex:none;margin-left:auto;font-style:normal;color:var(--mute)}
+.cv::before{content:"▸"}[open]>summary .cv::before{content:"▾"}
+.grp[data-t=a]>summary{color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)}
+.grp[data-t=r]>summary{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent)}
+.grp:is([data-t=a],[data-t=r])>summary :is(.dt,.gs){color:inherit}
+.grp[open]{padding-bottom:var(--s2)}
+/* A row: label (9ch) · gauge (15ch) · value; a row without a gauge spans the last two; meta and fix lines go under. */
+.gr{display:grid;grid-template-columns:9ch 15ch minmax(0,1fr);gap:0 1ch;align-items:baseline;margin:0;padding:var(--s1) 0;border:0}
+.gr>.k,.rw>summary>.k{color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gr>:is(.w,.x,.mt){grid-column:2/-1}.fx{display:block}
+.grp .mt{font-size:var(--fs-meta);color:var(--mute)}
+/* The gauge: ▕ + 12 cells + ▏ (disk: its floor tick ┃) in the mono font, ▶ past the limit; filled cells and edges take
+   the status colour, empty ░ cells the muted one. */
+.bar{white-space:pre;color:var(--g)}.bar.a{color:var(--a)}.bar.r{color:var(--r)}
+.bar i{font-style:normal;color:var(--mute)}
+/* A command chip never breaks inside; the whole chip wraps to the next line. */
+.grp code{white-space:nowrap;color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit;overflow-wrap:normal}
+/* A row that opens (a raw line, the accounts): the whole row is the 44 px tap target, the caret on it alone. The raw
+   line shows under it, 11 px, wrapping, on the panel colour. */
+.rw{border:0}
+.rw>summary{grid-template-columns:9ch minmax(0,1fr) auto;gap:0 1ch;align-items:baseline;align-content:center;padding:var(--s1) 0}
+.rw>summary>.x{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.rw>summary>.t{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
+.rw>pre{margin:0 0 var(--s2) 10ch;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.rw>.sub{margin:0 0 var(--s2) 10ch}.rw>.sub>p{margin:0;padding:var(--s1) 0}
+.grp form.role{border-top:0}
 /* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
    The line is 28 px controls in 8 px padding: 44 px tall, the rings inside it. */
 body:not(.unf) .ask.lt{display:none}
