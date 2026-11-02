@@ -313,7 +313,7 @@ fn services_rows_go_green_amber_and_red() {
         String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
     assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
     assert!(
-        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b><span class=\"mt fx\">→ herdsman timer install</span>"),
+        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
         "{page}"
     );
 }
