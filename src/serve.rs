@@ -1644,7 +1644,7 @@ impl<'a> Server<'a> {
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
-            let (wt, min) = (esc(wt.rsplit(" · ").next().unwrap_or_default()), lim.min_free_gb);
+            let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
             let o = if t == "r" { "▶ " } else { "" };
             let val =
                 format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
