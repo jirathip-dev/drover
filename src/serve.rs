@@ -369,7 +369,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 }
 
 /// Form ops only a paired device may POST.
-const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park"];
+const PAIRED_OPS: &[&str] = &["unpair", "answer", "drive", "override", "extend", "park", "reap"];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
 fn join(parts: &[&str]) -> String {
@@ -1040,6 +1040,11 @@ impl<'a> Server<'a> {
                 )?;
                 format!("#{n}: {op}")
             }
+            "reap" => {
+                let cfg = Config::load(&ctx.config)?;
+                let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
+                format!("reaped {n} leftover process(es)")
+            }
             "unpair" => {
                 let mut all = devices::load(ctx);
                 all.retain(|d| d.hash != g("hash"));
@@ -1666,6 +1671,39 @@ impl<'a> Server<'a> {
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
+        // #186: processes in closed lanes' worktrees, with a confirmed [reap].
+        if let Some(c) = cfg {
+            let left = host::agents(r).map_or(vec![], |a| {
+                crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
+            });
+            let pids: Vec<&str> = left.iter().map(|p| p.0.as_str()).collect();
+            let rss = (!pids.is_empty()).then(|| crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids.join(",")]));
+            let kb: u64 = rss
+                .and_then(Result::ok)
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter_map(|k| k.parse::<u64>().ok())
+                .sum();
+            let (t, n, hid) = (
+                if left.is_empty() { "g" } else { "a" },
+                left.len(),
+                hidden("reap", "", &mtime(ctx)),
+            );
+            let reap = format!("<form method=post>{hid}<button data-confirm=\"TERM then KILL {n} leftover process(es)?\">reap</button></form>");
+            let reap = if n > 0 && self.addr.is_some() {
+                reap.as_str()
+            } else {
+                ""
+            };
+            m += &kv(
+                "leftovers",
+                t,
+                &format!(
+                    "<b class={t}>{n}</b> <span class=mt>{} MB in closed lanes</span>{reap}",
+                    kb / 1024
+                ),
+            );
+        }
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);

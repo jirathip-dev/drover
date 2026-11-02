@@ -15,6 +15,63 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
         .collect()
 }
 
+/// #186: never signalled, whatever their cwd.
+const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];
+
+/// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
+pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
+    let me = [1, std::process::id(), std::os::unix::process::parent_id()].map(|p| p.to_string());
+    let (mut out, mut p) = (vec![], (String::new(), String::new()));
+    for l in stdout(r, "lsof", &["-d", "cwd", "-F", "pcn"])
+        .unwrap_or_default()
+        .lines()
+    {
+        match l.split_at(l.len().min(1)) {
+            ("p", pid) => p = (pid.into(), String::new()),
+            ("c", c) => p.1 = c.into(),
+            ("n", n) if !me.contains(&p.0) && !SPARE.contains(&p.1.as_str()) => {
+                out.push((p.0.clone(), p.1.clone(), n.into()));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// #186: the processes of `ps` whose cwd is inside `dir` (an absolute path at least two levels deep).
+pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, String, String)> {
+    let deep = dir.is_absolute() && dir.components().count() > 2;
+    ps.iter()
+        .filter(|p| deep && Path::new(&p.2).starts_with(dir))
+        .cloned()
+        .collect()
+}
+
+/// #186: TERM every process inside `dir`, wait 5 s, KILL those still there; the commands signalled.
+pub fn reap(r: &dyn Runner, dir: &Path) -> Vec<String> {
+    let first = inside(&cwds(r), dir);
+    let kill = |sig: &str, ps: &[(String, String, String)]| {
+        let pids = ps.iter().map(|p| p.0.clone());
+        let _ = r.run(
+            "kill",
+            &std::iter::once(sig.to_string()).chain(pids).collect::<Vec<_>>(),
+        );
+    };
+    if first.is_empty() {
+        return vec![];
+    }
+    kill("-TERM", &first);
+    r.sleep(5);
+    let left: Vec<_> = inside(&cwds(r), dir)
+        .into_iter()
+        .filter(|p| first.contains(p))
+        .collect();
+    if !left.is_empty() {
+        kill("-KILL", &left);
+    }
+    first.into_iter().map(|p| p.1).collect()
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Host {
     /// normal | warn | critical
