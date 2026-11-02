@@ -189,7 +189,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PushCmd,
     },
-    /// One pass of the loop for `driver = "herdsman"` fleets: do every step that's due, then exit; safe from cron
+    /// One pass of the loop for every unpaused fleet: do every step that's due, then exit; safe from cron
     Drive { fleet: Option<String> },
     /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it
     #[command(hide = true)]
@@ -670,7 +670,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
-                Cmd::Drive { fleet } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref())?,
+                Cmd::Drive { fleet } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false)?,
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let all = crate::waiting::scan(
                         ctx,

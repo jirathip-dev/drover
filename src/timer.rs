@@ -151,7 +151,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         herdr::status(r).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
         crate::check::check(ctx, cfg, r, out)?;
-        drive::drive(ctx, cfg, r, out, None)
+        drive::drive(ctx, cfg, r, out, None, false)
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {

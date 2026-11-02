@@ -85,8 +85,8 @@ fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     );
     // The Queue tab's rows: parked in neutral, dead in red.
     assert!(
-        page.contains("<span>#12</span><span class=m>parked</span>")
-            && page.contains("<span>#14</span><span class=r>dead</span>"),
+        page.contains("<span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span><span class=m>parked</span>")
+            && page.contains("<span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/14\">#14</a></span><span class=r>dead</span>"),
         "queue rows"
     );
     let herd: serde_json::Value = serde_json::from_str(&get(&s, "/herd.json")).unwrap();

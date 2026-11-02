@@ -249,6 +249,7 @@ pub const PASSIVE: &[&str] = &[
     "account-capped",
     "ask-waiting",
     "driven",
+    "drive-pass",
     "amended",
     "closed-other",
     "conflict-predicted",

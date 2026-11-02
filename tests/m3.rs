@@ -388,7 +388,11 @@ fn serve_is_read_only_html() {
         res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
         "issue link"
     );
-    assert!(res.contains("actions?query=branch%3Aissue-12"), "Actions runs link");
+    // #169: `checks` is the PR's checks page; never a query-string Actions URL.
+    assert!(
+        res.contains("pull/15/checks\">checks</a>]") && !res.contains("actions?query"),
+        "checks link"
+    );
     for m in ["POST", "PUT", "DELETE", "PATCH", "HEAD"] {
         let res = String::from_utf8(srv.respond(&format!("{m} / HTTP/1.1\r\n\r\n"), 1_000_000)).unwrap();
         assert!(res.starts_with("HTTP/1.1 405 "), "{m}: {res}");

@@ -196,6 +196,36 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED STALE_VERDICT"), "{out}");
     assert!(!r.0.called("gh pr merge"));
+    // #165: the next drive pass starts a review of the new head, not a dead block.
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &green_pr(3, &h))
+            .reply("gh issue view 3", r#"{"title":"t","body":"b"}"#)
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+            .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
+            .reply(
+                "herdr pane list",
+                r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+            )
+            .reply("herdr", "{}"),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("sendmeter #3 review"), "{out}");
+    let calls = r.0.calls.borrow();
+    assert!(
+        calls
+            .iter()
+            .any(|l| l.contains("--branch rev-3-r2 --base origin/issue-3")),
+        "{calls:?}"
+    );
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
+    assert_eq!(st.state, "review(2)");
+    assert!(!st.reviewed(&h), "B has no verdict yet");
 }
 
 #[test]

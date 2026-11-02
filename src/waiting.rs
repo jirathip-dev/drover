@@ -106,8 +106,10 @@ pub fn waiting_on(
         .find(|e| e.is("blocked", f, n))
         .and_then(|e| e.str("code"));
     let retry = s.state == "blocked" && s.verdicts.last().is_some_and(|v| v.1 == "PASS");
-    let st = match block.filter(|c| ["CI_NOT_GREEN", "NOT_MERGEABLE", "HOST_BUSY"].contains(c)) {
-        Some(_) if retry => "ready",
+    let st = match block {
+        Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
+        // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
+        Some("STALE_VERDICT") if s.state == "blocked" => "stale",
         _ => s.state.split('(').next().unwrap_or_default(),
     };
     match st {
@@ -123,6 +125,12 @@ pub fn waiting_on(
             w("drive", "PASS + green, waiting for merge", s.last_ts, cmd("merge", ""))
         }
         "ready" => w("ci", "waiting for CI", s.last_ts, None),
+        "stale" => w(
+            "drive",
+            "no verdict for the PR head: review again",
+            s.last_ts,
+            cmd("spawn", " rev --supersede"),
+        ),
         // The exact command, or none (no nudge) while the verdict word or the head sha is unknown.
         "review" => match rev {
             // #92: a verdict is for the head the rev lane was spawned at; a moved PR head gets a fresh reviewer.
@@ -201,6 +209,11 @@ pub fn scan(
             lane: Some(lane.clone()),
             ..s
         };
+        let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
+        // #169: no PR yet: the issue branch's latest run backs the `checks` link (the tick reads it, never a request).
+        if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
+            gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
+        }
         if busy(&lane) {
             let who = if s.lanes.get("rev") == Some(&lane) {
                 "reviewer"
@@ -227,7 +240,6 @@ pub fn scan(
             }));
             continue;
         }
-        let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
         let pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
             (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).unwrap_or_default(),

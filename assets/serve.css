@@ -98,14 +98,14 @@ main{transition:transform .2s}
 .av.r .px{filter:sepia(1) saturate(6) hue-rotate(-50deg)}
 @media (prefers-reduced-motion:reduce){.run b,.av .px{animation:none!important}.run b:last-child{visibility:hidden}}
 #sheet{position:fixed;inset:0;z-index:3}
-.bd{position:absolute;inset:0;background:#000a;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
+.bd{position:absolute;inset:0;background:#000a;touch-action:none;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
 /* #70: a full-height box placed by translateY (serve.js: half 50 %, mid 78 %, full); it follows the finger
-   (.drag), snaps (.28 s) and slides off to close (.out, .22 s ease-in); the backdrop fades with it. */
+   (.drag), snaps (.28 s) and slides off to close (.out, #166: .2 s ease-out); the backdrop fades with it. */
 .sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid #30363d;border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);will-change:transform}
 .sh.full{border-radius:0}
 #sheet.drag>*{transition:none}
-#sheet.out>*{transition-duration:.22s;transition-timing-function:ease-in}
-@media (prefers-reduced-motion:reduce){#sheet .sh{transition:none}}
+#sheet.out>*{transition-duration:.2s;transition-timing-function:ease-out}
+@media (prefers-reduced-motion:reduce){#sheet>*{transition:none!important}}
 /* The handle: the pill plus the title row, at least 56 px; it alone drags (the chat hands off at its top). */
 .hd{flex:none;min-height:calc(var(--hit) + var(--s3));padding-bottom:var(--s2);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
 .hd::before{content:"";display:block;width:40px;height:var(--s1);margin:var(--s2) auto;border-radius:3px;background:#30363d}
@@ -135,8 +135,8 @@ button[name=choice]::after,button.pick::after{inset:calc(-1 * var(--s1)) calc(-1
 button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .ask small,button[name=choice] small{font-size:var(--fs-meta)}
 /* #43: sheet actions, kill/clean confirm, `/` menu, per-turn transcript, tool calls collapsed; the page locked under the sheet. */
+/* #166: the page stays put and painted under the sheet; no position:fixed body, no scroll reset. */
 .lock,.lock body{overflow:hidden;overscroll-behavior:none}
-.lock body{position:fixed;left:0;right:0}
 .acts,.cf{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .acts [data-op=kill],.cf .yes{color:var(--r)}
 .cf{border:1px solid var(--r);border-radius:8px;padding:var(--s2)}.cf p{flex-basis:100%;margin:0;font-size:var(--fs-meta)}
@@ -217,3 +217,5 @@ details.q[open]{padding-bottom:var(--s2)}
 body:not(.unf) .ask.lt{display:none}
 .later{display:flex;align-items:center;gap:var(--s4);margin:var(--s2) 0;padding:var(--s2);border:1px solid var(--r);border-radius:8px;background:color-mix(in srgb,var(--r) 15%,transparent)}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
+/* #166: a driven fleet's result line under its header; a tap lists each action in plain words, a tap on one its code. */
+.dp summary{display:flex}.dp ul{margin:0;padding-left:var(--s4);color:var(--fg)}.dp code{font-size:var(--fs-meta)}
