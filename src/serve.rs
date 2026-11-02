@@ -769,7 +769,7 @@ impl<'a> Server<'a> {
                 // #140: an op that can spawn or merge runs on `serve_on`'s job thread; the reply is at once.
                 let f = form(body.trim());
                 let [op, fleet] = ["op", "fleet"].map(|k| f.get(k).cloned().unwrap_or_default());
-                let msg = match self.jobs.as_ref().filter(|_| ["drive", "override", "extend"].contains(&op.as_str())) {
+                let msg = match self.jobs.as_ref().filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str())) {
                     Some(_) if !lock(&self.running).insert(fleet.clone()) => format!("REFUSED DRIVE_RUNNING: {fleet} has a {op} running"),
                     Some(tx) => (format!("{op} started for {fleet}"), drop(tx.send((ctx.clone(), f, fleet)))).0,
                     None => self.write(ctx, &f).unwrap_or_else(|e| shown(&e)),
@@ -1223,7 +1223,10 @@ impl<'a> Server<'a> {
         let card = |s: &IssueState| {
             let (f, n) = (&s.fleet, s.issue);
             let (pr, fc) = (gh::cached_pr(ctx, f, n), cfg.and_then(|c| c.fleet.get(f)));
-            let why = events.iter().rev().find(|e| e.is("needs-human", f, n));
+            let why = events
+                .iter()
+                .rev()
+                .find(|e| ["needs-human", "extend-failed"].iter().any(|k| e.is(k, f, n)));
             let why = esc(why.and_then(|e| e.str("reason")).unwrap_or("gate"));
             let m = pr["mergeable"].as_str().unwrap_or("?");
             let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE";
@@ -1248,7 +1251,16 @@ impl<'a> Server<'a> {
             let (who, form) = (esc(&format!("{f} · #{n} · {a}")), if rw { form } else { String::new() });
             format!("<div class=ask data-n={n}><p><b>needs you</b> <span class=m>{who}</span></p><p>#{n} {title} · {why}</p><p class=m>{v}</p>{form}</div>")
         };
-        st.values().filter(|s| s.state == "needs-human").map(card).collect()
+        // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
+        let pend = |s: &IssueState| match s.last_event.as_str() {
+            "round-extended" if crate::waiting::unspawned(events, s) => format!(
+                "<div class=pend data-n={}><p class=m>⟳ one more round · starting a lane…</p></div>",
+                s.issue
+            ),
+            _ if s.state == "needs-human" || s.last_event == "extend-failed" => card(s),
+            _ => String::new(),
+        };
+        st.values().map(pend).collect()
     }
 
     /// A blocked lane's card: a Claude menu's options as buttons (`/answer`) under its title, reason, command

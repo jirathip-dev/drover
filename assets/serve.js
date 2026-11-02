@@ -176,7 +176,7 @@ function connect() {
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
   es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
   es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
-  es.addEventListener('toast', e => toast(JSON.parse(e.data))); // #140: a background drive/override/extend finished
+  es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
     es = null;
@@ -206,16 +206,20 @@ function toast(text) {
 if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
 // (#65, #140: no navigation); the tapped button spins until the reply. The plain form POST is the no-JS fallback.
+const PEND = { extend: 'one more round · starting a lane…', park: 'park · closing its lanes…', override: 'merge anyway · merging…' };
+const pend = (card, op) => { card.outerHTML = `<div class=pend data-n=${card.dataset.n}><p class=m>⟳ ${PEND[op]}</p></div>`; };
 document.addEventListener('submit', async e => {
   const f = e.target, b = e.submitter, c = b && b.dataset.confirm;
   if (c && !confirm(c)) return e.preventDefault(); // #130: merge anyway
   if (!f.elements.op) return;
   e.preventDefault();
   if (b) b.ariaBusy = 'true';
+  const d = new FormData(f, b), k = b && b.name === 'op' && b.closest('#needs>.ask');
+  if (k && PEND[b.value]) pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
   try {
-    const r = await post('', new FormData(f, b));
-    toast(r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim());
-    refresh();
+    const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
+    toast(m);
+    if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
   } catch (err) { toast('error: ' + err.message); }
   if (b) b.ariaBusy = null;
 });
