@@ -60,6 +60,8 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
+# env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
+# port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]
@@ -110,6 +112,8 @@ min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
+fast_secs = 60       # `herdsman timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
+slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin
