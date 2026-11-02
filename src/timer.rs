@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub const TICK: &str = "dev.herdsman.tick";
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
+const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
 
@@ -325,9 +326,10 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let shown = |(c, s, _): &(String, String, bool)| format!("client {c}, server {s}");
     let d = v.as_ref().map_or("not on PATH, or no server".into(), shown);
     let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
-    rows.push(row(herdr::BIN, t, d, herdr::BIN));
+    rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
-        let t = ["g", "a", "r"][usize::from(gb < host::AMBER_FREE_GB) + usize::from(gb < cfg.limits.min_free_gb)];
+        let (min, n) = (cfg.limits.min_free_gb, usize::from);
+        let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
         rows.push(row("disk", t, format!("{gb:.0} GB free"), "herdsman clean --yes"));
     }
     // #164: the worktree total from drive's last walk, against the budget; amber from 80 %, red over (DISK_BUDGET).
