@@ -1,6 +1,6 @@
 //! The clap CLI, `herdsman help --agent` and dispatch to the modules.
 use crate::config::{self, home, Config};
-use crate::events::{fold, read, status_line};
+use crate::events::{emit, fold, read, status_line, Event};
 use crate::runner::{self, Runner};
 use crate::{
     access, check, devices, gate, gh, harness, hook, migrate, pause, protection, queue, queue_change, serve, set,
@@ -453,7 +453,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Hook {
             role,
             git_pre_push: true,
-        } => return pre_push(ctx, out, stdin, role.as_deref() == Some("rev")),
+        } => return pre_push(ctx, r, out, stdin, role.as_deref() == Some("rev")),
         Cmd::Hook {
             role,
             git_pre_push: false,
@@ -858,8 +858,30 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
+    } else if let Some(dir) = hook::push_dir(&input) {
+        coauthor_warn(ctx, r, &dir, "HEAD");
     }
     Ok(())
+}
+
+/// #198: warn (never block) when an unpushed commit carries an AI `Co-Authored-By:`; logged `coauthor-trailer`.
+fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
+    let msgs = runner::ok(r, "git", &["-C", dir, "log", rev, "--not", "--remotes", "--format=%B"]);
+    let Some(trailer) = msgs.as_deref().ok().and_then(hook::ai_coauthor) else {
+        return;
+    };
+    eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let mut it = lane.split(':');
+    let (fleet, issue) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
+    let d = json!({"lane": lane, "line": trailer});
+    if let Ok(cfg) = Config::load(&ctx.config) {
+        let _ = emit(
+            &ctx.state,
+            &cfg,
+            Event::new(ctx.now, fleet, issue, "coauthor-trailer", d),
+        );
+    }
 }
 
 /// main, master, staging and every fleet's integration branch.
@@ -872,7 +894,7 @@ fn protected_branches(ctx: &Ctx) -> Vec<String> {
 }
 
 /// git `pre-push` hook for dsh lanes: exit 1 refuses a protected-branch push, or any reviewer push.
-fn pre_push(ctx: &Ctx, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
+fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     let branches = protected_branches(ctx);
@@ -892,6 +914,9 @@ fn pre_push(ctx: &Ctx, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool
             )?;
             return Ok(1);
         }
+    }
+    for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
+        coauthor_warn(ctx, r, ".", sha);
     }
     Ok(0)
 }

@@ -213,6 +213,32 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     None
 }
 
+/// #198: the repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
+pub fn push_dir(input: &Value) -> Option<String> {
+    let ti = if input["tool_input"].is_object() {
+        &input["tool_input"]
+    } else {
+        &input["args"]
+    };
+    let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
+    ti["command"]
+        .as_str()?
+        .split([';', '|', '&', '\n', '(', ')', '`'])
+        .find_map(|seg| {
+            let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
+            git_sub(&t, cwd).filter(|(i, _)| t[*i] == "push").map(|(_, d)| d)
+        })
+}
+
+/// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
+pub fn ai_coauthor(log: &str) -> Option<&str> {
+    const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];
+    log.lines().map(str::trim).find(|l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("co-authored-by:") && AI.iter().any(|a| l.contains(a))
+    })
+}
+
 /// The deny answer in the caller's dialect: Hermes `block`, Claude `deny`.
 pub fn deny_json(input: &Value, reason: &str) -> Value {
     if input["hook_event_name"] == "pre_tool_call" || input.get("args").is_some() {

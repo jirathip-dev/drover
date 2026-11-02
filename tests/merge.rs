@@ -556,3 +556,46 @@ fn extend_and_park_refuse_outside_needs_human_and_park_clears_it() {
     let (exit, out) = run(&c, &r, &["park", "sendmeter", "12"]);
     assert!(exit == 3 && out.contains("is parked, not needs-human"), "{out}");
 }
+
+/// #198: the merge commit is `<title> (#PR)`, the PR body's `## For humans` lines, then the facts line.
+#[test]
+fn merge_message_copies_the_human_summary_and_the_facts_line() {
+    let (_d, c) = setup("msg", CONFIG, &[("FAIL", OLD), ("PASS", HEAD)]);
+    let view = json!({"number": 34, "title": "#12: Board shows the host", "files": [
+        {"path": "src/a.rs", "additions": 20, "deletions": 5},
+        {"path": "src/b.rs", "additions": 1, "deletions": 4},
+        {"path": "tests/x.rs", "additions": 90, "deletions": 0}],
+        "body": "Closes #12\n\n## For humans\n\nThe board's Host tab now shows memory.\nNothing else changes.\n\n## Evidence\nx"});
+    let r = pr("staging", green()).once(
+        "gh pr view 34 -R jirathip-dev/sendmeter --json number",
+        0,
+        &view.to_string(),
+    );
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let want = format!(
+        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD} --subject Board shows the host (#34) --body The board's Host tab now shows memory.\nNothing else changes.\n\nCloses #12 · 2 review rounds · src +12 · PASS 1111111"
+    );
+    assert!(r.calls.borrow().contains(&want), "{:#?}", r.calls.borrow());
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "no-human-summary"));
+}
+
+/// #198: no `## For humans` section merges anyway with the facts line only, logged `no-human-summary`.
+#[test]
+fn merge_without_a_human_summary_gives_the_facts_line_only() {
+    let (_d, c) = setup("msg-none", CONFIG, &[("PASS", HEAD)]);
+    let view = json!({"number": 34, "title": "[#12] Trim the cap", "body": "Closes #12",
+        "files": [{"path": "src/a.rs", "additions": 1, "deletions": 9}]});
+    let r = pr("staging", green()).once(
+        "gh pr view 34 -R jirathip-dev/sendmeter --json number",
+        0,
+        &view.to_string(),
+    );
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let want = format!(
+        "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD} --subject Trim the cap (#34) --body Closes #12 · 1 review round · src -8 · PASS 1111111"
+    );
+    assert!(r.calls.borrow().contains(&want), "{:#?}", r.calls.borrow());
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));
+}
