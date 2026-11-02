@@ -18,8 +18,10 @@ herdsman clean --yes                  # reclaim merged or closed-issue lanes
 
 `herdsman spawn` refuses before creating anything:
 
-- `HOST_BUSY`: memory pressure warn or worse, swap-out rate or load per CPU over
-  `[limits]`. `--force` overrides and logs an `override` event.
+- `HOST_BUSY`: memory pressure warn or worse, load per CPU over `[limits]`, or a sustained
+  swap-out rate (the median of the last 5 samples) over `[limits]` while pressure is warn or worse;
+  one spike admits. `--force` overrides and logs an `override` event.
+- `MEM_LOW`: free + inactive memory under `[limits] min_free_mem_gb` (default 2 GB); a lane needs about 0.5–1.5 GB.
 - `DISK_LOW`: free disk on `/` under `[limits] min_free_gb` (default 10 GB). `herdsman clean --yes`
   frees the build folders (`target/`, `node_modules/`, `.next/`, `dist/`) of merged or closed lanes,
   even kept ones (never a live lane's, never one git tracks), and reports the bytes freed (approximate: a

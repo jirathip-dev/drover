@@ -180,6 +180,8 @@ pub struct Limits {
     pub swapout_rate: f64,
     /// `herdsman spawn` refuses `DISK_LOW` under this many GB free on `/`.
     pub min_free_gb: f64,
+    /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
+    pub min_free_mem_gb: f64,
     /// Default reasoning effort for roles that set none.
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
@@ -195,6 +197,7 @@ impl Default for Limits {
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
+            min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
         }
