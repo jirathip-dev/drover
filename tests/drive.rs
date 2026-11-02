@@ -1169,3 +1169,92 @@ fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_h
     );
     assert_eq!(line(json!([])), ("m", "07:41 · started 0 · merged 0".into()));
 }
+
+// --- #182: green PRs get reviewed and merged without waiting on a handoff or the next pass ---
+
+#[test]
+fn a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done() {
+    let c = setup("drive-handoff");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("bee");
+    let r = |ci: &str| {
+        fake(&agents(&[(
+            "sendmeter-impl-12",
+            "idle",
+            &wt.to_string_lossy(),
+            "w9:p1",
+        )]))
+        .reply("gh pr view issue-12", &pr(&head, ci))
+        .reply(&format!("git -C {} log", wt.display()), &format!("{} 20", sha("a1")))
+        .reply("git -C", "")
+    };
+    // The worktree is elsewhere and no handoff was logged; CI still runs at the PR head: nothing yet.
+    idle(&c, &r("pending"));
+    herdsman::gh::forget_pr(&c, "sendmeter", 12);
+    let (out, steps) = drive(&c, &r("green"));
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(out.contains("sendmeter #12 pushed: bee0000 via pr"), "{out}");
+    let all = read(&c.state).unwrap();
+    let p = all.iter().find(|e| e.kind == "pushed").unwrap();
+    assert_eq!((p.str("sha"), p.str("via")), (Some(head.as_str()), Some("pr")));
+    assert_eq!(state(&c), "review(1)");
+    assert_eq!(all.iter().filter(|e| e.kind == "pushed").count(), 1);
+}
+
+#[test]
+fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
+    let c = setup("drive-verdict-merge");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
+    std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
+    let head = sha("abc");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
+        .reply("git -C", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict", "merge"], "{out}");
+    assert!(r.called(&format!(
+        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+    )));
+    assert_eq!(state(&c), "merged");
+}
+
+#[test]
+fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
+    let alpha = "[fleet.alpha]\nrepo = \"jirathip-dev/alpha\"\nlocal = \"/tmp/does-not-matter/alpha\"\n\
+        integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[limits]";
+    let c = ctx(&tmpdir("drive-rev-first"), &CONFIG.replace("[limits]", alpha));
+    assert_eq!(run(&c, &Fake::default(), &["queue", "alpha", "add", "5"]).0, 0);
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    // The host admits one spawn, then is busy.
+    let r = Fake {
+        replies: fake(&agents(&[(
+            "sendmeter-impl-12",
+            "idle",
+            &wt.to_string_lossy(),
+            "w9:p1",
+        )]))
+        .reply("gh pr view issue-12", &pr(&head, "pending"))
+        .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
+        .reply("git -C", "")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
+        .replies,
+        ..Default::default()
+    }
+    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "1\n")
+    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review", "start"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
+    assert!(out.contains("alpha #5 start: REFUSED HOST_BUSY"), "{out}");
+    assert_eq!(state(&c), "review(1)");
+}

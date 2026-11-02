@@ -787,9 +787,19 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "<section id=events>",
         "#60: Events loads on tab open"
     );
-    assert!(get(&s, "/frag?id=events").contains("4 × clean / notify-failed"));
+    // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red.
+    let ev = get(&s, "/frag?id=events");
+    let rows: Vec<&str> = ev.split("<details class=\"er").skip(1).collect();
+    assert!(rows
+        .iter()
+        .filter(|r| r.contains("alert failed"))
+        .all(|r| r.contains("t-r\">✗") && !r.contains("clean")));
+    assert!(ev.contains("alert failed") && !ev.contains("clean ×"), "{ev}");
     let all = get(&s, "/?all=1");
-    assert!(!all.contains("× clean") && all.matches("<p class=ev>").count() > 50);
+    assert!(
+        all.matches("<details class=\"er").count() > 2 * 50,
+        "unfolded, unlimited"
+    );
 }
 
 /// #57: a request never samples the host (serve's 10 s thread does); the page links its scripts,
