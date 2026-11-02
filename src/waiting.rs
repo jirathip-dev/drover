@@ -108,6 +108,7 @@ pub fn waiting_on(
     while let Some(e) = update(base) {
         base = e.str("from").unwrap_or_default();
     }
+    let handed = |h: &str| events.iter().any(|e| e.is("pushed", f, n) && e.str("sha") == Some(h));
     // #102: a PASSed PR conflicting with / behind integration gets an update lane; its pushed head is reviewed first.
     let how = match (pr["mergeable"].as_str(), pr["mergeStateStatus"].as_str()) {
         (Some("CONFLICTING"), _) => "conflicts with",
@@ -204,7 +205,10 @@ pub fn waiting_on(
                 cmd("spawn", &format!(" {} --supersede", to(by, o))),
             )
         }
-        "impl" | "fix" if !pushed.is_empty() && !s.reviewed(pushed) && head.is_none_or(|h| h.0 == pushed) => {
+        // #182: a head the PR handed off (`pushed`, logged by drive) is due too, whatever the worktree holds.
+        "impl" | "fix"
+            if !pushed.is_empty() && !s.reviewed(pushed) && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+        {
             let what = format!(
                 "pushed {}{}, waiting for drive to spawn review",
                 if s.rounds > 0 { "fix " } else { "" },
