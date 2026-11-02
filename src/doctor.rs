@@ -123,8 +123,15 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
     // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof.
-    let driven = cfg.fleet.values().any(crate::config::Fleet::driven);
-    for what in ["check", "drive"].into_iter().filter(|what| *what == "check" || driven) {
+    for (name, _) in cfg.fleet.iter().filter(|f| f.1.driver.is_some()) {
+        row(
+            rows,
+            false,
+            '!',
+            &format!("fleet.{name}.driver — ignored: drive runs every fleet (#155) → remove the key"),
+        );
+    }
+    for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));

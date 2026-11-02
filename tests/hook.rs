@@ -186,7 +186,7 @@ fn github_comments_are_denied() {
 
 #[test]
 fn push_to_staging_is_denied() {
-    for role in ["impl", "orch", "rev"] {
+    for role in ["impl", "rev"] {
         assert!(bash_as(role, "git push origin staging")
             .unwrap()
             .contains("herdsman merge"));
@@ -342,19 +342,19 @@ fn design_spawn_is_owner_only() {
     ] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         for (var, role) in [
-            ("FLEET_LANE", "orch"),
-            ("HERDSMAN_LANE", "orch"),
+            ("FLEET_LANE", "impl"),
+            ("HERDSMAN_LANE", "rev"),
             ("HERDSMAN_LANE", "impl"),
         ] {
-            let out = hook_env(&[(var, Some("x:-:orch"))], role, input.clone());
+            let out = hook_env(&[(var, Some("x:1:impl"))], role, input.clone());
             assert!(out.contains("owner-only"), "{var} {role} {cmd}: {out}");
         }
         assert_eq!(
-            hook_env(&[], "orch", input.clone()),
+            hook_env(&[], "impl", input.clone()),
             "",
             "the owner (no lane) may: {cmd}"
         );
     }
-    assert_eq!(bash_as("orch", "herdsman spawn x 1 impl"), None);
-    assert_eq!(bash_as("orch", "herdsman board x # design"), None);
+    assert_eq!(bash_as("impl", "herdsman spawn x 1 impl"), None);
+    assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }

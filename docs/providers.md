@@ -30,7 +30,7 @@ The token is never copied, logged, or put in argv.
 banner, it logs `account-capped` with `until`, the banner's reset time (`resets 9am`, `resets Nov 4, 8am`,
 host local time; unparseable: `cap_reset_minutes`, default 300, or a day for a weekly limit). Spawns skip
 that account until then, or until `herdsman accounts reset <name>`; with every account capped, spawn
-refuses `ALL_CAPPED` (drive stops starting for the pass). The capped lane waits on the orch: drive
+refuses `ALL_CAPPED` (drive stops starting for the pass). The capped lane waits on drive, which
 respawns it with `--supersede` on a free account (the kill pushes its work to `wip/` first).
 
 **Usage meter.** Setup tokens can't read the usage API: they lack the `user:profile` scope, and

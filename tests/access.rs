@@ -262,7 +262,7 @@ fn every_account_capped_refuses_all_capped() {
 }
 
 #[test]
-fn capped_lane_waits_on_the_orch_to_respawn_on_a_free_account() {
+fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     let d = tmpdir("acct-respawn");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -273,7 +273,7 @@ fn capped_lane_waits_on_the_orch_to_respawn_on_a_free_account() {
     let ev = read(&c.state).unwrap();
     let waits = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
-    assert_eq!(w.who, "orch", "{w:?}");
+    assert_eq!(w.who, "drive", "{w:?}");
     let cmd = w.next_cmd.clone().unwrap();
     assert_eq!(cmd, "herdsman spawn sendmeter 12 impl --supersede");
     // That respawn (as drive runs it) picks the free account.

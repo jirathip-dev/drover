@@ -2,6 +2,9 @@
 mod common;
 use common::{ctx, run, tmpdir, Fake, CONFIG};
 
+/// A role (design) whose Hermes profile is not on disk.
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+
 const PROFILE: &str = "# fleet reviewer profile\n\
 model:\n  default: opus\n  provider: anthropic\n\
 hooks:\n  post_tool_call:\n    - command: /old/hook.sh\n\n\
@@ -25,7 +28,7 @@ fn without_hooks(text: &str) -> Vec<&str> {
 #[test]
 fn sync_writes_only_the_hooks_key_idempotently() {
     let d = tmpdir("hermes-hooks");
-    let c = ctx(&d, CONFIG);
+    let c = ctx(&d, &(CONFIG.to_string() + DESIGN));
     let rev = c.hermes.join("fleet-rev/config.yaml");
     let impl_ = c.hermes.join("fleet-impl/config.yaml");
     std::fs::create_dir_all(rev.parent().unwrap()).unwrap();
@@ -49,7 +52,7 @@ fn sync_writes_only_the_hooks_key_idempotently() {
         "model:\n  default: x\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n"
     ));
     // A role without a Hermes profile on disk gets none created.
-    assert!(!c.hermes.join("fleet-orch").exists());
+    assert!(!c.hermes.join("fleet-design").exists());
 
     let (code, _) = run(&c, &Fake::default(), &["profiles", "sync"]);
     assert_eq!(code, 0);
@@ -61,7 +64,7 @@ fn sync_writes_only_the_hooks_key_idempotently() {
 #[test]
 fn sync_approves_the_hook_once_per_role() {
     let d = tmpdir("hermes-allow");
-    let c = ctx(&d, CONFIG);
+    let c = ctx(&d, &(CONFIG.to_string() + DESIGN));
     for p in ["fleet-rev", "fleet-impl", "synergy"] {
         std::fs::create_dir_all(c.hermes.join(p)).unwrap();
         std::fs::write(c.hermes.join(p).join("config.yaml"), "model:\n  default: x\n").unwrap();
@@ -94,7 +97,7 @@ fn sync_approves_the_hook_once_per_role() {
         (Some("/x.sh"), Some("keep"))
     );
     assert_eq!(allow("synergy"), other, "non-fleet profile untouched");
-    assert!(!c.hermes.join("fleet-orch").exists());
+    assert!(!c.hermes.join("fleet-design").exists());
 
     let once = (allow("fleet-rev"), allow("fleet-impl"));
     let (code, _) = run(&c, &Fake::default(), &["profiles", "sync"]);

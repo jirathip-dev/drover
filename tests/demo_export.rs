@@ -49,7 +49,7 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     lanes.sort();
-    assert_eq!(lanes.len(), 12, "{lanes:?}");
+    assert_eq!(lanes.len(), 9, "{lanes:?}");
     for l in &lanes {
         let j: Value = serde_json::from_str(&std::fs::read_to_string(site.join("lane").join(l)).unwrap()).unwrap();
         assert!(!j["lines"].as_array().unwrap().is_empty(), "{l}: no lines");
@@ -88,7 +88,7 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         .flat_map(|f| f["lanes"].as_array().unwrap())
         .chain(h["others"].as_array().unwrap())
         .collect();
-    assert_eq!(all.len(), 14);
+    assert_eq!(all.len(), 11);
     for st in ["working", "idle", "done", "blocked", "parked", "dead"] {
         assert!(all.iter().any(|l| l["state"] == st), "no {st} lane");
     }
@@ -128,7 +128,7 @@ fn demo_page_is_inert_and_relative() {
     assert_eq!(html.matches("<div class=ask>").count(), 2, "two needs-you cards");
     let card = &html[html.find("<div class=ask>").unwrap()..];
     assert!(
-        card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-api · #21 · acme-api-orch"),
+        card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-api · #21 · 18m</span>"),
         "{card:.300}"
     );
     assert!(

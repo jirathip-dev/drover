@@ -152,7 +152,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
         )
     );
     assert!(get(&s, "/").contains(">paused</span>") && get(&s, "/").contains(">Resume</button>"));
-    // Paused: next offers nothing, impl/rev spawns refuse, orch still spawns its plan.
+    // Paused: next offers nothing, impl/rev spawns refuse.
     for c in [&cli, &web] {
         assert_eq!(
             run(c, &Fake::default(), &["next", "sendmeter"]),
@@ -163,10 +163,6 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
             assert_eq!(code, 3, "{out}");
             assert!(out.starts_with("REFUSED PAUSED: "), "{out}");
         }
-        assert_eq!(
-            run(c, &Fake::default(), &["spawn", "sendmeter", "-", "orch", "--dry-run"]).0,
-            0
-        );
     }
     assert_eq!(run(&cli, &Fake::default(), &["resume", "sendmeter"]).0, 0);
     let res = post(&s, &format!("op=resume&fleet=sendmeter&mtime={}", mtime(&s)), "");
@@ -426,7 +422,7 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     assert!(page.contains("data-ts=1000000"), "render time for the stale badge");
 }
 
-/// Two registered fleets plus one unregistered dir; orch/design/impl/rev/other placed.
+/// Two registered fleets plus one unregistered dir; design/impl/rev/other placed.
 #[test]
 fn lanes_group_by_fleet_with_others() {
     let d = tmpdir("lanes");
@@ -436,11 +432,6 @@ fn lanes_group_by_fleet_with_others() {
     let ev = |fleet: &str, issue: Option<u64>, d: serde_json::Value| {
         append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap()
     };
-    ev(
-        "sendmeter",
-        None,
-        json!({"role": "orch", "agent": "sendmeter-orch", "harness": "hermes"}),
-    );
     ev(
         "sendmeter",
         Some(12),
@@ -465,7 +456,6 @@ fn lanes_group_by_fleet_with_others() {
     let st = herdsman::events::fold(&events);
     let wt = c.worktrees.join("synergy-apps/designer").to_string_lossy().into_owned();
     let agents = json!([
-        {"name": "sendmeter-orch", "agent_status": "idle", "pane_id": "w1:p1", "cwd": "/x"},
         {"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p2", "cwd": "/x"},
         {"name": "synergy-design-5", "agent_status": "done", "pane_id": "w2:p1", "cwd": "/x"},
         {"agent": "claude", "agent_status": "working", "pane_id": "w3:p1", "cwd": wt, "workspace_id": "w3"},
@@ -497,7 +487,6 @@ fn lanes_group_by_fleet_with_others() {
     assert_eq!(
         got,
         [
-            (Some("sendmeter"), "sendmeter-orch", "orch", "idle", false),
             (Some("sendmeter"), "sendmeter-impl-12", "impl", "working", false),
             (Some("synergy"), "synergy-design-5", "design", "done", false),
             (Some("synergy"), "w3", "other", "working", false),
@@ -509,7 +498,7 @@ fn lanes_group_by_fleet_with_others() {
         ]
     );
     assert_eq!(
-        (lanes[1].model.as_deref(), lanes[1].effort.as_deref(), lanes[1].issue),
+        (lanes[0].model.as_deref(), lanes[0].effort.as_deref(), lanes[0].issue),
         (Some("opus"), Some("high"), Some(12))
     );
     // Rendered: state sections, fleet subgroups (Others last), the mismatch flagged.
