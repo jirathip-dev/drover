@@ -147,6 +147,9 @@ pub struct Fleet {
     pub bad: Vec<crate::pipeline::Problem>,
     /// #162: the Queue card's colour, one of `COLORS`; unset = a stable hash of the fleet name.
     pub color: Option<String>,
+    /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
+    pub form_categories: Option<Vec<String>>,
+    pub form_rounds: Option<u32>,
     /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
@@ -212,6 +215,9 @@ pub struct Limits {
     /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
     pub fast_secs: u64,
     pub slow_secs: u64,
+    /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
+    pub form_categories: Vec<String>,
+    pub form_rounds: u32,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -257,6 +263,18 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
+            form_categories: [
+                "trailer",
+                "pr-body",
+                "stale-baseline",
+                "format",
+                "docs-fresh",
+                "migration-redate",
+                "infra",
+            ]
+            .map(String::from)
+            .into(),
+            form_rounds: 3,
         }
     }
 }
@@ -353,6 +371,9 @@ impl Config {
             for g in p.stage.iter_mut().filter(|s| s.kind == "gate" && s.rounds.is_none()) {
                 g.rounds = Some(c.limits.update_rounds);
             }
+            f.form_categories
+                .get_or_insert_with(|| c.limits.form_categories.clone());
+            f.form_rounds.get_or_insert(c.limits.form_rounds);
             f.bad = p.validate(name, &f.role);
             f.pipeline = Some(p);
         }

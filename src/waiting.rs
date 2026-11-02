@@ -357,7 +357,9 @@ pub fn scan(
             .as_ref()
             .filter(|p| fresh(p))
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|v| v.lines().next().unwrap_or_default().trim().to_string());
+            .map(|v| v.lines().next().unwrap_or_default().trim().to_string())
+            // #228: a form-only FAIL is recorded as `FAIL`; `verdict` reads the tag from the file.
+            .map(|v| if v == "FAIL (form-only)" { "FAIL".into() } else { v });
         // In review, `head` is the one the rev lane was spawned at (logged since #92; else its worktree's).
         let at = spawn
             .filter(|_| s.check_lane() == Some(&lane))
