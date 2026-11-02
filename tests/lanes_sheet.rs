@@ -302,14 +302,15 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     let (rc, out) = run(&at(T + 700), &Fake::default(), &["serve", "approve", &late]);
     assert!(rc == 3 && out.contains("REFUSED EXPIRED"), "{out}");
     assert!(req(&s, "POST", "/pair/claim", "", &cookie, T + 700).starts_with("HTTP/1.1 403 "));
-    // At most 3 open, at most 2 per address.
+    // At most 4 open, at most 2 per address.
     assert!(
         ask_pair(&s, "10.0.0.5", T + 700).0.contains("200 OK")
             && ask_pair(&s, "10.0.0.5", T + 700).0.contains("200 OK")
     );
     assert!(ask_pair(&s, "10.0.0.5", T + 700).0.contains("429 "), "2 per address");
     assert!(ask_pair(&s, "10.0.0.6", T + 700).0.contains("200 OK"));
-    assert!(ask_pair(&s, "10.0.0.7", T + 700).0.contains("429 "), "3 open");
+    assert!(ask_pair(&s, "10.0.0.6", T + 700).0.contains("200 OK"));
+    assert!(ask_pair(&s, "10.0.0.7", T + 700).0.contains("429 "), "4 open");
     // The log names the device only: never a code or token.
     let ev: Vec<_> = read(&c.state)
         .unwrap()
@@ -317,7 +318,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         .filter(|e| e.kind.starts_with("pair"))
         .collect();
     let n = |k: &str| ev.iter().filter(|e| e.kind == k).count();
-    assert_eq!((n("pair-request"), n("pair-approve"), n("paired")), (7, 1, 0));
+    assert_eq!((n("pair-request"), n("pair-approve"), n("paired")), (8, 1, 0));
     assert!(
         ev.iter()
             .all(|e| e.data.len() == 1 && e.str("device").is_some_and(|d| d.starts_with("iPhone Safari"))),
@@ -329,6 +330,76 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
             .contains(&mine[11..mine.len() - 2]),
         "no token in the log"
     );
+}
+
+/// #199: behind `tailscale serve` every peer is 127.0.0.1: the limit keys on the forwarded address (trusted from loopback
+/// only); a Pair re-tap (or `[cancel]`) drops the browser's own open request; an unpaired page says the two iOS apps pair apart.
+#[test]
+fn pairing_behind_a_proxy_and_retaps() {
+    let (c, r) = fixture("pair-proxy");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let tap = |h: &str| req(&s, "POST", "/pair/request", "", h, T);
+    let open = || herdsman::devices::pending(&c).len();
+    // Two phones behind loopback with their own X-Forwarded-For each get 2.
+    for ip in ["100.64.0.1", "100.64.0.2"] {
+        let h = format!("X-Peer: 127.0.0.1\r\nX-Forwarded-For: {ip}\r\n");
+        assert!(
+            tap(&h).starts_with("HTTP/1.1 200 ") && tap(&h).starts_with("HTTP/1.1 200 "),
+            "{ip}"
+        );
+    }
+    assert_eq!(open(), 4);
+    assert!(
+        tap("X-Peer: 127.0.0.1\r\nX-Forwarded-For: 100.64.0.3\r\n").starts_with("HTTP/1.1 429 "),
+        "4 open at most"
+    );
+    // From a non-loopback peer the forwarded headers are ignored: the peer's own address counts.
+    let (c2, r2) = fixture("pair-spoof");
+    let s2 = Server::new(&c2, &r2, Some(ADDR.into()));
+    let spoof =
+        |n: u8| format!("X-Peer: 10.0.0.9\r\nX-Forwarded-For: 100.64.0.{n}\r\nTailscale-User-Login: u{n}@x\r\n");
+    let res: Vec<_> = (1..=3)
+        .map(|n| req(&s2, "POST", "/pair/request", "", &spoof(n), T))
+        .collect();
+    assert!(res[0].starts_with("HTTP/1.1 200 ") && res[1].starts_with("HTTP/1.1 200 "));
+    assert!(res[2].starts_with("HTTP/1.1 429 "), "2 per address: {}", res[2]);
+    // Repeated taps from one browser leave exactly 1 open request; its last code pairs.
+    let (c3, r3) = fixture("pair-retap");
+    let s3 = Server::new(&c3, &r3, Some(ADDR.into()));
+    let mut cookie = String::new();
+    for _ in 0..5 {
+        let res = req(
+            &s3,
+            "POST",
+            "/pair/request",
+            "",
+            &format!("X-Peer: 127.0.0.1\r\n{cookie}"),
+            T,
+        );
+        let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).expect(&res);
+        cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
+    }
+    let left = herdsman::devices::pending(&c3);
+    assert_eq!(left.len(), 1, "{left:?}");
+    let page = req(&s3, "GET", "/", "", "", T);
+    assert!(!page.contains("pair separately"), "no device paired yet");
+    herdsman::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
+    assert!(req(&s3, "POST", "/pair/claim", "", &cookie, T + 1).starts_with("HTTP/1.1 200 OK"));
+    // A paired device exists: an unpaired page (the other iOS app) says why it shows Pair.
+    let page = req(&s3, "GET", "/", "", "", T + 1);
+    assert!(
+        page.contains("<p class=m>Safari and the home-screen app pair separately</p>"),
+        "{page}"
+    );
+    assert!(!req(&s3, "GET", "/", "", &cookie, T + 1).contains("pair separately"));
+    // [cancel] drops the browser's open request; a paired device's cookie cancels nothing.
+    let (_, _, mine) = ask_pair(&s3, "10.0.0.3", T + 2);
+    assert_eq!(herdsman::devices::pending(&c3).len(), 1);
+    for k in [&cookie, &mine] {
+        assert!(req(&s3, "POST", "/pair/cancel", "", k, T + 3).starts_with("HTTP/1.1 200 OK"));
+    }
+    assert_eq!(herdsman::devices::pending(&c3).len(), 0);
+    assert!(req(&s3, "POST", "/send", "agent=sendmeter-impl-12&text=hi", &cookie, T + 4).starts_with("HTTP/1.1 200 "));
 }
 
 #[test]

@@ -42,6 +42,8 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("kitchen/scene.svg", SVG),
 ];
 const SVG: &str = "image/svg+xml";
+const I180: &[u8] = include_bytes!("../assets/icon-180.png");
+const I192: &[u8] = include_bytes!("../assets/icon-192.png");
 /// At the root, the fixed paths the manifest and iOS name: cached a day (`/sw.js`, VER filled in, is no-store).
 const FILES: &[(&str, &str, &[u8])] = &[
     (
@@ -49,15 +51,23 @@ const FILES: &[(&str, &str, &[u8])] = &[
         "application/manifest+json",
         include_bytes!("../assets/manifest.webmanifest"),
     ),
-    ("icon-180.png", "image/png", include_bytes!("../assets/icon-180.png")),
-    ("icon-192.png", "image/png", include_bytes!("../assets/icon-192.png")),
+    ("icon-180.png", "image/png", I180),
+    ("icon-192.png", "image/png", I192),
     ("icon-512.png", "image/png", include_bytes!("../assets/icon-512.png")),
+    // #195: the root icons Safari probes; a 404 there falls back to another service's icon on the same host.
+    ("apple-touch-icon.png", "image/png", I180),
+    ("apple-touch-icon-precomposed.png", "image/png", I180),
+    ("favicon.ico", "image/png", I192),
 ];
-/// FNV-1a over the assets at build time: their `/a/<hash8>/` path.
+/// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
-    while k < ASSETS.len() {
-        let b = ASSETS[k].2;
+    while k < ASSETS.len() + FILES.len() {
+        let b = if k < ASSETS.len() {
+            ASSETS[k].2
+        } else {
+            FILES[k - ASSETS.len()].2
+        };
         while i < b.len() {
             h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
             i += 1;
@@ -232,6 +242,23 @@ fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
             .filter(|(k, _)| k.trim().eq_ignore_ascii_case(name))
             .map(|(_, v)| v.trim())
     })
+}
+
+/// #199: the asking client's address. Behind `tailscale serve` every peer is loopback: then the forwarded address (the
+/// proxy appends it last) or the tailnet login; those headers count from a loopback peer only.
+fn client(head: &str) -> &str {
+    let peer = header(head, "x-peer").unwrap_or_default();
+    let fwd = header(head, "x-forwarded-for")
+        .and_then(|f| f.rsplit(',').next())
+        .map(str::trim);
+    let fwd = fwd
+        .or_else(|| header(head, "tailscale-user-login"))
+        .filter(|f| !f.is_empty());
+    peer.parse::<std::net::IpAddr>()
+        .is_ok_and(|p| p.is_loopback())
+        .then_some(fwd)
+        .flatten()
+        .unwrap_or(peer)
 }
 
 /// `application/x-www-form-urlencoded` (also the query string) into a map.
@@ -748,13 +775,20 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            ("POST", "/pair/request") => match devices::request(ctx, &kind(head), header(head, "x-peer").unwrap_or_default()) {
+            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out.
+            ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
+                .and_then(|()| devices::request(ctx, &kind(head), client(head)))
+            {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
                     ("200 OK", "text/plain", format!("{code}\n{}\n", hint.replace("{code}", &code)).into_bytes())
                 }
-                Ok(None) => ("429 Too Many Requests", "text/plain", text("3 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
+                Err(e) => fail(e),
+            },
+            ("POST", "/pair/cancel") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default()) {
+                Ok(()) => ("200 OK", "text/plain", text("pairing request cancelled\n")),
                 Err(e) => fail(e),
             },
             ("POST", "/pair/claim") => match self.device(ctx, head) {
@@ -1120,6 +1154,12 @@ impl<'a> Server<'a> {
             if root.is_empty() { " data-root=\"\"" } else { "" },
             if demo { " data-demo=1" } else { "" }
         );
+        // #199: iOS keeps Safari's and the home-screen app's cookies apart.
+        let msg = if !paired && !self.pairb().is_empty() && devices::load(ctx).iter().any(|d| d.code.is_none()) {
+            msg + "<p class=m>Safari and the home-screen app pair separately</p>"
+        } else {
+            msg
+        };
         let msg = if demo {
             "<p class=\"msg a\">Demo with fake data. Install herdsman to run your own.</p>".to_string()
         } else {
@@ -1134,7 +1174,7 @@ impl<'a> Server<'a> {
             "<!doctype html><html lang=en><head><meta charset=utf-8>\
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
-             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png><link rel=apple-touch-icon href={root}icon-180.png>\
+             <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css></head>\
              <body data-ts={} data-mode=horse{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
@@ -1704,8 +1744,11 @@ impl<'a> Server<'a> {
                 _ => String::new(),
             };
             let o = if t == "r" { "▶ " } else { "" };
-            let val = format!("<span><b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}</span>");
-            m += &hrow(k, t, &(bar + &val), "", "");
+            m += &kv(
+                k,
+                t,
+                &format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}"),
+            );
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
@@ -1714,9 +1757,8 @@ impl<'a> Server<'a> {
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
             let (wt, min) = (esc(wt.split_once(" · ").map_or(wt, |w| w.1)), lim.min_free_gb);
             let o = if t == "r" { "▶ " } else { "" };
-            let val =
-                format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
-            m += &hrow("disk", t, &(bar + &val), "", "");
+            let fl = format!("<span class=\"mt fx\">· floor {min} GB · {wt}</span>");
+            m += &kv("disk", t, &format!("{bar} <b class={t}>{o}{gb:.0} GB free</b> {fl}"));
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
@@ -1748,7 +1790,7 @@ impl<'a> Server<'a> {
         // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {
-            let fix = [String::new(), format!("<span class=\"mt fx\">→ {}</span>", chips(fix))];
+            let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
             s += &kv(
                 k,
                 t,
@@ -1865,8 +1907,17 @@ impl<'a> Server<'a> {
                 a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
-        let head = "<summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
-        let grp = |(n, rows): (&str, String)| format!("<details class=grp>{}{rows}</details>", head.replace("{}", n));
+        // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
+        let ks = [&m, &s, &f, &a].map(|g| {
+            g.split("<span class=k>")
+                .skip(1)
+                .map(|k| k.split('<').next().unwrap_or_default().chars().count())
+                .max()
+                .unwrap_or(0)
+        });
+        let head = "<details class=grp style=--kw:@ch><summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
+        let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
+        let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
         let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
         gs.map(grp).concat()
     }
