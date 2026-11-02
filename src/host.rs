@@ -22,7 +22,7 @@ const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
     let me = [1, std::process::id(), std::os::unix::process::parent_id()].map(|p| p.to_string());
     let (mut out, mut p) = (vec![], (String::new(), String::new()));
-    for l in stdout(r, "lsof", &["-d", "cwd", "-F", "pcn"])
+    for l in stdout(r, "lsof", &["-n", "-d", "cwd", "-F", "pcn"])
         .unwrap_or_default()
         .lines()
     {

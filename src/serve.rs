@@ -1671,39 +1671,6 @@ impl<'a> Server<'a> {
         }
         let p = hs.pressure.as_deref().unwrap_or("?");
         m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
-        // #186: processes in closed lanes' worktrees, with a confirmed [reap].
-        if let Some(c) = cfg {
-            let left = host::agents(r).map_or(vec![], |a| {
-                crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
-            });
-            let pids: Vec<&str> = left.iter().map(|p| p.0.as_str()).collect();
-            let rss = (!pids.is_empty()).then(|| crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids.join(",")]));
-            let kb: u64 = rss
-                .and_then(Result::ok)
-                .unwrap_or_default()
-                .split_whitespace()
-                .filter_map(|k| k.parse::<u64>().ok())
-                .sum();
-            let (t, n, hid) = (
-                if left.is_empty() { "g" } else { "a" },
-                left.len(),
-                hidden("reap", "", &mtime(ctx)),
-            );
-            let reap = format!("<form method=post>{hid}<button data-confirm=\"TERM then KILL {n} leftover process(es)?\">reap</button></form>");
-            let reap = if n > 0 && self.addr.is_some() {
-                reap.as_str()
-            } else {
-                ""
-            };
-            m += &kv(
-                "leftovers",
-                t,
-                &format!(
-                    "<b class={t}>{n}</b> <span class=mt>{} MB in closed lanes</span>{reap}",
-                    kb / 1024
-                ),
-            );
-        }
         if let Some(gb) = host::free_gb(r) {
             let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
             let wt = rows.iter().find(|s| s.0 == "disk").map_or("", |s| &s.2);
@@ -1712,6 +1679,24 @@ impl<'a> Server<'a> {
             let val =
                 format!("<span><b class={t}>{o}{gb:.0} GB free</b></span><span class=mt>floor {min} GB · {wt}</span>");
             m += &hrow("disk", t, &(bar + &val), "", "");
+        }
+        // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
+        let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
+            crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
+        });
+        if !left.is_empty() {
+            let pids = left.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(",");
+            let kb: f64 = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids]).map_or(0.0, |s| {
+                s.split_whitespace().filter_map(|k| k.parse::<f64>().ok()).sum()
+            });
+            let n = left.len();
+            let btn = format!("<form method=post>{}<button data-confirm=\"TERM, then KILL, {n} leftover process(es)?\">reap</button></form>", hidden("reap", "", &mtime(ctx)));
+            let btn = if self.addr.is_some() { btn } else { String::new() };
+            let val = format!(
+                "<b class=a>{n} running</b> <span class=mt>{:.0} MB · in closed lanes' worktrees</span>{btn}",
+                kb / 1024.0
+            );
+            m += &kv("leftovers", "a", &val);
         }
         m += &match (cfg, host::admit(&hs, lim)) {
             (None, _) => String::new(),
