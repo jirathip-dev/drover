@@ -21,6 +21,16 @@ pub fn role_prompt(role: &str) -> &'static str {
     }
 }
 
+/// #173: a role's brief prompt: its kind's, then its `prompt = "<file>"` appended (unreadable: noted, not fatal).
+fn lane_prompt(f: &Fleet, role: &str) -> String {
+    let extra =
+        f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
+            std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
+        });
+    let base = role_prompt(f.family(role));
+    extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
+}
+
 pub fn profile_dir(ctx: &Ctx, profile: &str) -> PathBuf {
     ctx.claude_dir().join(profile)
 }
@@ -41,8 +51,9 @@ fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
+        // #173: a role's profile is its kind's: a check role's is read-only, as rev's.
         for h in harness::NAMES {
-            harness::get(h).sync(ctx, role, profile, usage, out)?;
+            harness::get(h).sync(ctx, f.family(role), profile, usage, out)?;
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
@@ -59,13 +70,13 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
 /// `profiles sync --check`: each Hermes profile's `hooks list` (run as in a lane) shows its hook `✓ allowed`.
 pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
     let mut good = true;
-    for (name, _, role, _, profile) in profiles(cfg) {
+    for (name, f, role, _, profile) in profiles(cfg) {
         if !ctx.hermes.join(&profile).join("config.yaml").exists() {
             continue;
         }
         let lane = format!("HERDSMAN_LANE={name}:-:{role}");
         let o = r.run("env", &argv(&[&lane, "hermes", "-p", &profile, "hooks", "list"]))?;
-        let cmd = hook_command(ctx, role);
+        let cmd = hook_command(ctx, f.family(role));
         let allowed = o.code == 0 && o.stdout.lines().any(|l| l.contains(&cmd) && l.contains("✓ allowed"));
         writeln!(
             out,
@@ -80,6 +91,9 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
 pub struct Plan {
     pub agent: String,
     pub role: String,
+    /// #173: the pipeline stage it runs and the role's kind (`impl`, `rev` for a check, `design`).
+    pub stage: String,
+    pub family: &'static str,
     pub harness: String,
     pub profile: String,
     pub model: Option<String>,
@@ -167,12 +181,13 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
             );
         }
         let impl_branch = crate::gate::branch_of(st.as_ref(), issue);
-        let (agent, branch, base, head) = if role == "rev" {
-            let k = st.as_ref().map_or(0, |s| s.rounds) + 1;
-            let head = format!("{fleet} · rev #{issue} r{k}");
+        let (agent, branch, base, head) = if f.family(role) == "rev" {
+            let rounds = st.as_ref().and_then(|s| s.stage_rounds.get(f.flow().stage_of(role)));
+            let k = rounds.copied().unwrap_or_default() + 1;
+            let head = format!("{fleet} · {role} #{issue} r{k}");
             (
-                format!("{fleet}-rev-{issue}-r{k}"),
-                format!("rev-{issue}-r{k}"),
+                format!("{fleet}-{role}-{issue}-r{k}"),
+                format!("{role}-{issue}-r{k}"),
                 format!("origin/{impl_branch}"),
                 head,
             )
@@ -207,6 +222,8 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     Ok(Plan {
         agent,
         role: role.into(),
+        stage: f.flow().stage_of(role).into(),
+        family: f.family(role),
         harness: r.harness.clone(),
         profile: r.profile_or(role),
         model: r.model.clone(),
@@ -233,7 +250,7 @@ that is not a fix. The next reviewer decides.";
 /// The issue lane's `.brief.md` (`roles/brief*.md` templates).
 fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&str>) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
-    let contract = match p.role.as_str() {
+    let contract = match p.family {
         "rev" => format!(
             include_str!("../roles/brief-rev.md"),
             integration = integration,
@@ -258,7 +275,7 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
         agent = p.agent,
         repo = f.repo,
         issue = issue,
-        role = role_prompt(&p.role),
+        role = lane_prompt(f, &p.role),
         title = title,
         body = body,
         fix = fix,
@@ -311,10 +328,48 @@ pub fn changes(st: &str) -> usize {
 }
 
 /// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
-pub fn lockfiles_match(local: &Path, wt: &Path) -> bool {
-    let locks = ["package-lock.json", "pnpm-lock.yaml"];
+pub fn lockfiles_match(locks: &[&str], local: &Path, wt: &Path) -> bool {
     let read = |dir: &Path, l: &str| std::fs::read(dir.join(l)).ok();
     locks.iter().any(|l| read(local, l).is_some()) && locks.iter().all(|l| read(local, l) == read(wt, l))
+}
+
+/// #185: clone each `clone_build` folder whose lockfile matches (`Cargo.lock` for `target`, the package ones for
+/// `node_modules`); the `build-cloned` data, if any. Never a full copy: macOS `cp -c` copies across volumes, so it
+/// clones within one; elsewhere `--reflink=always` fails instead. Never over a folder the lane's agent made: the
+/// clone lands beside it and renames in only while the name is free.
+pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> Option<Value> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+    let (t, mut done, mut errs) = (std::time::Instant::now(), vec![], vec![]);
+    for d in dirs {
+        let locks: &[&str] = match d.as_str() {
+            "target" => &["Cargo.lock"],
+            "node_modules" => &["package-lock.json", "pnpm-lock.yaml"],
+            _ => {
+                errs.push(format!("{d}: not target or node_modules"));
+                continue;
+            }
+        };
+        let (src, dst, tmp) = (local.join(d), wt.join(d), wt.join(format!(".{d}.clone")));
+        if !src.is_dir() || dst.exists() || !lockfiles_match(locks, local, wt) {
+            continue;
+        }
+        let (s, t) = (src.to_string_lossy(), tmp.to_string_lossy());
+        let res = match cfg!(target_os = "macos") {
+            true if dev(local) != dev(wt) => Err(anyhow::anyhow!("another volume, no clone")),
+            true => ok(r, "cp", &["-cR", &s, &t]),
+            false => ok(r, "cp", &["-R", "--reflink=always", &s, &t]),
+        };
+        match res.and_then(|_| Ok(std::fs::rename(&tmp, &dst)?)) {
+            Ok(()) => done.push(d),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                errs.push(format!("{d}: {e:#}"));
+            }
+        }
+    }
+    let secs = t.elapsed().as_secs();
+    (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
@@ -369,10 +424,10 @@ pub fn spawn(
     o: &Opts,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    if f.paused && matches!(role, "impl" | "rev") {
+    if f.paused && role != "design" {
         return refused("PAUSED", format!("{fleet} is paused; `herdsman resume {fleet}` first"));
     }
-    if o.update && role != "impl" {
+    if o.update && f.family(role) != "impl" {
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
@@ -417,7 +472,7 @@ pub fn spawn(
     }
     if let Some(s) = fold(&events)
         .remove(&(fleet.to_string(), issue))
-        .filter(|s| s.unfinished(role))
+        .filter(|s| s.unfinished(role, f.family(role) == "rev"))
     {
         dup.push((
             "LANE_LIVE",
@@ -449,10 +504,10 @@ pub fn spawn(
 
     lane_admit(f, &events, fleet, issue, role)?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
-    if o.update && updates >= cfg.limits.update_rounds {
+    if o.update && updates >= f.flow().update_limit() {
         let why = format!(
             "PR still conflicts after {updates}/{} update rounds",
-            cfg.limits.update_rounds
+            f.flow().update_limit()
         );
         event("needs-human", json!({"code": "UPDATE_LIMIT", "reason": why}))?;
         return refused("UPDATE_LIMIT", why);
@@ -499,6 +554,7 @@ pub fn spawn(
     }
 
     let local = f.local_path().to_string_lossy().into_owned();
+    let reopen = p.worktree.exists();
     let mut sha = None;
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, r, f, fleet, issue, true)?;
@@ -507,15 +563,9 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let open = herdr::worktree_open_argv(&local, &wt);
-        let reopen = p.worktree.exists();
+        let open = herdr::worktree_open_argv(&local, &wt, &p.agent);
         let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
-        if f.clone_node_modules && !reopen && lockfiles_match(&f.local_path(), &p.worktree) {
-            if let Err(e) = ok(r, "cp", &["-cR", &format!("{local}/node_modules"), &wt]) {
-                eprintln!("clone_node_modules: {e:#}");
-            }
-        }
-        if role == "rev" {
+        if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
                 ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
@@ -530,7 +580,7 @@ pub fn spawn(
         // A fix round's brief carries the findings of the latest verdict if it was FAIL.
         let last = events.iter().rev().find(|e| e.is("verdict", fleet, issue));
         let fix = last
-            .filter(|e| role == "impl" && e.str("verdict") == Some("FAIL"))
+            .filter(|e| p.family == "impl" && e.str("verdict") == Some("FAIL"))
             .and_then(|e| e.str("body"));
         // #102: an update round's instructions follow the spec (and any decisions).
         let update = o
@@ -550,6 +600,7 @@ pub fn spawn(
     let ws = created["result"]["workspace"]["workspace_id"]
         .as_str()
         .context("herdr: no workspace_id")?;
+    herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     if let Some(d) = p.brief.parent() {
         std::fs::create_dir_all(d)?;
     }
@@ -592,27 +643,43 @@ pub fn spawn(
             bail!("{why}; closed pane {pane}");
         }
     }
-    let kicked = h.kick(r, &p, &pane);
-    let mut d = lane_data(&p, &pane, ws);
-    d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
-    d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
-    d["update"] = json!(o.update);
-    if let Some(h) = sha.filter(|h| !h.is_empty()) {
-        d["sha"] = json!(h);
+    // #185: a new lane's clone runs beside the kick and pane clean-up, once the lane has started; a failure is logged.
+    let mut dirs: Vec<String> = f.clone_build.clone();
+    dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
+    dirs.sort();
+    dirs.dedup();
+    let dirs = if reopen { &[][..] } else { &dirs[..] };
+    let (res, cloned) = std::thread::scope(|s| {
+        let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
+        let res = (|| -> Result<bool> {
+            let kicked = h.kick(r, &p, &pane);
+            let mut d = lane_data(&p, &pane, ws);
+            d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
+            d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
+            d["update"] = json!(o.update);
+            if let Some(h) = sha.filter(|h| !h.is_empty()) {
+                d["sha"] = json!(h);
+            }
+            event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
+            let confirmed = kicked?;
+            // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
+            if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
+                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
+                    let _ = herdr::close(r, old);
+                    event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
+                }
+            }
+            pj["pane"] = json!(pane);
+            pj["confirmed"] = json!(confirmed);
+            print_plan(out, &pj, o.json)?;
+            Ok(confirmed)
+        })();
+        (res, c.join().ok().flatten())
+    });
+    if let Some(d) = cloned {
+        event("build-cloned", d)?;
     }
-    event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
-    let confirmed = kicked?;
-    // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
-    if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
-        if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-            let _ = herdr::close(r, old);
-            event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
-        }
-    }
-    pj["pane"] = json!(pane);
-    pj["confirmed"] = json!(confirmed);
-    print_plan(out, &pj, o.json)?;
-    Ok(confirmed)
+    res
 }
 
 /// #107: the pane of the lane's agent (its planned name, or `unnamed`) in its worktree that no `spawn` logged: adopt it.
@@ -642,7 +709,8 @@ fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) 
             );
         }
     }
-    let (cap, n) = match role {
+    let fam = f.family(role);
+    let (cap, n) = match fam {
         "impl" => (f.max_impl, others.iter().filter(|s| building(&s.state)).count()),
         "rev" => (
             f.max_rev,
@@ -651,14 +719,14 @@ fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) 
         _ => (None, 0),
     };
     if let Some(cap) = cap.filter(|&c| n >= c) {
-        return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{role} = {cap}"));
+        return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
     Ok(())
 }
 
 /// The `spawn` event's data for a lane of plan `p` running in `pane`.
 fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
-    json!({"role": p.role, "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
+    json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
         "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0)})
 }
 

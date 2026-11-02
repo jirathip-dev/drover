@@ -100,10 +100,10 @@ fn a_builder_with_a_pass_frees_its_build_folders() {
 /// stamp makes spawn refuse DISK_BUDGET, and drive's pass stops starting.
 #[test]
 fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
-    // 2500 bytes of budget.
+    // 2.5 blocks of budget (`du` counts 4096-byte blocks).
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
     let d = tmpdir("disk-budget");
-    let c = ctx(&d, &cfg(2500.0 / 1_073_741_824.0));
+    let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));
     let (old, new, busy) = (
         lane(&c, 10, 7, "impl", "issue-7"),
         lane(&c, 20, 8, "impl", "issue-8"),
@@ -111,9 +111,9 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     );
     ev(&c, 30, 7, "verdict", json!({"verdict": "PASS", "sha": HEAD})); // #7's last activity: 30
     let (o, n, b) = (
-        build(&old, "target", 1000),
-        build(&new, "target", 1000),
-        build(&busy, "target", 1000),
+        build(&old, "target", 4096),
+        build(&new, "target", 4096),
+        build(&busy, "target", 4096),
     );
     let r = Fake::default().reply("git -C", "").reply(
         "herdr agent list",
@@ -134,21 +134,21 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     assert_eq!(freed.len(), 1);
     assert_eq!(
         (freed[0].str("agent"), freed[0].data["bytes"].as_u64()),
-        (Some("sendmeter-impl-8"), Some(1000))
+        (Some("sendmeter-impl-8"), Some(4096))
     );
     let stamp = || std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
-    assert_eq!(stamp(), format!("2000 {}", c.now));
+    assert_eq!(stamp(), format!("8192 {}", c.now));
 
-    // 500 bytes: #7 goes too, the working #9 keeps 1000 → still over.
-    let c = ctx(&d, &cfg(500.0 / 1_073_741_824.0));
+    // Half a block: #7 goes too, the working #9 keeps 4096 → still over.
+    let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
     run_budget(&c);
     assert!(!o.exists() && b.exists());
-    assert_eq!(stamp(), format!("1000 {}", c.now));
+    assert_eq!(stamp(), format!("4096 {}", c.now));
     let r = Fake::default().reply("herdr agent list", NO_AGENTS).reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(
-        out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB > 0.000000"),
+        out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB > 0.0000019"),
         "{out}"
     );
     assert!(!r.called("herdr worktree"), "nothing created");

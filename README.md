@@ -83,7 +83,7 @@ cmd = "notify <chat>"                # any command; one line on stdin
 on = ["stall", "lane-dead", "merged", "needs-human"]
 ```
 
-More: [architecture](docs/architecture.md), [lanes and hooks](docs/lanes.md), [dsh](docs/dsh.md), [phone page](docs/serve.md), [providers and keys](docs/providers.md).
+More: [architecture](docs/architecture.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [dsh](docs/dsh.md), [phone page](docs/serve.md), [providers and keys](docs/providers.md).
 
 ## License
 

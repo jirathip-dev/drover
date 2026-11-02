@@ -291,6 +291,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         all.iter().all(|p| p.exists()) && !dry.contains("freed"),
         "a dry run frees nothing: {dry}"
     );
+    let freed = herdsman::check::du(&gone) + herdsman::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
     let r1 = r();
     let (code, done) = run(&c, &r1, &["clean", "--yes"]);
     assert_eq!(code, 0, "{done}");
@@ -304,7 +305,10 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         done.contains(&format!("keep {unpushed}/dist: not git-ignored")),
         "{done}"
     );
-    assert!(done.contains("freed 2000 bytes of build folders"), "{done}");
+    assert!(
+        done.contains(&format!("freed {freed} bytes of build folders")),
+        "{done}"
+    );
     assert!(r1.called("herdr worktree remove --workspace wA") && r1.called("herdr worktree remove --workspace wB"));
     assert!(r1.called("herdr pane close wA:p1"));
     for ws in ["wC", "wD", "wE"] {
@@ -585,4 +589,17 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             "history kept"
         );
     }
+}
+
+/// #185/#164: the worktree budget counts blocks used (`du -k`), not apparent size, so unwritten space costs nothing.
+#[test]
+fn du_counts_blocks_used_not_apparent_size() {
+    let d = tmpdir("du-blocks");
+    std::fs::File::create(d.join("sparse"))
+        .unwrap()
+        .set_len(1 << 30)
+        .unwrap();
+    std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
+    let n = herdsman::check::du(&d);
+    assert!((64 << 10..1 << 20).contains(&n), "{n}");
 }

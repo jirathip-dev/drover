@@ -20,7 +20,7 @@ fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<
     let branch = crate::gate::branch_of(Some(s), s.issue);
     let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).ok()?;
     (pr["state"] == "OPEN").then_some(())?;
-    gate(f, &pr, Some(s), cfg.limits.review_rounds).ok()
+    gate(f, &pr, Some(s), false).ok()
 }
 
 /// `(url, prompt)` when the issue's latest amendment is missing from the lane's `.brief.md` (#101).
@@ -603,11 +603,12 @@ fn drop_log(ctx: &Ctx, agent: Option<&str>) {
     let _ = crate::lanes::log(&ctx.state, agent.unwrap_or_default()).map(std::fs::remove_file);
 }
 
-/// Bytes under `p` (symlinks not followed); the worktree total for the disk row.
+/// Bytes of blocks used under `p` (symlinks not followed), like `du -k`, not apparent size; the disk row's total.
 pub fn du(p: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
     match std::fs::symlink_metadata(p) {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| du(&e.path())).sum()),
-        m => m.map_or(0, |m| m.len()),
+        m => m.map_or(0, |m| m.blocks() * 512),
     }
 }
 

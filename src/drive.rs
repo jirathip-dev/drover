@@ -274,8 +274,20 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
     let conflicts = crate::overlap::preview(ctx, cfg, r, fleet, &events).unwrap_or_default();
-    let rev = |w: &Waiting| w.next_cmd.as_deref().and_then(|c| c.split(' ').nth(4)) == Some("rev");
-    waits.sort_by_key(|(s, w)| (!rev(w), conflicts.contains_key(&s.issue)));
+    // #173: a review is a spawn of any check stage's role, not only `rev`.
+    let rev = |w: &Waiting| {
+        w.next_cmd
+            .as_deref()
+            .and_then(|c| c.split(' ').nth(4))
+            .is_some_and(|r| f.family(r) == "rev")
+    };
+    // #207: every written verdict is recorded before any merge (and the auto-update after it) moves a head.
+    let verdict = |w: &Waiting| {
+        w.next_cmd
+            .as_deref()
+            .is_some_and(|c| c.starts_with("herdsman verdict "))
+    };
+    waits.sort_by_key(|(s, w)| (!verdict(w), !rev(w), conflicts.contains_key(&s.issue)));
     let mut go = true;
     for (s, w) in waits
         .iter()
@@ -307,7 +319,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
-                ("spawn", Some("rev")) => "review",
+                ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
                 ("spawn", _) if cmd.ends_with("--supersede") => "fix",
                 ("spawn", _) => "respawn",
@@ -387,11 +399,11 @@ fn handoff(
 /// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
 /// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets' (false).
 fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
-    let events = read(&ctx.state)?;
+    let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
     let mut go = start;
     for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, "impl"])?;
+        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
@@ -428,8 +440,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     Ok(go)
 }
 
-/// #129: after a merge, merge integration into every other open ready / in-review PR whose lane isn't working, oldest
-/// PR first, in a scratch worktree. A clean merge is pushed (`auto-updated`); a ready PR's conflict gets an `--update` lane.
+/// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in
+/// a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`); a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
@@ -442,7 +454,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")
     };
     let mut prs: Vec<(u64, IssueState)> = (fold(&events).into_values())
-        .filter(|s| s.fleet == fleet && (s.state == "ready" || s.state.starts_with("review")))
+        .filter(|s| s.fleet == fleet && s.state == "ready")
         .filter(|s| !s.lane.as_deref().is_some_and(busy))
         .filter_map(|s| Some((open(&s)?, s)))
         .collect();
@@ -460,7 +472,12 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
         let res = if !clean && s.state == "ready" {
-            let args = ["spawn", fleet, &n, "impl", "--supersede", "--update"];
+            let p = f.flow();
+            let b = p
+                .next(p.gate(), "conflict")
+                .and_then(|t| p.role(t.0))
+                .unwrap_or(p.start());
+            let args = ["spawn", fleet, &n, b, "--supersede", "--update"];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "conflict"), &args).map(drop)
         } else if clean && to != from {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {

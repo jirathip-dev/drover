@@ -1,5 +1,5 @@
 //! #46: what an idle lane waits on (drive | owner | ci | none), worked out from the log, git and the cached PR.
-use crate::config::Config;
+use crate::config::{Config, Fleet};
 use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
 use crate::runner::{ok, Runner};
 use crate::{gh, Ctx};
@@ -37,15 +37,30 @@ impl Waiting {
 
 /// Pure: the issue's wait reason. `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
+/// #173: each next step is the one `fc`'s pipeline maps the outcome to.
 pub fn waiting_on(
     events: &[Event],
     s: &IssueState,
     head: Option<(&str, u64)>,
     pr: &Value,
-    req: &[String],
+    fc: &Fleet,
     rev: Option<(&str, &str)>,
 ) -> Waiting {
-    let (f, n) = (&s.fleet, s.issue);
+    let (f, n, req, p) = (&s.fleet, s.issue, &fc.required_checks, fc.flow());
+    // The role an outcome of `stage` goes to (a build for a fix, a check for a review).
+    let to = |stage: &str, o: &str| {
+        p.next(stage, o)
+            .and_then(|t| p.role(t.0))
+            .unwrap_or(p.start())
+            .to_string()
+    };
+    let build = p.stage_of(s.build.as_deref().unwrap_or(p.start()));
+    let passed = s.verdicts.last().filter(|v| v.1 == "PASS").map(|v| v.2.as_str());
+    let then = passed.and_then(|c| p.next(c, "PASS")).map(|t| t.0);
+    let next_check = then.filter(|t| p.get(t).is_some_and(|c| c.kind == "check"));
+    let gate = then
+        .filter(|t| p.get(t).is_some_and(|g| g.kind == "gate"))
+        .unwrap_or(p.gate());
     let lane = s.lane.clone().unwrap_or_default();
     let w = |who, what: &str, since, next: Option<String>| Waiting {
         fleet: f.clone(),
@@ -114,13 +129,30 @@ pub fn waiting_on(
         _ => s.state.split('(').next().unwrap_or_default(),
     };
     match st {
+        // #173: a PASS that goes on to another check: that check reviews the same head.
+        "ready" if next_check.is_some() => {
+            let c = next_check.unwrap_or_default();
+            let what = format!("{} PASS, waiting for drive to spawn {c}", passed.unwrap_or_default());
+            w(
+                "drive",
+                &what,
+                s.last_ts,
+                cmd("spawn", &format!(" {}", p.role(c).unwrap_or(c))),
+            )
+        }
         "ready" if !how.is_empty() => {
             let what = format!(
                 "conflict: PR #{} {how} {}",
                 pr["number"],
                 pr["baseRefName"].as_str().unwrap_or("?")
             );
-            w("drive", &what, s.last_ts, cmd("spawn", " impl --supersede --update"))
+            let b = to(gate, "conflict");
+            w(
+                "drive",
+                &what,
+                s.last_ts,
+                cmd("spawn", &format!(" {b} --supersede --update")),
+            )
         }
         "ready" if gh::ci(&gh::required(&pr["statusCheckRollup"], req)) == "green" => {
             w("drive", "PASS + green, waiting for merge", s.last_ts, cmd("merge", ""))
@@ -130,22 +162,27 @@ pub fn waiting_on(
             "drive",
             "no verdict for the PR head: review again",
             s.last_ts,
-            cmd("spawn", " rev --supersede"),
+            cmd("spawn", &format!(" {} --supersede", to(build, "push"))),
         ),
         // The exact command, or none (no nudge) while the verdict word or the head sha is unknown.
         "review" => match rev {
             // #92: a verdict is for the head the rev lane was spawned at; a moved PR head gets a fresh reviewer.
             Some(_) if head.is_some_and(|h| !pushed.is_empty() && h.0 != base) => {
                 let what = format!(
-                    "verdict is for {:.7}, the PR head moved to {pushed:.7}: review again",
+                    "review was for {:.7}, head moved to {pushed:.7} (not a clean merge): review again",
                     head.unwrap_or_default().0
                 );
-                w("drive", &what, s.last_ts, cmd("spawn", " rev --supersede"))
+                let c = s.check.as_deref().unwrap_or("rev");
+                w("drive", &what, s.last_ts, cmd("spawn", &format!(" {c} --supersede")))
             }
             Some((path, v)) => {
                 let at = head.is_some_and(|h| h.0 == base);
-                let next = (matches!(v, "PASS" | "FAIL") && at)
-                    .then(|| format!("herdsman verdict {f} {n} {v} --sha {pushed} --file {path}"));
+                let next = (matches!(v, "PASS" | "FAIL") && at).then(|| {
+                    format!(
+                        "herdsman verdict {f} {n} {v} --sha {} --file {path}",
+                        head.unwrap_or_default().0
+                    )
+                });
                 w(
                     "drive",
                     "verdict written, waiting for drive to record it",
@@ -155,12 +192,23 @@ pub fn waiting_on(
             }
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },
-        "fix" if s.last_event == "verdict" => w(
-            "drive",
-            "review FAIL, waiting for drive to start fix round",
-            s.last_ts,
-            cmd("spawn", " impl --supersede"),
-        ),
+        "fix" if s.last_event == "verdict" => {
+            // The FAIL's stage: a check's FAIL, or a gate's CI red (logs before #173 name none: `rev`).
+            let v = events.iter().rev().find(|e| e.is("verdict", f, n));
+            let by = v.and_then(|e| e.str("stage")).unwrap_or("rev");
+            let o = if p.get(by).is_some_and(|g| g.kind == "gate") {
+                "ci_red"
+            } else {
+                "FAIL"
+            };
+            let what = "review FAIL, waiting for drive to start fix round";
+            w(
+                "drive",
+                what,
+                s.last_ts,
+                cmd("spawn", &format!(" {} --supersede", to(by, o))),
+            )
+        }
         // #182: a head the PR handed off (`pushed`, logged by drive) is due too, whatever the worktree holds.
         "impl" | "fix"
             if !pushed.is_empty() && !s.reviewed(pushed) && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
@@ -174,14 +222,14 @@ pub fn waiting_on(
                 "drive",
                 &what,
                 head.map_or(s.last_ts, |h| h.1.max(s.last_ts)),
-                cmd("spawn", " rev"),
+                cmd("spawn", &format!(" {}", to(build, "push"))),
             )
         }
         "impl" | "fix" if s.last_event == "lane-killed" => w(
             "drive",
             "lane killed, waiting for drive to respawn impl",
             s.last_ts,
-            cmd("spawn", " impl"),
+            cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
@@ -202,11 +250,13 @@ pub fn scan(
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         // #43: after a `lane-killed`, the issue's surviving lane carries its reason (a killed rev: spawn rev again).
-        let Some(lane) = s
-            .lane
-            .clone()
-            .or_else(|| s.lanes.get("impl").or(s.lanes.get("rev")).cloned())
-        else {
+        let Some(lane) = s.lane.clone().or_else(|| {
+            s.build
+                .as_ref()
+                .and_then(|b| s.lanes.get(b))
+                .or(s.check_lane())
+                .cloned()
+        }) else {
             continue;
         };
         let s = IssueState {
@@ -219,7 +269,7 @@ pub fn scan(
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
         if busy(&lane) {
-            let who = if s.lanes.get("rev") == Some(&lane) {
+            let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
                 "none"
@@ -257,7 +307,7 @@ pub fn scan(
             .as_deref()
             .and_then(|g| g.trim().split_once(' '))
             .and_then(|(h, t)| Some((h, t.parse().ok()?)));
-        let spawn = s.lanes.get("rev").and_then(|l| last_spawn(events, l));
+        let spawn = s.check_lane().and_then(|l| last_spawn(events, l));
         let path = spawn
             .and_then(|e| e.str("worktree"))
             .map(|wt| format!("{wt}/verdict.md"));
@@ -273,16 +323,29 @@ pub fn scan(
             .map(|v| v.lines().next().unwrap_or_default().trim().to_string());
         // In review, `head` is the one the rev lane was spawned at (logged since #92; else its worktree's).
         let at = spawn
-            .filter(|_| s.lanes.get("rev") == Some(&lane))
+            .filter(|_| s.check_lane() == Some(&lane))
             .and_then(|e| Some((e.str("sha")?, e.ts)));
-        let mut w = waiting_on(
-            events,
-            &s,
-            at.or(head),
-            &pr,
-            &f.required_checks,
-            path.as_deref().zip(word.as_deref()),
-        );
+        // #207: a PR head that merges the reviewed one with integration and adds nothing carries its verdict, as a
+        // logged auto-update does: read as one, the verdict is recorded at the reviewed sha.
+        let pushed = pr["headRefOid"].as_str().unwrap_or_default();
+        let updated = |e: &Event| e.is("auto-updated", &s.fleet, s.issue) && e.str("to") == Some(pushed);
+        let carry = at.filter(|(x, _)| {
+            word.is_some()
+                && !pushed.is_empty()
+                && !x.eq_ignore_ascii_case(pushed)
+                && !events.iter().any(updated)
+                && crate::overlap::carries(r, f, &s, x, pushed)
+        });
+        let ev = carry.map(|(x, _)| {
+            let d = serde_json::json!({"from": x, "to": pushed});
+            [
+                events,
+                &[Event::new(ctx.now, &s.fleet, Some(s.issue), "auto-updated", d)],
+            ]
+            .concat()
+        });
+        let ev = ev.as_deref().unwrap_or(events);
+        let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.
         if let Some(l) = f
             .merge_label
