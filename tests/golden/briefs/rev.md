@@ -35,6 +35,8 @@ blind spots is trustworthy.
 
 AC: it {works} \ `ok`
 
+Start any dev server on `$HERDSMAN_PORT` (this lane's own port); never a fixed port.
+
 ## Output contract
 
 - Read-only: no edits, no commits, no push.

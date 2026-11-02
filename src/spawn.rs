@@ -94,6 +94,8 @@ pub struct Plan {
     /// Claude lanes: the account name and the shell assignment exporting its token.
     pub account: Option<(String, String)>,
     pub env: std::collections::BTreeMap<String, String>,
+    /// #187: `HERDSMAN_PORT`, the lane's dev-server port (`lane_port`).
+    pub port: u16,
     /// The only MCP servers the lane gets, and the lane-local file Claude reads them from.
     pub mcp: serde_json::Map<String, Value>,
     pub mcp_file: PathBuf,
@@ -105,8 +107,11 @@ pub struct Plan {
 impl Plan {
     /// Exports `HERDSMAN_LANE`, the fleet's `env` (and an account's `CLAUDE_CODE_OAUTH_TOKEN`) in the pane's shell.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
+        let port = self.port.to_string();
         let mut c = herdr::run_argv(pane, &["export", &format!("HERDSMAN_LANE='{}'", self.lane)]);
-        c.extend(self.env.iter().map(|(k, v)| format!("{k}='{}'", expand(v).display())));
+        c.push(format!("HERDSMAN_PORT={port}"));
+        let v = |v: &str| expand(&v.replace("$HERDSMAN_PORT", &port)).display().to_string();
+        c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| a.1.clone()));
         c
     }
@@ -153,6 +158,36 @@ pub fn lane_title(head: &str, issue_title: &str) -> String {
         "" => head.to_string(),
         c => format!("{head} · {c}…"),
     }
+}
+
+/// #187: `<fleet>/<branch>` hashed (FNV-1a, stable across builds) into `range` (`"lo-hi"`, default 41000-41999);
+/// a port in `taken` moves on to the next free one, wrapping within the range.
+pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
+    let r = range
+        .and_then(|r| r.split_once('-'))
+        .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
+    let (lo, hi): (u16, u16) = r.filter(|(a, b)| a <= b).unwrap_or((41000, 41999));
+    let h = key.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+    });
+    let n = u64::from(hi - lo) + 1;
+    let at = |i: u64| lo + u16::try_from((h + i) % n).unwrap_or(0);
+    (0..n).map(at).find(|p| !taken.contains(p)).unwrap_or_else(|| at(0))
+}
+
+/// Ports of the open lanes the log records (every fleet: they share the host), except `branch`'s own.
+fn live_ports(events: &[Event], branch: &str) -> Vec<u16> {
+    let st = fold(events);
+    let open = |e: &Event| {
+        let s = e.issue.and_then(|i| st.get(&(e.fleet.clone(), i)));
+        s.is_some_and(|s| {
+            !s.done() && s.lanes.get(e.str("role").unwrap_or_default()).map(String::as_str) == e.str("agent")
+        })
+    };
+    let mine = |e: &Event| e.str("branch") == Some(branch);
+    let port = |e: &Event| u16::try_from(e.data.get("port")?.as_u64()?).ok();
+    let live = events.iter().filter(|e| e.kind == "spawn" && open(e) && !mine(e));
+    live.filter_map(port).collect()
 }
 
 pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Result<Plan> {
@@ -203,6 +238,11 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         None
     };
     let mcp_file = worktree.join(".mcp.lane.json");
+    let port = lane_port(
+        f.port_range.as_deref(),
+        &format!("{fleet}/{branch}"),
+        &live_ports(&read(&ctx.state)?, &branch),
+    );
     let title = lane_title(&head, &crate::gh::cached_title(ctx, fleet, issue).unwrap_or_default());
     Ok(Plan {
         agent,
@@ -219,6 +259,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         lane,
         account,
         env: f.env.clone(),
+        port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
         head,
@@ -629,7 +670,7 @@ fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) 
 /// The `spawn` event's data for a lane of plan `p` running in `pane`.
 fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
     json!({"role": p.role, "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0)})
+        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port})
 }
 
 /// `herdsman adopt`: log the lane running in `pane` and name its agent as planned; nothing is started.

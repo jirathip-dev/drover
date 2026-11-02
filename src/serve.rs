@@ -1585,6 +1585,7 @@ impl<'a> Server<'a> {
             o(&l.model),
             o(&l.effort),
             o(&l.account),
+            l.port.map(|p| format!(":{p}")).unwrap_or_default(),
             a.clone(),
         ];
         let mut card = vec![

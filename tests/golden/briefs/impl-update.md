@@ -66,6 +66,8 @@ This is a fix round; a fresh review follows at your pushed head.
 3. Run the repo's gates (build, lint, tests) and push.
 4. Report the resolved files.
 
+Start any dev server on `$HERDSMAN_PORT` (this lane's own port); never a fixed port.
+
 ## Output contract
 
 - Work on branch `issue-12` only. Commit, push it, open a PR to `staging` whose body says `Closes #12`.

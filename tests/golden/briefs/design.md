@@ -26,6 +26,8 @@ What you produced, where it lives (branch, files), open questions for the owner.
 
 AC: it {works} \ `ok`
 
+Start any dev server on `$HERDSMAN_PORT` (this lane's own port); never a fixed port.
+
 ## Output contract
 
 - Work on branch `design-12` only; never push to `staging` or main.

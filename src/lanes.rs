@@ -26,6 +26,8 @@ pub struct Lane {
     pub pane: Option<String>,
     /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
     pub parked: Option<String>,
+    /// #187: the spawn's `HERDSMAN_PORT`.
+    pub port: Option<u64>,
 }
 
 /// Join `herdr agent list` rows with the log. `ws` maps workspace id -> label.
@@ -118,6 +120,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         effort: s("effort"),
         account: s("account"),
         since: e.ts,
+        port: e.data.get("port").and_then(Value::as_u64),
         ..l
     }
 }
