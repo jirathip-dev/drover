@@ -114,8 +114,13 @@ pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     up() || (reply(r, false, agent, pane, text).is_ok() && up())
 }
 
+/// Close the pane; one already gone (#249: a worktree remove closed its workspace) is closed.
 pub fn close(r: &dyn Runner, pane: &str) -> Result<String> {
-    ok(r, &argv(&["pane", "close", pane]))
+    let o = exec(r, &argv(&["pane", "close", pane]))?;
+    if o.code != 0 && ![&o.stderr, &o.stdout].iter().any(|s| s.contains("pane_not_found")) {
+        bail!("herdr pane close {pane} failed ({}): {}", o.code, o.stderr.trim());
+    }
+    Ok(o.stdout)
 }
 
 /// herdr's `{"error": {"code": <code>}}` answer (on stderr or stdout), e.g. `timeout`.
