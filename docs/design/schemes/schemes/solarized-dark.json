@@ -1,0 +1,25 @@
+{
+  "label": "Solarized dark",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#002b36",
+    "--card": "#073642",
+    "--edge": "#2a4d57",
+    "--line": "#0a3a46",
+    "--scrim": "#001014aa",
+    "--fg": "#93a1a1",
+    "--mute": "#8e9d9f",
+    "--l": "#4fa1db",
+    "--link": "#4fa1db",
+    "--g": "#83a622",
+    "--a": "#c99a1a",
+    "--r": "#df4341",
+    "--p": "#9195d3",
+    "--c": "#3eaaa2",
+    "--fk-l": "#4fa1db",
+    "--fk-p": "#9195d3",
+    "--fk-c": "#3eaaa2",
+    "--fk-g": "#83a622",
+    "--fk-a": "#c99a1a"
+  }
+}

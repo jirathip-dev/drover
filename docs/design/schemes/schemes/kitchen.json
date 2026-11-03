@@ -1,0 +1,25 @@
+{
+  "label": "Kitchen (charcoal tile; #239 values)",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#1a1816",
+    "--card": "#24201c",
+    "--edge": "#4a3f2e",
+    "--line": "#2e2a26",
+    "--scrim": "#0a0908aa",
+    "--fg": "#efe3cb",
+    "--mute": "#a89a87",
+    "--l": "#e89a62",
+    "--link": "#c9a55a",
+    "--g": "#6cc96e",
+    "--a": "#f4d24e",
+    "--r": "#ff5c84",
+    "--p": "#d39ad0",
+    "--c": "#62c9c0",
+    "--fk-l": "#e89a62",
+    "--fk-p": "#d39ad0",
+    "--fk-c": "#62c9c0",
+    "--fk-g": "#6cc96e",
+    "--fk-a": "#f4d24e"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "label": "Nord",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#2e3440",
+    "--card": "#3b4252",
+    "--edge": "#4c566a",
+    "--line": "#3b4252",
+    "--scrim": "#1b1f27aa",
+    "--fg": "#e5e9f0",
+    "--mute": "#a7b1c2",
+    "--l": "#88c0d0",
+    "--link": "#8fb4d8",
+    "--g": "#9ccc8c",
+    "--a": "#ebcb8b",
+    "--r": "#e0707a",
+    "--p": "#c8a6c8",
+    "--c": "#8fbcbb",
+    "--fk-l": "#88c0d0",
+    "--fk-p": "#c8a6c8",
+    "--fk-c": "#8fbcbb",
+    "--fk-g": "#9ccc8c",
+    "--fk-a": "#ebcb8b"
+  }
+}
