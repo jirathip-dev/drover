@@ -818,16 +818,27 @@ fn a_lost_agent_name_retries_once_without_a_double_start() {
 }
 
 /// #275: asks a lane logged on its own host before forwarding are imported into the main log once, under a new id.
+/// #283: only the ones unanswered there and under a day old; `asks-imported` marks the host once.
 #[test]
 fn asks_stranded_on_a_remote_host_are_imported_once() {
     let c = setup("hosts-import", "", true, 0);
     remote_spawn(&c, NOW - 900);
     let d = json!({"id": "q1", "question": "Old?", "options": [], "agent": "x"});
     ev(&c, NOW - 800, 9, "needs-decision", d);
-    let stranded = json!({"ts": NOW - 600, "fleet": "sendmeter", "issue": 12, "type": "needs-decision",
-                          "id": "q59", "question": "Which way?", "options": ["a"], "agent": null});
+    let ask = |ts: u64, id: &str| {
+        json!({"ts": ts, "fleet": "sendmeter", "issue": 12, "type": "needs-decision",
+               "id": id, "question": "Which way?", "options": ["a"], "agent": null})
+    };
+    let answered = json!({"ts": NOW - 650, "fleet": "sendmeter", "issue": 12, "type": "decision", "id": "q58"});
+    let remote = [
+        ask(NOW - 30 * 3600, "q57"),
+        ask(NOW - 700, "q58"),
+        answered,
+        ask(NOW - 600, "q59"),
+    ];
+    let remote: String = remote.iter().map(|e| format!("{e}\n")).collect();
     let log = "/home/me/.local/state/herdsman/events.jsonl";
-    let r = fake(1.0, 1.0).reply(&format!("{SSH}'cat' '{log}'"), &format!("{stranded}\n"));
+    let r = fake(1.0, 1.0).reply(&format!("{SSH}'cat' '{log}'"), &remote);
     for _ in 0..2 {
         assert_eq!(run(&c, &r, &["check"]).0, 0);
     }
@@ -836,11 +847,18 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
         .iter()
         .filter(|e| e.kind == "needs-decision" && e.issue == Some(12))
         .collect();
-    assert_eq!(asks.len(), 1, "imported once");
+    assert_eq!(asks.len(), 1, "only the unanswered recent ask, imported once");
     let a = asks[0];
     assert_eq!(
         (a.str("id"), a.str("from"), a.str("agent"), a.ts),
         (Some("q2"), Some("bazzite:q59"), Some("sendmeter-impl-12"), NOW - 600)
+    );
+    let marks: Vec<_> = all.iter().filter(|e| e.kind == "asks-imported").collect();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].data["upto_ts"], json!(NOW - 600));
+    assert!(
+        !all.iter().any(|e| e.kind == "ask-waiting"),
+        "an imported ask never pushes"
     );
     let (_, out) = run(&c, &r, &["asks", "sendmeter"]);
     assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
