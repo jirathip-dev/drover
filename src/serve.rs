@@ -82,6 +82,7 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ("favicon.ico", "image/png", I192),
 ];
 /// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
+#[allow(long_running_const_eval)] // staging build fix: the assets outgrew the default step limit (#310)
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
     while k < ASSETS.len() + FILES.len() {

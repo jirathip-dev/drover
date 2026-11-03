@@ -95,7 +95,10 @@ fn spawn_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(&format!("{SSH}'gh' 'repo' 'clone' 'jirathip-dev/sendmeter'"), "")
+        .reply(
+            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
+            "",
+        )
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply("herdr --machine cloud1 worktree create", ws)
