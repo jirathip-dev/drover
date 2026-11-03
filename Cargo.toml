@@ -1,11 +1,25 @@
-[package]
-name = "herdsman"
+# #264: core (state, gates, commands) <- server (the phone page) <- cli (the `herdsman` binary); docs/architecture.md.
+[workspace]
+members = ["crates/core", "crates/server", "crates/cli"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Small CLI that owns fleet state, gates and harness toggles over herdr"
 license = "MIT"
 
-[dependencies]
+# Lints for every crate root (moved from the old lib.rs, #264); the allows are style noise, docs/architecture.md (Code rules).
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+format_push_string = "allow"
+format_collect = "allow"
+many_single_char_names = "allow"
+
+[workspace.dependencies]
 aes-gcm = "0.11.1"
 anyhow = "1"
 base64 = "0.23.1"
@@ -16,3 +30,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
 toml = "0.8"
+herdsman-core = { path = "crates/core" }
+herdsman-server = { path = "crates/server" }
