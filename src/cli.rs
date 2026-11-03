@@ -287,6 +287,9 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
+    /// Claude Code status line: records the lane account's 5h/7d limits (reads status JSON on stdin)
+    #[command(hide = true)]
+    Statusline,
 }
 
 /// A read over one fleet or all: `[FLEET] [--json]`.
@@ -450,7 +453,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             return if e.use_stderr() { 2 } else { 0 };
         }
     };
-    if !matches!(cli.cmd, Cmd::Hook { .. } | Cmd::Migrate | Cmd::Help { .. }) {
+    if !matches!(
+        cli.cmd,
+        Cmd::Hook { .. } | Cmd::Statusline | Cmd::Migrate | Cmd::Help { .. }
+    ) {
         for h in &ctx.hints {
             eprintln!("{h}");
         }
@@ -492,6 +498,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             role,
             git_pre_push: false,
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
+        Cmd::Statusline => {
+            let mut buf = String::new();
+            let _ = stdin.read_to_string(&mut buf);
+            let env = |k: &str| std::env::var(k).unwrap_or_default();
+            crate::usage::statusline(ctx, &env("HERDSMAN_ACCOUNT"), &env("HERDSMAN_LANE"), &buf, out);
+        }
         Cmd::Status(Scope { fleet, json }) => {
             let events = read(&ctx.state)?;
             let all = fold(&events);

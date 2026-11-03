@@ -328,6 +328,17 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
             row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
+    // #246: how long the last fast step took and when it ran.
+    let (at, secs) = drive::fast_step(ctx).unzip();
+    let took = secs
+        .flatten()
+        .map_or(String::new(), |s| format!("fast step {s:.1} s · "));
+    rows.push(row(
+        "fast step",
+        tone(ctx.now, at),
+        format!("{took}ran {}", ago(ctx.now, at)),
+        FIX,
+    ));
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

@@ -1,6 +1,7 @@
-//! Cached GitHub reads: the issue spec (re-fetched when `updatedAt` moved) and PR/CI views fresh for 60 s.
+//! Cached GitHub reads: the issue spec (re-fetched when `updatedAt` moved) and PR/CI views fresh for 60 s, all of a
+//! fleet's open PRs read in one GraphQL call (#246).
 use crate::config::Fleet;
-use crate::runner::{argv, json, Runner};
+use crate::runner::{json, ok, Runner};
 use crate::usage::load;
 use crate::Ctx;
 use anyhow::Result;
@@ -24,10 +25,10 @@ pub(crate) fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> Path
 // #212: the fast step reads every PR afresh, so a minute's launchd jitter never leaves a card 2 min old.
 thread_local!(pub static FORCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
 
-/// A `{"ts": …}` cache entry younger than `PR_TTL` at `now` (never, while `FORCE` is set).
+/// A `{"ts": …}` cache entry younger than `PR_TTL` at `now` (#246: while `FORCE` is set, only one of this step).
 fn fresh(c: &Value, now: u64) -> bool {
     let ts = c["ts"].as_u64().unwrap_or(0);
-    !FORCE.get() && now >= ts && now - ts < PR_TTL
+    now >= ts && now - ts < PR_TTL && (!FORCE.get() || ts == now)
 }
 
 pub(crate) fn store(p: &Path, v: &Value) -> Result<()> {
@@ -88,17 +89,63 @@ pub fn spec(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issue: u64, refre
     Ok(v)
 }
 
-/// The PR for `branch` as of `now`: one `gh pr view` per 60 s. Null when there is none.
+/// #246: every open PR of the repo, flattened to `gh pr view`'s shape, in one paginated GraphQL call.
+const PRS_QUERY: &str = "query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){\
+pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state \
+baseRefName headRefName headRefOid mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
+commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion startedAt \
+detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
+const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
+[.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
+
+/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says).
+pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Value> {
+    let p = cache_path(ctx, "prs", fleet, 0);
+    let c = load::<Value>(&p).filter(|c| fresh(c, now)).unwrap_or_else(|| {
+        let (owner, name) = f.repo.split_once('/').unwrap_or_default();
+        let v = [
+            format!("owner={owner}"),
+            format!("name={name}"),
+            format!("query={PRS_QUERY}"),
+        ];
+        let a = [
+            &["api", "graphql", "--paginate", "--jq", PRS_JQ][..],
+            &["-f", &v[0], "-f", &v[1], "-f", &v[2]],
+        ];
+        let c = match ok(r, "gh", &a.concat()) {
+            Ok(out) => {
+                let prs = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+                let by = prs.map(|v| (v["headRefName"].as_str().unwrap_or_default().to_string(), v));
+                json!({"ts": now, "prs": by.collect::<serde_json::Map<_, _>>()})
+            }
+            Err(e) => json!({"ts": now, "error": format!("{e:#}")}),
+        };
+        let _ = store(&p, &c);
+        c
+    });
+    match c["error"].as_str() {
+        Some(e) => anyhow::bail!("open PRs of {}: {e}", f.repo),
+        None => Ok(c["prs"].clone()),
+    }
+}
+
+/// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open
+/// set, or one fleet just changed (`forget_pr`), is read alone (`gh pr view`).
 pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "pr", fleet, issue);
-    if let Some(c) = load::<Value>(&p).filter(|c| c["branch"] == branch && fresh(c, now)) {
+    let c = load::<Value>(&p).filter(|c| c["branch"] == branch);
+    if let Some(c) = c.as_ref().filter(|c| fresh(c, now)) {
         return Ok(c["pr"].clone());
     }
-    let o = r.run("gh", &argv(&["pr", "view", branch, "-R", &f.repo, "--json", PR_FIELDS]))?;
-    let pr = if o.code == 0 {
-        serde_json::from_str(&o.stdout).unwrap_or(Value::Null)
-    } else {
-        Value::Null
+    let (old, forgot) = c.map_or((Value::Null, false), |c| (c["pr"].clone(), c["forgot"] == true));
+    let open = (!forgot).then(|| snapshot(ctx, r, f, fleet, now)).transpose()?;
+    let pr = match open.as_ref().and_then(|o| o.get(branch)) {
+        Some(v) => v.clone(),
+        // Outside a step (`pr`, `wait`) a branch never seen open is read too: it may be merged already.
+        None if forgot || old["state"] == "OPEN" || old.is_null() && !FORCE.get() => {
+            json(r, "gh", &["pr", "view", branch, "-R", &f.repo, "--json", PR_FIELDS]).unwrap_or_default()
+        }
+        None => old,
     };
     store(&p, &json!({"ts": now, "branch": branch, "pr": pr}))?;
     Ok(pr)
@@ -112,7 +159,7 @@ pub fn cached_pr(ctx: &Ctx, fleet: &str, issue: u64) -> Value {
 /// #169: the latest Actions run url for an issue branch with no PR: one `gh run list` per 60 s, by the tick only.
 pub fn run(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) {
     let p = cache_path(ctx, "run", fleet, issue);
-    if load::<Value>(&p).is_some_and(|c| fresh(&c, now)) {
+    if FORCE.get() || load::<Value>(&p).is_some_and(|c| fresh(&c, now)) {
         return;
     }
     let a = [
@@ -182,9 +229,12 @@ pub fn diff_names(
         .collect())
 }
 
-/// Drop the cached PR read (after fleet changed the PR itself).
+/// Drop the cached PR read (after fleet changed the PR itself): the next read is of that PR alone (#246).
 pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
-    let _ = std::fs::remove_file(cache_path(ctx, "pr", fleet, issue));
+    let p = cache_path(ctx, "pr", fleet, issue);
+    if let Some(c) = load::<Value>(&p) {
+        let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
+    }
 }
 
 /// The PR view carries label `name`.
