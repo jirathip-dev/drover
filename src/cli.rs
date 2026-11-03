@@ -1004,7 +1004,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
             crate::drive::kick(ctx, r, f, n, why);
         }
-        return Ok(());
+    }
+    if matches!(
+        input["hook_event_name"].as_str(),
+        Some("PostToolUse" | "post_tool_call" | "Stop" | "on_session_end")
+    ) {
+        return Ok(()); // after the fact: nothing left to guard
     }
     let branches = protected_branches(ctx);
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
