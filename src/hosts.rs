@@ -481,27 +481,17 @@ pub fn place(
 fn held_for(ctx: &Ctx, held: bool) -> u64 {
     let p = ctx.state.with_file_name("held-since");
     let since = std::fs::read_to_string(&p).ok().and_then(|s| s.trim().parse().ok());
-    let _ = if held {
-        std::fs::write(&p, since.unwrap_or(ctx.now).to_string())
-    } else {
-        std::fs::remove_file(&p)
-    };
+    let mark = || std::fs::write(&p, since.unwrap_or(ctx.now).to_string());
+    let _ = if held { mark() } else { std::fs::remove_file(&p) };
     ctx.now.saturating_sub(since.filter(|_| held).unwrap_or(ctx.now))
 }
 
 /// #254: start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
-pub fn wake(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    f: &Fleet,
-    p: Option<Placed>,
-    dry: bool,
-) -> Result<Option<Placed>> {
+pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Option<Placed>) -> Result<Option<Placed>> {
     match p {
-        Some(p) if !dry && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
+        Some(p) if !f.1 && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
             crate::cloud::start(ctx, cfg, r, &p.name)?;
-            Ok(Some(at(ctx, cfg, f, r, (&p.name, p.machine.as_deref()))))
+            Ok(Some(at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()))))
         }
         p => Ok(p),
     }

@@ -851,9 +851,7 @@ fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
 
 /// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`); false when there is none.
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<bool> {
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?.trim() != "0";
-    if !ahead && changes(&git(&["status", "--porcelain"])?) == 0 {
+    if dirty(r, Path::new(wt)).is_none() {
         return Ok(false);
     }
     snapshot(r, wt, w, msg).map(|()| true).map_err(|e| match e {

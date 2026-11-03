@@ -484,7 +484,7 @@ pub fn spawn(
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
     let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
-    let placed = crate::hosts::wake(ctx, cfg, r, f, placed, o.dry_run)?;
+    let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
     let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
