@@ -95,6 +95,8 @@ pub struct Accounts {
     pub cap_reset_minutes: u64,
     /// `[accounts.usage]`: account name -> the `CLAUDE_CONFIG_DIR` of its own `claude` login, read only for the usage meter.
     pub usage: BTreeMap<String, String>,
+    /// `headroom`: spawns take the uncapped account with the most 5h/7d headroom; `order` (default): as before.
+    pub pick: Option<String>,
     #[serde(flatten)]
     pub names: BTreeMap<String, String>,
 }
@@ -106,6 +108,7 @@ impl Default for Accounts {
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
+            pick: None,
             names: BTreeMap::new(),
         }
     }

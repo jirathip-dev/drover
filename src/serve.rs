@@ -2052,8 +2052,9 @@ impl<'a> Server<'a> {
             let mut sub = String::new();
             for name in c.accounts.names.keys() {
                 let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
-                let usage = crate::usage::meter(ctx, c, self.r, name)
-                    .map(|m| crate::usage::shown(self.r, &m, &c.accounts.usage[name], ctx.now));
+                let login = c.accounts.usage.get(name).map_or("", String::as_str);
+                let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
+                    .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
                 let usage = match usage {
                     Some(Ok((parts, pace))) => {
                         let bar = |(t, p): &(String, f64)| {

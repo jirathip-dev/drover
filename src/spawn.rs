@@ -124,7 +124,11 @@ impl Plan {
         let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
         let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
         c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
-        c.extend(self.account.iter().map(|a| a.1.clone()));
+        c.extend(
+            self.account
+                .iter()
+                .flat_map(|a| [format!("HERDSMAN_ACCOUNT='{}'", a.0), a.1.clone()]),
+        );
         c
     }
 

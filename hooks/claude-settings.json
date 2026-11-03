@@ -8,6 +8,7 @@
     "swift-lsp@claude-plugins-official": false,
     "vercel@claude-plugins-official": false
   },
+  "statusLine": { "type": "command", "command": "{{FLEET_STATUSLINE}}" },
   "hooks": {
     "PreToolUse": [
       {
