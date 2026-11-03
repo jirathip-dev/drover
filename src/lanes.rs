@@ -32,6 +32,8 @@ pub struct Lane {
     pub machine: Option<String>,
     /// #248: why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
     pub kept: Option<String>,
+    /// #260: its worktree, from the spawn.
+    pub worktree: Option<String>,
 }
 
 /// Join `herdr agent list` rows with the log. `ws` maps workspace id -> label.
@@ -127,6 +129,20 @@ impl Lane {
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
     }
+    /// #260: a local Claude lane's newest session transcript, `~/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
+    pub fn session(&self) -> Option<std::path::PathBuf> {
+        let local = self.harness == "claude" && self.machine.is_none();
+        session_file(&crate::config::home(), self.worktree.as_ref().filter(|_| local)?)
+    }
+}
+
+/// The newest `.jsonl` Claude keeps for worktree `wt` under `<home>/.claude/projects`.
+pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
+    let d = home.join(".claude/projects");
+    let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
+    let paths = all.flatten().map(|e| e.path());
+    let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
+    jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -143,6 +159,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         since: e.ts,
         host: s("host").or(l.host),
         machine: s("machine").or(l.machine),
+        worktree: s("worktree"),
         ..l
     }
 }
@@ -332,14 +349,10 @@ pub fn log(state: &Path, agent: &str) -> Option<std::path::PathBuf> {
     plain.then(|| state.with_file_name("transcripts").join(format!("{agent}.log")))
 }
 
-/// #248: a closed Claude lane's saved session, the newest `.jsonl` Claude keeps for `cwd` under `<home>/.claude/projects`,
+/// #248: a closed Claude lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`),
 /// as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
-pub fn session(home: &Path, cwd: &str) -> Option<Vec<String>> {
-    let name = cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-");
-    let at = |p: &std::path::PathBuf| p.metadata().and_then(|m| m.modified()).ok();
-    let jsonl = |p: &std::path::PathBuf| p.extension().is_some_and(|e| e == "jsonl");
-    let files = std::fs::read_dir(home.join(".claude/projects").join(name)).ok()?;
-    let file = files.flatten().map(|d| d.path()).filter(jsonl).max_by_key(at)?;
+pub fn session(home: &Path, wt: &str) -> Option<Vec<String>> {
+    let file = session_file(home, wt)?;
     let part = |p: &Value| match p["type"].as_str()? {
         "text" => p["text"].as_str().map(String::from),
         "tool_use" => {
@@ -349,7 +362,7 @@ pub fn session(home: &Path, cwd: &str) -> Option<Vec<String>> {
         }
         _ => None,
     };
-    let (text, mut out) = (std::fs::read_to_string(file).ok()?, vec![]);
+    let (text, mut out) = (read_tail(&file, 1 << 21)?, vec![]);
     for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
         let mark = ["❯ ", "⏺ "][usize::from(v["type"] == "assistant")];
         let c = &v["message"]["content"];
@@ -403,6 +416,70 @@ pub fn activity(harness: &str, screen: &str) -> String {
     } else {
         m
     }
+}
+
+/// #260: a tool call as a masked `now:` line (the row ellipsises it): `running <cmd>`, `editing <file>`, …, else the tool.
+fn doing(tool: &str, arg: &str) -> String {
+    let rows = "running Bash Shell $|editing Edit Write Update MultiEdit|reading Read".split('|');
+    let row = rows.into_iter().find(|r| r.split(' ').skip(1).any(|w| w == tool));
+    let first = arg.lines().next().unwrap_or_default();
+    mask(&format!("now: {} {}", row.map_or(tool, |r| &r[..7]), first.trim()))
+}
+
+/// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.
+pub fn now(screen: &str) -> Option<String> {
+    chat(screen).0.iter().rev().find_map(|l| {
+        let t = strip(l).trim().trim_start_matches(['┊', ' ']).to_string();
+        if let Some((n, a)) = t.strip_prefix(['⏺', '•']).and_then(|r| r.trim_start().split_once('(')) {
+            let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
+            return word.then(|| doing(n, a.rsplit_once(')').map_or(a, |x| x.0)));
+        }
+        let cmd = t.strip_prefix("💻").or(t.strip_prefix("$ "))?.trim_start();
+        Some(doing("$", cmd.strip_prefix("$ ").unwrap_or(cmd)))
+    })
+}
+
+/// #260: a file's last `n` bytes as text (a session transcript is tens of MB; a cut first line fails to parse, skipped).
+pub fn read_tail(p: &std::path::Path, n: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let (mut f, mut b) = (std::fs::File::open(p).ok()?, vec![]);
+    let from = f.metadata().ok()?.len().saturating_sub(n);
+    f.seek(SeekFrom::Start(from)).and_then(|_| f.read_to_end(&mut b)).ok()?;
+    Some(String::from_utf8_lossy(&b).into_owned())
+}
+
+/// #260: a lane row's `now:` line: its session transcript's current tool call (in its last 256 KB), else the pane's.
+pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
+    let tail = l.session().and_then(|p| read_tail(&p, 1 << 18));
+    tail.map_or_else(|| now(screen), |t| said(&t).1)
+}
+
+/// #260: a Claude session transcript (`.jsonl`): its prompts and each turn's final text reply as `{k: me | ai, text, at}`
+/// (masked; meta lines, tool results and `<…>` wrappers dropped), and its last tool call as a `now:` line (none once text
+/// follows it: the turn replied).
+pub fn said(jsonl: &str) -> (Vec<Value>, Option<String>) {
+    let (mut out, mut now, keys) = (Vec::<Value>::new(), None, ["command", "file_path", "path", "pattern"]);
+    for v in jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let (c, k) = (&v["message"]["content"], if v["type"] == "user" { "me" } else { "ai" });
+        if v["isMeta"] == true || !["user", "assistant"].contains(&v["type"].as_str().unwrap_or_default()) {
+            continue;
+        }
+        let one = vec![json!({"type": "text", "text": c})];
+        for p in c.as_array().cloned().unwrap_or(one) {
+            let t = p["text"].as_str().map(str::trim).unwrap_or_default();
+            if p["type"] == "tool_use" {
+                let arg = keys.iter().find_map(|k| p["input"][k].as_str()).unwrap_or_default();
+                now = Some(doing(p["name"].as_str().unwrap_or_default(), arg));
+            } else if p["type"] == "text" && !t.is_empty() && !t.starts_with('<') {
+                if k == "ai" && out.last().is_some_and(|l| l["k"] == "ai") {
+                    out.pop();
+                }
+                now = None;
+                out.push(json!({"k": k, "text": mask(t), "at": v["timestamp"]}));
+            }
+        }
+    }
+    (out, now)
 }
 
 /// The pane's last `n` non-empty lines, masked.

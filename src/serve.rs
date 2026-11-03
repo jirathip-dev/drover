@@ -1124,7 +1124,21 @@ impl<'a> Server<'a> {
         let end = all.len().saturating_sub(before);
         let page = &all[end.saturating_sub(lines)..end];
         let status = lanes::chat(&screen).1.map(lanes::strip);
-        Some(serde_json::json!({"harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
+        // #260: the default view's source: Claude's session transcript, else (null) the pane's role runs.
+        let ok = self.export.is_none();
+        let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
+        let note = |e: &&Event| {
+            let t = match e.kind.as_str() {
+                _ if Some(&e.fleet) != l.fleet.as_ref() || e.issue != l.issue => None,
+                "spawn" => Some(format!("spawned {}", e.str("agent")?)),
+                "needs-decision" => Some(format!("ask: {}", e.str("question")?)),
+                "verdict" => Some(format!("verdict {}", e.str("verdict")?)),
+                k => (k == "merged").then(|| k.into()),
+            };
+            Some(json!({"at": e.ts, "text": lanes::mask(&t?)}))
+        };
+        let notices: Vec<_> = events.iter().filter_map(|e| note(&e)).collect();
+        Some(serde_json::json!({"said": said.map(|s| lanes::said(&s).0), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -1950,7 +1964,8 @@ impl<'a> Server<'a> {
             } else {
                 String::new()
             };
-        let act = esc(&lanes::activity(&l.harness, &screen.unwrap_or_default()));
+        let screen = screen.unwrap_or_default();
+        let act = esc(&lanes::now_of(l, &screen).unwrap_or_else(|| lanes::activity(&l.harness, &screen)));
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
