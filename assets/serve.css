@@ -76,7 +76,7 @@ nav a.on .n{color:inherit}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)}#scp{margin-left:var(--s4)} /* #244: [▦]'s select reaches 8 px left; the gap keeps it off [◐]'s */ /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
+/* #290: the four header controls are one width, so each bracket sits as far from its glyph */header>button:not(.pairb){width:calc(var(--ctl) + var(--s1));padding:0}header>button:not(.pairb)+button{margin-left:var(--s2)} /* 16 px apart: no tap ring over its neighbour */#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 /* #305: a theme's `loading` sprite runs in [↻]'s place while busy, 24 px over the glyph (hidden, so the box never moves):
    8 fps through steps(), the trot by --gait, the kf1/kf2 frames (with the flame) by --o1/--o2; reduced motion: one still frame. */
@@ -90,7 +90,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html[data-tab=queue] :is(#thp,#scp),html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -488,3 +488,31 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}
+/* The header never wraps its title (offline, `last update hh:mm` squeezed it to a letter a line); the note, now `as of
+   hh:mm`, fits beside [?] [↻] [🐎] [◐] at 390 and ellipsises first; the title only as a last resort (+ [Pair]). */
+body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#stale{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #290: `[◐]` sits on every tab (no select behind it); the look sheet (docs/design/pickers) is the lane sheet's box with
+   two listboxes, THEME and COLOURS (`.cg` groups as in [config]). Its backdrop is light, so the board behind it shows
+   each pick at once; ≥ 720 px the two lists sit side by side and the sheet opens at half. */
+#sheet:has(>.look)>.bd{background:color-mix(in srgb,var(--scrim) 35%,transparent)}
+.sh.look .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
+/* A row: 44 px, the art, the name, `(theme default)`; the current one is in the accent with a ✓. Pressed inverts like a
+   control; the keyboard's row has a 2 px accent ring. */
+.lko{display:flex;align-items:center;gap:var(--s3);min-height:var(--hit);padding:0 var(--s1);border-top:1px solid var(--line);cursor:pointer;outline:0;-webkit-tap-highlight-color:transparent}
+.lko:first-child{border-top:0}
+.lko>.ln{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lko>small{flex:none;font-size:var(--fs-meta);color:var(--mute)}
+.lko::after{content:"";flex:none;margin-left:auto;width:2ch;text-align:center}
+.lko[aria-selected=true]>.ln,.lko[aria-selected=true]::after{color:var(--l)}
+.lko[aria-selected=true]::after{content:"✓"}
+.lko:active{background:var(--l)}.lko:active>*,.lko:active::after{color:var(--bg)}
+.lko:focus-visible{box-shadow:inset 0 0 0 2px var(--l)}
+/* The art, one column wide in both lists so the names line up: a theme's row sprite (crisp) or its icon on a 24 px tile,
+   the same tile for every theme; a scheme's `Aa` (its fg on its bg, bordered), then its green, amber and red chips. */
+.lka,.lsw{display:flex;flex:none;gap:calc(var(--s1) / 2);width:calc(5 * var(--s4));height:calc(var(--s4) + var(--s2))}
+.lka>*{width:calc(var(--s4) + var(--s2));height:100%;border:1px solid var(--edge);border-radius:5px;background:var(--card)}
+.lka>svg{shape-rendering:crispEdges;image-rendering:pixelated}
+.lsw>b{flex:1;border-radius:3px}
+.lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
+.lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+@media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}

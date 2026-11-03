@@ -1,0 +1,26 @@
+/* The header never wraps its title (offline, `last update hh:mm` squeezed it to a letter a line); the note, now `as of
+   hh:mm`, fits beside [?] [↻] [🐎] [◐] at 390 and ellipsises before the title would wrap. */
+header b{white-space:nowrap}#stale{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #290: `[◐]` sits on every tab (no select behind it); the look sheet (docs/design/pickers) is the lane sheet's box with
+   two listboxes, THEME and COLOURS (`.cg` groups as in [config]). Its backdrop is light, so the board behind it shows
+   each pick at once; ≥ 720 px the two lists sit side by side and the sheet opens at half. */
+#sheet:has(>.look)>.bd{background:color-mix(in srgb,var(--scrim) 35%,transparent)}
+.sh.look .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
+/* A row: 44 px, the art, the name, `(theme default)`; the current one is in the accent with a ✓. Pressed inverts like a
+   control; the keyboard's row has a 2 px accent ring. */
+.lko{display:flex;align-items:center;gap:var(--s3);min-height:var(--hit);padding:0 var(--s1);border-top:1px solid var(--line);cursor:pointer;outline:0;-webkit-tap-highlight-color:transparent}
+.lko:first-child{border-top:0}
+.lko>.ln{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lko>small{flex:none;font-size:var(--fs-meta);color:var(--mute)}
+.lko::after{content:"";flex:none;margin-left:auto;width:2ch;text-align:center}
+.lko[aria-selected=true]>.ln,.lko[aria-selected=true]::after{color:var(--l)}
+.lko[aria-selected=true]::after{content:"✓"}
+.lko:active{background:var(--l)}.lko:active>*,.lko:active::after{color:var(--bg)}
+.lko:focus-visible{box-shadow:inset 0 0 0 2px var(--l)}
+/* The art: a theme's row sprite (24 × 18) or its icon (24 px tile); a scheme's 5 swatches, bg fg green amber red. */
+.lka{display:grid;place-items:center;flex:none;width:24px;height:24px}
+.lka>svg{width:24px;height:18px}.lka>img{width:24px;height:24px;border-radius:5px}
+.lsw{display:flex;flex:none;width:60px;height:18px;border:1px solid var(--edge);border-radius:3px;overflow:hidden}
+.lsw>b{flex:1}
+.lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+@media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}

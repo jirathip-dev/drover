@@ -501,3 +501,42 @@ fn a_long_reason_never_squeezes_the_name() {
         "the older lane does not repeat it; no `(10m)` suffix in the row"
     );
 }
+
+/// #327: a fix lane that died (`lane-dead`), or whose supersede never spawned, at the FAILed head: the fix is due again;
+/// a live fix lane at that head is not.
+#[test]
+fn a_dead_fix_lane_is_respawned_not_parked() {
+    let c = ctx(&tmpdir("waiting-dead-fix"), CONFIG);
+    let t = NOW - 1500;
+    for n in [20, 21, 22] {
+        spawn(&c, t, n, "impl", &format!("sendmeter-impl-{n}"));
+        rev(&c, t + 10, n, None, false);
+        verdict(&c, t + 20, n, "FAIL", &sha(&n.to_string()));
+    }
+    spawn(&c, t + 30, 20, "impl", "sendmeter-impl-20");
+    ev(
+        &c,
+        t + 40,
+        Some(20),
+        "lane-dead",
+        json!({"key": "parked:sendmeter-impl-20"}),
+    );
+    ev(
+        &c,
+        t + 30,
+        Some(21),
+        "supersede",
+        json!({"role": "impl", "agent": "sendmeter-impl-21"}),
+    );
+    spawn(&c, t + 30, 22, "impl", "sendmeter-impl-22");
+    let mut r = Fake::default();
+    for n in [20, 21, 22] {
+        r = r.reply(&format!("gh pr view issue-{n} "), &pr(&sha(&n.to_string()), "green"));
+    }
+    let all = waits(&c, &r, &[]);
+    let of = |n: u64| all.iter().find(|w| w.issue == n).map(|w| w.next_cmd.clone());
+    let fix = |n: u64| Some(Some(format!("herdsman spawn sendmeter {n} impl --supersede")));
+    assert_eq!(of(20), fix(20), "lane-dead with the fix still due");
+    assert_eq!(of(21), fix(21), "a supersede that never spawned");
+    assert_eq!(of(22), Some(None), "a fix lane still there is left alone");
+}

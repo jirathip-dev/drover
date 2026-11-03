@@ -1,0 +1,330 @@
+{
+ "headers": {
+  "today queue": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[?]",
+    "[↻]",
+    "[🐎]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": false,
+   "selects": 2
+  },
+  "today lanes": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]",
+    "[▦]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": false,
+   "selects": 2
+  },
+  "today host": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]",
+    "[▦]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": false,
+   "selects": 2
+  },
+  "today events": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]",
+    "[▦]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": false,
+   "selects": 2
+  },
+  "today queue-offline": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[?]",
+    "[↻]",
+    "[🐎]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": false,
+   "selects": 2
+  },
+  "next queue": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[?]",
+    "[↻]",
+    "[🐎]",
+    "[◐]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": true,
+   "selects": 0
+  },
+  "next lanes": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": true,
+   "selects": 0
+  },
+  "next host": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": true,
+   "selects": 0
+  },
+  "next events": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[↻]",
+    "[🐎]",
+    "[◐]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": true,
+   "selects": 0
+  },
+  "next queue-offline": {
+   "height": 48,
+   "right": 378,
+   "controls": [
+    "[?]",
+    "[↻]",
+    "[🐎]",
+    "[◐]"
+   ],
+   "title": 20,
+   "staleCut": false,
+   "look": true,
+   "selects": 0
+  }
+ },
+ "sheet": {
+  "390 open": {
+   "open": true,
+   "title": "look",
+   "theme": "farm",
+   "scheme": "farm",
+   "lists": [
+    {
+     "label": "theme",
+     "options": [
+      "farm ✓",
+      "kitchen",
+      "terminal"
+     ]
+    },
+    {
+     "label": "colours",
+     "options": [
+      "dracula",
+      "farm ✓ (theme default)",
+      "github-dark",
+      "gruvbox",
+      "kitchen",
+      "nord",
+      "paper",
+      "solarized-dark"
+     ]
+    }
+   ],
+   "selects": 0,
+   "focus": null,
+   "outliers": []
+  },
+  "390 tap kitchen": {
+   "open": true,
+   "title": "look",
+   "theme": "kitchen",
+   "scheme": "kitchen",
+   "lists": [
+    {
+     "label": "theme",
+     "options": [
+      "farm",
+      "kitchen ✓",
+      "terminal"
+     ]
+    },
+    {
+     "label": "colours",
+     "options": [
+      "dracula",
+      "farm",
+      "github-dark",
+      "gruvbox",
+      "kitchen ✓ (theme default)",
+      "nord",
+      "paper",
+      "solarized-dark"
+     ]
+    }
+   ],
+   "selects": 0,
+   "focus": null,
+   "outliers": [],
+   "reloaded": false
+  },
+  "390 terminal + paper": {
+   "open": true,
+   "title": "look",
+   "theme": "terminal",
+   "scheme": "paper",
+   "lists": [
+    {
+     "label": "theme",
+     "options": [
+      "farm",
+      "kitchen",
+      "terminal ✓"
+     ]
+    },
+    {
+     "label": "colours",
+     "options": [
+      "dracula",
+      "farm",
+      "github-dark (theme default)",
+      "gruvbox",
+      "kitchen",
+      "nord",
+      "paper ✓",
+      "solarized-dark"
+     ]
+    }
+   ],
+   "selects": 0,
+   "focus": null,
+   "outliers": [],
+   "reloaded": false,
+   "kept": [
+    "terminal",
+    "paper"
+   ]
+  },
+  "390 lanes": {
+   "open": true,
+   "lists": [
+    "theme 3",
+    "colours 8"
+   ],
+   "outliers": []
+  },
+  "390 host": {
+   "open": true,
+   "lists": [
+    "theme 3",
+    "colours 8"
+   ],
+   "outliers": []
+  },
+  "390 events": {
+   "open": true,
+   "lists": [
+    "theme 3",
+    "colours 8"
+   ],
+   "outliers": []
+  },
+  "1440 open by Enter": {
+   "focus": "farm"
+  },
+  "1440 keys Tab ↓ ↓ Enter ↓": {
+   "open": true,
+   "title": "look",
+   "theme": "farm",
+   "scheme": "gruvbox",
+   "lists": [
+    {
+     "label": "theme",
+     "options": [
+      "farm ✓",
+      "kitchen",
+      "terminal"
+     ]
+    },
+    {
+     "label": "colours",
+     "options": [
+      "dracula",
+      "farm (theme default)",
+      "github-dark",
+      "gruvbox ✓",
+      "kitchen",
+      "nord",
+      "paper",
+      "solarized-dark"
+     ]
+    }
+   ],
+   "selects": 0,
+   "focus": "kitchen",
+   "outliers": [],
+   "reloaded": false
+  },
+  "1440 Esc": {
+   "open": false,
+   "focus": "look"
+  }
+ },
+ "audit": {
+  "queue": {
+   "view": "queue",
+   "controls": 31,
+   "outliers": []
+  },
+  "lanes": {
+   "view": "lanes",
+   "controls": 21,
+   "outliers": []
+  },
+  "host": {
+   "view": "host",
+   "controls": 21,
+   "outliers": []
+  },
+  "events": {
+   "view": "events",
+   "controls": 26,
+   "outliers": []
+  }
+ },
+ "errors": []
+}
