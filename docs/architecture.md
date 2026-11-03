@@ -45,7 +45,7 @@ the hook for one release, and `HERDSMAN_LANE` wins when both are set.
 
 Three crates (#264): `crates/core` (every module below but `serve`), `crates/server` (`serve`, over core only) and
 `crates/cli` (the `herdsman` binary: core plus server, and the integration tests). `cargo install --path crates/cli`.
-Core never depends on server or cli: `herdsman serve` reaches it through the `SERVE` hook the binary sets. CI checks
+Core never depends on server or cli: `herdsman serve` reaches it through the `SERVE` hook `main.rs` sets. CI checks
 both rules: no server or cli crate in core's dependency tree, and `std::process::Command` in core only in `runner`
 (the `Runner` implementation), `events` (notifiers) and `webpush` (curl).
 The split is a pure move by what compiles today, so core still holds I/O modules (`drive`, `spawn`, `harness`,
@@ -57,7 +57,7 @@ herdr argv) and `gh` (cached GitHub reads).
 
 | Module | Job |
 |---|---|
-| `cli` | clap CLI, `help --agent`, dispatch (`main.rs`, `lib.rs` in `crates/cli`: the binary, `serve` wired in) |
+| `cli` | clap CLI, `help --agent`, dispatch (`crates/cli`: `main.rs` sets the `SERVE` hook) |
 | `lib` | `Ctx` (paths, clock); `ask`, `answer`, `asks` |
 | `config` | fleet.toml: load, validate, in-place edits that keep every other byte |
 | `events` | the append-only log, the state fold, notifiers |

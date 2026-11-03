@@ -39,7 +39,7 @@ pub mod waiting;
 pub mod webpush;
 
 use anyhow::{bail, Result};
-pub use cli::{main_with, usage_doc, Serve, HELP_AGENT_MAX, SERVE};
+pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, read, Event};
 use serde_json::{json, Value};

@@ -6,22 +6,16 @@ use crate::runner::{self, Runner};
 use crate::{
     access, check, devices, gate, gh, harness, hook, migrate, pause, protection, queue, queue_change, set, spawn, Ctx,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-/// #264: `herdsman serve` lives in the server crate, which depends on this one; the binary sets it at start.
-pub struct Serve {
-    pub serve: fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>,
-    pub export: fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>,
-}
-pub static SERVE: std::sync::OnceLock<Serve> = std::sync::OnceLock::new();
-
-fn serve() -> Result<&'static Serve> {
-    SERVE.get().ok_or_else(|| anyhow::anyhow!("this build has no `serve`"))
-}
+/// #264: (`serve`, `serve --export`), set by the binary: the server crate depends on this one, never the reverse.
+pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
+type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
+type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
 
 #[derive(Parser)]
 #[command(
@@ -675,8 +669,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             export: Some(dir),
             demo,
             ..
-        } => (serve()?.export)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => (serve()?.serve)(ctx, r, &addr, read_only)?,
+        } => (SERVE.get().context("no serve in this build")?.1)(ctx, r, &dir, demo)?,
+        Cmd::Serve { addr, read_only, .. } => {
+            (SERVE.get().context("no serve in this build")?.0)(ctx, r, &addr, read_only)?;
+        }
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
