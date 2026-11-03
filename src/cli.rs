@@ -215,8 +215,12 @@ enum Cmd {
         #[arg(long)]
         config: std::path::PathBuf,
     },
-    /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun
+    /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
+    /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
     Setup {
+        #[arg(requires = "name")]
+        host: Option<String>,
+        name: Option<String>,
         /// Write the jobs without loading them
         #[arg(long)]
         no_load: bool,
@@ -727,7 +731,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
         }
         Cmd::Doctor { json } => return crate::doctor::doctor(ctx, r, out, json),
-        Cmd::Setup { no_load } => return crate::timer::setup(ctx, r, out, !no_load),
+        Cmd::Setup { host, name, no_load } => {
+            let Some((h, n)) = host.zip(name) else {
+                return crate::timer::setup(ctx, r, out, !no_load);
+            };
+            let pane = crate::setup::start(ctx, &Config::load(&ctx.config)?, r, &h, &n, "cli")?;
+            writeln!(
+                out,
+                "{n} on {h}: herdr pane {pane}; it closes when the login exits or in 10 min"
+            )?;
+        }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
         cmd => {
             let cfg = Config::load(&ctx.config)?;

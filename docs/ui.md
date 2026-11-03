@@ -82,6 +82,10 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    is a blend of its neighbours (crisp, never smoothed). `theme-switch` picks
    terminal then kitchen in place and fails on a reload, a kept sprite or a favicon not swapped; `moment-still` runs
    with reduced motion forced and fails unless a moment is a still frame.
+   #305: `loading` (and `~kitchen`, `~terminal`) sets `[↻]` busy and fails if the header or the control moves, or farm
+   and kitchen do not draw their 24×24 `loading` sprite over the hidden ↻ (terminal: no sprite, the ↻ spins); the shot
+   holds a strip of its first four frames under the header. `loading-still` runs with reduced motion forced and fails
+   unless it is one still frame.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).

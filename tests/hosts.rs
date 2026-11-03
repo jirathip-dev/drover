@@ -213,7 +213,10 @@ fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(&format!("{SSH}'gh' 'repo' 'clone' 'jirathip-dev/sendmeter'"), "")
+        .reply(
+            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
+            "",
+        )
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply("herdr --machine bazzite worktree create", ws)
@@ -250,10 +253,10 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         "git runs on bazzite: {calls:?}"
     );
     assert!(
-        calls
-            .iter()
-            .any(|c| c.starts_with(&format!("{SSH}'gh' 'repo' 'clone'"))),
-        "first use clones"
+        calls.iter().any(|c| c.starts_with(&format!(
+            "{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git' '/tmp/does-not-matter/sendmeter'"
+        ))) && !calls.iter().any(|c| c.contains("'gh' 'repo' 'clone'")),
+        "#307: first use clones with plain git (the host's insteadOf/SSH applies), never gh: {calls:?}"
     );
     assert!(
         calls.iter().any(|c| c.contains(&format!("--path {WT} "))),
@@ -484,8 +487,8 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let cases = [
         (format!("{SSH}'sh' '-c' 'PATH="), "✗ herdr — server none, client ? → herdr update on the host"),
         (format!("{SSH}'sh' '-c' 'p=$(pgrep"), "✗ herdr session — the server runs outside the login session (keychain locked) → restart the herdr server from its launchd job: `launchctl kickstart -k gui/<uid>/<label>`"),
-        (format!("{SSH}'git' 'ls-remote'"), "✗ git sendmeter — ls-remote https://github.com/jirathip-dev/sendmeter.git → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
-        ("herdr --machine bazzite workspace create".into(), "✗ gh — not logged in inside a herdr pane → gh auth login"),
+        (format!("{SSH}'git' 'ls-remote'"), "✗ git sendmeter — can't reach jirathip-dev/sendmeter: no stderr → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
+        ("herdr --machine bazzite workspace create".into(), "✗ gh — logged out in a herdr pane → ssh bazzite gh auth login"),
         (format!("{SSH}'/opt/herdsman/bin/herdsman'"), "! herdsman — missing there, herdsman 0.1.0"),
     ];
     for (bad, want) in cases {
@@ -505,7 +508,7 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     let r = healthy(fake(0.1, 0.1)).once("herdr --machine bazzite pane read", 0, "gh:0\nclaude:1\nhs:done\n");
     let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
     assert_eq!(rows.len(), 1, "{rows:?}");
-    assert!(rows[0].starts_with("✗ claude — not logged in inside a herdr pane → claude auth login"));
+    assert!(rows[0].starts_with("✗ claude — logged out in a herdr pane → claude auth login"));
     assert!(
         r.called("herdr --machine bazzite workspace close w5"),
         "the throwaway workspace is closed"
@@ -516,7 +519,10 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
         .once(&format!("{SSH}'git' 'ls-remote'"), 128, "");
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains("\n✗ host bazzite git sendmeter — ls-remote"), "{out}");
+    assert!(
+        out.contains("\n✗ host bazzite git sendmeter — can't reach jirathip-dev/sendmeter"),
+        "{out}"
+    );
     let (_, out) = run(&c, &healthy(r), &["doctor"]);
     assert!(
         out.contains("\n✓ host bazzite — herdr, session, git, gh, claude, herdsman 0.1.0 ("),
@@ -528,7 +534,8 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
 fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     let c = setup("hosts-sick", "", true, 0);
     let mut all = cached(&c);
-    all.get_mut("bazzite").unwrap().health = vec!["✗ gh — not logged in inside a herdr pane → gh auth login".into()];
+    all.get_mut("bazzite").unwrap().health =
+        vec!["✗ gh — logged out in a herdr pane → ssh bazzite gh auth login".into()];
     std::fs::write(
         c.state.with_file_name("hosts.json"),
         serde_json::to_string(&all).unwrap(),
@@ -544,7 +551,7 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     let e = placed(&c, &r, 12, "impl", None).unwrap_err();
     assert_eq!(
         e,
-        "NO_HOST: bazzite: unhealthy: ✗ gh — not logged in inside a herdr pane → gh auth login"
+        "NO_HOST: bazzite: unhealthy: ✗ gh — logged out in a herdr pane → ssh bazzite gh auth login"
     );
     let cfg = Config::load(&c.config).unwrap();
     let s = &cached(&c)["bazzite"];
@@ -553,8 +560,56 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
         (tone, words.as_str()),
         (
             "r",
-            "unhealthy · gh — not logged in inside a herdr pane → gh auth login"
+            "unhealthy · gh — logged out in a herdr pane → ssh bazzite gh auth login"
         )
+    );
+}
+
+/// #307: a host whose `git ls-remote` of one fleet's repo fails is skipped for that fleet only, with the reason.
+#[test]
+fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
+    let c = setup("hosts-reach", "", true, 0);
+    let cfg = Config::load(&c.config).unwrap();
+    let r = healthy(fake(0.1, 0.1)).once_err(
+        &format!("{SSH}'git' 'ls-remote'"),
+        128,
+        "remote: Repository not found.\nfatal: repository not found\n",
+    );
+    let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].starts_with("✗ git sendmeter — can't reach jirathip-dev/sendmeter: remote: Repository not found. →"),
+        "{rows:?}"
+    );
+    let write = |health: Vec<String>| {
+        let mut all = cached(&c);
+        all.get_mut("bazzite").unwrap().health = health;
+        std::fs::write(
+            c.state.with_file_name("hosts.json"),
+            serde_json::to_string(&all).unwrap(),
+        )
+        .unwrap();
+    };
+    let r = fake(2.0, 0.1);
+    write(vec![rows[0]
+        .replace("sendmeter", "berth")
+        .replace("jirathip-dev/berth", "jirathip-dev/other")]);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "another fleet's repo: still placed"
+    );
+    write(rows.clone());
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("mini"),
+        "the next host takes the lane"
+    );
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "--needs", "docker"]);
+    let e = placed(&c, &r, 12, "impl", None).unwrap_err();
+    assert!(
+        e.starts_with("NO_HOST: bazzite: unhealthy: ✗ git sendmeter — can't reach jirathip-dev/sendmeter: remote: Repository not found."),
+        "{e}"
     );
 }
 

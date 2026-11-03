@@ -21,6 +21,7 @@ profile = "lane-impl"
 model = "opus"
 effort = "xhigh"                 # none|low|medium|high|xhigh: Claude --effort, Hermes --reasoning
 accounts = ["A", "B", "C"]   # Claude token: first uncapped one (or `account = "A"`)
+# fallback = ["claude:A", "claude:B", "dsh"]   # #302: out of usage / signed out / won't start: the next entry carries on
 mcp = ["supabase-dev"]        # only these servers from the repo's .mcp.json; default none
 
 [fleet.api.role.rev]
@@ -118,6 +119,7 @@ ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long t
 done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
 max_pushes_per_pass = 3   # herdsman check pushes at most this many alerts a pass, then one summary
+# fallback_rest_minutes = 60   # #302: an unavailable agent rests this long when its message names no reset
 transcript_days = 30      # Claude lanes' cleanupPeriodDays; lanes share ~/.claude, so below 30 (Claude's default) also prunes your own transcripts
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
@@ -136,3 +138,9 @@ cmd = "notify <chat>"   # any command; one plain line on stdin
 # cmd = "hermes send -q -t telegram:<chat_id>"   # or Hermes, to Telegram
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing", "account-capped"]
 # format = "json"   # send the raw event JSON instead
+
+# #303: the logins a host card's [sign in ▾] (or `herdsman setup <host> <name>`) runs; claude, gh and codex are built in.
+# [[setup]]
+# name = "claude B"
+# cmd = "claude /login"
+# env = { CLAUDE_CONFIG_DIR = "~/accounts/B" }

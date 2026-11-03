@@ -47,6 +47,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let stall = cfg.limits.stall_minutes * 60;
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
     let remote = crate::hosts::survey(ctx, cfg, r, false);
+    crate::setup::reap(ctx, r, &events)?;
     for name in cfg.fleet.keys() {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
     }
@@ -90,13 +91,25 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             // A Claude lane on a named account that shows the usage-limit banner caps that account.
+            // #302: with a `fallback` chain, any lane's limit or sign-out rests its account (else its harness).
             let account = spawned.and_then(|e| e.str("account"));
-            if let (Some(name), Some(p), true) = (account, pane, status.is_some()) {
+            let chain = cfg
+                .fleet(&s.fleet)
+                .is_ok_and(|f| f.role.get(role).is_some_and(|r| !r.fallback.is_empty()));
+            if let (Some(p), Some(sp), true) = (pane, spawned, status.is_some() && (account.is_some() || chain)) {
                 let screen = herdr::read(r, p).unwrap_or_default();
+                let name = account.or(sp.str("harness")).unwrap_or_default();
+                let (harness, host) = (sp.str("harness"), sp.str("host"));
+                let rest = |until| json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until});
                 if access::capped_screen(cfg, &screen) {
                     let why = format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now");
-                    hits.push(("account-capped", format!("{lane}:{name}"), why));
-                    capped = Some((name, access::cap_until(cfg, r, &screen, ctx.now)));
+                    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
+                    hits.push((kind, format!("{lane}:{name}"), why));
+                    capped = Some(rest(access::cap_until(cfg, r, &screen, ctx.now)));
+                } else if chain && access::signed_out(&screen) {
+                    let why = format!("{name}: {role} lane {lane} is signed out; spawns skip {name} for now");
+                    hits.push(("agent-unavailable", format!("{lane}:{name}:auth"), why));
+                    capped = Some(rest(ctx.now + cfg.limits.fallback_rest_minutes * 60));
                 }
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
@@ -155,9 +168,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if kind == "account-capped" {
-                d["account"] = json!(capped.map(|c| c.0));
-                d["until"] = json!(capped.map(|c| c.1));
+            if let (Some(serde_json::Value::Object(c)), "account-capped" | "agent-unavailable") = (&capped, kind) {
+                c.iter().for_each(|(k, v)| d[k] = v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }

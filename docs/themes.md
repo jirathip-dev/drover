@@ -30,6 +30,7 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `rail` | `{"item", "needs"}`: the sprite of a queued issue at the Herd's gate, and its needs-you variant | `item`: the `idle` action; `needs`: the item |
 | `moments` | `{"merged" \| "fail" \| "needs-you": {"sprite": id, "anim": "hop" \| "shake" \| "pulse"}}`, played for 2.4 s when the log gets that event (an `ev` with its `k` on `/live`, once per seq). Silent; reduced motion shows a still frame. `false`: none | farm's |
 | `row_sprites` | sprite id per action for the Queue and Events row sprite (16 × 12 art drawn at 24 px, 1.5× with crisp pixels, #281; its title and label is the plain state word). `false`: rows keep their state glyph | the action's sprite |
+| `loading` | the sprite id the header's `[↻]` runs while a refresh or action is in flight (#305): 24 px in the same box, ~8 fps via `steps()` (a horse's trot by its `.leg`s, the `.kf1`/`.kf2` frames with the flame); reduced motion: one still frame | the spinning `↻` (not farm's) |
 | `icons` | `180`, `192`, `512`, `favicon`: one of `icon-180.png`, `icon-192.png`, `icon-512.png` in the folder | the same names; a file the folder lacks is the board's icon |
 | `ascii` | per action, the Lanes `[ascii]` mode's words: at most 3 lines of 8 narrow characters (no CJK, emoji or control characters) | farm's ASCII horses |
 | `modes` | the Lanes modes offered, from `scene`, `ascii`, `glyph`; one mode hides the button | `["scene", "ascii"]` |

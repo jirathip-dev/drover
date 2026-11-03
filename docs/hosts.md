@@ -14,8 +14,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
 2. On the new host, install and log in to:
    - herdr (its server running);
    - git;
-   - `gh` (`gh auth login`): the host clones each repo itself the first time a lane goes there
-     (`gh repo clone <repo> <local>`);
+   - `gh` (`gh auth login`): lanes there open their PRs with it;
+   - git access to each fleet repo: the host clones each repo itself the first time a lane goes there, with plain
+     `git clone https://github.com/<repo>.git <local>`, so its git config (`insteadOf`, credential helper) applies;
    - the agent harness (Claude Code logged in);
    - herdsman itself, then run `herdsman profiles sync` there. The lane's tool-guard hook calls `herdsman hook`, and
      the Claude profile lives under that host's own home.
@@ -135,10 +136,12 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
   starts `herdr server`).
 - **git**: `ssh <host> git ls-remote https://github.com/<repo>.git` works for each fleet whose needs the host fits.
   herdsman's own git over SSH never has the keychain, so HTTPS fails with `could not read Username for
-  'https://github.com'`. Fix: add the host's SSH key to GitHub and run
-  `git config --global url.git@github.com:.insteadOf https://github.com/` there.
+  'https://github.com'`. A failure reads `✗ git <fleet> — can't reach <repo>: <first error line>` and keeps only
+  that fleet's lanes off the host; placement moves them to the next host. Fix: add the host's SSH key to GitHub
+  and run `git config --global url.git@github.com:.insteadOf https://github.com/` there.
 - **gh** and **claude**: `gh auth status` and `claude auth status` succeed inside a herdr pane on the host (a
-  throwaway `herdsman-health` workspace, closed again). Fix: log in from a pane there.
+  throwaway `herdsman-health` workspace, closed again). Lanes there need `gh` for their PRs, so `gh` logged out is
+  a red host problem. Fix: `ssh <host> gh auth login` for gh; for claude, log in from a pane there.
 - **herdsman**: `herdsman --version` there prints the same version and git sha as on the main host. A mismatch is
   a warning (amber), not a failure.
 
