@@ -9,7 +9,7 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 bazzite -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 
 fn two_hosts(name: &str) -> herdsman::Ctx {
     let cfg = format!("{CONFIG}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
@@ -156,7 +156,7 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     let get = |q: &str| {
         String::from_utf8_lossy(&s.respond(&format!("GET {q} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
     };
-    let page = get("/");
+    let page = get("/?all=1");
     let gs: Vec<&str> = page
         .split("<span class=gn>")
         .skip(1)

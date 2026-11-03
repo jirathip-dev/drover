@@ -223,8 +223,9 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
         .reply("herdr workspace list", "{}")
         .reply("herdr pane read", working);
     let s2 = Server::new(&c, &r2, Some(ADDR.into()));
-    let page = String::from_utf8_lossy(&s2.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"), T + 5))
-        .into_owned();
+    let page =
+        String::from_utf8_lossy(&s2.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"), T + 5))
+            .into_owned();
     let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
     assert!(!needs.contains("sendmeter-impl-12"), "no stale card: {needs}");
 }
@@ -494,7 +495,7 @@ fn live_board_fits_390px() {
     let (c, r) = blocked("live-shots", &[COUNTDOWN]);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let page = req(&s, "GET", "/", "", &ck);
+    let page = req(&s, "GET", "/?all=1", "", &ck);
     let d = tmpdir("live-png");
     let file = d.join("page.html");
     std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();

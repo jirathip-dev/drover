@@ -532,7 +532,7 @@ fn lanes_group_by_fleet_with_others() {
         "herdr pane read w1:p2",
         "⏺ Bash(cd ~/w; cargo test 2>&1 | tail -5)\n\n✻ Herding… (4m 2s · ↓ 1k tokens)\n────────────────────\n> \n────────────────────\n",
     );
-    let page = get(&Server::new(&c, &r, None), "/");
+    let page = get(&Server::new(&c, &r, None), "/?all=1");
     let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
     let working = &page[at("<h2><span class=g>working (2)</span></h2><h3>sendmeter (1)</h3>")..];
     let rest = &working[4..];
@@ -550,7 +550,7 @@ fn lanes_group_by_fleet_with_others() {
     // One herdr agent list per 10 s, one pane read per 30 s.
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
-        s.respond("GET / HTTP/1.1\r\n\r\n", 1_000_000 + t);
+        s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", 1_000_000 + t);
     }
     assert_eq!(r.count("herdr agent list"), 1 + 2);
     assert_eq!(r.count("herdr pane read w1:p2"), 1 + 1);
@@ -944,7 +944,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
     assert!(sw.contains("P + 'frags'") && !sw.contains("frag=all"));
     let v = send("/", "");
     let v = &v[v.find("/a/").unwrap()..][..11];
-    assert!(send(&format!("{v}/serve.js"), "").contains("fetch(R + 'frags'"));
+    assert!(send(&format!("{v}/serve.js"), "").contains("fetch(R + 'frags?tab='"));
 }
 
 /// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404.

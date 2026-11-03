@@ -601,8 +601,19 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
-                let waits = cfg
-                    .map(|c| crate::waiting::scan(ctx, &c, r, &events, &all_agents(&c, r).unwrap_or_default(), false));
+                // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
+                let look = crate::snapshot::Snap::read(ctx, r);
+                let waits = cfg.map(|mut c| {
+                    c.fleet.retain(|k, _| fleet.as_ref().is_none_or(|f| f == k));
+                    crate::waiting::scan(
+                        ctx,
+                        &c,
+                        &look,
+                        &events,
+                        &all_agents(&c, &look).unwrap_or_default(),
+                        false,
+                    )
+                });
                 // #157: a HOST column once fleet.toml has `[hosts]`.
                 let hosts = Config::load(&ctx.config).is_ok_and(|c| !c.hosts.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
@@ -631,6 +642,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{:<pad$}{} {w}", status_line(s, ctx.now), host(s))?;
                 }
                 write!(out, "{}", serial.concat())?;
+                if let Some(t) = look.ts {
+                    writeln!(
+                        out,
+                        "as of the step's look {} ago",
+                        crate::events::age(ctx.now.saturating_sub(t))
+                    )?;
+                }
             }
         }
         Cmd::Set {
@@ -768,7 +786,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
         cmd => {
             let cfg = Config::load(&ctx.config)?;
-            let kick = |f: &str, n, why| crate::drive::kick(ctx, r, f, n, why);
+            let kick = |f: &str, n, why| {
+                let _ = crate::drive::kick(ctx, r, f, n, why);
+            };
             match cmd {
                 Cmd::Profiles {
                     cmd: ProfilesCmd::Sync { check: true },
@@ -1050,11 +1070,8 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             crate::drive::kick(ctx, r, f, n, why);
         }
     }
-    if matches!(
-        input["hook_event_name"].as_str(),
-        Some("PostToolUse" | "post_tool_call" | "Stop" | "on_session_end")
-    ) {
-        return Ok(()); // after the fact: nothing left to guard
+    if hook::after(&input) {
+        return Ok(());
     }
     let branches = protected_branches(ctx);
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();

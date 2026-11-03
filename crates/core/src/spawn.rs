@@ -31,10 +31,6 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
 }
 
-pub fn profile_dir(ctx: &Ctx, profile: &str) -> PathBuf {
-    ctx.claude_dir().join(profile)
-}
-
 /// Each profile once, at its first (fleet, role) in fleet.toml order.
 fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
     let mut done = std::collections::BTreeSet::new();
@@ -47,7 +43,7 @@ fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
 }
 
 /// Write every harness's files for every role's profile, so `herdsman set` alone can switch a role's harness;
-/// a generated Claude profile no role names any more (#155: a retired role's) is removed.
+/// a generated profile no role names any more (#155: a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
@@ -57,7 +53,8 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
-    for d in std::fs::read_dir(ctx.claude_dir()).into_iter().flatten().flatten() {
+    let root = harness::profiles_root(ctx);
+    for d in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let (name, dir) = (d.file_name().to_string_lossy().into_owned(), d.path());
         if dir.join("role.md").exists() && !all.iter().any(|p| p.4 == name) {
             std::fs::remove_dir_all(&dir)?;
@@ -105,11 +102,11 @@ pub struct Plan {
     pub kick: String,
     /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
     pub lane: String,
-    /// Claude lanes: the account name and the shell assignment exporting its token.
+    /// `[accounts]` lanes: the account name and the shell assignment exporting its token.
     pub account: Option<(String, String)>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
-    /// The only MCP servers the lane gets, and the lane-local file Claude reads them from.
+    /// The only MCP servers the lane gets, and the lane-local file a harness reads them from.
     pub mcp: serde_json::Map<String, Value>,
     pub mcp_file: PathBuf,
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
@@ -131,10 +128,7 @@ impl Plan {
                 .iter()
                 .flat_map(|a| [format!("HERDSMAN_ACCOUNT='{}'", a.0), a.1.clone()]),
         );
-        // #248: no updater, telemetry or other background traffic in a Claude lane (names as of Claude Code 2.1.311).
-        if self.harness == "claude" {
-            c.extend(["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"].map(String::from));
-        }
+        c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
         c
     }
 
@@ -246,11 +240,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     };
     let kick = format!("Read {} and execute it fully.", brief.display());
     let lane = format!("{fleet}:{issue}:{role}");
-    let account = if r.harness == "claude" {
-        access::pick(ctx, cfg, &read(&ctx.state)?, r)?
-    } else {
-        None
-    };
+    let account = access::pick(ctx, cfg, &read(&ctx.state)?, r)?;
     let mcp_file = worktree.join(".mcp.lane.json");
     // Ports of the logged lanes of open issues, this branch's own aside.
     let events = read(&ctx.state)?;

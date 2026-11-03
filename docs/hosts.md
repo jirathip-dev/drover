@@ -10,7 +10,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    `herdr machine status`. herdsman reaches the host two ways under that one name: `herdr --machine <name> …` for
    herdr commands, and `ssh <name> …` for everything else (git, probes, file reads and writes). So the machine's label
    must also work as an SSH host name, e.g. an entry in `~/.ssh/config`. Key-based login only, because herdsman runs
-   ssh with `BatchMode=yes`.
+   ssh with `BatchMode=yes` (#337: and `ControlMaster=auto`, one connection kept 10 minutes). The board's reads of a
+   host (#337) are one ssh call per step, its herdr run as `~/.local/bin/herdr` there.
 2. On the new host, install and log in to:
    - herdr (its server running);
    - git;

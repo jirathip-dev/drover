@@ -106,10 +106,10 @@ impl Serve {
 pub struct Accounts {
     /// Env file (`VAR=value` lines) the tokens are read from.
     pub accounts_env: Option<String>,
-    /// Usage-limit banner, `|`-separated substrings (default `access::CAP_PATTERN`).
+    /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
-    /// `[accounts.usage]`: account name -> the `CLAUDE_CONFIG_DIR` of its own `claude` login, read only for the usage meter.
+    /// `[accounts.usage]`: account name -> the config dir of its own harness login (`Harness::usage_meter`), read only for the usage meter.
     pub usage: BTreeMap<String, String>,
     /// `headroom`: spawns take the uncapped account with the most 5h/7d headroom; `order` (default): as before.
     pub pick: Option<String>,
@@ -300,6 +300,7 @@ pub struct Limits {
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize, // #318: concurrent detached spawn kicks (0: in the pass)
+    pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
 }
@@ -366,6 +367,7 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
         }
     }
@@ -401,6 +403,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "answer-undelivered",
     "state-write-failed",
     "wip-blocked",
+    "spawn-held",
 ];
 
 impl Notify {

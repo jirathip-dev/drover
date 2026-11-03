@@ -46,6 +46,8 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool) -> Res
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
+    let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
+    row(rows, !line.contains(" · stale"), '!', &line); // #333
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
     row(rows, ctx.worktrees.is_dir(), '✗', &line);
     for (name, fleet) in &cfg.fleet {
@@ -172,8 +174,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             }),
         );
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
+        let h = crate::harness::all().filter_map(|h| h.1.health_check());
+        let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let ok = format!(
-            "✓ host {name} — herdr, session, git, gh, claude, herdsman {}",
+            "✓ host {name} — herdr, session, git, gh, {logins}herdsman {}",
             crate::VERSION
         );
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));

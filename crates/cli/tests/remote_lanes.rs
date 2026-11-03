@@ -6,7 +6,7 @@ use common::*;
 use herdsman::events::read;
 use herdsman::runner::{Out, Runner};
 
-const MAIN_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 mini -- 'env' 'HERDSMAN_LANE=sendmeter:12:impl' \
+const MAIN_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m mini -- 'env' 'HERDSMAN_LANE=sendmeter:12:impl' \
 '/opt/herdsman/bin/herdsman' ";
 
 /// The lane host's runner: its ssh to `mini` runs herdsman in process on the main host's `main` ctx.

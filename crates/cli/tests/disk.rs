@@ -413,7 +413,7 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
     let get = |cookie: &str| {
-        let res = s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
+        let res = s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
         String::from_utf8_lossy(&res).into_owned()
     };
     let page = get("");

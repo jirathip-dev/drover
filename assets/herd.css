@@ -108,6 +108,7 @@
 .kf1{opacity:var(--o1,1)}.kf2{opacity:var(--o2,0)}.ksteam{opacity:var(--steam,0)}
 #herd.heat{animation:kfr 1.2s infinite}
 @keyframes kfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+.lds{--f1:#ee7a22;--f2:#ffd15a;--steam:1} /* #305, #337: the loading chef cooks at busy heat */
 .heat-calm{--f1:#3d7fd9;--f2:#9cc8ff}.heat-busy{--f1:#ee7a22;--f2:#ffd15a;--steam:1}.heat-held{--f1:#e04a1e;--f2:#ffb03a;--steam:1}
 .rs :is(.h-calm,.h-busy,.h-held){display:none}
 .heat-calm .rs .h-calm,.heat-busy .rs .h-busy,.heat-held .rs .h-held{display:inline}

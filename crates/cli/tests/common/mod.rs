@@ -106,10 +106,41 @@ impl Fake {
     }
 }
 
+/// #337's batch suffix: each remote read in the step's one ssh script ends with it.
+pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
+
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.calls.borrow_mut().push(line.clone());
+        // #337: a batched ssh script answers each of its reads as the one call it stands for (also logged).
+        let script = args
+            .last()
+            .and_then(|a| a.strip_prefix("'sh' '-c' '")?.strip_suffix('\''));
+        if let Some(script) = script.filter(|s| prog == "ssh" && s.contains("\\036")) {
+            let mut out = String::new();
+            for l in script.replace("'\\''", "'").lines() {
+                let l = l.trim_end_matches(BATCH);
+                // A herdr read there stands for `herdr --machine <host> …`.
+                let o = match l.strip_prefix("PATH=\"$HOME/.local/bin:$PATH\" 'herdr' '") {
+                    Some(h) => {
+                        let m = &args[args.len() - 3];
+                        let words = h.trim_end_matches('\'').split("' '").map(String::from);
+                        self.run(
+                            "herdr",
+                            &[["--machine".into(), m.clone()].to_vec(), words.collect()].concat(),
+                        )?
+                    }
+                    None => self.run(prog, &[&args[..args.len() - 1], &[l.to_string()]].concat())?,
+                };
+                out += &format!("{}\x1e{}\x1e", o.stdout, o.code);
+            }
+            return Ok(Out {
+                code: 0,
+                stdout: out,
+                stderr: String::new(),
+            });
+        }
         let mut onces = self.onces.borrow_mut();
         if let Some(i) = onces.iter().position(|(p, _)| line.starts_with(p.as_str())) {
             return Ok(onces.remove(i).1);

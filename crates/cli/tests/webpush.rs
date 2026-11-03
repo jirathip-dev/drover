@@ -143,8 +143,8 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
     let file = dir.join("state/webpush/subs.json");
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).into_owned();
+    let page = String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
+        .into_owned();
     assert!(
         page.contains("Enable alerts") && page.contains(&subs[0].id()),
         "Host tab lists the device"
@@ -366,7 +366,7 @@ const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example
 /// The Host tab's Alerts row at `now`.
 fn host(s: &Server, now: u64) -> String {
     let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), now)).into_owned();
+        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), now)).into_owned();
     let row = page
         .split("<span class=k>push</span><span class=w><b class=")
         .nth(1)

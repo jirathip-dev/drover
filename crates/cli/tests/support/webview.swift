@@ -11,11 +11,12 @@
 // #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `HERDSMAN_COOKIE` (`name=value`) set;
 // `HERDSMAN_WAIT` is the wait (s) before `window.late` is read (default 0.5).
 // `HERDSMAN_PRE`: js run at document start (before the page's own scripts).
-// swift webview.swift <page.html> <width> <tab> <mode> [out.png] [js] [close]
+// swift webview.swift <page.html | http URL> <width> <tab> <mode> [out.png] [js] [close]
 import AppKit
 import WebKit
 
 let a = CommandLine.arguments
+// #337: an http URL loads as a real navigation (its paint timing kept; `HERDSMAN_WARM`: twice), else the file's HTML.
 let url = a[1].hasPrefix("http") ? URL(string: a[1]) : nil
 let html = url == nil ? try! String(contentsOfFile: a[1], encoding: .utf8) : ""
 let env = ProcessInfo.processInfo.environment
@@ -102,9 +103,11 @@ func gate(_ w: WKWebView, _ close: String) {
 }
 
 final class Nav: NSObject, WKNavigationDelegate {
+    var warm = env["HERDSMAN_WARM"] != nil
     func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
+        // #337 `HERDSMAN_WARM`: load the URL a second time in the same WebKit (its caches and service worker warm).
+        if warm, let url { warm = false; return DispatchQueue.main.asyncAfter(deadline: .now() + 1) { w.load(URLRequest(url: url)) } }
         if let close { return gate(w, close) }
-        if url != nil { win.orderFrontRegardless() } // timers and animations run at full rate only on screen
         let js = tab == "-" ? "\(extra); [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]" : """
         tab('\(tab)'); mode('\(mode)'); \(extra);
         \(png == nil ? "document.querySelectorAll('details').forEach(d => d.open = true);" : "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });")
@@ -132,6 +135,7 @@ final class Nav: NSObject, WKNavigationDelegate {
 let nav = Nav()
 web.navigationDelegate = nav
 if let url {
+    win.orderFrontRegardless() // timers, animations and paint timing run at full rate only on screen
     let kv = (env["HERDSMAN_COOKIE"] ?? "").split(separator: "=", maxSplits: 1).map(String.init)
     let ck = kv.count == 2 ? HTTPCookie(properties: [.name: kv[0], .value: kv[1], .domain: url.host!, .path: "/"]) : nil
     if let ck { web.configuration.websiteDataStore.httpCookieStore.setCookie(ck) { web.load(URLRequest(url: url)) } } else { web.load(URLRequest(url: url)) }

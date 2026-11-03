@@ -23,6 +23,7 @@ pub mod protection;
 pub mod queue;
 pub mod runner;
 pub mod setup;
+pub mod snapshot;
 pub mod spawn;
 pub mod timer;
 pub mod usage;
@@ -88,9 +89,6 @@ impl Ctx {
             home: root,
             hints,
         }
-    }
-    pub fn claude_dir(&self) -> PathBuf {
-        self.config.parent().unwrap_or(&self.config).join("claude")
     }
 }
 
@@ -342,7 +340,9 @@ pub fn answer(
         ),
     )?;
     let why = via.map_or("answer", |_| "board");
-    ask.issue.inspect(|n| crate::drive::kick(ctx, r, fleet, *n, why)); // #304: after the decision is logged
+    if let Some(n) = ask.issue {
+        let _ = crate::drive::kick(ctx, r, fleet, n, why); // #304: after the decision is logged
+    }
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());

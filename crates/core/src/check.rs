@@ -1,5 +1,5 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
-use crate::access;
+
 use crate::config::Config;
 use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
@@ -56,6 +56,36 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let _ = gh::spec(ctx, r, f, name, i.issue, false);
         }
     }
+    // #333: a crashed kick's marker or lock goes on the next check; an issue SPAWN_PENDING has held back in every
+    // pass for 15 min alerts once per episode (its fleet's earliest hold is the key).
+    crate::drive::markers(ctx, cfg, r, true);
+    let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
+    for e in events.iter().filter(|e| e.kind == "drive-pass") {
+        let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
+        for a in acts.into_iter().flatten() {
+            let Some(n) = a["issue"].as_u64() else { continue };
+            if a["code"] == "SPAWN_PENDING" {
+                held.entry((&e.fleet, n)).or_insert((e.ts, e.ts)).1 = e.ts;
+            } else {
+                held.remove(&(e.fleet.as_str(), n));
+            }
+        }
+    }
+    held.retain(|_, (since, last)| ctx.now >= *since + 900 && ctx.now < *last + 900);
+    for name in cfg.fleet.keys() {
+        let mine: Vec<_> = held.iter().filter(|h| h.0 .0 == name).collect();
+        let Some(since) = mine.iter().map(|h| h.1 .0).min() else {
+            continue;
+        };
+        let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
+        let why = format!(
+            "{} held back by SPAWN_PENDING for {}",
+            ns.join(", "),
+            age(ctx.now - since)
+        );
+        let d = json!({"key": since, "reason": why});
+        fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
+    }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
@@ -95,7 +125,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     format!("{role} lane {lane} is gone ({})", s.state),
                 ));
             }
-            // A Claude lane on a named account that shows the usage-limit banner caps that account.
+            // A lane on a named account that shows its harness's usage-limit banner caps that account.
             // #302: with a `fallback` chain, any lane's limit or sign-out rests its account (else its harness).
             let account = spawned.and_then(|e| e.str("account"));
             let chain = cfg
@@ -106,12 +136,13 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let name = account.or(sp.str("harness")).unwrap_or_default();
                 let (harness, host) = (sp.str("harness"), sp.str("host"));
                 let rest = |until| json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until});
-                if access::capped_screen(cfg, &screen) {
+                let h = crate::harness::get(harness.unwrap_or_default());
+                if let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now) {
                     let why = format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now");
                     let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
                     hits.push((kind, format!("{lane}:{name}"), why));
-                    capped = Some(rest(access::cap_until(cfg, r, &screen, ctx.now)));
-                } else if chain && access::signed_out(&screen) {
+                    capped = Some(rest(until));
+                } else if chain && h.signed_out(&screen) {
                     let why = format!("{name}: {role} lane {lane} is signed out; spawns skip {name} for now");
                     hits.push(("agent-unavailable", format!("{lane}:{name}:auth"), why));
                     capped = Some(rest(ctx.now + cfg.limits.fallback_rest_minutes * 60));

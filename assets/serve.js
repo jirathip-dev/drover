@@ -4,6 +4,9 @@
 const B = document.body, $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
 const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const put = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+// Per tab session (sessionStorage): #141's open groups; #337's last copy of each part (`c:<id>`), painted before fresh data lands.
+const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
+const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
 // URLs hang off R (`/` live, `` relative in a `serve --export`). #39 demo: static files, never a POST, never `/live`.
 const R = B.dataset.root ?? '/', DEMO = !!B.dataset.demo;
 if (DEMO) { const f = fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('demo: no writes')) : f(u, o); }
@@ -12,14 +15,28 @@ function tab(t) {
   $$('main>section').forEach(s => s.hidden = s.id !== t);
   $$('nav a').forEach(a => a.classList.toggle('on', a.hash === '#' + t));
   put('tab', t);
+  document.cookie = `tab=${t};path=${R || '/'};max-age=31536000;samesite=strict`; // #337: the page carries this tab only
   $('.qhelp').hidden = t !== 'queue';
-  // #60: the live page leaves the Events body out; it loads when the tab opens.
-  if (t === 'events' && !$('#events').childElementCount) part('frag?id=events').then(h => h && frag('events', h));
+  // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
+  if (have.has(t) || DEMO || B.dataset.root === '') return;
+  have.add(t);
+  if (!$('#' + t).childElementCount && sget('c:' + t)) frag(t, sget('c:' + t));
+  wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
 }
+// #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
+const have = new Set([...$$('main>section')].filter(s => s.childElementCount).map(s => s.id));
+// #337: a load, refresh or action over 300 ms shows the theme's loading animation, large, over a light scrim near the
+// top of the content (the page stays tappable; [↻] spins as well); it goes as soon as the data paints.
+let waits = 0, ovt = 0;
+function wait(p) {
+  if (!waits++) ovt = setTimeout(() => loading(true), 300);
+  return Promise.resolve(p).finally(() => { if (!--waits) { clearTimeout(ovt); loading(false); } });
+}
+function loading(on) { $('#ld').hidden = !on; }
 // #60: a part of the page read on demand (null when it cannot be read).
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
 // A form POST of `data` (an object or FormData) to `path`.
-const post = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
+const post = (path, data) => wait(fetch(R + path, { method: 'POST', body: new URLSearchParams(data) }));
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
 const DBG = new URLSearchParams(location.search), want = DBG.get('issue');
@@ -288,7 +305,7 @@ function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
   rf.classList.toggle('spin', s === 'a' || busy);
-  $('#stale').hidden = s !== 'r';
+  $('#stale').hidden = s !== 'r' && (DEMO || Date.now() - last < 120000); // #337: offline, or a copy over 2 min old
   const at = new Date(last).toTimeString().slice(0, 5);
   Object.assign($('#stale'), { textContent: 'as of ' + at, title: 'last update ' + at });
   $$('form button, form select:not([data-off]), .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
@@ -337,6 +354,7 @@ function frag(id, html) {
   if (scrollY !== y) scrollTo(0, y);
   rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
   last = Date.now();
+  sput('c:' + id, html);
   alerts();
   badge();
   if (id === 'lanes') mode(B.dataset.mode);
@@ -450,8 +468,6 @@ document.addEventListener('toggle', e => {
 // #141: the Host groups, in the server's fixed order (#234: HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS). A group takes
 // its worst row's status (grey rows don't count); a red or amber one starts open, the header summing up the rows at
 // that status (a host card's rows by host). A tap's open/closed holds for the session until the group's status changes.
-const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
-const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
 const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
 const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children, h = r.closest('.hcd'); return (h ? h.dataset.h + ' ' : '') + k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t,.sp')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
@@ -514,7 +530,9 @@ async function refresh() {
   busy = true;
   sync('a');
   try {
-    const j = await (await fetch(R + 'frags', { cache: 'no-store' })).json();
+    const t = document.documentElement.dataset.tab, j = await wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
+    have.clear();
+    have.add(t);
     for (const id in j) frag(id, j[id]);
     herdPull();
     busy = false;
@@ -717,8 +735,9 @@ function tidy(root) {
 }
 tidy(document);
 nows();
-// #334 amendment B: [↻] is the plain ↻, spinning while it loads (as before #305); no theme sprite in it.
+// [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the overlay's, herd.js builds #hload).
 rf.innerHTML = '<i>↻</i>';
+document.addEventListener('visibilitychange', () => document.documentElement.classList.toggle('bg', document.hidden));
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
 // you (a typed prompt), the assistant (prose), a tool run (`⏺ Name(…)`/`•`/`$`/`┊` plus its `⎿`/indented output),
 // status (a line all in grey: `Ran 2 shell commands`), and the gap line where the rolling transcript missed lines.

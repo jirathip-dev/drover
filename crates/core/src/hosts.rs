@@ -3,6 +3,7 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, closed, emit, fold, last_spawn, read, Event, IssueState};
 use crate::gate::refused;
+use crate::harness;
 use crate::host::{self, Host};
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
@@ -13,6 +14,21 @@ use std::cmp::Ordering::Equal;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// `prog args` as one shell line, each word single-quoted.
+pub fn quote(prog: &str, args: &[String]) -> String {
+    let q = |a: &str| format!("'{}'", a.replace('\'', "'\\''"));
+    std::iter::once(q(prog))
+        .chain(args.iter().map(|a| q(a)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+const CM: [&str; 3] = [
+    "-oControlMaster=auto",
+    "-oControlPath=/tmp/herdsman-ssh-%C",
+    "-oControlPersist=10m",
+];
 
 /// A lane's host; `machine` None is this one (every call and file exactly as before).
 pub struct On<'a> {
@@ -36,11 +52,18 @@ impl<'a> On<'a> {
         if prog == crate::herdr::BIN {
             return (prog.into(), [argv(&["--machine", m]), args.to_vec()].concat());
         }
-        let mut line = format!("'{prog}'");
-        for a in args {
-            line += &format!(" '{}'", a.replace('\'', "'\\''"));
-        }
-        let ssh = argv(&["-oBatchMode=yes", "-oConnectTimeout=10", m, "--", &line]);
+        let line = quote(prog, args);
+        // #337: one connection per host, kept 10 min, whatever the user's ssh config says.
+        let ssh = argv(&[
+            "-oBatchMode=yes",
+            "-oConnectTimeout=10",
+            CM[0],
+            CM[1],
+            CM[2],
+            m,
+            "--",
+            &line,
+        ]);
         ("ssh".into(), ssh)
     }
     fn sh(&self, script: &str, p: &Path, input: &str) -> Result<Out> {
@@ -353,12 +376,10 @@ pub fn under(p: &str, home: Option<&str>) -> PathBuf {
 /// #235: is the herdr server in the login session (macOS: a `gui/<uid>` launchd job), where the keychain is open?
 const LOGIN: &str = "p=$(pgrep -f 'herdr server$' | head -1); [ -n \"$p\" ] || exit 1; \
 command -v launchctl >/dev/null || exit 0; launchctl print gui/$(id -u) | awk -v p=\"$p\" '$1 == p { f = 1 } END { exit !f }'";
-/// #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
-const PANE: &str = "gh auth status >/dev/null 2>&1; echo \"gh:$?\"; claude auth status >/dev/null 2>&1; echo \"claude:$?\"; echo \"hs:\"done";
 
 /// #235: what is wrong with a reachable remote host, a `✗|! <check> — <detail> → <fix>` row each (none: healthy):
-/// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and Claude logins in a
-/// herdr pane, and its herdsman's version against this one's.
+/// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and each harness's login
+/// (`Harness::health_check`) in a herdr pane, and its herdsman's version against this one's.
 pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
@@ -378,9 +399,14 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         let line = format!("✗ git {name} — can't reach {}: {first} → {fix}", f.repo);
         fail(o.is_some_and(|o| o.code == 0), line);
     }
-    let text = crate::herdr::in_pane(on, home, PANE, "hs:done").unwrap_or_default();
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
-    for (tool, fix) in [("gh", gh.as_str()), ("claude", "claude auth login in a pane there")] {
+    let mut logins = vec![("gh", "gh auth status", gh.as_str())];
+    logins.extend(harness::all().filter_map(|h| h.1.health_check()));
+    // #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
+    let probe = |(t, c, _): &(&str, &str, &str)| format!("{c} >/dev/null 2>&1; echo \"{t}:$?\"; ");
+    let pane = logins.iter().map(probe).collect::<String>() + "echo \"hs:\"done";
+    let text = crate::herdr::in_pane(on, home, &pane, "hs:done").unwrap_or_default();
+    for (tool, _, fix) in logins {
         let line = format!("✗ {tool} — logged out in a herdr pane → {fix} (else: herdr session)");
         fail(text.lines().any(|l| l.trim() == format!("{tool}:0")), line);
     }
@@ -570,7 +596,10 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
     if cfg.hosts.is_empty() {
         return Ok(writeln!(out, "no [hosts] in fleet.toml: every lane runs on this host")?);
     }
-    survey(ctx, cfg, r, refresh);
+    // #337: the last look (the tick's, every 5 min) unless asked to refresh or none is saved.
+    if refresh || cfg.hosts.keys().any(|h| !cached(ctx).contains_key(h)) {
+        survey(ctx, cfg, r, refresh);
+    }
     let (seen, events) = (cached(ctx), read(&ctx.state)?);
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
@@ -583,7 +612,8 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
         writeln!(
             out,
-            "{name} · {words} · tags {t} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls}"
+            "{name} · {words} · tags {t} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
+            age(ctx.now.saturating_sub(s.seen))
         )?;
     }
     Ok(())

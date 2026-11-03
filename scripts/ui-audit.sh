@@ -18,7 +18,7 @@ limit=${UI_AUDIT_TIMEOUT:-60} to=$(command -v timeout || command -v gtimeout || 
 run() { # url, extra args
   local prof rc=0; prof=$(mktemp -d)
   ${to:+"$to" -k 5 "$limit"} "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$prof" --no-first-run \
-    --window-size=390,844 --force-device-scale-factor=3 --virtual-time-budget=8000 "${@:2}" "$1" 2>"$prof.err" || rc=$?
+    --window-size="${size:-390,844}" --force-device-scale-factor="${dpr:-3}" --virtual-time-budget=8000 "${@:2}" "$1" 2>"$prof.err" || rc=$?
   if [ "$rc" != 0 ]; then
     echo "$v: chrome ${2%%=*} exited $rc$([ "$rc" = 124 ] || [ "$rc" = 137 ] && echo ", killed after ${limit} s: hung")" >&2
     tail -5 "$prof.err" >&2
@@ -31,14 +31,18 @@ fail=0
 # #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
 # mini's load/cpu chart open.
 for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll toast needs-later needs-pending \
-  queue-rows events-rows queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still \
+  queue-rows events-rows queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still loading@1440 loading~kitchen@1440 loading~terminal@1440 \
   $(for s in github-dark solarized-dark gruvbox nord dracula paper farm kitchen; do echo "queue^$s busy/host-ranked^$s"; done); do
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png. #244: `<view>^<scheme>`
   # in that colour scheme (`?scheme=`), shot as <view>-scheme-<scheme>.png: the contact sheet, from the real CSS.
+  # #337: `<view>@1440` at the desktop width (1440×900, DPR 2), shot as <view>-1440.png.
+  wd=$([[ $v == *@* ]] && echo "${v#*@}" || true) v=${v%%@*} size=390,844 dpr=3
+  [ -n "$wd" ] && size=$wd,900 dpr=2
   sc=$([[ $v == *^* ]] && echo "${v#*^}" || true) v=${v%%^*}
   th=$([[ $v == *~* ]] && echo "${v#*~}" || true) v=${v%%~*} flags=()
   dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}${th:+-$th}${sc:+-scheme-$sc}
-  url="http://127.0.0.1:$port/${dir}index.html?audit=$view${th:+&theme=$th}${sc:+&scheme=$sc}"
+  v=$v${wd:+-$wd}
+  url="http://127.0.0.1:$port/${dir}index.html?audit=$view${th:+&theme=$th}${sc:+&scheme=$sc}${wd:+&w=$wd}"
   case $v in herd-kitchen*) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172, #239
   case $v in moment-still|herd-kitchen-still|herd-nav|loading-still) flags=(--force-prefers-reduced-motion) ;; esac # #241, #239, #291, #305
   run "$url" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1

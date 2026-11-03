@@ -1,5 +1,5 @@
 //! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
-use super::{attempts, Harness};
+use super::{attempts, Credential, Harness};
 use crate::herdr;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
@@ -20,9 +20,7 @@ pub struct Dsh;
 
 /// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
-    ctx.claude_dir()
-        .with_file_name("dsh")
-        .join(format!("{profile}.patch.yml"))
+    ctx.config.with_file_name("dsh").join(format!("{profile}.patch.yml"))
 }
 
 /// Reviewers get the workspace-write sandbox; escalations are never asked (nobody answers them).
@@ -115,6 +113,13 @@ impl Harness for Dsh {
             }
         }
         Ok(false)
+    }
+
+    fn credential(&self) -> Credential {
+        Credential::Own
+    }
+    fn process_names(&self) -> &'static [&'static str] {
+        &[LABEL]
     }
 }
 

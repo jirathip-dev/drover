@@ -373,22 +373,41 @@
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
       if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
     },
-    // #305 gate 2, #334 amendment B: [↻] busy in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still`
-    // with reduced motion forced): the header and the control keep their boxes (28 px, the 44 px tap is measure()'s); every
-    // theme spins the plain ↻ (reduced motion: still), never a sprite in it, and no two header controls draw one sprite.
+    // #337 gate 2: a wait in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still` with reduced motion
+    // forced; `-1440` at the desktop width): [↻] keeps its box and spins its plain ↻ (no sprite in the header, idle or
+    // busy); the overlay's sprite is 96 px, centred near the top of the content under the header, over a light scrim that
+    // takes no taps; terminal: a spinning glyph; reduced motion: one still frame. A strip holds the sprite's first four
+    // frames (8 fps: 0, 125, 250, 375 ms) for the shot.
     loading: () => {
       tab('queue');
       const box = () => [rf, rf.firstChild, $('header')].map(e => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); }).join(' ');
-      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (rf.matches('.spin')) early.push('[↻] busy before the refresh');
+      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches, ov = $('#ld'), svg = ov.querySelector('svg'), g = ov.querySelector('i');
+      if (rf.matches('.spin') || seen(ov)) early.push('busy before the refresh');
+      if ($('header svg.lds, header use[href="#hload"]')) early.push('a loading sprite in the header');
       busy = true;
       sync('a');
+      loading(true);
       if (box() !== idle) early.push(`[↻] busy moved: ${idle} → ${box()}`);
       if (V === 'loading-still' && !still) early.push('reduced motion not forced');
-      const t = document.documentElement.dataset.theme, spin = getComputedStyle(rf.firstChild).animationName;
-      if (rf.querySelector('svg') || rf.firstChild.textContent !== '↻' || !seen(rf.firstChild) || spin !== (still ? 'none' : 's')) early.push(`${t}: [↻] is not the spinning ↻ (${rf.innerHTML}, ${spin})`);
-      const uses = [...$$('header button svg use')].filter(u => seen(u.closest('svg'))).map(u => u.getAttribute('href'));
-      if (new Set(uses).size !== uses.length) early.push(`${t}: header controls repeat a sprite: ${uses}`);
+      if (rf.querySelector('svg') || rf.textContent !== '↻') early.push('[↻] is not the plain ↻');
+      const spin = getComputedStyle(rf.firstChild).animationName;
+      if (spin !== (still ? 'none' : 's')) early.push(`[↻] ${spin}, not spinning`);
+      if (getComputedStyle(ov).pointerEvents !== 'none') early.push('the overlay takes taps');
+      const hb = $('header').getBoundingClientRect(), t = document.documentElement.dataset.theme, term = t === 'terminal';
+      if (ov.getBoundingClientRect().top < hb.bottom - 1) early.push('the overlay covers the header');
+      if (term ? seen(svg) || !seen(g) : !ov.matches('.ld') || !$('#hload') || !seen(svg) || seen(g)) early.push(`${t}: not its loading animation (#hload ${!!$('#hload')})`);
+      const el = term ? g : svg, r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      if (!term && (Math.round(r.width) !== 96 || Math.round(r.height) !== 96)) early.push(`${t}: loading sprite ${r.width}×${r.height}, not 96×96`);
+      if (Math.abs(r.left + r.width / 2 - innerWidth / 2) > 2) early.push(`${t}: loading animation off centre (${r.left}+${r.width} in ${innerWidth})`);
+      if (r.top < hb.bottom || r.top > hb.bottom + 160) early.push(`${t}: loading animation ${r.top - hb.bottom | 0} px under the header, not near the top`);
+      if (cs.animationName !== (still ? 'none' : term ? 's' : 'ldg, ldk')) early.push(`${t}: loading animation ${cs.animationName}`);
+      if (term) return;
+      const strip = B.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;z-index:3;bottom:calc(var(--hit) + var(--ctl) + var(--s3));left:0;right:0;display:flex;justify-content:center;gap:var(--s2);padding:var(--s1);background:var(--card);pointer-events:none' }));
+      [0, 1, 2, 3].forEach(i => {
+        const c = strip.appendChild(svg.cloneNode(true));
+        c.style.cssText += ';width:48px;height:48px;image-rendering:pixelated;shape-rendering:crispEdges;animation:' + cs.animation;
+        c.getAnimations().forEach(a => { a.pause(); a.currentTime = i * 125; });
+      });
     },
     'loading-still': () => VIEWS.loading(),
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
@@ -507,7 +526,8 @@
     const nav = $('nav').getBoundingClientRect().top;
     const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
-    if (innerWidth !== 390) res.outliers.push(`viewport ${innerWidth} px wide, not 390`); // #68: new-headless Chrome keeps windows ≥ 500 px
+    const W = +(DBG.get('w') || 390); // #337: `&w=1440`, a desktop shot
+    if (innerWidth !== W) res.outliers.push(`viewport ${innerWidth} px wide, not ${W}`); // #68: new-headless Chrome keeps windows ≥ 500 px
     // #114 app-like: no pinch or double-tap zoom.
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
