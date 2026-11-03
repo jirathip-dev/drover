@@ -20,9 +20,7 @@ pub struct Dsh;
 
 /// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
-    ctx.claude_dir()
-        .with_file_name("dsh")
-        .join(format!("{profile}.patch.yml"))
+    ctx.config.with_file_name("dsh").join(format!("{profile}.patch.yml"))
 }
 
 /// Reviewers get the workspace-write sandbox; escalations are never asked (nobody answers them).

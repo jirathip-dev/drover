@@ -35,6 +35,10 @@ jobs:
           if grep -E '^herdsman(-server)? v' <<<"$core" || grep -E '^herdsman v' <<<"$server"; then exit 1; fi
           bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/(runner|events|webpush)\.rs' || true)
           test -z "$bad" || { echo "std::process outside the Runner implementations: $bad"; exit 1; }
+      - name: harness-neutral core (#316; no "claude" literal outside crates/core/src/harness/ but comments and the hook's AI-trailer names)
+        run: |
+          bad=$(grep -rn '"claude"' crates/*/src | grep -v '^crates/core/src/harness/' | grep -vE '^[^:]+:[0-9]+: *//' | grep -v 'const AI:' || true)
+          test -z "$bad" || { echo "harness named outside crates/core/src/harness/: $bad"; exit 1; }
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)

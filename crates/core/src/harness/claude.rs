@@ -1,19 +1,26 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
 use super::{hook_command, Harness};
 use crate::herdr;
+use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
-use crate::spawn::{profile_dir, role_prompt, Plan};
+use crate::spawn::{role_prompt, Plan};
 use crate::Ctx;
 use anyhow::{bail, Result};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 
 pub struct Claude;
 
+/// `<config dir>/claude`, the generated per-role profiles.
+pub fn root(ctx: &Ctx) -> PathBuf {
+    ctx.config.with_file_name("claude")
+}
+
 impl Harness for Claude {
     fn sync(&self, ctx: &Ctx, role: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
-        let dir = profile_dir(ctx, profile);
+        let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
         let days = crate::config::Config::load(&ctx.config).map_or(30, |c| c.limits.transcript_days);
@@ -30,7 +37,7 @@ impl Harness for Claude {
     }
 
     fn ready(&self, ctx: &Ctx, _r: &dyn Runner, p: &Plan) -> Result<()> {
-        if !profile_dir(ctx, &p.profile).join("settings.json").exists() {
+        if !root(ctx).join(&p.profile).join("settings.json").exists() {
             bail!("Claude profile {} missing; run `herdsman profiles sync`", p.profile);
         }
         Ok(())
@@ -45,7 +52,7 @@ impl Harness for Claude {
     }
 
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        let dir = profile_dir(ctx, &p.profile);
+        let dir = root(ctx).join(&p.profile);
         let mut a = vec![
             "--dangerously-skip-permissions".to_string(),
             "--settings".into(),
@@ -78,5 +85,43 @@ impl Harness for Claude {
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         Ok(herdr::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
+    }
+
+    /// #248: no updater, telemetry or other background traffic (names as of Claude Code 2.1.311).
+    fn env(&self) -> &'static [&'static str] {
+        &["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"]
+    }
+    fn accounts(&self) -> bool {
+        true
+    }
+
+    /// #276: `✻ Herding… (4m 12s · ↓ 3k tokens)` is (`✻ Herding…`, `4m`).
+    fn status_word(&self, screen: &str) -> Option<(String, Option<String>)> {
+        let s = strip(chat(screen).1?);
+        let (w, rest) = s.split_once(" (")?;
+        let mins = |t: &&str| t.strip_suffix(['m', 'h']).is_some_and(|n| n.parse::<u32>().is_ok());
+        let t = rest.split([' ', ')']).find(mins).map(String::from);
+        w.trim().ends_with('…').then(|| (mask(w.trim()), t))
+    }
+    fn now_line(&self, line: &str) -> bool {
+        line.starts_with('⏺')
+    }
+    fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
+        crate::lanes::pending(screen)
+    }
+
+    /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
+    fn transcript(&self, home: &Path, wt: &str) -> Option<PathBuf> {
+        let d = home.join(".claude/projects");
+        let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
+        let paths = all.flatten().map(|e| e.path());
+        let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
+        jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+    }
+    fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
+        Some(("claude", "claude auth status", "claude auth login in a pane there"))
+    }
+    fn process_names(&self) -> &'static [&'static str] {
+        &["claude"]
     }
 }

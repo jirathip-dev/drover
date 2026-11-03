@@ -1,6 +1,7 @@
 //! The page's Lanes tab (docs/serve.md): herdr agents joined with the log, grouped, plus masked pane text.
 use crate::config::Config;
 use crate::events::{Event, States};
+use crate::harness;
 use crate::runner::{ok, Runner};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -131,20 +132,16 @@ impl Lane {
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
     }
-    /// #260: a local Claude lane's newest session transcript, `~/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
+    /// #260: a local lane's newest session transcript, when its harness keeps one (`Harness::transcript`).
     pub fn session(&self) -> Option<std::path::PathBuf> {
-        let local = self.harness == "claude" && self.machine.is_none();
-        session_file(&crate::config::home(), self.worktree.as_ref().filter(|_| local)?)
+        let wt = self.worktree.as_ref().filter(|_| self.machine.is_none())?;
+        harness::get(&self.harness).transcript(&crate::config::home(), wt)
     }
 }
 
-/// The newest `.jsonl` Claude keeps for worktree `wt` under `<home>/.claude/projects`.
+/// The newest session transcript any harness keeps for worktree `wt` under `home`.
 pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
-    let d = home.join(".claude/projects");
-    let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
-    let paths = all.flatten().map(|e| e.path());
-    let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
-    jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+    harness::NAMES.iter().find_map(|h| harness::get(h).transcript(home, wt))
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -295,7 +292,7 @@ fn word(w: &str) -> (String, bool) {
 const GLYPHS: &[&str] = &["─━═╌┄▔▁", "⎿┊│"];
 
 /// Box-drawing rules, prompts and status bars: no activity there.
-fn chrome(l: &str) -> bool {
+pub fn chrome(l: &str) -> bool {
     l.chars().all(|c| "─━│┃╭╮╰╯┌┐└┘═╌┄▔▁ ".contains(c)) || l.starts_with(['❯', '⏵', '>', '›'])
 }
 
@@ -352,7 +349,7 @@ pub fn log(state: &Path, agent: &str) -> Option<std::path::PathBuf> {
     plain.then(|| state.with_file_name("transcripts").join(format!("{agent}.log")))
 }
 
-/// #248: a closed Claude lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`),
+/// #248: a closed lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`),
 /// as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
 pub fn session(home: &Path, wt: &str) -> Option<Vec<String>> {
     let file = session_file(home, wt)?;
@@ -404,16 +401,12 @@ pub fn roll(file: &Path, body: &[String]) -> (Vec<String>, usize) {
     (all, live.len())
 }
 
-/// The live status line, else the latest action (Claude `⏺`, Hermes `💻`/`┊`, else non-chrome), masked, ≤ 60 chars.
+/// The live status line, else the latest action (`Harness::now`), masked, ≤ 60 chars.
 pub fn activity(harness: &str, screen: &str) -> String {
     let (body, status) = chat(screen);
     let lines: Vec<&str> = body.into_iter().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let line = match harness {
-        "claude" => lines.iter().rev().find(|l| l.starts_with('⏺')),
-        "hermes" => lines.iter().rev().find(|l| l.contains('💻') || l.starts_with('┊')),
-        _ => lines.iter().rev().find(|l| !chrome(l)),
-    };
-    let m = mask(status.or(line.copied()).unwrap_or_default());
+    let line = lines.into_iter().rev().find(|l| harness::get(harness).now_line(l));
+    let m = mask(status.or(line).unwrap_or_default());
     if m.chars().count() > 60 {
         m.chars().take(59).collect::<String>() + "…"
     } else {
@@ -478,14 +471,9 @@ pub fn short(cmd: &str) -> String {
     out + &tail.into_iter().filter(|t| t.0).map(|t| t.1).collect::<String>()
 }
 
-/// #276: Claude's live spinner as its word and, past a minute, its elapsed time: `✻ Herding… (4m 12s · ↓ 3k tokens)` is
-/// (`✻ Herding…`, `4m`); None when idle, or for a harness without a spinner line.
+/// #276: the live spinner's word and elapsed time (`Harness::status_word`).
 pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
-    let s = strip(chat(screen).1.filter(|_| harness == "claude")?);
-    let (w, rest) = s.split_once(" (")?;
-    let mins = |t: &&str| t.strip_suffix(['m', 'h']).is_some_and(|n| n.parse::<u32>().is_ok());
-    let t = rest.split([' ', ')']).find(mins).map(String::from);
-    w.trim().ends_with('…').then(|| (mask(w.trim()), t))
+    harness::get(harness).status_word(screen)
 }
 
 /// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.
@@ -553,7 +541,7 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run
+/// A blocked pane's pending prompt: the question and a numbered menu's options (a `❯`-marked run
 /// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.
 pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
     let lines: Vec<&str> = screen

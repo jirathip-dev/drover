@@ -71,6 +71,10 @@ impl Harness for Hermes {
         }
         Ok(false)
     }
+
+    fn now_line(&self, line: &str) -> bool {
+        line.contains('💻') || line.starts_with('┊')
+    }
 }
 
 /// Record Hermes' first-use consent for the hook (unconsented hooks never register on non-TTY runs), keeping others.
