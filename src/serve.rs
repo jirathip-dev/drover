@@ -514,10 +514,10 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
         .parked
         .as_ref()
         .map_or((tone, shown), |h| ("m", format!("parked · {}", on(h))));
-    let shown = match &l.kept {
-        Some(k) => format!("{shown} · kept open: {k}"),
-        None => shown,
-    };
+    let shown = l
+        .kept
+        .as_ref()
+        .map_or(shown.clone(), |k| format!("{shown} · kept open: {k}"));
     (title, tone, shown, ago(ctx.now, l.since))
 }
 
@@ -1056,13 +1056,8 @@ impl<'a> Server<'a> {
         // saved session for its worktree first.
         let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
             let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
-            let closed = events
-                .iter()
-                .rev()
-                .find(|e| e.kind == "lane-closed" && e.str("agent") == Some(agent));
-            let id = closed.and_then(|e| e.str("session"));
             let saved = wt
-                .and_then(|wt| lanes::session(&ctx.home, wt, id))
+                .and_then(|wt| lanes::session(&ctx.home, wt))
                 .filter(|_| self.export.is_none());
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
             let all: Vec<String> = saved.or_else(rolled)?;
@@ -2122,15 +2117,13 @@ impl<'a> Server<'a> {
                 let ours: Vec<&serde_json::Value> = all.iter().filter(|a| a["agent"] == "claude").collect();
                 let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
                 let mb: u64 = host::held(r, &ours).iter().sum();
-                let gb = format!("{}.{} GB", mb / 1024, mb % 1024 * 10 / 1024);
-                claude = (!ours.is_empty()).then(|| {
-                    format!(
-                        "<b>{gb}</b> <span class=mt>({} lanes: working {} / done {})</span>",
-                        ours.len(),
-                        n("working"),
-                        n("done")
-                    )
-                });
+                let (gb, w, d) = (
+                    format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024),
+                    n("working"),
+                    n("done"),
+                );
+                let ls = format!("({} lanes: working {w} / done {d})", ours.len());
+                claude = (!ours.is_empty()).then(|| format!("<b>{gb} GB</b> <span class=mt>{ls}</span>"));
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
@@ -2203,9 +2196,7 @@ impl<'a> Server<'a> {
             let mut rows = row("load/cpu", "load", grey(lt), &lv, &dl(lim.load_per_cpu));
             rows += &row("swap-out", "swap", grey(st), &sv, &dl(lim.swapout_rate));
             rows += &row("memory", "mem", grey(mt), &mv, &dl(lim.min_free_mem_gb));
-            if let Some(c) = &claude {
-                rows += &kv("claude", grey("g"), c);
-            }
+            rows += &claude.map_or(String::new(), |c| kv("claude", grey("g"), &c));
             rows += &row("disk", "disk", grey(dt), &dv, &dl(lim.min_free_gb));
             // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
             if !s.top.is_empty() {

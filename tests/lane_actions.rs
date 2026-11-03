@@ -667,12 +667,12 @@ fn kill_saves_code_and_names_the_secret_line() {
     assert!(!r.called(&format!("git -C {wt} push")));
 }
 
-/// #248: a lane herdsman closed reads back Claude's saved session for its worktree (its logged session id first),
-/// over the rolling transcript; prompts `❯`, replies and tool calls `⏺`, masked.
+/// #248: a lane herdsman closed reads back Claude's saved session for its worktree (the newest) over the rolling
+/// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
 #[test]
 fn a_closed_lane_reads_claudes_saved_session() {
     let (c, wt) = lane("closed-session");
-    let ev = json!({"agent": LANE, "reason": "done", "freed_mb": 270, "session": "s-1"});
+    let ev = json!({"agent": LANE, "reason": "done", "freed_mb": 270});
     append(&c.state, &Event::new(T - 10, "sendmeter", Some(12), "lane-closed", ev)).unwrap();
     let dir = c
         .home
@@ -688,7 +688,7 @@ fn a_closed_lane_reads_claudes_saved_session() {
     ];
     let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
     std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
-    std::fs::write(dir.join("other.jsonl"), "").unwrap();
+    std::fs::write(dir.join("notes.txt"), "not a session").unwrap();
     let log = herdsman::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  rolled\n").unwrap();

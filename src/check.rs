@@ -79,10 +79,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 format!("{}:{lane}", s.last_ts)
             };
             // #248: a lane herdsman closed once its handoff was logged is not gone.
-            let closed = spawned.is_some_and(|sp| {
-                let me = |e: &&Event| e.kind == "lane-closed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-                events.iter().any(|e| me(&e) && e.str("reason") == Some("done"))
-            });
+            let mine = |e: &Event| e.kind == "lane-closed" && e.str("agent") == Some(lane);
+            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e) && e.ts >= sp.ts));
             if status.is_none() && !closed {
                 hits.push((
                     "lane-dead",
@@ -165,19 +163,16 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let open = open_asks(&events);
     // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
     for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
-        let (Some(name), Some(pane)) = (a["name"].as_str(), a["pane_id"].as_str()) else {
+        let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
+        let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
             continue;
         };
-        let Some(e) = last_spawn(&events, name).filter(|e| On::of(r, Some(e)).machine.is_none()) else {
-            continue;
-        };
-        let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
+        let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
             continue;
         };
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
-        let due =
-            handoff(r, &events, e, (n, wt)).filter(|t| !asking && ctx.now >= t + cfg.limits.done_close_minutes * 60);
-        let Some(at) = due else { continue };
+        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let Some(at) = due.filter(|_| !asking) else { continue };
         if let Some(why) = kept(r, wt) {
             let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
             fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
@@ -185,11 +180,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         let mb = host::held(r, &[a]).first().copied().unwrap_or_default();
         if herdr::close(r, pane).is_ok() {
-            let id = a["agent_session"]["value"].as_str();
-            let d = json!({"agent": name, "freed_mb": mb, "reason": "done", "session": id});
-            let ev = Event::new(ctx.now, &e.fleet, Some(n), "lane-closed", d);
-            writeln!(out, "{}", plain(&ev))?;
-            emit(&ctx.state, cfg, ev)?;
+            let d = json!({"key": format!("{name}:{at}"), "agent": name, "freed_mb": mb, "reason": "done"});
+            fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-closed", d)?;
         }
     }
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
@@ -285,11 +277,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 /// lane's latest commit since then.
 fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
     if e.str("role") == Some("design") {
-        let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"])
-            .ok()?
-            .trim()
-            .parse()
-            .ok();
+        let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"]).ok()?;
+        let t = t.trim().parse().ok();
         return t.filter(|t| *t > e.ts);
     }
     let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
@@ -301,10 +290,8 @@ fn kept(r: &dyn Runner, wt: &str) -> Option<String> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     let made = |l: &&str| ["?? ui-390/", "?? node_modules/"].contains(&l.trim_end());
     let st = git(&["status", "--porcelain"]).map(|s| s.lines().filter(|l| !made(l)).collect::<Vec<_>>().join("\n"));
-    match (
-        st.map(|s| changes(&s)),
-        git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]),
-    ) {
+    let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]);
+    match (st.map(|s| changes(&s)), ahead) {
         (Ok(0), Ok(n)) if n.trim() == "0" => None,
         (Ok(0), Ok(n)) => Some(format!("{} unpushed commit(s)", n.trim())),
         (Ok(0), Err(e)) | (Err(e), _) => Some(format!("unreadable git state ({e:#})")),

@@ -25,9 +25,7 @@ fn lane(name: &str, pushed: u64) -> (herdsman::Ctx, String) {
 
 /// herdr lists the lane `done` in its worktree; git answers `status` and the unpushed count; the agent holds 270 MB.
 fn fake(wt: &str, status: &str, ahead: &str) -> Fake {
-    let mut list: serde_json::Value = serde_json::from_str(&agents(&[(LANE, "done", wt, "w1:p2")])).unwrap();
-    list["result"]["agents"][0]["agent_session"] = json!({"value": "af92ad99-44ee"});
-    with(&list.to_string(), wt, status, ahead)
+    with(&agents(&[(LANE, "done", wt, "w1:p2")]), wt, status, ahead)
 }
 
 fn with(list: &str, wt: &str, status: &str, ahead: &str) -> Fake {
@@ -65,7 +63,6 @@ fn a_done_pushed_lane_closes_after_the_delay() {
     assert_eq!(closed.len(), 1);
     assert_eq!(closed[0].data["agent"], LANE);
     assert_eq!(closed[0].data["freed_mb"], 270);
-    assert_eq!(closed[0].data["session"], "af92ad99-44ee");
     assert!(std::path::Path::new(&wt).is_dir(), "the worktree stays");
     // Closed by herdsman, herdr no longer lists it: never a `lane-dead`.
     let r = with(NO_AGENTS, &wt, "", "0\n");

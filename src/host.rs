@@ -79,15 +79,13 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
 /// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
 pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
     let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
+    let rss: Vec<Vec<&str>> = rss.lines().map(|l| l.split_whitespace().collect()).collect();
     let kb = |pid: &str| {
-        rss.lines().find_map(|l| {
-            l.trim()
-                .strip_prefix(pid)?
-                .strip_prefix(' ')?
-                .trim()
-                .parse::<u64>()
-                .ok()
-        })
+        rss.iter()
+            .find(|w| w.first() == Some(&pid))?
+            .get(1)?
+            .parse::<u64>()
+            .ok()
     };
     let mb = |a: &&Value| {
         let dir = Path::new(a["cwd"].as_str().unwrap_or("\0"));

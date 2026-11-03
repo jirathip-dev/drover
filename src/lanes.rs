@@ -115,15 +115,9 @@ pub fn join(
     }
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
-        let last = events
-            .iter()
-            .rev()
-            .filter(mark)
-            .find(|e| e.str("agent") == Some(l.name.as_str()));
-        l.kept = last
-            .filter(|e| e.kind == "lane-kept-dirty")
-            .and_then(|e| e.str("why"))
-            .map(String::from);
+        let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
+        let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
+        l.kept = why.map(String::from);
     }
     out
 }
@@ -339,56 +333,32 @@ pub fn log(state: &Path, agent: &str) -> Option<std::path::PathBuf> {
 }
 
 /// #248: a closed Claude lane's saved session, the newest `.jsonl` Claude keeps for `cwd` under `<home>/.claude/projects`,
-/// (`<id>.jsonl` for its logged session `id`), as sheet lines: `❯` prompts, `⏺` replies and tool calls, masked.
-pub fn session(home: &Path, cwd: &str, id: Option<&str>) -> Option<Vec<String>> {
-    let dir = home
-        .join(".claude/projects")
-        .join(cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
-    let plain = |i: &&str| i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    let named = id.filter(plain).map(|i| dir.join(format!("{i}.jsonl")));
+/// as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
+pub fn session(home: &Path, cwd: &str) -> Option<Vec<String>> {
+    let name = cwd.replace(|c: char| !c.is_ascii_alphanumeric(), "-");
     let at = |p: &std::path::PathBuf| p.metadata().and_then(|m| m.modified()).ok();
-    let newest = || {
-        let files = std::fs::read_dir(&dir).ok()?.flatten().map(|d| d.path());
-        files
-            .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
-            .max_by_key(at)
-    };
-    let file = named.filter(|f| f.is_file()).or_else(newest)?;
+    let jsonl = |p: &std::path::PathBuf| p.extension().is_some_and(|e| e == "jsonl");
+    let files = std::fs::read_dir(home.join(".claude/projects").join(name)).ok()?;
+    let file = files.flatten().map(|d| d.path()).filter(jsonl).max_by_key(at)?;
     let part = |p: &Value| match p["type"].as_str()? {
         "text" => p["text"].as_str().map(String::from),
         "tool_use" => {
-            let arg = p["input"]
-                .as_object()?
-                .values()
-                .find_map(Value::as_str)
-                .unwrap_or_default();
-            Some(format!(
-                "{}({})",
-                p["name"].as_str()?,
-                arg.lines().next().unwrap_or_default()
-            ))
+            let arg = p["input"].as_object()?.values().find_map(Value::as_str);
+            let arg = arg.and_then(|a| a.lines().next()).unwrap_or_default();
+            Some(format!("{}({arg})", p["name"].as_str()?))
         }
         _ => None,
     };
-    let mut out = vec![];
-    for v in std::fs::read_to_string(file)
-        .ok()?
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-    {
-        let mark = match v["type"].as_str() {
-            Some("user") => "❯ ",
-            Some("assistant") => "⏺ ",
-            _ => continue,
-        };
+    let (text, mut out) = (std::fs::read_to_string(file).ok()?, vec![]);
+    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let mark = ["❯ ", "⏺ "][usize::from(v["type"] == "assistant")];
         let c = &v["message"]["content"];
-        let parts: Vec<String> = c.as_str().map_or_else(
-            || c.as_array().into_iter().flatten().filter_map(part).collect(),
-            |t| vec![t.into()],
-        );
-        for (i, l) in parts.iter().flat_map(|t| t.lines().enumerate()) {
-            out.push(mask(&format!("{}{l}", if i == 0 { mark } else { "  " })));
-        }
+        let parts: Vec<String> = match c.as_str() {
+            Some(t) if v["type"] == "user" => vec![t.into()],
+            _ => c.as_array().into_iter().flatten().filter_map(part).collect(),
+        };
+        let lines = parts.iter().flat_map(|t| t.lines().enumerate());
+        out.extend(lines.map(|(i, l)| mask(&format!("{}{l}", if i == 0 { mark } else { "  " }))));
     }
     Some(out)
 }
