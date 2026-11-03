@@ -2050,7 +2050,7 @@ impl<'a> Server<'a> {
             m += &kv("leftovers", "a", &val);
         }
         // #98: green, amber or red per service, what clears it otherwise.
-        let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
+        let svc = |s: &&crate::timer::Row| ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {
             let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
             s += &kv(
