@@ -318,28 +318,33 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
     )
 }
 
-/// The herdr argv that creates the lane's worktree.
-fn create_argv(local: &str, p: &Plan) -> Vec<String> {
-    herdr::worktree_create_argv(local, &p.branch, &p.base, &p.worktree.to_string_lossy(), &p.agent)
+/// The herdr argv that opens (`reopen`) or creates the lane's worktree.
+fn create_argv(local: &str, p: &Plan, reopen: bool) -> Vec<String> {
+    let wt = p.worktree.to_string_lossy();
+    if reopen {
+        herdr::worktree_open_argv(local, &wt, &p.agent)
+    } else {
+        herdr::worktree_create_argv(local, &p.branch, &p.base, &wt, &p.agent)
+    }
 }
 
-fn plan_json(ctx: &Ctx, f: &Fleet, p: &Plan) -> Value {
-    let local = f.local_path().to_string_lossy().into_owned();
-    let fetch = argv(&[
+/// #236: the commands as sent to the lane's host (`on`, `home`): spawn runs these same argvs.
+fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), home: Option<&str>) -> Value {
+    let sent = |prog: &str, a: Vec<String>| {
+        let (prog, a) = on.wrap(prog, &a);
+        [vec![prog], a].concat()
+    };
+    let home = |a| crate::hosts::rehome(a, home);
+    let mut cmds = vec![sent(
         "git",
-        "-C",
-        &local,
-        "fetch",
-        "origin",
-        p.base.trim_start_matches("origin/"),
-    ]);
-    let mut cmds = vec![fetch];
-    cmds.push(herdr::line(create_argv(&local, p)));
-    cmds.push(herdr::line(p.lane_cmd("<pane>")));
-    cmds.push(herdr::line(p.start_cmd(ctx, "<pane>")));
-    cmds.extend(p.kick_cmds("<pane>").into_iter().map(herdr::line));
+        argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
+    )];
+    cmds.push(sent(herdr::BIN, create_argv(local, p, reopen)));
+    cmds.push(sent(herdr::BIN, home(p.lane_cmd("<pane>"))));
+    cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
+    cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     json!({
-        "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile,
+        "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base, "account": p.account.as_ref().map(|a| &a.0),
         "worktree": p.worktree, "brief": p.brief, "kick": p.kick, "title": p.title, "port": p.port, "commands": cmds,
     })
@@ -469,15 +474,7 @@ pub fn spawn(
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
-    let mut pj = plan_json(ctx, f, &p);
-    if o.dry_run {
-        pj["dry_run"] = json!(true);
-        print_plan(out, &pj, o.json)?;
-        return Ok(true);
-    }
-    let h = harness::get(&p.harness);
-    h.ready(ctx, r, &p)?;
-    // #157: from here every call and file of the lane is on its host.
+    // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
     let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
     let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
@@ -487,8 +484,20 @@ pub fn spawn(
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
         }
     }
-    let home = |a: Vec<String>| crate::hosts::rehome(a, placed.as_ref().and_then(|pl| pl.home.as_deref()));
+    let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
+    let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
     let wt = p.worktree.to_string_lossy().into_owned();
+    let local = placed.as_ref().map_or_else(|| f.local_path(), |pl| pl.local.clone());
+    let local = local.to_string_lossy().into_owned();
+    let reopen = on.exists(&p.worktree);
+    let mut pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
+    if o.dry_run {
+        pj["dry_run"] = json!(true);
+        print_plan(out, &pj, o.json)?;
+        return Ok(true);
+    }
+    let h = harness::get(&p.harness);
+    h.ready(ctx, r, &p)?;
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     // Duplicate guard.
@@ -595,9 +604,6 @@ pub fn spawn(
         )?;
     }
 
-    let local = placed.as_ref().map_or_else(|| f.local_path(), |pl| pl.local.clone());
-    let local = local.to_string_lossy().into_owned();
-    let reopen = on.exists(&p.worktree);
     let mut sha = None;
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
@@ -610,8 +616,7 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let open = herdr::worktree_open_argv(&local, &wt, &p.agent);
-        let created = herdr::json(r, &if reopen { open } else { create_argv(&local, &p) })?;
+        let created = herdr::json(r, &create_argv(&local, &p, reopen))?;
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
@@ -651,7 +656,7 @@ pub fn spawn(
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
     let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
-    pj = plan_json(ctx, f, &p);
+    pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
     herdr::ok(r, &home(p.lane_cmd(&pane)))?;
     let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
@@ -683,6 +688,11 @@ pub fn spawn(
                 .map(|e| format!("{e:#}"))
         };
         if let Some(why) = why {
+            // #236: on another host the half-made workspace goes too (nobody there would close it).
+            if on.machine.is_some() {
+                let _ = herdr::workspace_close(r, ws);
+                bail!("{why}; closed workspace {ws}");
+            }
             let _ = herdr::close(r, &pane);
             bail!("{why}; closed pane {pane}");
         }

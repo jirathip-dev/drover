@@ -2,7 +2,7 @@
 # #141 gate 2: the Host tab's two fixtures, exported beside the demo as <site>/busy and <site>/healthy for
 # scripts/ui-audit.sh. Each is a copy of demo/ with a webpush device and 42 GB free; busy: load/cpu 4.24 over 2.5,
 # herdr half updated, docs' drive refused SERIAL_BUSY; healthy: load/cpu 1.84, docs' drive started #10; hosts (#157): healthy
-# with two `[hosts]`, mini (every lane on it) and bazzite (offline, last seen 33m).
+# with two `[hosts]`, mini (every lane on it) and bazzite (offline, last seen 33m), and 24 h of host history (#234).
 # Usage: scripts/host-fixtures.sh [site-dir] [herdsman-binary]
 set -euo pipefail
 site=${1:-site} bin=${2:-./target/release/herdsman}
@@ -34,8 +34,25 @@ toml += '\n[fleet.acme-mobile]\nrepo = "acme-example/acme-mobile"\nlocal = "/srv
 if fx == "hosts":
     toml += '\n[hosts.mini]\ntags = ["fast"]\n\n[hosts.bazzite]\nmachine = "bazzite"\n'
     seen = {"mini": {"tags": ["os:macos", "arch:arm64", "xcode"], "home": "/Users/demo", "probed": ts, "seen": ts, "up": True, "load": 1.84, "mem": 9.5, "disk": 42.0},
-            "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/demo", "probed": ts - 1980, "seen": ts - 1980, "up": False}}
+            "bazzite": {"tags": ["os:linux", "arch:x86_64", "docker"], "home": "/home/demo", "probed": ts - 1980, "seen": ts - 1980, "up": False,
+                        "load": 0.41, "mem": 21.8, "mem_total": 32.0, "disk": 340.0, "disk_total": 476.0, "pressure": 0, "swap": 0}}
     json.dump(seen, open(f"{d}/hosts.json", "w"))
+    # #234: 24 h of history (export's now is the last event + 60 s): mini a row a minute, 9 lanes from 5 h to 3 h ago
+    # (load past 2.5, swap bursts, pressure warn), its disk falling 52 to 42 GB; bazzite every 5 min until 33 min ago.
+    import random
+    rnd, now, rows = random.Random(234), ts + 60, []
+    for i in range(1440, 0, -1):
+        t, hot = now - i * 60 + 1, 180 <= i < 300
+        lanes = 9 if hot else 5 if 300 <= i < 600 else 3
+        load = max(0.05, 0.18 + 0.27 * lanes + (rnd.random() - 0.5) * 0.25 + (rnd.random() * 0.9 if rnd.random() < 0.04 else 0))
+        swap = 600 + rnd.random() * 3400 if hot and rnd.random() < 0.3 else 0
+        mem = max(1.3, 13 - 1.15 * lanes + (rnd.random() - 0.5) * 0.8)
+        rows.append({"ts": t, "host": "mini", "load_cpu": round(load, 2), "pressure": int(hot and 200 <= i < 260), "swap_out": round(swap),
+                     "mem_free_gb": round(mem, 1), "disk_free_gb": round(52 - 10 * (1440 - i) / 1440, 1), "lanes": lanes})
+        if i % 5 == 0 and i > 33:
+            rows.append({"ts": t, "host": "bazzite", "load_cpu": round(0.15 + rnd.random() * 0.3, 2), "pressure": None, "swap_out": None,
+                         "mem_free_gb": 21.8, "disk_free_gb": 340.0, "lanes": 0})
+    open(f"{d}/host-history.jsonl", "w").write("".join(json.dumps(r) + "\n" for r in rows))
     evs = [json.loads(l) for l in open(f"{d}/events.jsonl") if l.strip()]
     open(f"{d}/events.jsonl", "w").write("".join(json.dumps({**e, "host": "mini"} if e["type"] == "spawn" else e) + "\n" for e in evs))
 open(f"{d}/fleet.toml", "w").write(toml + '\n[[notify]]\ntype = "webpush"\nsub = "mailto:demo@example.com"\n')

@@ -241,13 +241,16 @@ client). CI's deps gate fails on any other direct dependency.
 
 ## Host tab (#141)
 
-Four groups: MACHINE (load/cpu, swap-out, memory, disk, the spawn gate), SERVICES (board, tick, herdr, accounts,
+Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,
+top memory, lanes, tags, each with a 24 h sparkline that opens a 1 h / 6 h / 24 h chart; docs/hosts.md), FLEET DISK
+(the worktree budget, orphan folders, processes left in closed lanes), SERVICES (board, tick, herdr, accounts,
 deepseek), FLEETS (each fleet's last `herdsman drive` result in plain words, the raw line on tap) and ALERTS (push,
 alert devices, paired devices). A group takes its worst row's status, red over amber over green (a paused fleet is
-grey and counts as none); problem groups go first and open, green ones collapse to one summary line. A tap's
+grey and counts as none); problem groups open, green ones collapse to one summary line. A tap's
 open/closed holds for the browser session until the group's status changes (`sessionStorage`, `host:<GROUP>`).
 Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %, amber to 100 %, red past it with
-`▶` and the percentage); disk's gauge fills as free space nears `min_free_gb`, its floor the closing tick. The words
+`▶` and the percentage); memory's and disk's bars show the used part (`free 12 GB of 228`), their status from the
+floor (`min_free_mem_gb`, `min_free_gb`). The words
 come from one table in `src/serve.rs` (`WORDS`, golden-tested in tests/host_words.rs). The tab bar is
 `[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
 

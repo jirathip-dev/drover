@@ -193,6 +193,8 @@ pub struct Role {
     /// #157: host tags this role's lanes need besides the fleet's.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
+    pub host: Option<String>,
 }
 
 impl Role {
