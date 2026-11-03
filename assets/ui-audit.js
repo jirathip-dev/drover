@@ -186,7 +186,7 @@
       await wait();
       $('.fv').click();
       await wait();
-      if ($('.fv').ariaPressed !== 'true' || !$('.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
+      if ($('.fv').ariaPressed !== 'true' || !$('.chat>.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
     },
     // #83: the demo's parked lane (no pane, its work on PR #15): the card's parked line, [clean] disabled with its
     // reason in p.st, [stop]/[kill] hidden, and nothing in the sheet in the red (danger) colour.
@@ -204,7 +204,7 @@
       if (!$('.top').textContent.includes('parked · work on PR #15')) early.push('the card has no `parked · work on PR #15` line');
       for (const op of ['stop', 'kill']) if (seen($(`[data-op=${op}]`))) early.push(`[${op}] shown on a lane with no pane`);
       if (!$('[data-op=clean]').disabled) early.push('[clean] enabled before merge');
-      if ($('.now').textContent !== 'no pane: the transcript closed with it') early.push(`chat reads "${$('.now').textContent.slice(0, 40)}"`);
+      if ($('.chat>.now').textContent !== 'no pane: the transcript closed with it') early.push(`chat reads "${$('.chat>.now').textContent.slice(0, 40)}"`);
       for (const e of [S, ...S.querySelectorAll('*')].filter(seen)) if (e.matches('.r') || getComputedStyle(e).color === red) early.push(`red in the sheet: ${e.outerHTML.slice(0, 60)}`);
     },
     // #95: the demo's Others agent (not a lane): only [close pane], the reason in p.st, nothing in the red colour.
