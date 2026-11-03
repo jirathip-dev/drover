@@ -291,7 +291,8 @@ fn a_claude_spinner_is_its_word_and_elapsed_time() {
 }
 
 /// #260: the chat's default view from pane lines: you, the last assistant run before each prompt and the notices; no
-/// tool runs or status. From a session transcript: its messages and the notices in time order.
+/// tool runs or status. From a session transcript: its messages and the notices in time order. #315: screen-first: a
+/// Claude lane without transcript messages (none, or an empty tail) says so in a line; no role run: every block.
 #[test]
 fn the_default_view_keeps_prompts_final_replies_and_asks() {
     let js = r#"
@@ -300,13 +301,16 @@ const notes = [{ at: 1, text: 'spawned w-impl-9' }, { at: 1793700600, text: 'ask
 const pane = matters(lines, null, notes, 'claude').map(b => b.k + ' ' + b.key.split(':')[1]);
 const said = [{ k: 'me', text: 'fix it', at: '2026-11-03T10:00:00.000Z' }, { k: 'ai', text: '# Fixed\nall green', at: '2026-11-03T10:20:00.000Z' }];
 const ts = matters([], said, notes, 'claude');
-console.log(JSON.stringify([pane, ts.map(b => b.k), ts[3].html]));
+const k = (l, s, h) => matters(l, s, [], h).map(b => b.k).join(' ');
+const other = [k(lines, [], 'claude'), k(lines, null, 'hermes'), k(['⏺ Bash(cargo test)', '  ⎿  ok'], null, 'hermes')];
+console.log(JSON.stringify([pane, ts.map(b => b.k), ts[3].html, other]));
 "#;
     let Some(out) = node(js) else { return };
-    let (pane, ts, html): (Vec<String>, Vec<String>, String) = serde_json::from_str(&out).unwrap();
+    let (pane, ts, html, other): (Vec<String>, Vec<String>, String, Vec<String>) = serde_json::from_str(&out).unwrap();
     assert_eq!(
         pane,
         [
+            "note none",
             "note 1",
             "note 1793700600",
             "me > fix it",
@@ -320,4 +324,5 @@ console.log(JSON.stringify([pane, ts.map(b => b.k), ts[3].html]));
         html.contains("<span class=pv>Fixed</span>") && html.contains("<p class=h>Fixed</p><p>all green</p>"),
         "{html}"
     );
+    assert_eq!(other, ["note me ai me ai", "me ai me ai", "run"]);
 }

@@ -484,9 +484,16 @@ fn handoff(
             .iter()
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
-        let done = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) != "pending";
+        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         let idle = w.who == "none" && ctx.now >= w.since + 120;
-        if !(idle && building && done && pr["state"] == "OPEN") || head.is_empty() || handed || s.reviewed(head) {
+        if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
+            continue;
+        }
+        if s.reviewed(head) {
+            any |= no_change(ctx, cfg, out, (fleet, s.issue), ev, head, ci)?;
+            continue;
+        }
+        if handed {
             continue;
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
@@ -495,6 +502,51 @@ fn handoff(
         any = true;
     }
     Ok(any)
+}
+
+/// #319: a settled fix lane left the head of the FAIL as it was. A CI-only FAIL (a gate's CI red, or every blocker tagged
+/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `herdsman done
+/// --no-change` is reviewed again at the same head (`waiting`). True if `fix-no-change` was logged.
+fn no_change(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    ev: &[Event],
+    head: &str,
+    ci: &str,
+) -> Result<bool> {
+    let Some(i) = ev.iter().rposition(|e| e.is("verdict", fleet, n)) else {
+        return Ok(false);
+    };
+    let (v, since) = (&ev[i], &ev[i + 1..]);
+    let at = v.str("sha").is_some_and(|x| x.eq_ignore_ascii_case(head));
+    if v.str("verdict") != Some("FAIL") || !at || since.iter().any(|e| e.is("fix-no-change", fleet, n)) {
+        return Ok(false);
+    }
+    let gate = cfg
+        .fleet(fleet)?
+        .flow()
+        .get(v.str("stage").unwrap_or_default())
+        .is_some_and(|g| g.kind == "gate");
+    let pass = ci == "green" && (gate || crate::gate::form_only(v.str("body").unwrap_or_default(), &["ci".into()]));
+    let done = since
+        .iter()
+        .rfind(|e| e.is("fix-done", fleet, n))
+        .and_then(|e| e.str("why"));
+    let Some(why) = done.or(pass.then_some("CI-only FAIL, CI green at the same head")) else {
+        return Ok(false);
+    };
+    writeln!(out, "{fleet} #{n} fix-no-change at {head:.7}: {why} (CI {ci})")?;
+    let d = json!({"sha": head, "why": why, "ci": ci});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "fix-no-change", d))?;
+    if pass {
+        let body = format!("PASS\n\nNo new commit: the CI-only FAIL at {head} is resolved, CI is green there now.\n");
+        let d = json!({"verdict": "PASS", "sha": head, "stage": v.str("stage"), "loop": v.str("loop"), "body": body,
+            "by": "drive"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "verdict", d))?;
+    }
+    Ok(true)
 }
 
 /// #285: a tracked issue whose PR (as last read) was merged or closed outside herdsman is logged once, no comment:
