@@ -497,36 +497,31 @@ fn handoff(
     Ok(any)
 }
 
-/// #285: a tracked issue whose PR (as last read) was merged or closed on GitHub outside herdsman is logged so, once:
-/// `merged`/`closed` `by: external` (no comment), `blocked` while its issue is open; `clean` takes its lanes.
+/// #285: a tracked issue whose PR (as last read) was merged or closed outside herdsman is logged once, no comment:
+/// `merged`/`closed` `by: external`, or `blocked` while its issue is open; `clean` takes its lanes.
 fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let (f, events) = (cfg.fleet(fleet)?, read(&ctx.state)?);
-    for s in fold(&events).into_values() {
+    let events = read(&ctx.state)?;
+    for s in fold(&events)
+        .into_values()
+        .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked")
+    {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
-        if s.fleet != fleet || s.done() || s.state == "parked" || !pr["number"].is_u64() {
-            continue;
-        }
         let num = pr["number"].to_string();
-        let seen = |e: &Event| {
-            e.is("blocked", fleet, s.issue) && e.str("code") == Some("PR_CLOSED") && e.str("pr") == Some(&num)
-        };
-        let (kind, d) = match pr["state"].as_str() {
+        let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
+        let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
+        let (kind, mut d) = match pr["state"].as_str() {
             Some("MERGED") => {
-                let (into, sha, at) = (&pr["baseRefName"], &pr["mergeCommit"]["oid"], &pr["mergedAt"]);
-                (
-                    "merged",
-                    json!({"into": into, "merge_sha": sha, "pr": num, "by": "external", "merged_at": at}),
-                )
+                let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+                ("merged", m)
             }
-            Some("CLOSED") if gh::closed(ctx, r, f, fleet, ctx.now)?.contains(&s.issue) => {
-                ("closed", json!({"pr": num, "by": "external"}))
-            }
+            Some("CLOSED") if closed()? => ("closed", json!({})),
             Some("CLOSED") if !events.iter().any(seen) => (
                 "blocked",
-                json!({"code": "PR_CLOSED", "reason": "PR closed outside herdsman", "pr": num}),
+                json!({"code": "PR_CLOSED", "reason": "PR closed outside herdsman"}),
             ),
             _ => continue,
         };
+        (d["pr"], d["by"]) = (json!(num), json!("external"));
         writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
     }

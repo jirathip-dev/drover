@@ -627,10 +627,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(
         Fake::default()
-            .reply(
-                RULES,
-                r#"[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true}}]"#,
-            )
+            .reply(RULES, "true\n")
             .reply("gh pr edit", "")
             .reply("herdr", NO_AGENTS),
     );
