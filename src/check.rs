@@ -39,6 +39,7 @@ fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Opti
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
+    PUSHES.set((0, 0));
     let _ = std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string());
     let agents = host::agents(r)
         .map_err(|e| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane checks"))
@@ -207,7 +208,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (&u.fleet, u.issue), "decision-redelivered", d)?;
         }
     }
-    let waiting = |a: &&&Event| !routine(a) && ctx.now.saturating_sub(a.ts) > 30 * 60;
+    // #283: an imported ask shows on the board only.
+    let waiting = |a: &&&Event| !routine(a) && a.str("from").is_none() && ctx.now.saturating_sub(a.ts) > 30 * 60;
     for a in open.iter().filter(waiting) {
         let why = format!(
             "{} unanswered for {}: {}",
@@ -224,6 +226,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             "ask-waiting",
             json!({"key": a.str("id"), "reason": why}),
         )?;
+    }
+    // #283: past `max_pushes_per_pass` the held alerts are one summary push.
+    if let (sent, held @ 1..) = PUSHES.get() {
+        let why = format!("{} questions waiting — open the board", sent + held);
+        let ev = Event::new(
+            ctx.now,
+            "herdsman",
+            None,
+            "ask-waiting",
+            json!({"key": ctx.now, "reason": why}),
+        );
+        writeln!(out, "{}", plain(&ev))?;
+        emit(&ctx.state, cfg, ev)?;
     }
     // #87: devices subscribed but no webpush notifier: the page's alerts never send; once per device count.
     let subs = crate::webpush::load(&ctx.state).len();
@@ -284,7 +299,13 @@ fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) ->
     events.iter().rev().find(by).map(|x| x.ts)
 }
 
-/// Log and print one alert unless one of its kind already carries `d`'s `key`.
+thread_local! {
+    /// #283: this pass's alerts that push `(sent, held)`.
+    static PUSHES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Log and print one alert unless one of its kind already carries `d`'s `key`; past `max_pushes_per_pass` pushing
+/// alerts are logged without notifying.
 fn fire(
     ctx: &Ctx,
     cfg: &Config,
@@ -302,6 +323,15 @@ fn fire(
     }
     let ev = Event::new(ctx.now, fleet, issue, kind, d);
     writeln!(out, "{}", plain(&ev))?;
+    let (sent, held) = PUSHES.get();
+    if !crate::config::WEBPUSH_ON.contains(&kind) {
+        return emit(&ctx.state, cfg, ev);
+    }
+    if sent >= cfg.limits.max_pushes_per_pass {
+        PUSHES.set((sent, held + 1));
+        return crate::events::append(&ctx.state, &ev);
+    }
+    PUSHES.set((sent + 1, held));
     emit(&ctx.state, cfg, ev)
 }
 
