@@ -1528,7 +1528,10 @@ impl<'a> Server<'a> {
         let mut cards: Vec<(bool, String)> = vec![];
         for (f, fc) in &cfg.fleet {
             let q = queue::view(events, st, f);
-            let (sl, sp) = (esc(fc.serial_label()), esc(&fc.serial_paths.join(", ")));
+            // #294: a group each, names by spaces and their paths by ` | ` (serve.js splits them).
+            let sl: Vec<_> = fc.serial.iter().map(|g| g.name.as_str()).collect();
+            let sp: Vec<_> = fc.serial.iter().map(|g| g.paths.join(", ")).collect();
+            let (sl, sp) = (esc(&sl.join(" ")), esc(&sp.join(" | ")));
             let sa = (!sp.is_empty()).then(|| format!(" data-s=\"{sl}\" data-sp=\"{sp}\""));
             let sa = sa.unwrap_or_default();
             let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == *f).collect();
@@ -1651,7 +1654,11 @@ impl<'a> Server<'a> {
                     let down = q.get(k + 1).map(|x| mv("▼ down", "after", x.issue)).unwrap_or_default();
                     card.push(format!("<span class=btns>{up}{down}</span>"));
                 }
-                let s = k.filter(|&k| q[k].serial).map(|_| format!(" data-s=\"{sl}\""));
+                let gs: Vec<_> = queue::groups(&q, events, fc, f, n)
+                    .iter()
+                    .map(|g| esc(&g.name))
+                    .collect();
+                let s = (!gs.is_empty()).then(|| format!(" data-s=\"{}\"", gs.join(" ")));
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
@@ -1781,10 +1788,7 @@ impl<'a> Server<'a> {
             if !lanes.is_empty() {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
-            if !fc.serial_paths.is_empty() {
-                let busy = queue::serial_in_flight(events, st, f).len();
-                meta.push(format!("serial {busy}/{}", fc.serial_max.unwrap_or(1)));
-            }
+            meta.extend(queue::serial_use(events, st, f, Some(cfg)));
             // #173: a refused pipeline stops this fleet only; its card says so in red.
             let bad = match fc.bad.len() {
                 0 => String::new(),
@@ -2902,6 +2906,8 @@ fn config_sheet(
         }
     };
     let cap = |n: Option<usize>| n.map_or("<span class=m>no cap</span>".into(), |n| n.to_string());
+    let group = |g: &crate::config::Serial| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", "));
+    let groups: Vec<_> = fc.serial.iter().map(group).collect();
     let line_cap = std::fs::read_to_string(fc.local_path().join("ci/cap.toml"))
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
@@ -2983,18 +2989,10 @@ fn config_sheet(
                 format!("{n} <span class=m>(ci/cap.toml in the repo)</span>")
             }),
         ),
-        ("serial paths", list(&fc.serial_paths)),
+        ("serial", list(&groups)),
         (
             "deny commands",
             list(&fc.deny(l).iter().map(|d| d.cmd().to_string()).collect::<Vec<_>>()),
-        ),
-        (
-            "serial",
-            format!(
-                "{} at a time · label 🔒{}",
-                fc.serial_max.unwrap_or(1),
-                esc(fc.serial_label())
-            ),
         ),
         (
             "required checks",

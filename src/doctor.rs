@@ -58,6 +58,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || gh repo clone {repo} {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        if let Some(g) = fleet.serial.first().filter(|_| !fleet.serial_paths.is_empty()) {
+            rows.push(format!(
+                "! serial_paths is the old form; [[fleet.{name}.serial]] name=\"{}\"…",
+                g.name
+            ));
+        }
         // #173: a broken pipeline stops only its fleet; each rule it breaks, with its fleet.toml line.
         let bad = match fleet.bad.len() {
             0 if fleet.flow().builtin => "valid (built-in)".to_string(),

@@ -32,8 +32,11 @@ local = "~/src/<repo>"
 integration = "staging"                      # merge target; main never is
 required_checks = ["test"]                   # gate on these checks only; unset = all
 # merge_label = "merge-ready"                # PR label the full CI needs: added on a PASS at the head
-serial_paths = ["db/migrations/**"]          # `--serial` lanes: serial_max (default 1) at a time
-serial_label = "schema"                      # their Queue mark, 🔒schema; ≤ 8 characters, default "serial"
+
+[[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
+name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
+paths = ["db/migrations/**"]
+max = 1                                      # issues in flight at once; default 1
 
 [fleet.app.role.impl]
 harness = "claude"

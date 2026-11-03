@@ -434,6 +434,33 @@ fn premerge(
     )))
 }
 
+/// #294: the serial groups (name order) `n`'s PR diff touches and it is not in yet, each with the first such file.
+pub(crate) fn unjoined<'a>(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &'a Fleet,
+    (fleet, n): (&str, u64),
+    (num, head): (&str, &str),
+) -> Result<Vec<(&'a crate::config::Serial, String)>> {
+    let ev = read(&ctx.state)?;
+    let mine = crate::queue::groups(&crate::queue::replay(&ev, fleet), &ev, f, fleet, n);
+    let mut new: Vec<_> = f
+        .serial
+        .iter()
+        .filter(|g| !mine.iter().any(|m| m.name == g.name))
+        .collect();
+    new.sort_by(|a, b| a.name.cmp(&b.name));
+    let files = if new.is_empty() {
+        vec![]
+    } else {
+        gh::diff_names(ctx, r, f, (fleet, n), num, head)?
+    };
+    Ok(new
+        .into_iter()
+        .filter_map(|g| g.hit(&files).map(|p| (g, p.clone())))
+        .collect())
+}
+
 /// `over` (`--owner-override`, #130) lifts only `ROUND_LIMIT`.
 pub fn merge(
     ctx: &Ctx,
@@ -478,18 +505,15 @@ pub fn merge(
     } else {
         gate(f, &pr, st.as_ref(), over)
     };
-    let serial = || crate::queue::serial(&read(&ctx.state).unwrap_or_default(), fleet).contains(&issue);
+    // #294: belt and braces: a group the PR touches but drive never joined it to.
     let res = match res {
-        Ok(head) if !f.serial_paths.is_empty() && !serial() => {
-            let files = gh::diff_names(ctx, r, f, (fleet, issue), &num, &head)?;
-            match files.iter().find(|p| f.serial_path(p)) {
-                Some(p) => Err(refuse(
-                    "SERIAL_UNMARKED",
-                    format!("PR touches serial path {p}; queue #{issue} with `--serial` first"),
-                )),
-                None => Ok(head),
-            }
-        }
+        Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?.first() {
+            Some((g, p)) => Err(refuse(
+                "SERIAL_UNMARKED",
+                format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+            )),
+            None => Ok(head),
+        },
         res => res,
     };
     let res = match res {

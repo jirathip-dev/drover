@@ -308,7 +308,6 @@ struct Scope {
 enum QueueCmd {
     /// Append issues to the queue (or put them on top / after N)
     Add {
-        #[arg(required = true)]
         issues: Vec<u64>,
         /// Put them at the top
         #[arg(long, conflicts_with = "after")]
@@ -316,9 +315,9 @@ enum QueueCmd {
         /// Put them right after issue N
         #[arg(long, value_name = "N")]
         after: Option<u64>,
-        /// They touch the fleet's serial_paths (DB migrations): serial_max (default 1) in flight at a time
-        #[arg(long)]
-        serial: bool,
+        /// They touch serial group G's paths (plain: the first group): its `max` (default 1) in flight at a time
+        #[arg(long, value_name = "G", num_args = 0..=1, default_missing_value = "")]
+        serial: Option<String>,
         /// Host tags their lanes need besides the fleet's (`docker,gpu`)
         #[arg(long, value_delimiter = ',')]
         needs: Vec<String>,
@@ -339,10 +338,10 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
-    /// Replace a queued issue's `needs` host tags (`queue set 12 needs docker,gpu`; empty clears)
+    /// Replace a queued issue's `needs` host tags or serial groups (`queue set 12 needs docker,gpu`; empty clears)
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs"])]
+        #[arg(value_parser = ["needs", "serial"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -879,27 +878,40 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     );
                 }
                 Cmd::Queue { fleet, cmd } => {
-                    cfg.fleet(&fleet)?;
+                    let groups = &cfg.fleet(&fleet)?.serial;
+                    let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
                     let d = match cmd {
                         QueueCmd::Add {
-                            issues,
+                            mut issues,
                             top,
                             after,
                             serial,
                             needs,
                         } => {
+                            // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
+                            let g =
+                                serial.map(|g| g.parse().map(|n| issues.insert(0, n)).map_or(g, |()| String::new()));
+                            anyhow::ensure!(
+                                g.iter().all(known),
+                                "no serial group `{}` in fleet.{fleet}",
+                                g.unwrap_or_default()
+                            );
                             let mut d = queue::op("add", &issues, top, None, after, None);
-                            if serial {
-                                d["serial"] = json!(true);
+                            if let Some(g) = g {
+                                d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
                             }
                             if !needs.is_empty() {
                                 d["needs"] = json!(needs);
                             }
                             d
                         }
-                        QueueCmd::Set { issue, tags, .. } => {
+                        QueueCmd::Set { issue, key, tags } => {
+                            anyhow::ensure!(
+                                key != "serial" || tags.iter().all(known),
+                                "no such serial group: {tags:?}"
+                            );
                             let mut d = queue::op("set", &[issue], false, None, None, None);
-                            d["needs"] = json!(tags);
+                            d[key.as_str()] = json!(tags);
                             d
                         }
                         QueueCmd::Mv {

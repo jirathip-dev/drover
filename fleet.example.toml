@@ -48,9 +48,7 @@ profile = "lane-rev"
 repo = "acme/web"
 local = "~/Projects/web"
 integration = "staging"
-serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a time (SERIAL_BUSY / SERIAL_UNMARKED)
-# serial_max = 2   # serial issues in flight at once; default 1 (board/status: `serial n/max`)
-# serial_label = "schema"   # the Queue graph's lock mark for serial issues (🔒schema), ≤ 8 characters; default "serial"
+# serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # premerge = ["herdsman cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
 # merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves
@@ -63,6 +61,11 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
+
+# #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
+[[fleet.web.serial]]
+name = "db"   # ≤ 8 characters; also the Queue mark 🔒db and `queue add N --serial db`
+paths = ["supabase/migrations/**"]
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]

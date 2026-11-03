@@ -840,7 +840,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     );
     let status = run(&c, &fake(&working(&c, &[2, 3, 9])), &["status", "sendmeter"]).1;
     assert!(
-        status.contains("skipped this pass: SERIAL_BUSY (serial #9 is unmerged (impl)"),
+        status.contains("skipped this pass: SERIAL_BUSY (db: #9 holds 1/1"),
         "{status}"
     );
     let board = run(&c, &Fake::default(), &["board", "sendmeter"]).1;
@@ -899,7 +899,7 @@ fn host_busy_stops_the_pass_and_cap_stops_starting() {
     idle(&c, &fan_fake(&working(&c, &[1])));
 }
 
-/// #149: unmarked #12 at PASS + green whose PR changes `files`: one drive pass, then the `serial-auto` events.
+/// #149: unmarked #12 at PASS + green whose PR changes `files`: one drive pass, then the `serial-joined` events (#294).
 fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Event>) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"",
@@ -925,7 +925,7 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
     assert_eq!(steps, ["merge"], "{out}");
     assert!(!out.contains("SERIAL_UNMARKED"), "{out}");
     assert_eq!(state(&c), "merged");
-    let auto = read(&c.state).unwrap().into_iter().filter(|e| e.kind == "serial-auto");
+    let auto = read(&c.state).unwrap().into_iter().filter(|e| e.kind == "serial-joined");
     (c, r, out, auto.collect())
 }
 
@@ -933,7 +933,7 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
 fn an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges() {
     let (c, r, out, auto) = serial_auto("drive-serial-auto", "src/a.rs\nsupabase/migrations/1_x.sql\n");
     assert!(
-        out.contains("sendmeter #12 serial-auto: supabase/migrations/1_x.sql"),
+        out.contains("sendmeter #12 serial-joined db: supabase/migrations/1_x.sql"),
         "{out}"
     );
     assert_eq!(auto.len(), 1);

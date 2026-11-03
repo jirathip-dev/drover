@@ -119,12 +119,13 @@ pub struct Fleet {
     pub repo: String,
     pub local: String,
     pub integration: String,
-    /// Globs only `serial_max` lanes at a time may touch: `--serial` issues (`SERIAL_BUSY`, `SERIAL_UNMARKED`).
+    /// #294: `[[fleet.<n>.serial]]` groups: globs only `max` issues at a time may touch (`SERIAL_BUSY`, `SERIAL_UNMARKED`).
+    #[serde(default)]
+    pub serial: Vec<Serial>,
+    /// The old form of one group named `serial_label` (unset = `db`); `Config::parse` reads it into `serial`.
     #[serde(default)]
     pub serial_paths: Vec<String>,
-    /// How many `--serial` issues may be in flight at once (`SERIAL_BUSY`); unset = 1.
     pub serial_max: Option<usize>,
-    /// #115: the Queue graph's lock mark for `--serial` issues, at most 8 characters; unset = `serial`.
     pub serial_label: Option<String>,
     /// The only checks merge, `check` and `wait` look at (latest run of each); empty = all.
     #[serde(default)]
@@ -177,6 +178,27 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<String>>,
+}
+
+/// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.
+#[derive(Debug, Deserialize, Clone)]
+pub struct Serial {
+    pub name: String,
+    pub paths: Vec<String>,
+    #[serde(default = "one")]
+    pub max: usize,
+}
+
+fn one() -> usize {
+    1
+}
+
+impl Serial {
+    /// The first of `files` one of the group's globs matches.
+    pub fn hit<'a>(&self, files: &'a [String]) -> Option<&'a String> {
+        let hit = |p: &&String| self.paths.iter().any(|g| glob(g.as_bytes(), p.as_bytes()));
+        files.iter().find(hit)
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -418,9 +440,17 @@ impl Config {
             f.bad = p.validate(name, &f.role);
             f.pipeline = Some(p);
         }
-        for (name, f) in &c.fleet {
-            if !(1..=8).contains(&f.serial_label().chars().count()) {
-                bail!("fleet.{name}.serial_label: must be 1 to 8 characters");
+        for (name, f) in &mut c.fleet {
+            if !f.serial_paths.is_empty() {
+                if !f.serial.is_empty() {
+                    bail!("fleet.{name}: serial_paths and [[fleet.{name}.serial]] together; keep one");
+                }
+                let name = f.serial_label.clone().unwrap_or_else(|| "db".into());
+                let (paths, max) = (f.serial_paths.clone(), f.serial_max.unwrap_or(1));
+                f.serial.push(Serial { name, paths, max });
+            }
+            if f.serial.iter().any(|g| !(1..=8).contains(&g.name.chars().count())) {
+                bail!("fleet.{name}.serial: a name (serial_label) must be 1 to 8 characters");
             }
             if f.deny_commands.as_ref().is_some_and(Vec::is_empty) {
                 eprintln!("herdsman: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
@@ -526,7 +556,7 @@ impl Fleet {
         d
     }
     pub fn serial_label(&self) -> &str {
-        self.serial_label.as_deref().unwrap_or("serial")
+        self.serial.first().map_or("serial", |g| &g.name)
     }
     pub fn role(&self, role: &str) -> Result<&Role> {
         self.role
@@ -538,10 +568,6 @@ impl Fleet {
     }
     pub fn repo_name(&self) -> &str {
         self.repo.rsplit('/').next().unwrap_or(&self.repo)
-    }
-    /// `path` matches a `serial_paths` glob.
-    pub fn serial_path(&self, path: &str) -> bool {
-        self.serial_paths.iter().any(|g| glob(g.as_bytes(), path.as_bytes()))
     }
 }
 
