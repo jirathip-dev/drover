@@ -602,3 +602,86 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     assert!(r.calls.borrow().contains(&want), "{:#?}", r.calls.borrow());
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));
 }
+
+/// #272: a fleet whose local checkout has `ci/cap.toml` (or not); returns (dir, ctx, local, scratch worktree).
+fn premerge_setup(name: &str, cap: bool) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
+    let d = tmpdir(name);
+    let local = d.join("local");
+    std::fs::create_dir_all(local.join("ci")).unwrap();
+    if cap {
+        std::fs::write(local.join("ci/cap.toml"), "[fleet.x]\nline_cap = 1\n").unwrap();
+    }
+    let local = local.to_string_lossy().to_string();
+    let c = ctx(&d, &CONFIG.replace("/tmp/does-not-matter/sendmeter", &local));
+    let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
+    append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
+    let v = json!({"verdict": "PASS", "sha": HEAD, "round": 1});
+    append(&c.state, &Event::new(20, "sendmeter", Some(12), "verdict", v)).unwrap();
+    let wt = d.join("state/premerge-sendmeter").to_string_lossy().to_string();
+    (d, c, local, wt)
+}
+
+fn premerge_fake(local: &str) -> Fake {
+    pr("staging", green())
+        .reply(&format!("git -C {local} rev-parse origin/staging"), "base1")
+        .reply("git -C ", "")
+        .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
+}
+
+#[test]
+fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
+    let (_d, c, local, wt) = premerge_setup("pre-cap", true);
+    let r = premerge_fake(&local).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 3, "{out}");
+    let want = "REFUSED STAGING_WOULD_BREAK: /opt/herdsman/bin/herdsman cap-check --config ci/cap.toml: src lines (formatted): 14885 / cap 14700";
+    assert!(out.contains(want), "{out}");
+    assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
+    assert!(r.called(&format!("git -C {wt} merge --no-ff --no-edit {HEAD}")));
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "not a new review round");
+    let ev = read(&c.state).unwrap();
+    let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
+    assert!(v.str("body").unwrap().contains("14885 / cap 14700"), "{v:?}");
+}
+
+#[test]
+fn premerge_passing_merges_and_logs_its_time() {
+    let (_d, c, local, _) = premerge_setup("pre-ok", true);
+    let r = premerge_fake(&local).reply("sh -c", "src lines (formatted): 10 / cap 14700\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(r.index("sh -c").unwrap() < r.index("gh pr merge").unwrap());
+    let ev = read(&c.state).unwrap();
+    let m = ev.iter().find(|e| e.kind == "merged").unwrap();
+    assert!(m.data["premerge_secs"].is_u64(), "{:?}", m.data);
+}
+
+#[test]
+fn premerge_rechecks_when_staging_moved() {
+    let (_d, c, local, wt) = premerge_setup("pre-moved", true);
+    let tip = format!("git -C {local} rev-parse origin/staging");
+    let r = premerge_fake(&local)
+        .once(&tip, 0, "base1")
+        .once(&tip, 0, "base2")
+        .once(&tip, 0, "base2")
+        .once(&tip, 0, "base2")
+        .reply("sh -c", "ok\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert_eq!(r.count("sh -c"), 2, "{:#?}", r.calls.borrow());
+    assert!(r.called(&format!("git -C {local} worktree add -f --detach {wt} base2")));
+    assert!(r.index(&format!("git -C {local} worktree add -f --detach {wt} base2")) < r.index("gh pr merge"));
+}
+
+#[test]
+fn premerge_default_needs_cap_toml() {
+    let (_d, c, local, _) = premerge_setup("pre-none", false);
+    let r = premerge_fake(&local);
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(!r.called("sh -c") && !r.called("git -C "), "{:#?}", r.calls.borrow());
+    let ev = read(&c.state).unwrap();
+    let m = ev.iter().find(|e| e.kind == "merged").unwrap();
+    assert!(!m.data.contains_key("premerge_secs"));
+}

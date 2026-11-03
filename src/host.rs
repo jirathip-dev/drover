@@ -76,6 +76,18 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
+/// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
+pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
+    let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
+    let rss: std::collections::BTreeMap<&str, &str> = rss.lines().filter_map(|l| l.trim().split_once(' ')).collect();
+    let kb = |pid: &str| rss.get(pid)?.trim().parse::<u64>().ok();
+    let mb = |a: &&Value| {
+        let dir = Path::new(a["cwd"].as_str().unwrap_or("\0"));
+        inside(&ps, dir).iter().filter_map(|p| kb(&p.0)).sum::<u64>() / 1024
+    };
+    agents.iter().map(mb).collect()
+}
+
 /// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live
 /// agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
 pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
