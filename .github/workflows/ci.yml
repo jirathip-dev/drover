@@ -26,9 +26,16 @@ jobs:
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(sed -n '/^\[dependencies\]/,/^\[/p' Cargo.toml | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|herdsman-core|herdsman-server' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
-      - name: line cap (formatted non-test Rust lines under src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
+      - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
+        run: |
+          core=$(cargo tree --locked -p herdsman-core -e normal,build --prefix none)
+          server=$(cargo tree --locked -p herdsman-server -e normal,build --prefix none)
+          if grep -E '^herdsman(-server)? v' <<<"$core" || grep -E '^herdsman v' <<<"$server"; then exit 1; fi
+          bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/(runner|events|webpush)\.rs' || true)
+          test -z "$bad" || { echo "std::process outside the Runner implementations: $bad"; exit 1; }
+      - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
         run: |
@@ -76,7 +83,7 @@ jobs:
       - name: sheet close in WebKit (chat, config, legend)
         run: |
           mkdir -p ui-webkit
-          HERDSMAN_SNAPSHOTS=ui-webkit cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
+          HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
           test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
       - uses: actions/upload-artifact@v4
         if: always()

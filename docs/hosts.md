@@ -149,7 +149,7 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 When `check` sees an older herdsman on a remote host, and fleet.toml has the herdsman fleet, it rebuilds the main
 host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
-`cargo install --path . --locked --root <root> --force` in that fleet's checkout on the host, then
+`cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
 `herdsman profiles sync`. Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
 logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
 A host still on the old version stays amber. A failed update never blocks the main host.
