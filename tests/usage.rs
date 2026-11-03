@@ -464,3 +464,114 @@ fn spawn_prefers_the_lowest_fresh_weekly_usage() {
     meter("B", c.now - 1900, 20.0);
     assert_eq!(dry(), "A", "B's reading is over 30 min old: configured order");
 }
+
+/// Claude Code's status-line JSON with these 5h/7d percentages (resets as epoch seconds).
+fn status(five: f64, week: f64, now: u64) -> String {
+    json!({"model": {"display_name": "Opus"}, "rate_limits": {
+        "five_hour": {"used_percentage": five, "resets_at": now + 3600},
+        "seven_day": {"used_percentage": week, "resets_at": now + 86400}}})
+    .to_string()
+}
+
+fn row(c: &herdsman::Ctx, account: &str, ts: u64, five: f64, week: f64) {
+    let mut c = c.clone();
+    c.now = ts;
+    herdsman::usage::statusline(&c, account, "", &status(five, week, ts), &mut Vec::new());
+}
+
+#[test]
+fn statusline_appends_a_throttled_row_and_shrugs_off_garbage() {
+    let d = tmpdir("usage-statusline");
+    let mut c = ctx(&d, &config(&d));
+    let log = d.join("state/usage.jsonl");
+    let line = |c: &herdsman::Ctx, account: &str, input: &str| {
+        let mut out = Vec::new();
+        herdsman::usage::statusline(c, account, "synergy:2940:impl", input, &mut out);
+        String::from_utf8(out).unwrap()
+    };
+    let rows = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+    assert_eq!(
+        line(&c, "A", &status(41.2, 63.0, c.now)),
+        "synergy #2940 · 5h 41% · 7d 63%\n"
+    );
+    let got: serde_json::Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).unwrap();
+    assert_eq!(
+        got,
+        json!({"ts": c.now, "account": "A", "five_hour_pct": 41.2, "five_hour_reset": c.now + 3600,
+            "seven_day_pct": 63.0, "seven_day_reset": c.now + 86400})
+    );
+    line(&c, "A", &status(50.0, 70.0, c.now));
+    assert_eq!(rows(), 1, "one row per account per minute");
+    line(&c, "B", &status(5.0, 7.0, c.now));
+    c.now += 60;
+    line(&c, "A", &status(50.0, 70.0, c.now));
+    assert_eq!(rows(), 3);
+    for junk in ["not json", "{}", r#"{"rate_limits": 7}"#, ""] {
+        assert_eq!(line(&c, "C", junk), "synergy #2940\n");
+    }
+    line(&c, "", &status(1.0, 1.0, c.now));
+    assert_eq!(rows(), 3, "garbage, or no account: no row");
+}
+
+#[test]
+fn meter_prefers_a_fresh_status_line_row() {
+    let d = tmpdir("usage-rows");
+    let c = ctx(&d, &config(&d));
+    std::fs::create_dir_all(d.join("state/usage")).unwrap();
+    // A's /login meter, read just now (no poll), says week 50%.
+    let cached = json!({"checked": c.now, "ts": c.now, "week": [50.0, c.now + 86400]});
+    std::fs::write(d.join("state/usage/A.json"), cached.to_string()).unwrap();
+    let accounts = || {
+        let (code, out) = run(&c, &Fake::default().reply("date -r", "Mon 19\n"), &["accounts"]);
+        assert_eq!(code, 0, "{out}");
+        out
+    };
+    row(&c, "A", c.now - 60, 41.0, 63.0);
+    // B has no /login dir: its row is shown, with its age.
+    row(&c, "B", c.now - 3600, 12.0, 30.0);
+    let out = accounts();
+    assert!(
+        out.contains("session 41% (resets 59m, read 60s ago) · week 63%"),
+        "{out}"
+    );
+    assert!(
+        out.contains("session 12% (resets 0s, read 60m ago) · week 30%"),
+        "{out}"
+    );
+    // A's newest row is 700 s old.
+    std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
+    row(&c, "A", c.now - 700, 41.0, 63.0);
+    let out = accounts();
+    assert!(
+        out.contains("week 50%") && !out.contains("week 63%"),
+        "a stale row yields to the meter: {out}"
+    );
+}
+
+#[test]
+fn headroom_picking_takes_the_most_headroom() {
+    let d = tmpdir("usage-headroom");
+    let order = config(&d);
+    let dry = |cfg: &str| {
+        let c = ctx(&d, cfg);
+        let (code, out) = run(
+            &c,
+            &Fake::default(),
+            &["spawn", "sendmeter", "7", "impl", "--dry-run", "--json"],
+        );
+        assert_eq!(code, 0, "{out}");
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["account"].clone()
+    };
+    let headroom = order.replace("[accounts]\n", "[accounts]\npick = \"headroom\"\n");
+    let c = ctx(&d, &order);
+    // A: 5h nearly spent; B: more headroom on both windows.
+    row(&c, "A", c.now, 90.0, 10.0);
+    row(&c, "B", c.now, 20.0, 30.0);
+    assert_eq!(dry(&order), "A", "default `order`: unchanged");
+    assert_eq!(dry(&headroom), "B");
+    // A's 5h window has reset since its reading: A's live use is its week, 10%.
+    std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
+    row(&c, "A", c.now - 4000, 90.0, 10.0);
+    row(&c, "B", c.now, 20.0, 30.0);
+    assert_eq!(dry(&headroom), "A");
+}

@@ -21,6 +21,7 @@ writeFileSync(new URL('sprites.svg', out), sprites);
 writeFileSync(new URL('scene.svg', out), cls(station()).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '));
 
 const theme = {
+  scheme: 'kitchen',
   actions: { impl: 'chef-cook', fix: 'chef-chop', rev: 'chef-taste', update: 'chef-carry', idle: 'chef-wait', done: 'chef-serve', blocked: 'chef-bell' },
   poses: { working: 'chef-cook', idle: 'chef-wait', done: 'chef-serve', blocked: 'chef-bell' },
   looks: LOOKS.map(l => Object.fromEntries(Object.entries(l.vars).map(([k, v]) => [k, String(v)]))),
@@ -41,7 +42,7 @@ const theme = {
     weather: false, line: true,
     palette: {
       '--pa': 'repeating-conic-gradient(#4a3f38 0 25%,#41372f 0 50%) 0 0/24px 24px', '--sky1': '#3a332e', '--sky2': '#3a332e',
-      '--fp': '#8d9399', '--fr': '#c9ced2', '--done': '1', '--blocked': 'none', '--qw': '88px',
+      '--fp': '#8d9399', '--fr': '#c9ced2', '--done': '1', '--qw': '88px',
       '--flutter': 'kflut 1.6s ease-in-out infinite alternate',
     },
   },

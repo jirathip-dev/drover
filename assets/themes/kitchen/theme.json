@@ -1,4 +1,5 @@
 {
+ "scheme": "kitchen",
  "actions": {
   "impl": "chef-cook",
   "fix": "chef-chop",
@@ -202,7 +203,6 @@
    "--fp": "#8d9399",
    "--fr": "#c9ced2",
    "--done": "1",
-   "--blocked": "none",
    "--qw": "88px",
    "--flutter": "kflut 1.6s ease-in-out infinite alternate"
   }

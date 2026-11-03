@@ -166,15 +166,16 @@ B.prepend(defs);
 // #58: the header's Herd button is our horse (the default coat), not an emoji.
 $('#herd-on').innerHTML = '<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hp2"/></svg>';
 const pages = new Map();
-const POSE = { working: 1, idle: 2, unknown: 2, parked: 2, done: 3, blocked: 4, dead: 4 };
+// #242: a horse acts by its role while it works (serve.rs `act`), else by its state.
+const ACT = l => ({ done: 'done', blocked: 'blocked', dead: 'blocked' })[l.state] || (l.state === 'working' ? ({ fix: 'fix', update: 'update', rev: 'rev', review: 'rev' })[l.role] || 'impl' : 'idle');
 const BANDS = [['working', ['working']], ['idle', ['idle', 'unknown', 'parked']], ['done', ['done']], ['blocked/dead', ['blocked', 'dead']]];
 let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
 // #239: a working lane draws its role's action (cook, chop…) and says its word; an idle one fans while the heat is held.
 function horse(l, k) {
-  const use = l.state === 'working' && l.act ? 'ha-' + l.act : H.dataset.heat === 'held' && POSE[l.state] === 2 && $('#hfan') ? 'hfan' : 'hp' + (POSE[l.state] || 2);
-  const said = l.state === 'working' && T.words[l.act] || l.shown;
+  const a = l.state === 'working' && l.act || ACT(l), use = a === 'idle' && H.dataset.heat === 'held' && $('#hfan') ? 'hfan' : 'ha-' + a;
+  const said = l.state === 'working' && T.words[a] || l.shown;
   return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l.name, l.coat))}"><use href="#${use}"/></svg>` +
     `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(said)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
 }
@@ -185,7 +186,7 @@ const queued = q => `<button type=button class="hqh${q.needs ? ' n' : ''}" data-
 function nh(f) {
   const n = f.needs || [], lanes = f.lanes.map(l => n.includes(l.issue) ? Object.assign({}, l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l);
   const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
-  return [f.name, lanes, queue];
+  return [f.name, lanes, queue, f.color];
 }
 function card(n) {
   const c = here().querySelector(`.hn .ask[data-n="${n}"]`);
@@ -265,14 +266,13 @@ function draw() {
   const list = data.fleets.map(nh);
   if (data.others.length) list.push(['Others', data.others, []]);
   for (const [k, p] of pages) if (!list.some(x => x[0] === k)) { p.remove(); pages.delete(k); }
-  list.forEach(([key, lanes, queue], n) => {
+  list.forEach(([key, lanes, queue, c], n) => {
     const p = pages.get(key) || page(key);
     pages.set(key, p);
+    if (c) p.style.setProperty('--fk', `var(--${c})`); // #242: the halters and saddle cloths wear the fleet's colour (#162)
     // Never re-append a placed page: a detached scroller forgets its scrollTop (#65, the snap to the top).
     if (PG.children[n] !== p) PG.insertBefore(p, PG.children[n] || null);
     p.querySelector('.hs b').textContent = key;
-    const fc = data.fleets.find(f => f.name === key)?.color;
-    if (fc) p.style.setProperty('--fk', `var(--${fc})`);
     p.querySelector('.hs .n').textContent = `· ${lanes.length} here`;
     p.querySelector('.hs .dots').textContent = list.map((_, i) => i === n ? '●' : '○').join('');
     const count = states => lanes.filter(l => states.includes(l.state)).length;

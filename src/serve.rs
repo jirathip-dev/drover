@@ -48,6 +48,20 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("terminal/icon-192.png", PNG),
     th!("terminal/icon-512.png", PNG),
 ];
+/// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
+macro_rules! sc {
+    ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
+}
+const SCHEMES: [(&str, &[u8]); 8] = sc![
+    "github-dark",
+    "solarized-dark",
+    "gruvbox",
+    "nord",
+    "dracula",
+    "paper",
+    "farm",
+    "kitchen"
+];
 const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
 const I180: &[u8] = include_bytes!("../assets/icon-180.png");
@@ -139,7 +153,8 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             for (c, f, fleet) in rx {
                 let msg = json!(s.write(&c, &f).unwrap_or_else(|e| shown(&e)));
                 s.kick.store(lock(&s.running).remove(&fleet), Relaxed);
-                lock(&s.clients).retain(|c| c.0.send(format!("event: toast\ndata: {msg}\n\n")).is_ok());
+                let id = lock(&s.watch).seen.unwrap_or(0);
+                lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
             }
         });
         for mut st in l.incoming().flatten() {
@@ -210,11 +225,11 @@ struct Watch {
     frags: BTreeMap<(bool, &'static str), u64>,
     /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
     driving: bool,
-    /// #241: the log's event count at the last look (none yet: nothing to play).
-    seen: Option<usize>,
+    /// #241, #259: the log's last seq at the last look (none yet: nothing to play).
+    seen: Option<u64>,
 }
 
-/// #241: the theme moment an event plays on the page (`moment` on `/live`): merged, fail or needs-you.
+/// #241: the theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
 pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),
@@ -222,6 +237,15 @@ pub fn moment(e: &Event) -> Option<&'static str> {
         "needs-human" | "needs-decision" => Some("needs-you"),
         _ => None,
     }
+}
+
+/// #259: an event on `/live` (`ev`, also replayed after `Last-Event-ID` / `?since=`): its seq, time and moment.
+fn sse(e: &Event) -> String {
+    format!(
+        "id: {}\nevent: ev\ndata: {}\n\n",
+        e.seq,
+        json!({"seq": e.seq, "ts": e.ts, "k": moment(e)})
+    )
 }
 
 pub struct Server<'a> {
@@ -482,6 +506,15 @@ fn coat(name: &str) -> String {
     )
 }
 
+/// #242: a lane's coat for its 16 px row sprite, as `--rc/--rd/--rm` (the board's `--c` is a colour token).
+fn row_coat(lane: &str) -> String {
+    if lane.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", coat(lane).replace("--", "--r"))
+    }
+}
+
 /// `age` since `t`, or nothing when `t` is unknown (0).
 fn ago(now: u64, t: u64) -> String {
     if t > 0 {
@@ -616,9 +649,11 @@ impl<'a> Server<'a> {
             ),
             1,
         );
+        let target = req.split_whitespace().nth(1).unwrap_or_default();
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
-        if req.starts_with("GET /live ") && self.allowed(self.ctx, &req) && clients.len() < 8 {
+        if req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8 {
             s.set_write_timeout(Some(Duration::from_secs(10)))?;
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
@@ -636,13 +671,35 @@ impl<'a> Server<'a> {
             let mut msg =
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\n"
                     .to_string();
-            // Each second: a frag, else a peek (the peer closed: free the slot), else a ping every 15 s.
+            // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
+            let q = form(query);
+            let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
+            let mut top = 0;
+            if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
+                let ev = read(&self.ctx.state).unwrap_or_default();
+                top = ev.last().map_or(n, |e| e.seq);
+                let after: Vec<_> = ev.iter().filter(|e| e.seq > n).collect();
+                msg += &match after.last() {
+                    Some(l) if after.len() > 500 => format!("id: {0}\nevent: refresh\ndata: {0}\n\n", l.seq),
+                    _ => after.into_iter().map(sse).collect(),
+                };
+            }
+            // Each second: a frag (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
+            // the slot), else a ping every 15 s.
             std::thread::spawn(move || {
                 while s.write_all(msg.as_bytes()).is_ok() {
                     let t = Instant::now();
                     msg = loop {
                         match rx.recv_timeout(Duration::from_secs(1)) {
-                            Ok(m) if !m.is_empty() => break m,
+                            Ok(m)
+                                if !m.is_empty()
+                                    && !m
+                                        .strip_prefix("id: ")
+                                        .and_then(|r| r.split_once("\nevent: ev\n"))
+                                        .is_some_and(|(id, _)| id.parse::<u64>().is_ok_and(|i| i <= top)) =>
+                            {
+                                break m
+                            }
                             Err(RecvTimeoutError::Disconnected) => return,
                             _ if s
                                 .peek(&mut [0])
@@ -678,11 +735,11 @@ impl<'a> Server<'a> {
         let driving = self.ctx.state.with_file_name("drive.lock").exists();
         if log != w.log {
             let ev = read(&self.ctx.state).unwrap_or_default();
-            let new = ev.get(w.seen.unwrap_or(ev.len())..).unwrap_or_default();
-            for m in new.iter().filter_map(moment).collect::<BTreeSet<_>>() {
-                lock(&self.clients).retain(|c| c.0.send(format!("event: moment\ndata: {m}\n\n")).is_ok());
+            let top = ev.last().map_or(0, |e| e.seq);
+            for e in ev.iter().filter(|e| e.seq > w.seen.unwrap_or(top)) {
+                lock(&self.clients).retain(|c| c.0.send(sse(e)).is_ok());
             }
-            w.seen = Some(ev.len());
+            w.seen = Some(top);
         }
         let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
         (w.log, w.driving) = (log, driving);
@@ -706,7 +763,8 @@ impl<'a> Server<'a> {
                 .map(|v| v.to_string())
                 .unwrap_or_default();
             if w.herd.0 > 0 && hash(&j) != w.herd.1 && !j.is_empty() {
-                lock(&self.clients).retain(|c| c.0.send(format!("event: herd\ndata: {j}\n\n")).is_ok());
+                let msg = format!("id: {}\nevent: herd\ndata: {j}\n\n", w.seen.unwrap_or(0));
+                lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
             }
             w.herd = (now, hash(&j));
         }
@@ -730,7 +788,8 @@ impl<'a> Server<'a> {
                     .insert((paired, id), hash(&html))
                     .is_some_and(|h| h != hash(&html))
                 {
-                    let msg = format!("event: frag\ndata: {}\n\n", serde_json::json!({"id": id, "html": html}));
+                    let (seq, j) = (w.seen.unwrap_or(0), json!({"id": id, "html": html}));
+                    let msg = format!("id: {seq}\nevent: frag\ndata: {j}\n\n");
                     lock(&self.clients).retain(|c| c.1.is_some() != paired || c.0.send(msg.clone()).is_ok());
                 }
             }
@@ -1063,7 +1122,21 @@ impl<'a> Server<'a> {
         let end = all.len().saturating_sub(before);
         let page = &all[end.saturating_sub(lines)..end];
         let status = lanes::chat(&screen).1.map(lanes::strip);
-        Some(serde_json::json!({"harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
+        // #260: the default view's source: Claude's session transcript, else (null) the pane's role runs.
+        let ok = self.export.is_none();
+        let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
+        let note = |e: &&Event| {
+            let t = match e.kind.as_str() {
+                _ if Some(&e.fleet) != l.fleet.as_ref() || e.issue != l.issue => None,
+                "spawn" => Some(format!("spawned {}", e.str("agent")?)),
+                "needs-decision" => Some(format!("ask: {}", e.str("question")?)),
+                "verdict" => Some(format!("verdict {}", e.str("verdict")?)),
+                k => (k == "merged").then(|| k.into()),
+            };
+            Some(json!({"at": e.ts, "text": lanes::mask(&t?)}))
+        };
+        let notices: Vec<_> = events.iter().filter_map(|e| note(&e)).collect();
+        Some(serde_json::json!({"said": said.map(|s| lanes::said(&s).0), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -1244,8 +1317,38 @@ impl<'a> Server<'a> {
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
         let opts: String = names.iter().map(|n| format!("<option>{}</option>", esc(n))).collect();
-        let pick =
-            format!("<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme>{opts}</select></label>");
+        let pick = format!(
+            "<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme>{opts}</select></label>\
+             <label class=pk id=scp><span>▦</span><select id=scheme aria-label=colours></select></label>"
+        );
+        // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
+        // scheme (serve.js keeps its block), else the board theme's built-in default.
+        let def: BTreeMap<_, serde_json::Value> = names
+            .iter()
+            .map(|n| (*n, theme(ctx, n, "theme.json").0.unwrap_or_default()))
+            .map(|(n, j)| {
+                (
+                    n,
+                    serde_json::from_slice(&j).map_or(json!(null), |t: serde_json::Value| t["scheme"].clone()),
+                )
+            })
+            .collect();
+        let b = SCHEMES
+            .iter()
+            .find(|s| def[name.as_str()] == s.0)
+            .unwrap_or(&SCHEMES[0]);
+        let b: serde_json::Value = serde_json::from_slice(b.1)?;
+        let tokens = b["tokens"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
+        let first = format!(
+            ":root{{{}color-scheme:{}}}",
+            tokens.collect::<String>(),
+            b["color-scheme"].as_str().unwrap_or("dark")
+        );
+        let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
         let badge = if demo {
             "<span class=tag id=demo>demo</span>"
         } else {
@@ -1256,8 +1359,9 @@ impl<'a> Server<'a> {
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
-             <title>herdsman</title><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th}</script></head>\
+             <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
+             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
+             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
              <section id=queue>{}</section><section id=lanes>{}</section><section id=host>{}</section>\
@@ -1454,6 +1558,7 @@ impl<'a> Server<'a> {
                 need += usize::from(rank == 0);
                 let a = ago(now, s.map_or(0, |s| s.last_ts));
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
+                let coat = row_coat(lane);
                 let head = gh::cached_pr(ctx, f, n)["headRefOid"]
                     .as_str()
                     .unwrap_or_default()
@@ -1544,10 +1649,11 @@ impl<'a> Server<'a> {
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
-                    "class=\"q\"{}{b}{} data-act={}",
+                    "class=\"q\"{}{b}{} data-act={}{}",
                     if k.is_some() { " data-q" } else { "" },
                     s.unwrap_or_default(),
-                    act(["", "update"][usize::from(up)], state)
+                    act(["", "update"][usize::from(up)], state),
+                    coat
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
                 let row = match (qls, row.strip_suffix("</details>")) {
@@ -1862,7 +1968,8 @@ impl<'a> Server<'a> {
             } else {
                 String::new()
             };
-        let act = esc(&lanes::activity(&l.harness, &screen.unwrap_or_default()));
+        let screen = screen.unwrap_or_default();
+        let act = esc(&lanes::now_of(l, &screen).unwrap_or_else(|| lanes::activity(&l.harness, &screen)));
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -1969,8 +2076,9 @@ impl<'a> Server<'a> {
             let mut sub = String::new();
             for name in c.accounts.names.keys() {
                 let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
-                let usage = crate::usage::meter(ctx, c, self.r, name)
-                    .map(|m| crate::usage::shown(self.r, &m, &c.accounts.usage[name], ctx.now));
+                let login = c.accounts.usage.get(name).map_or("", String::as_str);
+                let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
+                    .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
                 let usage = match usage {
                     Some(Ok((parts, pace))) => {
                         let bar = |(t, p): &(String, f64)| {
@@ -2453,8 +2561,9 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             !a.is_empty() && m.len() == a.len()
         })
     };
-    let rules: [(&str, Check, &str); 4] = [
+    let rules: [(&str, Check, &str); 5] = [
         ("scene", &Value::is_object, "an object"),
+        ("scheme", &Value::is_string, "a colour scheme's name"),
         (
             "looks",
             &|x| x.as_array().is_some_and(|a| a.iter().all(look)),
@@ -2494,9 +2603,27 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
             t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
         }
     }
+    t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
     t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
     t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
     t
+}
+
+/// #244: every colour scheme by name: the built-ins, then `<config dir>/schemes/<name>.json` (one named like a
+/// built-in wins). Unchecked here: the page gates each one (serve.js) before it offers it; unreadable JSON is `null`.
+fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
+    let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let (p, ok) = (e.path(), |b: u8| b.is_ascii_alphanumeric() || b == b'-');
+            let n = p.file_stem()?.to_str()?.to_string();
+            (p.extension()? == "json" && n.bytes().all(ok)).then(|| (n, std::fs::read(&p).unwrap_or_default()))
+        });
+    let all = SCHEMES.iter().map(|(n, j)| (n.to_string(), j.to_vec())).chain(own);
+    all.map(|(n, j)| (n, serde_json::from_slice(&j).unwrap_or_default()))
+        .collect()
 }
 
 /// Theme `name`'s `file` (`<config dir>/themes/<name>/`, then the built-in `<name>`, then farm's; an icon then the
@@ -3150,7 +3277,7 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
                     format!("<pre>{}</pre>", esc(&raw(e)))
                 };
                 h += &format!(
-                    "<details class=\"er{k}{}\" data-f=\"{}\"><summary><i class=\"kg t-{t}\" data-act={}>{gl}</i><i class=fd></i>{num}<span class=sm>{}{via}</span><span class=ag>{}</span></summary><div class=ex><p class=lk>{gl2}<span class=m>{at}</span></p>{body}</div></details>",
+                    "<details class=\"er{k}{}\" data-f=\"{}\"><summary><i class=\"kg t-{t}\" data-act={}{}>{gl}</i><i class=fd></i>{num}<span class=sm>{}{via}</span><span class=ag>{}</span></summary><div class=ex><p class=lk>{gl2}<span class=m>{at}</span></p>{body}</div></details>",
                     [" imp", ""][usize::from(!imp)],
                     esc(&e.fleet),
                     match (e.kind.as_str(), *t) {
@@ -3160,6 +3287,7 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
                         (_, "g") => "done",
                         _ => "idle",
                     },
+                    row_coat(e.str("agent").unwrap_or_default()),
                     esc(&w),
                     age(ctx.now.saturating_sub(e.ts))
                 );

@@ -267,7 +267,11 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
 
 /// herdr's (client, server) versions, and whether the server is older (`herdr status`).
 pub fn herdr_versions(r: &dyn Runner) -> Option<(String, String, bool)> {
-    let status = herdr::status(r).ok()?;
+    versions(&herdr::status(r).ok()?)
+}
+
+/// `herdr status` text's (client, server) versions, and whether the server is older.
+pub fn versions(status: &str) -> Option<(String, String, bool)> {
     let version = |l: &str| l.trim().strip_prefix("version: ").map(String::from);
     let mut v = status.lines().filter_map(version);
     let (client, server) = (v.next()?, v.next()?);
@@ -324,6 +328,17 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
             row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
+    // #246: how long the last fast step took and when it ran.
+    let (at, secs) = drive::fast_step(ctx).unzip();
+    let took = secs
+        .flatten()
+        .map_or(String::new(), |s| format!("fast step {s:.1} s · "));
+    rows.push(row(
+        "fast step",
+        tone(ctx.now, at),
+        format!("{took}ran {}", ago(ctx.now, at)),
+        FIX,
+    ));
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

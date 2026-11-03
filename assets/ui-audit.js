@@ -144,6 +144,15 @@
       mid('clean refused');
       await canned(502, LONG.send, () => $('.reply').requestSubmit());
     },
+    // #260: the same sheet with [full conversation] on (every tool run); `sheet` itself is the default view.
+    'sheet-full': async () => {
+      tab('lanes');
+      open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
+      await wait();
+      $('.fv').click();
+      await wait();
+      if ($('.fv').ariaPressed !== 'true' || !$('.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
+    },
     // #83: the demo's parked lane (no pane, its work on PR #15): the card's parked line, [clean] disabled with its
     // reason in p.st, [stop]/[kill] hidden, and nothing in the sheet in the red (danger) colour.
     'sheet-parked': async () => {
@@ -379,7 +388,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.

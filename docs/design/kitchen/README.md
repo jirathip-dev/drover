@@ -155,4 +155,4 @@ conductor's 8 fixes are in `art.mjs` and the build:
    red ✗) draw their stations.
 6. A queued slot is 88 px in the kitchen (`--qw`), so `! needs you` fits its ticket.
 7. Herd text keeps the farm's label cards and caption bar: every pair is ≥ 4.5 : 1.
-8. The kitchen accent is #244's board scheme, so it isn't built here.
+8. The kitchen accent belongs to #244's `kitchen` board scheme. This theme only names it (`"scheme": "kitchen"`).

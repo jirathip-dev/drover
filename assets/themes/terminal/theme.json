@@ -1,4 +1,5 @@
 {
+  "scheme": "github-dark",
   "load_scene": { "kind": "none" },
   "moments": false,
   "row_sprites": false,

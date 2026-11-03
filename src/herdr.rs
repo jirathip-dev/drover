@@ -114,8 +114,13 @@ pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     up() || (reply(r, false, agent, pane, text).is_ok() && up())
 }
 
+/// Close the pane; one already gone (#249: a worktree remove closed its workspace) is closed.
 pub fn close(r: &dyn Runner, pane: &str) -> Result<String> {
-    ok(r, &argv(&["pane", "close", pane]))
+    let o = exec(r, &argv(&["pane", "close", pane]))?;
+    if o.code != 0 && ![&o.stderr, &o.stdout].iter().any(|s| s.contains("pane_not_found")) {
+        bail!("herdr pane close {pane} failed ({}): {}", o.code, o.stderr.trim());
+    }
+    Ok(o.stdout)
 }
 
 /// herdr's `{"error": {"code": <code>}}` answer (on stderr or stdout), e.g. `timeout`.
@@ -142,6 +147,32 @@ pub fn harness_in(r: &dyn Runner, pane: &str) -> Option<Value> {
 /// `herdr pane run <pane> <words…>`: type a line into the pane's shell.
 pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
     argv(&[&["pane", "run", pane][..], words].concat())
+}
+
+/// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
+/// close the workspace; the screen (None: no pane).
+pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
+    let ws = json(
+        r,
+        &argv(&[
+            "workspace",
+            "create",
+            "--cwd",
+            cwd,
+            "--label",
+            "herdsman-health",
+            "--no-focus",
+        ]),
+    );
+    let pane = ws.ok()?["result"]["root_pane"]["pane_id"].as_str()?.to_string();
+    let _ = exec(r, &run_argv(&pane, &[line]));
+    let _ = exec(r, &wait_output_argv(&pane, done, "20000"));
+    let text = read(r, &pane).unwrap_or_default();
+    let _ = exec(
+        r,
+        &argv(&["workspace", "close", pane.split(':').next().unwrap_or(&pane)]),
+    );
+    Some(text)
 }
 
 /// `herdr agent start` for the harnesses herdr knows (`--kind`), `args` going to the harness.

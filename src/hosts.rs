@@ -108,6 +108,8 @@ pub struct Seen {
     pub load: Option<f64>,
     pub mem: Option<f64>,
     pub disk: Option<f64>,
+    /// #235: a remote host's failed checks from `health` (`✗` keeps lanes off it, `!` warns), with the probe.
+    pub health: Vec<String>,
     /// #234: memory pressure 0 normal, 1 warn, 2 critical; swap-out pages/2s; the top memory users (remote hosts).
     pub pressure: Option<u8>,
     pub swap: Option<f64>,
@@ -158,6 +160,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             if refresh || s.probed + 3600 <= ctx.now {
                 if let Some((tags, home)) = probe(&on) {
                     (s.tags, s.home, s.probed) = (tags, home, ctx.now);
+                }
+                if h.machine.is_some() && h.enabled {
+                    s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
+                    if s.health.iter().any(|w| w.starts_with("! herdsman")) && update(ctx, cfg, &on, name, &s.home) {
+                        s.probed = ctx.now.saturating_sub(3000); // read its version back in 10 minutes
+                    }
                 }
             }
             let hs = host::sample(&on);
@@ -252,18 +260,17 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         seen.home = probe(&on).map(|p| p.1).unwrap_or_default();
     }
     let home = machine.and(Some(seen.home.clone()).filter(|h| !h.is_empty()));
-    let ex = |p: &str| match (p.strip_prefix("~/"), &home) {
-        (Some(rest), Some(h)) => Path::new(h).join(rest),
-        _ => expand(p),
-    };
+    let ex = |p: &str| under(p, home.as_deref());
     let def = if home.is_some() {
         ex("~/.herdr/worktrees")
     } else {
         ctx.worktrees.clone()
     };
     let root = cfg.hosts.get(name).and_then(|h| h.root.as_deref());
+    let sick = seen.health.iter().find(|w| w.starts_with('✗'));
     let (hs, refusal) = match host::agents(&on) {
         Err(_) => (Host::default(), Some(("NO_HOST", "unreachable".to_string()))),
+        Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(_) => gate(ctx, cfg, &on),
     };
     Placed {
@@ -279,6 +286,83 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         refusal: refusal.map(|(c, w)| (c, format!("{name}: {w}"))),
         home,
     }
+}
+
+/// `p` with a leading `~/` under the host's `home` (none: this one's).
+fn under(p: &str, home: Option<&str>) -> PathBuf {
+    match (p.strip_prefix("~/"), home) {
+        (Some(rest), Some(h)) => Path::new(h).join(rest),
+        _ => expand(p),
+    }
+}
+
+/// #235: is the herdr server in the login session (macOS: a `gui/<uid>` launchd job), where the keychain is open?
+const LOGIN: &str = "p=$(pgrep -f 'herdr server$' | head -1); [ -n \"$p\" ] || exit 1; \
+command -v launchctl >/dev/null || exit 0; launchctl print gui/$(id -u) | awk -v p=\"$p\" '$1 == p { f = 1 } END { exit !f }'";
+/// #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
+const PANE: &str = "gh auth status >/dev/null 2>&1; echo \"gh:$?\"; claude auth status >/dev/null 2>&1; echo \"claude:$?\"; echo \"hs:\"done";
+
+/// #235: what is wrong with a reachable remote host, a `✗|! <check> — <detail> → <fix>` row each (none: healthy):
+/// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and Claude logins in a
+/// herdr pane, and its herdsman's version against this one's.
+pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
+    let mut bad = vec![];
+    let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
+    let status = ok(on, "sh", &["-c", "PATH=\"$HOME/.local/bin:$PATH\" herdr status"]).unwrap_or_default();
+    let (client, server) = crate::timer::versions(&status).map_or(("?".into(), "none".into()), |v| (v.0, v.1));
+    let line =
+        format!("✗ herdr — server {server}, client {client} → herdr update on the host, then restart its server");
+    fail(client == server, line);
+    let fix = "restart the herdr server from its launchd job: `launchctl kickstart -k gui/<uid>/<label>`";
+    let line = format!("✗ herdr session — the server runs outside the login session (keychain locked) → {fix}");
+    fail(ok(on, "sh", &["-c", LOGIN]).is_ok(), line);
+    for (name, f) in cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t))) {
+        let url = format!("https://github.com/{}.git", f.repo);
+        let fix = "add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`";
+        fail(
+            ok(on, "git", &["ls-remote", &url, "HEAD"]).is_ok(),
+            format!("✗ git {name} — ls-remote {url} → {fix}"),
+        );
+    }
+    let text = crate::herdr::in_pane(on, home, PANE, "hs:done").unwrap_or_default();
+    for (tool, fix) in [("gh", "gh auth login"), ("claude", "claude auth login")] {
+        let line =
+            format!("✗ {tool} — not logged in inside a herdr pane → {fix} in a pane there (else: herdr session)");
+        fail(text.lines().any(|l| l.trim() == format!("{tool}:0")), line);
+    }
+    let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+    let theirs = ok(on, &exe, &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let mine = format!("herdsman {}", crate::VERSION);
+    let line = format!("! herdsman — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
+    fail(theirs == mine, line);
+    bad
+}
+
+/// #235: build this herdsman's sha on the host in the background (log: `~/.herdsman-update.log` there), then
+/// `profiles sync` there; logged `host-update` once per host and sha. Whether it started.
+pub fn update(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) -> bool {
+    let (sha, events) = (env!("HERDSMAN_SHA"), read(&ctx.state).unwrap_or_default());
+    let f = cfg.fleet.values().find(|f| f.repo.ends_with("/herdsman"));
+    let done = |e: &Event| e.kind == "host-update" && e.str("host") == Some(name) && e.str("sha") == Some(sha);
+    let Some(f) = f.filter(|_| !sha.is_empty() && !events.iter().any(done)) else {
+        return false;
+    };
+    let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+    let root = Path::new(&exe)
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(Path::new(&exe));
+    let script = format!(
+        "cd '{}' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" \
+cargo install --path . --locked --root '{}' --force && '{exe}' profiles sync",
+        under(&f.local, Some(home)).display(),
+        root.display()
+    );
+    let bg = "nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &";
+    let res = ok(on, "sh", &["-c", bg, "sh", &script]);
+    let d = json!({"host": name, "sha": sha, "error": res.as_ref().err().map(|e| format!("{e:#}"))});
+    let _ = emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "host-update", d));
+    res.is_ok()
 }
 
 /// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's earlier lanes (its
@@ -370,10 +454,15 @@ pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, 
         let last = [age(now.saturating_sub(s.seen)), "never".into()][usize::from(s.seen == 0)].clone();
         return ("m", format!("offline · last seen {last}"));
     }
+    let sick = |c: char| s.health.iter().find_map(|w| w.strip_prefix(c)).map(str::trim);
     match (enabled, lanes) {
         (false, 0) => ("m", "off · not used for lanes".into()),
         (false, n) => ("m", format!("off · draining {n} lane{}", if n == 1 { "" } else { "s" })),
-        _ => ("g", "up".into()),
+        _ => match (sick('✗'), sick('!')) {
+            (Some(w), _) => ("r", format!("unhealthy · {w}")),
+            (_, Some(w)) => ("a", format!("up · {w}")),
+            _ => ("g", "up".into()),
+        },
     }
 }
 
