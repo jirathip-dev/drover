@@ -18,7 +18,7 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-      - name: test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)
+      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
       - name: demo export (#39, synthetic data in demo/)
         run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
