@@ -509,13 +509,21 @@ fn serial(
         }
     }
     let new = crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default();
+    // Drive sees a push before its review, so a first join at review/ready is work from before the group (grandfathered).
+    let old = s.state.starts_with("review") || s.state == "ready";
+    let mut by = ev
+        .iter()
+        .rev()
+        .find(|e| e.is("serial-held", fleet, n))
+        .and_then(|e| e.data["holder"].as_u64());
     for (g, p) in &new {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
         let h = queue::holders(&ev, &st, f, fleet, &g.name);
-        if wait || h.len() >= g.max {
-            let h = h.first().map_or(0, |h| h.issue);
+        if !old && (wait || h.len() >= g.max) {
+            let h = h.first().map(|h| h.issue).or(by).unwrap_or(0);
+            by = Some(h);
             let d = json!({"group": g.name, "holder": h});
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
             let stop = format!(

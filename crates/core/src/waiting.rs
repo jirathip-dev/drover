@@ -115,7 +115,12 @@ pub fn waiting_on(
         let st = crate::events::fold(events);
         let h = crate::queue::holders(events, &st, fc, f, &g.name);
         let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
-        let what = format!("waits: {} held by {} ({}/{})", g.name, who.join(" "), h.len(), g.max);
+        let by = if who.is_empty() {
+            "for a slot".into()
+        } else {
+            format!("held by {}", who.join(" "))
+        };
+        let what = format!("waits: {} {by} ({}/{})", g.name, h.len(), g.max);
         return w("drive", &what, s.last_ts, None);
     }
     // #104: an impl/fix/review lane whose account capped since its spawn respawns on a free one (`kill` pushes `wip/`).

@@ -312,9 +312,17 @@ fn a_held_issue_waits_on_its_second_group_with_its_first_slot_taken() {
 #[test]
 fn work_over_the_limit_when_a_group_lands_keeps_going_and_new_joins_wait() {
     let c = ctx(&tmpdir("sg-grand"), &config("", DB_CI));
+    // #8 and #9 already touch ci.yml and are in review when the group lands: no join events yet.
     for n in [8, 9] {
         lane(&c, n);
-        ev(&c, n, "serial-joined", json!({"group": "ci", "by": "diff"}));
+        let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "w9:r", "workspace": "w9"});
+        ev(&c, n, "spawn", d);
+    }
+    let ci = ".github/workflows/ci.yml\n";
+    let (out, _) = drive(&c, &fake(&[(8, ci), (9, ci)]));
+    for n in [8, 9] {
+        assert_eq!(logged(&c, n, "serial-joined"), ["ci"], "{out}");
+        assert!(logged(&c, n, "serial-held").is_empty(), "#{n} keeps going: {out}");
     }
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
     assert!(status.contains("serial: db 0/10 · ci 2/1"), "{status}");
