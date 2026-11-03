@@ -340,6 +340,8 @@ pub fn answer(
         );
     }
     let agent = ask.str("agent").unwrap_or_default();
+    let why = via.map_or("answer", |_| "board");
+    ask.issue.inspect(|n| crate::drive::kick(ctx, r, fleet, *n, why));
     let sp = events::last_spawn(&events, agent);
     let (pane, r) = (sp.and_then(|e| e.str("pane")), &crate::hosts::On::of(r, sp)); // #157: on the lane's host
     emit(

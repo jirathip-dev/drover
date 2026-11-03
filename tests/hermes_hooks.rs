@@ -45,11 +45,11 @@ fn sync_writes_only_the_hooks_key_idempotently() {
         "other settings unchanged:\n{once}"
     );
     assert!(once.contains(
-        "hooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role rev\"\n# keep me\n"
+        "hooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role rev\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role rev\"\n# keep me\n"
     ), "{once}");
     assert!(!once.contains("/old/hook.sh"));
     assert!(std::fs::read_to_string(&impl_).unwrap().ends_with(
-        "model:\n  default: x\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n"
+        "model:\n  default: x\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n"
     ));
     // A role without a Hermes profile on disk gets none created.
     assert!(!c.hermes.join("fleet-design").exists());
@@ -83,13 +83,11 @@ fn sync_approves_the_hook_once_per_role() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|e| e["event"] == "pre_tool_call")
+            .filter(|e| e["command"] == cmd)
             .collect();
-        assert_eq!(
-            fleet,
-            [&serde_json::json!({"event": "pre_tool_call", "command": cmd})],
-            "{p}"
-        );
+        let ev = |e: &str| serde_json::json!({"event": e, "command": cmd});
+        // #304: `post_tool_call` too, so a push kicks the issue.
+        assert_eq!(fleet, [&ev("pre_tool_call"), &ev("post_tool_call")], "{p}");
     }
     let rev: serde_json::Value = serde_json::from_str(&allow("fleet-rev")).unwrap();
     assert_eq!(

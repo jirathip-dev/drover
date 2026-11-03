@@ -293,6 +293,26 @@ pub fn ai_coauthor(log: &str) -> Option<&str> {
     })
 }
 
+/// #304: a post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:`
+/// or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
+pub fn kick_why(input: &Value) -> Option<&'static str> {
+    match input["hook_event_name"].as_str()? {
+        "Stop" | "on_session_end" => Some("stop"),
+        "PostToolUse" | "post_tool_call" if push_dir(input).is_some() => {
+            let res = input["tool_response"].to_string() + &input["result"].to_string();
+            let failed = [
+                "rejected",
+                "fatal:",
+                "error:",
+                "\"interrupted\":true",
+                "\"is_error\":true",
+            ];
+            (!failed.iter().any(|f| res.contains(f))).then_some("push")
+        }
+        _ => None,
+    }
+}
+
 /// The deny answer in the caller's dialect: Hermes `block`, Claude `deny`.
 pub fn deny_json(input: &Value, reason: &str) -> Value {
     if input["hook_event_name"] == "pre_tool_call" || input.get("args").is_some() {
