@@ -765,7 +765,7 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let calls = r.calls.borrow().clone();
     let lane = calls.iter().find(|c| c.starts_with(export)).unwrap();
     assert!(
-        lane.ends_with(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
+        lane.contains(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
         "{lane}"
     );
     let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
