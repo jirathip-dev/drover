@@ -289,6 +289,26 @@
       if ([...$$('#events .er')].some(r => /clean/.test(r.textContent) && /alert failed/.test(r.textContent))) early.push('a row holds clean and a failure');
       imp.querySelector('.er').open = true;
     },
+    // #241: a pick applies in place: no reload, the favicon swaps, terminal strips every sprite, kitchen draws its own.
+    'theme-switch': async () => {
+      tab('queue');
+      window.kept = 1;
+      const pick = n => { thp.value = n; thp.dispatchEvent(new Event('change')); return new Promise(r => setTimeout(r, 800)); };
+      await pick('terminal');
+      if (window.kept !== 1 || document.documentElement.dataset.theme !== 'terminal' || get('theme') !== 'terminal') early.push('the switch to terminal reloaded the page or was not kept');
+      if (!$('link[rel=icon]').href.includes('themes/terminal/icon-')) early.push(`favicon ${$('link[rel=icon]').href}, not terminal's`);
+      if ($$('.rsp, .lsc').length || B.dataset.mode !== 'glyph') early.push('terminal kept sprites or a scene mode');
+      await pick('kitchen');
+      if (!$$('#queue .rsp').length || !$('#hr-impl .chef, #hr-impl [shape-rendering]')) early.push("kitchen: no row sprites, or not the chef's");
+    },
+    // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
+    'moment-still': () => {
+      tab('queue');
+      moment('merged');
+      const o = $('#mo');
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
+      if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
+    },
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.
@@ -355,10 +375,30 @@
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
+    if (['queue', 'lanes', 'host', 'events'].includes(V)) res.outliers.push(...drawn());
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
     B.append(out);
+  }
+  // #241 gate 2: the phone's theme on the tab. Terminal is today's glyph board: no sprite, no load scene, no mode button,
+  // glyph avatars. Others draw a 16 px action sprite for each Queue/Events glyph (its title and label the plain word), a
+  // load scene on each Host group header, and offer [scene] [ascii].
+  function drawn() {
+    const t = document.documentElement.dataset.theme, tb = document.documentElement.dataset.tab, bad = [];
+    const on = s => [...$$(s)].filter(seen);
+    if (!TT) return [`theme ${t} never loaded`];
+    if (t === 'terminal') {
+      if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
+      if (B.dataset.mode !== 'glyph' || on('#mode').length || on('.av .px, .av .asc').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
+      return bad;
+    }
+    if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
+    if (tb === 'events' && !on('#events .kg.rsg>.rsp').length) bad.push('no Events row sprite');
+    if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
+    if (tb === 'lanes' && (!on('#mode').length || TM.join() !== 'scene,ascii')) bad.push(`Lanes modes ${TM}, button shown ${on('#mode').length}`);
+    for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
+    return bad;
   }
   function measure() {
     $$('[inert]').forEach(e => { e.inert = false; });
@@ -547,6 +587,7 @@
     },
   };
   const go = async () => {
+    await themed; // #241: the phone's theme drawn first
     await VIEWS[V]();
     setTimeout(() => {
       if (V === 'herd2') PG.scrollLeft = PG.clientWidth;
