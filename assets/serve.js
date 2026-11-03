@@ -637,7 +637,10 @@ function tree(p, rows, end) {
     st.replaceWith(w);
     w.append(st);
     tip(st);
-    const tag = (cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
+    // #331: every row's title line (nested and clamped rows too) ellipsises at the card edge; the full text in its title.
+    const tl = d.querySelector('summary>.tl');
+    if (tl) tl.title = tl.textContent;
+    const tag =(cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
     for (const g of (d.dataset.s || '').split(' ').filter(Boolean)) tag('tag m', '🔒' + g, 'serial: one lane at a time');
     if (d.dataset.b && !par(d)) tag('tag r', '! #' + d.dataset.b);
     if (deep) tag('m', 'after #' + d.dataset.b);

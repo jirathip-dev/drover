@@ -69,6 +69,17 @@ fn fixture() -> (herdsman::Ctx, Fake) {
     }
     ok(&["queue", "beta", "add", "--serial", "21", "22"]);
     ok(&["queue", "beta", "block", "--on", "21", "22"]);
+    // #331: every row's title (the deep ones too) is long enough to be cut at the card edge.
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    for (f, n) in (1..=8).map(|n| ("acme", n)).chain([("beta", 21), ("beta", 22)]) {
+        let t = format!("Issue {n}: queue rows show their one-line title at every depth");
+        std::fs::write(
+            cache.join(format!("issue-{f}-{n}.json")),
+            json!({ "title": t }).to_string(),
+        )
+        .unwrap();
+    }
     let spawn = json!({"role": "impl", "agent": "acme-impl-1", "harness": "claude"});
     append(&c.state, &Event::new(900_000, "acme", Some(1), "spawn", spawn)).unwrap();
     (c, Fake::default())
@@ -132,6 +143,11 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
          [...d.querySelector('.gt').children].map(n => n.dataset.g ?? n.textContent).join('') + ' ' + d.querySelector('summary>span:nth-of-type(2)').textContent, \
          ...[...d.querySelectorAll('[name=before],[name=after]')].map(i => (i.name === 'before' ? '▲' : '▼') + i.name + i.value)].join(' ')).join('|'); \
          if (got !== '{want}') throw new Error('graph: ' + got); \
+         const h0 = document.querySelector('#queue details.q.d0>summary').getBoundingClientRect().height; \
+         for (const d of document.querySelectorAll('#queue details.q')) {{ const t = d.querySelector('summary>.tl'), r = t?.getBoundingClientRect(); \
+           if (!r || !r.height || r.height > parseFloat(getComputedStyle(t).lineHeight) + 1 || r.right > 390 || getComputedStyle(t).textOverflow !== 'ellipsis' \
+             || t.title !== t.textContent || d.querySelector('summary').getBoundingClientRect().height > h0 + 1) \
+             throw new Error('title of ' + d.querySelector('summary>span').textContent + ': ' + JSON.stringify(r) + ' ' + t?.title); }} \
          if (document.querySelector('details.q[data-s] .tag').getAttribute('aria-label') !== 'serial: one lane at a time') throw new Error('lock label'); \
          if (document.querySelector('details.q summary>span:nth-of-type(2)>span').title !== 'impl = being built') throw new Error('no state hint'); \
          document.querySelectorAll('#queue details').forEach((d, i) => {{ d.open = i === 0; }})"
