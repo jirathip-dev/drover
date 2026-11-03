@@ -230,8 +230,9 @@ pub struct IssueState {
     /// The latest lane's reasoning effort, as spawned.
     pub effort: Option<String>,
     pub rounds: u32,
-    /// Extra rounds the owner allowed (`round-extended`, #130).
+    /// Extra rounds the owner allowed (`round-extended`, #130); #309: the latest grants the round after any stage's.
     pub extra: u32,
+    pub granted: u32,
     /// #123: passed `--update` rounds, apart from `rounds`; `updating` while one is open (state `fix(n)+uk`).
     pub updates: u32,
     pub updating: bool,
@@ -420,7 +421,7 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             "round-extended" => {
-                s.extra += 1;
+                (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
                 // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.
                 if s.state == "needs-human" {
                     s.state = format!("fix({})", s.rounds);

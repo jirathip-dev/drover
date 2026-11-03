@@ -300,13 +300,14 @@ pub fn chat_fixture() -> serde_json::Value {
 }
 
 /// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the
-/// same), every block open with [show all] pressed, or all collapsed.
+/// same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all]
+/// pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
         "window.fetch = async u => u.includes('lane') ? new Response({j}) : new Response('', {{status: 404}}); \
          open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]')); snap('full'); \
-         hist = {l}.slice(0, -1); tail = {l}.slice(-1); harness = 'claude'; spin = true; paint(); \
+         full = true; hist = {l}.slice(0, -1); tail = {l}.slice(-1); harness = 'claude'; spin = true; paint(); \
          $('.live').hidden = false; $('.live').innerHTML = '<b>✽</b> Gusting… (2m 47s · ↓ 1.8k tokens)'; \
          document.querySelectorAll('.blk').forEach(d => d.open = {open}); \
          if ({open}) document.querySelectorAll('.more2 button').forEach(b => b.click())",
