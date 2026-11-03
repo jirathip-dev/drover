@@ -171,10 +171,8 @@ fn admission_runs_per_host() {
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
-#[test]
-fn a_remote_lane_runs_every_command_on_its_host() {
-    let c = setup("hosts-spawn", "", true, 0);
-    // The impl role has an account: its token must never reach bazzite (Q3).
+/// The impl role gets account A (its token returned); its profiles synced.
+fn with_account(c: &herdsman::Ctx) -> &'static str {
     let token = concat!("sk", "-ant-oat01-AAAA-secret");
     let env = c.state.parent().unwrap().join("tokens.env");
     std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={token}\n")).unwrap();
@@ -187,14 +185,14 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         env.display()
     );
     std::fs::write(&c.config, toml).unwrap();
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    run(
-        &c,
-        &Fake::default(),
-        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
-    );
+    assert_eq!(run(c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    token
+}
+
+/// A fresh lane on bazzite: its clone, worktree, pane and agent start all answer.
+fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-    let r = fake(0.1, 0.1)
+    fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'gh' 'repo' 'clone' 'jirathip-dev/sendmeter'"), "")
         .reply(&format!("{SSH}'git' '-C'"), "")
@@ -206,7 +204,20 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         )
         .reply("herdr --machine bazzite pane run w9:p1 export", "{}")
         .reply("herdr --machine bazzite agent start sendmeter-impl-12", "{}")
-        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}")
+}
+
+#[test]
+fn a_remote_lane_runs_every_command_on_its_host() {
+    let c = setup("hosts-spawn", "", true, 0);
+    // The impl role has an account: its token must never reach bazzite (Q3).
+    let token = with_account(&c);
+    run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    let r = remote_fake();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let calls = r.calls.borrow();
@@ -426,4 +437,112 @@ fn lane_cards_and_the_herd_name_the_host() {
     let herd = String::from_utf8_lossy(&s.respond(&format!("GET /herd.json HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW))
         .into_owned();
     assert!(herd.contains("\"host\":\"bazzite\""), "{herd}");
+}
+
+/// #236: a dry run places the lane first and prints the argvs exactly as a real spawn sends them: bazzite's home in
+/// every path, `--machine`, and no account token.
+#[test]
+fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
+    let c = setup("hosts-dry", "", true, 0);
+    let token = with_account(&c);
+    let text = std::fs::read_to_string(&c.config).unwrap().replace(
+        "local = \"/tmp/does-not-matter/sendmeter\"",
+        "local = \"~/src/sendmeter\"\nenv = { TOOLS = \"~/bin\" }",
+    );
+    std::fs::write(&c.config, text).unwrap();
+    let r = remote_fake();
+    let cfg = Config::load(&c.config).unwrap();
+    herdsman::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
+    let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite", "--json"];
+    let (code, dry) = run(&c, &r, &[&args[..], &["--dry-run"]].concat());
+    assert_eq!(code, 0, "{dry}");
+    let pj: serde_json::Value = serde_json::from_str(&dry).unwrap();
+    let mine = herdsman::config::home().display().to_string();
+    let cmds: Vec<String> = pj["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let w: Vec<&str> = c.as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+            w.join(" ").replace("<pane>", "w9:p1")
+        })
+        .collect();
+    let all = cmds.join("\n");
+    assert!(!all.contains("OAUTH_TOKEN") && !all.contains(token), "{all}");
+    assert!(pj["account"].is_null() && pj["machine"] == "bazzite", "{pj}");
+    assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
+    assert!(all.contains("--cwd /home/me/src/sendmeter --branch issue-12"), "{all}");
+    assert!(
+        all.contains("TOOLS='/home/me/bin'") && all.contains(&format!("Read {WT}/.brief.md")),
+        "{all}"
+    );
+    assert!(
+        cmds[0].starts_with(&format!("{SSH}'git' '-C' '/home/me/src/sendmeter' 'fetch'")),
+        "{all}"
+    );
+    assert!(
+        cmds[1..].iter().all(|c| c.starts_with("herdr --machine bazzite ")),
+        "{all}"
+    );
+    // Golden: the real spawn sends exactly these argvs.
+    let n = r.calls.borrow().len();
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out}");
+    let sent = r.calls.borrow()[n..].to_vec();
+    for c in &cmds {
+        assert!(sent.contains(c), "planned but not sent: {c}\nsent: {sent:#?}");
+    }
+}
+
+/// #236: a design lane runs on the main host whatever the issue's history or the load says; another host is refused.
+/// A role pin (`host = "<name>"` or `"main"`) beats least-busy placement.
+#[test]
+fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
+    let c = setup("hosts-design", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let r = fake(1.0, 0.1);
+    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"), "history");
+    assert_eq!(placed(&c, &r, 12, "design", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 13, "design", Some("mini")).as_deref(), Ok("mini"));
+    let main_only = "REFUSED DESIGN_MAIN_ONLY: host bazzite: design lanes run on the main host only";
+    assert_eq!(placed(&c, &r, 13, "design", Some("bazzite")).unwrap_err(), main_only);
+    let text = std::fs::read_to_string(&c.config).unwrap().replace(
+        "profile = \"fleet-rev\"",
+        "profile = \"fleet-rev\"\nhost = \"bazzite\"\n\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nhost = \"bazzite\"",
+    );
+    std::fs::write(&c.config, &text).unwrap();
+    assert_eq!(
+        placed(&c, &fake(0.1, 2.0), 13, "rev", None).as_deref(),
+        Ok("bazzite"),
+        "pinned"
+    );
+    assert_eq!(
+        placed(&c, &r, 13, "design", None).unwrap_err(),
+        main_only,
+        "a pin can't move design"
+    );
+    let (code, out) = run(
+        &c,
+        &r,
+        &["spawn", "sendmeter", "13", "design", "--host", "bazzite", "--dry-run"],
+    );
+    assert_eq!((code, out.trim()), (3, main_only));
+    let main = text.replace("host = \"bazzite\"", "host = \"main\"");
+    std::fs::write(&c.config, main).unwrap();
+    assert_eq!(placed(&c, &fake(2.0, 0.1), 13, "rev", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 13, "design", None).as_deref(), Ok("mini"));
+}
+
+/// #236: an agent that fails to start on another host leaves no half-made workspace there.
+#[test]
+fn a_failed_remote_start_closes_its_workspace() {
+    let c = setup("hosts-fail", "", true, 0);
+    with_account(&c);
+    let r = remote_fake()
+        .once_err("herdr --machine bazzite agent start", 1, r#"{"error":{"code":"boom"}}"#)
+        .reply("herdr --machine bazzite workspace close w9", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(r.called("herdr --machine bazzite workspace close w9"));
+    assert!(!r.called("herdr --machine bazzite pane close"));
 }

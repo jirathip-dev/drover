@@ -28,7 +28,8 @@ impl<'a> On<'a> {
     pub fn of(r: &'a dyn Runner, e: Option<&'a Event>) -> Self {
         Self::new(r, e.and_then(|e| e.str("machine")))
     }
-    fn wrap(&self, prog: &str, args: &[String]) -> (String, Vec<String>) {
+    /// The program and argv actually run for `prog args` on this host.
+    pub fn wrap(&self, prog: &str, args: &[String]) -> (String, Vec<String>) {
         let Some(m) = self.machine else {
             return (prog.into(), args.to_vec());
         };
@@ -297,11 +298,28 @@ pub fn place(
         };
     }
     let f = cfg.fleet(fleet)?;
-    if let Some(h) = force {
-        let Some(c) = cfg.hosts.get(h) else {
-            return refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]"));
+    // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
+    let design = f.family(role) == "design";
+    let pin = f.role.get(role).and_then(|r| r.host.as_deref());
+    if let Some(h) = force.or(pin).or(design.then_some("main")) {
+        let main = cfg
+            .hosts
+            .iter()
+            .find(|h| h.1.machine.is_none())
+            .map_or("local", |h| h.0.as_str());
+        let h = if h == "main" { main } else { h };
+        let machine = match cfg.hosts.get(h) {
+            Some(c) => c.machine.as_deref(),
+            None if h == main => None,
+            None => return refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]")),
         };
-        return Ok(Some(at(ctx, cfg, f, r, (h, c.machine.as_deref()))));
+        if design && machine.is_some() {
+            return refused(
+                "DESIGN_MAIN_ONLY",
+                format!("host {h}: design lanes run on the main host only"),
+            );
+        }
+        return Ok(Some(at(ctx, cfg, f, r, (h, machine))));
     }
     if let Some(e) = events.iter().rev().find(|e| e.is("spawn", fleet, issue)) {
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));

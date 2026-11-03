@@ -60,9 +60,12 @@ A lane needs the union of three lists:
 `herdsman spawn` picks the host like this:
 
 1. `--host <name>` forces that host.
-2. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
+2. Otherwise, a role pinned with `[fleet.<n>.role.<r>] host = "main"` (or a host name) goes there. `main` is the host
+   without `machine`. A `design` lane always runs on the main host, in the owner's herdr: it defaults to `main`,
+   and `--host` or a pin naming another host is refused `DESIGN_MAIN_ONLY`.
+3. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
    even when the host has been turned off.
-3. Otherwise, herdsman takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
+4. Otherwise, herdsman takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
    CPU first, then the most free memory.
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
@@ -73,6 +76,9 @@ off fit. drive retries on its next pass.
 The `spawn` event records the lane's `host` and `machine`. From then on, every herdr call for that lane carries
 `--machine` (pane reads, prompts, stop, kill, close), and its worktree work runs over ssh on that host:
 `git worktree`, the brief and MCP files, the reviewer's `verdict.md`, the dirty and unpushed checks, and `clean`.
+
+`spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
+paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
 
 ## Turn a host off
 
