@@ -501,7 +501,7 @@
     if (se.scrollWidth > se.clientWidth) bad.push(`page scrolls sideways: ${se.scrollWidth}>${se.clientWidth}`);
     if (V in HP) {
       const p = hp(HP[V]), pr = p.getBoundingClientRect();
-      for (const e of [p.querySelector('.hs'), $('.hlt'), $('.hx')]) if (e.offsetHeight !== 28) bad.push(`${e.className}: Herd strip/[A]/[×] ${e.offsetHeight}px, not 28`);
+      for (const e of [p.querySelector('.hs'), $('.hlt'), $('.hx')]) if (!e.hidden && e.offsetHeight !== 28) bad.push(`${e.className}: Herd strip/[A]/[×] ${e.offsetHeight}px, not 28`);
       // #71: the ranch-light button sits inside the strip, left of [×] (the tap checks above scrolled the page, and
       // in a storm #herd itself: the rain tile overflows it, which only scrollIntoView can scroll).
       p.scrollTo({ top: 0, behavior: 'instant' });

@@ -95,6 +95,6 @@
 .heat-held .hb{background:radial-gradient(120% 50% at 50% 100%,#ff5a2a33,#0000 70%)}
 .heat-held .kglow{animation:kgl 4s ease-in-out infinite alternate}
 @keyframes kgl{from{opacity:.75}to{opacity:1}}
-.hqh.n svg{animation:var(--flutter,none);transform-origin:50% 0}
+.hqh.n use{animation:var(--flutter,none);transform-box:view-box;transform-origin:50% 0}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
-@media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n svg{animation:none}}
+@media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n use{animation:none}}
