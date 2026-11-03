@@ -144,6 +144,32 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
     argv(&[&["pane", "run", pane][..], words].concat())
 }
 
+/// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
+/// close the workspace; the screen (None: no pane).
+pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
+    let ws = json(
+        r,
+        &argv(&[
+            "workspace",
+            "create",
+            "--cwd",
+            cwd,
+            "--label",
+            "herdsman-health",
+            "--no-focus",
+        ]),
+    );
+    let pane = ws.ok()?["result"]["root_pane"]["pane_id"].as_str()?.to_string();
+    let _ = exec(r, &run_argv(&pane, &[line]));
+    let _ = exec(r, &wait_output_argv(&pane, done, "20000"));
+    let text = read(r, &pane).unwrap_or_default();
+    let _ = exec(
+        r,
+        &argv(&["workspace", "close", pane.split(':').next().unwrap_or(&pane)]),
+    );
+    Some(text)
+}
+
 /// `herdr agent start` for the harnesses herdr knows (`--kind`), `args` going to the harness.
 pub fn start_argv(agent: &str, kind: &str, pane: &str, args: Vec<String>) -> Vec<String> {
     let mut c = argv(&["agent", "start", agent, "--kind", kind, "--pane", pane]);

@@ -267,7 +267,11 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
 
 /// herdr's (client, server) versions, and whether the server is older (`herdr status`).
 pub fn herdr_versions(r: &dyn Runner) -> Option<(String, String, bool)> {
-    let status = herdr::status(r).ok()?;
+    versions(&herdr::status(r).ok()?)
+}
+
+/// `herdr status` text's (client, server) versions, and whether the server is older.
+pub fn versions(status: &str) -> Option<(String, String, bool)> {
     let version = |l: &str| l.trim().strip_prefix("version: ").map(String::from);
     let mut v = status.lines().filter_map(version);
     let (client, server) = (v.next()?, v.next()?);

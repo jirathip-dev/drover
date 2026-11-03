@@ -146,6 +146,31 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     let line = format!("timer — {} loaded → herdsman timer install", crate::timer::TICK);
     row(rows, crate::timer::loaded(ctx, r), '✗', &line);
+    // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
+    for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
+        let Some(m) = h.machine.as_deref() else { continue };
+        let on = crate::hosts::On::new(r, Some(m));
+        let Some((tags, home)) = crate::hosts::probe(&on).filter(|_| crate::host::agents(&on).is_ok()) else {
+            rows.push(format!(
+                "✗ host {name} — unreachable → herdr machine status; ssh {m} true"
+            ));
+            continue;
+        };
+        let tags = crate::hosts::tags(
+            h,
+            Some(&crate::hosts::Seen {
+                tags,
+                ..Default::default()
+            }),
+        );
+        let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
+        let ok = format!(
+            "✓ host {name} — herdr, session, git, gh, claude, herdsman {}",
+            crate::VERSION
+        );
+        rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
+        rows.extend(bad.is_empty().then_some(ok));
+    }
 }
 
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `herdsman serve`.
