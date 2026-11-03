@@ -67,7 +67,7 @@ pub fn close(ctx: &Ctx, r: &dyn Runner, e: &Event, why: &str) -> Result<()> {
 pub fn reap(ctx: &Ctx, r: &dyn Runner, events: &[Event]) -> Result<()> {
     for e in events.iter().filter(|e| e.kind == "setup" && ctx.now >= e.ts + TIMEOUT) {
         if open(events, e.str("pane").unwrap_or_default()).is_some_and(|o| o.ts == e.ts) {
-            close(ctx, r, e, "timeout")?;
+            let _ = close(ctx, r, e, "timeout");
         }
     }
     Ok(())
@@ -78,9 +78,12 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
     let (events, shut) = (read(&ctx.state)?, json!({"closed": true, "lines": []}));
     let Some(e) = open(&events, pane) else { return Ok(shut) };
     let live = ctx.now < e.ts + TIMEOUT;
-    let Some(s) = herdr::read(&On::of(r, Some(e)), pane).ok().filter(|_| live) else {
+    let o = herdr::exec(&On::of(r, Some(e)), &herdr::read_argv(pane))?;
+    if !live || herdr::failed_with(&o, "pane_not_found") {
         return close(ctx, r, e, ["timeout", "exited"][usize::from(live)]).map(|()| shut);
-    };
+    }
+    anyhow::ensure!(o.code == 0, "could not read the sign-in pane; retrying");
+    let s = o.stdout;
     let ls: Vec<&str> = s.lines().map(str::trim_end).collect();
     let mut urls = vec![];
     for (i, l) in ls.iter().enumerate().filter(|(_, l)| l.contains("https://")) {
@@ -105,7 +108,8 @@ pub fn send(ctx: &Ctx, r: &dyn Runner, pane: &str, text: &str) -> Result<String>
         return refused("BAD_VALUE", "up to 2000 chars, no control characters");
     }
     if !text.is_empty() {
-        herdr::ok(&on, &herdr::send_text_argv(pane, text))?;
+        let sent = herdr::ok(&on, &herdr::send_text_argv(pane, text));
+        sent.map_err(|_| anyhow::anyhow!("could not type into the sign-in pane"))?;
     }
     herdr::keys(&on, pane, "Enter").map(|_| "sent".into())
 }
