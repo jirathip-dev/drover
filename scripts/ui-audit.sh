@@ -30,13 +30,14 @@ fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
 # #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
 # mini's load/cpu chart open.
-for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later needs-pending \
+for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later needs-pending \
   queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal host~terminal events~terminal theme-switch moment-still; do
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png.
   th=$([[ $v == *~* ]] && echo "${v#*~}" || true) v=${v%%~*} flags=()
   dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}${th:+-$th}
   url="http://127.0.0.1:$port/${dir}index.html?audit=$view${th:+&theme=$th}"
-  case $v in herd-kitchen) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; moment-still) flags=(--force-prefers-reduced-motion) ;; esac # #172, #241
+  case $v in herd-kitchen*) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172, #239
+  case $v in moment-still|herd-kitchen-still) flags=(--force-prefers-reduced-motion) ;; esac # #241, #239
   run "$url" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1
   run "$url&check=1" --dump-dom ${flags[@]+"${flags[@]}"} > "$shots/$v.html" || fail=1
   if ! python3 - "$shots/$v.html" "$v" <<'EOF'

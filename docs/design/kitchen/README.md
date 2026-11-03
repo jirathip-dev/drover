@@ -17,9 +17,8 @@ loop their two frames. With `prefers-reduced-motion` everything is static.
 | `kitchen-390.png` (DPR 2), `kitchen-1440.png` | full-page shots of `index.html` |
 | `sheet.html`, `sprite-sheet.png` | 8 actions × 3 looks + frame 2, the rail ticket and its red variant, the 5 project trims, the 16 px row sprites at 1× and 3× |
 | `icon/icon-{180,192,512}.png`, `icon/favicon-{32,16}.png` (+ `.svg` sources) | the theme icon |
-| `theme/sprites.svg`, `theme/scene.svg`, `theme/theme.json` | the phase-2 theme files, generated, filled to #241's keys |
 | `art.mjs` | pixel maps, looks, heat colours, the station scene, the Host miniature, the icon, the board scheme |
-| `build.mjs` | `node build.mjs` writes `theme/` and `icon/*.svg` |
+| `build.mjs` | `node build.mjs` writes `assets/themes/kitchen/` (sprites, scene, theme.json to #241's contract) and `icon/*.svg` |
 | `contrast.mjs` | `node contrast.mjs`: WCAG ratios and hue distances, today's board vs the kitchen scheme |
 | `board-fixture.html` | the demo export's Queue and Host markup (fake data), used by section 8 |
 | `shoot.sh` | regenerates everything (`CHROME=<chrome-headless-shell> docs/design/kitchen/shoot.sh` from the repo root) |
@@ -141,3 +140,19 @@ links and the active tab, and brass `#c9a55a` for the title, card edges and grou
    ignores day/night and hides `[A]`, or keeps it and dims the wall tiles. Your pick.
 9. **Q4's "nothing scary".** Held is the strongest state: wall flames on both sides of the range, smoke and a red floor
    glow. It never flashes. If it still reads as too much, the first thing to drop is the wall flames.
+
+## Approved (2026-11-03, "Approve all with fixes") and built
+
+Built to #241's merged contract with the README's recommendations. No `theme.css` or board scheme (that is #244). The
+conductor's 8 fixes are in `art.mjs` and the build:
+
+1. Idle: crossed forearms, diagonal, hands at the elbows.
+2. The bell has a knob and a highlight. Cook has a curved wok over a bigger flame burst. The 16 px cook, chop (cleaver),
+   carry (crate) and bell rows are distinct.
+3. The project colour is a neckerchief. The apron's seams are its own shade.
+4. Held keeps its smoke, wall flames and red floor glow in the reduced-motion still. Only the loops stop.
+5. The moments `order-up` (the pass, the bell, the plate sliding out) and `sent-back` (the plate back on the cook line under a
+   red ✗) draw their stations.
+6. A queued slot is 88 px in the kitchen (`--qw`), so `! needs you` fits its ticket.
+7. Herd text keeps the farm's label cards and caption bar: every pair is ≥ 4.5 : 1.
+8. The kitchen accent is #244's board scheme, so it isn't built here.

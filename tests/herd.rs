@@ -141,6 +141,29 @@ fn herd_json_shape_on_a_fixture() {
     assert!((h["load"].as_f64().unwrap() - 0.39).abs() < 1e-9, "{h}");
 }
 
+/// #239: each fleet's colour (a station's), and each lane's theme action: its role's while it works, a fix round's
+/// `fix` though its lane's role is impl, else its state's.
+#[test]
+fn herd_json_carries_the_action_and_fleet_colour() {
+    let (c, r) = fixture("act");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let v = body(&get(&s, "/herd.json", ADDR, ""));
+    let f = &v["fleets"];
+    assert!(
+        ["l", "p", "c", "g", "a"].contains(&f[0]["color"].as_str().unwrap()),
+        "{f}"
+    );
+    assert_eq!(f[0]["lanes"][0]["act"], "impl");
+    assert_eq!(
+        (&f[1]["lanes"][0]["act"], &f[1]["lanes"][1]["act"]),
+        (&json!("blocked"), &json!("done"))
+    );
+    let fail = json!({"verdict": "FAIL", "sha": "a".repeat(40)});
+    append(&c.state, &Event::new(900_200, "sendmeter", Some(12), "verdict", fail)).unwrap();
+    let v = body(&get(&Server::new(&c, &r, Some(ADDR.into())), "/herd.json", ADDR, ""));
+    assert_eq!(v["fleets"][0]["lanes"][0]["act"], "fix");
+}
+
 #[test]
 fn herd_json_has_no_pane_text() {
     let (c, r) = fixture("nopane");

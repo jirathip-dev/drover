@@ -7,15 +7,15 @@
 // One character → a fill (and an opacity). `.` and space are transparent.
 export const INK = {
   k: '#2f2a26', B: '#2a2522', m: '#7a3b2e', b: '#ec9a82', q: ['#2f2a26', 0.16],
-  S: 'var(--sk)', s: 'var(--ss)', M: 'var(--hr)',
+  S: 'var(--sk,#f1c7a5)', s: 'var(--ss,#d9a684)', M: 'var(--hr,#5a3a24)',
   W: '#f4f1ea', w: '#d6cfc1',
-  A: 'var(--ap)', a: 'var(--as)', T: 'var(--fk)',
+  A: 'var(--ap,#34506e)', a: 'var(--as,#2a4058)', T: 'var(--fk,#58a6ff)',
   P: '#3b3d4a', p: '#2c2e39',
-  H: 'var(--hc)', h: 'var(--hs)',
+  H: 'var(--hc,#c0453a)', h: 'var(--hs,#9a352d)',
   G: '#8d9399', g: '#5b6168', L: '#c9ced2', N: '#33363b', n: '#24262a',
   O: '#b07a4a', o: '#8a5a34', V: '#7fae5a', v: '#5b8a3e', R: '#d0563b', Q: '#e8833a', Y: '#e8b84a', y: '#b8892a',
   E: '#f7f5ef', e: '#d4cdbf', C: '#c4955a', c: '#96693a',
-  F: 'var(--f1)', f: 'var(--f2)', Z: ['#ffffff', 0.55], D: '#8ec5ff',
+  F: 'var(--f1,#3d7fd9)', f: 'var(--f2,#9cc8ff)', Z: ['#ffffff', 0.55], D: '#8ec5ff',
   X: 'var(--tp, #fbf6e6)', x: 'var(--tl, #c9bfa5)', r: 'var(--th, #c9bfa5)', K: '#1f2a38',
 };
 
@@ -66,17 +66,17 @@ const HEAD_SMILE = ['.MMMMMMM.', 'MSSSSSSSM', 'SSkSSSkSS', 'SSkSSSkSS', 'SbSSSSS
 const TOQUE = ['..WWW.WWW..', '.WWWWWWWWW.', 'WWWWWWWWWWW', 'WWWwWWWwWWW', '.WWWWWWWWW.', '.wwwwwwwww.'];
 const BANDANA = ['..HHWHHWH...', '.HHHHHHHHHh.', '.........hHh'];
 const CAP = ['...HHHHH...', '..HHHHHHH..', 'hhhhhhhhhhh'];
-// Jacket and apron: collar, bib with the trim on top, skirt, trim on the hem.
+// Jacket and apron: the neckerchief in the project colour (fix 3), bib, skirt, the apron's own seams.
 const BODY = [
-  '..wwWWWww..',
-  '.WWWWWWWWW.',
-  'WWTTTTTTTWW',
+  '..wTTTTTw..',
+  '.WWWWTWWWW.',
+  'WWaaaaaaaWW',
   'WWAAAAAAAWW',
   'WWAAaAAAAWW',
   'WWAAAAAAAWW',
   '.AAAAAAAAA.',
   '.AAAAAAaAA.',
-  '.TTTTTTTTT.',
+  '.aaaaaaaaa.',
 ];
 const LEGS = ['..PpP.PpP..', '..PPP.PPP..', '.BBBB.BBBB.'];
 const WALK1 = ['.PpP...PpP.', 'PPP.....PPP', 'BBB......BBB'];
@@ -110,10 +110,10 @@ const STOVE = [
   'GgggggggggggG',
   'GGGGGGGGGGGGG',
 ];
-const FLAME1 = ['.F..F..F.', 'FfFFfFFfF'];
-const FLAME2 = ['F..F..F..', 'FfFfFFfFF'];
-const WOK_A = ['N.VRQVY.N', 'NNNNNNNNN', '.NNNNNNN.'];
-const WOK_B = ['N.......N', 'NNNNNNNNN', '.NNNNNNN.'];
+const FLAME1 = ['..F...F..', '.FfF.FfF.', 'FfYfFfYfF', 'FfffffffF'];
+const FLAME2 = ['.F...F...', 'FfF.FfF.F', 'FfYfFfYfF', 'FfffffffF'];
+const WOK_A = ['NVRQVYQVN', '.NNNNNNN.', '..NNNNN..'];
+const WOK_B = ['N.......N', '.NNNNNNN.', '..NNNNN..'];
 const TOSS = ['.V..R.', '...Q..', 'Y...V.'];
 const STEAM = ['.Z..Z.', 'Z..Z..', '.Z...Z'];
 const TABLE = [
@@ -132,7 +132,7 @@ const PASS = ['LLLLLLLLLLLLL', 'GGGGGGGGGGGGG', '.g.........g.', '.g.........g.'
 const LAMP = ['ggggggggggg', '.NNNNNNNNN.', '..Y.....Y..'];
 const PLATE = ['..VQR..', '.EEEEE.', 'eeeeeee'];
 const CRATE = ['.V.QV.VQ.', 'CCCCCCCCC', 'CcCcCcCcC', 'CCCCCCCCC', 'CcCcCcCcC', 'CCCCCCCCC'];
-const BELL = ['...Y...', '..YYY..', '.YYYYY.', 'yyyyyyy'];
+const BELL = ['...N...', '..YYY..', '.YEYYY.', '.YEYYY.', 'yyyyyyy'];
 const RING = ['Y.....Y', '.Y...Y.'];
 const STAND = ['ooooooooooo', 'OOOOOOOOOOO', '.o.......o.', '.o.......o.', '.o.......o.', '.o.......o.'];
 const TOWEL_UP = ['WWWW', 'wWWW', '.wWW', '..wW'];
@@ -143,11 +143,11 @@ export const ACTIONS = {
   cook: () => [
     ...chef(5, 5, { arms: 'l' }),
     [STOVE, 18, 16],
-    [FLAME1, 20, 14, 'f1 fl'], [FLAME2, 20, 14, 'f2 fl'],
-    [STEAM, 21, 2, 'steam'],
+    [FLAME1, 20, 12, 'f1 fl'], [FLAME2, 20, 12, 'f2 fl'],
+    [STEAM, 21, 0, 'steam'],
     // the wok, the right arm and the toss: frame 1 at rest, frame 2 lifted with the food in the air
-    [['W', 'WS'], 14, 13, 'f1'], [['oooN'], 16, 14, 'f1'], [WOK_A, 19, 12, 'f1'],
-    [['.S', 'W.'], 14, 12, 'f2'], [['oooN'], 16, 12, 'f2'], [WOK_B, 19, 11, 'f2'], [TOSS, 20, 6, 'f2'],
+    [['W', 'WS'], 14, 11, 'f1'], [['oooN'], 16, 11, 'f1'], [WOK_A, 19, 9, 'f1'],
+    [['.S', 'W.'], 14, 10, 'f2'], [['oooN'], 16, 9, 'f2'], [WOK_B, 19, 8, 'f2'], [TOSS, 20, 3, 'f2'],
   ],
   chop: () => [
     ...chef(5, 5, { arms: 'l' }),
@@ -170,8 +170,8 @@ export const ACTIONS = {
   ],
   wait: () => [
     ...chef(12, 5, { arms: '' }),
-    // arms crossed over the bib
-    [['W.........W', 'WwwwwwwwwwW', 'WWSWWWWWSWW', '.wwwwwwwww.'], 11, 13],
+    // arms crossed over the bib (fix 1): upper arms at the sides, forearms crossing diagonally, hands at the elbows
+    [['WS.......SW', 'W.ww...WW.W', 'W...WWW...W', 'W.WW...ww.W', '.WW.....ww.'], 11, 13],
   ],
   serve: () => [
     ...chef(5, 5, { arms: 'l', head: HEAD_SMILE }),
@@ -182,8 +182,8 @@ export const ACTIONS = {
     ...chef(6, 5, { arms: '', head: HEAD_O }),
     // the left arm waves overhead (two frames), the right hand rings the bell
     [['SS', 'WW', 'WW', 'WW', 'wW', 'wW', 'WW'], 3, 6, 'f1'], [['SS..', '.WW.', '..WW', '..WW', '..wW', '..wW', '..WW'], 1, 6, 'f2'],
-    [STAND, 19, 18], [BELL, 21, 14],
-    [['WWWWS'], 15, 13, 'f1'], [['WWWWS'], 15, 12, 'f2'], [RING, 21, 11, 'f2'],
+    [STAND, 19, 18], [BELL, 21, 13],
+    [['WWWWS'], 15, 13, 'f1'], [['WWWWS'], 15, 12, 'f2'], [RING, 21, 10, 'f2'],
   ],
   fan: () => [
     ...chef(8, 5, { arms: 'l', head: HEAD_O }),
@@ -200,6 +200,25 @@ export const TICKET = () => [
     'XXXXXXXXXXXXXXXXX', 'X.X.X.X.X.X.X.X.X'], 8, 2],
   [['qqqqqqqqqqqqqqqqq'], 9, 16],
 ];
+
+// #241 `moments` (fix 5): each scene draws the station it names. Order up: the chef rings the bell at the serving
+// pass and the plate slides out (f1 → f2). Sent back: the plate comes back to the cook line (the stove) under a red ✗.
+const XMARK = ['R...R', '.R.R.', '..R..', '.R.R.', 'R...R'];
+export const MOMENTS = {
+  'order-up': () => [
+    ...chef(3, 5, { arms: 'l', head: HEAD_SMILE }),
+    [PASS, 16, 17], [BELL, 17, 12], [['WWWWS'], 12, 13],
+    [PLATE, 24, 14, 'f1'], [PLATE, 26, 14, 'f2'], [RING, 17, 9, 'f2'],
+  ],
+  'sent-back': () => [
+    ...chef(3, 5, { arms: 'l', head: HEAD_O }),
+    [STOVE, 18, 16], [FLAME1, 20, 14, 'f1 fl'], [FLAME2, 20, 14, 'f2 fl'],
+    [['WWWWS'], 12, 13], [PLATE, 21, 13], [XMARK, 22, 6],
+  ],
+};
+// The words each moment says, in a bubble over the scene.
+export const SAYS = { 'order-up': 'order up!', 'sent-back': 'sent back' };
+export const bubble = t => `<rect x="60" y="0" width="72" height="16" rx="4" fill="#f4f1ea"/><text x="96" y="12" font-size="11" font-weight="700" font-family="ui-monospace,Menlo,monospace" text-anchor="middle" fill="#2f2a26">${t}</text>`;
 
 // ---- rasterising: layers → <rect> runs, one <g> per class ----
 function rects(map, x0, y0, u) {
@@ -218,13 +237,13 @@ function rects(map, x0, y0, u) {
   });
   return s;
 }
-const HATVAR = { 'hat-t': '--ht', 'hat-b': '--hb', 'hat-k': '--hk' };
+const HATVAR = { 'hat-t': ['--ht', 1], 'hat-b': ['--hb', 0], 'hat-k': ['--hk', 0] };
 export function draw(layers, u = 4) {
   return layers.map(([map, x, y, cls]) => {
     const r = rects(map, x, y, u);
     if (!cls) return r;
     const hv = HATVAR[cls];
-    return `<g class="${cls}"${hv ? ` style="opacity:var(${hv},0)"` : ''}>${r}</g>`;
+    return `<g class="${cls}"${hv ? ` style="opacity:var(${hv[0]},${hv[1]})"` : ''}>${r}</g>`;
   }).join('');
 }
 // Symbols for a page: <symbol id="k-cook" viewBox="0 0 132 100">… (shape-rendering crisp, the pixel look).
@@ -241,15 +260,15 @@ export function symbols() {
 const RH = ['..WWWWW.', '.WWWWWWW', '.wwwwwww', '.SSSSSSS', '.SkSSSkS', '.SSSSSSS', '..sSSSs.'];
 const RHB = ['........', '..HHHHH.', '.HHHHHHH', '.SSSSSSS', '.SkSSSkS', '.SSSSSSS', '..sSSSs.'];
 const RHK = ['........', '..HHHHH.', 'hhhhhhhhh', '.SSSSSSS', '.SkSSSkS', '.SSSSSSS', '..sSSSs.'];
-const rowHead = () => [[RH, 0, 1, 'hat-t'], [RHB, 0, 1, 'hat-b'], [RHK, 0, 1, 'hat-k'], [['.WTTTTTW.', 'WWAAAAAWW', '.AAAAAAA.'], 0, 8], [['.AAAAAAA.', '.TTTTTTT.'], 0, 11]];
+const rowHead = () => [[RH, 0, 1, 'hat-t'], [RHB, 0, 1, 'hat-b'], [RHK, 0, 1, 'hat-k'], [['..TTTTT..', 'WWWaTaWWW', '.AAAAAAA.'], 0, 8], [['.AAAAAAA.', '.aaaaaaa.'], 0, 11]];
 export const ROW = {
-  cook: [...rowHead(), [['....F.F', '...FfFfF', '..NNNNNN', '...NNNN.', 'oo......'], 9, 7], [['GGGGGGG'], 9, 13]],
-  chop: [...rowHead(), [['NLLL', '..GG'], 10, 6], [['QQ.Q', 'OOOOOO', 'oooooo'], 10, 9]],
+  cook: [...rowHead(), [['.V.R....', 'N....N..', 'NNNNNNoo', '.NNNN...', '.FfF.F..', 'FfFfFfF.'], 8, 6], [['GGGGGGG'], 8, 12]],
+  chop: [...rowHead(), [['LLLL..', 'LLLLoo', 'LLLL..'], 9, 4], [['.Q.QV.', 'OOOOOOO', 'ooooooo'], 9, 9]],
   taste: [...rowHead(), [['LL', '.L', '..L'], 8, 6], [['.VQR.', 'EEEEEE', 'eeeeee'], 10, 10]],
-  carry: [...rowHead(), [['.V.QV.V', 'CCCCCCC', 'CcCcCcC', 'CCCCCCC'], 9, 8]],
+  carry: [...rowHead(), [['.V.QV.V.', 'CCCCCCCC', 'CcCcCcCc', 'CCCCCCCC', 'CcCcCcCc', 'CCCCCCCC'], 8, 7]],
   wait: [...rowHead(), [['W.......W', 'WWWWWWWWW', 'WSwwwwwSW'], 0, 9]],
   serve: [...rowHead(), [['.VQR..', 'EEEEEE', 'eeeeee'], 10, 5], [['WWS'], 8, 8]],
-  bell: [...rowHead(), [['.Y.Y', '..Y.', '.YYY', 'YYYYY', 'yyyyy'], 10, 8], [['S', 'W'], 15, 2]],
+  bell: [...rowHead(), [['..N..', '.YYY.', 'YEYYY', 'YEYYY', 'yyyyy'], 10, 8], [['S', 'W'], 15, 2]],
   ticket: [[['..GGG..'], 4, 0], [['XXXXXXXXX', 'XrrrrrrrX', 'XXXXXXXXX', 'XxxxxxxXX', 'XXXXXXXXX', 'XxxxxXXXX', 'XXXXXXXXX', 'XxxxxxXXX', 'XXXXXXXXX', 'XXXXXXXXX', 'X.X.X.X.X'], 3, 1]],
   back: [[['..R...R', '...R.R.', '....R..', '...R.R.', '..R...R'], 8, 0], [['.VQR...', 'EEEEEEE', 'eeeeeee'], 0, 10], [['k...', 'kk..', 'kkkk', 'kk..', 'k...'], 0, 3]],
 };

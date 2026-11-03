@@ -1,10 +1,210 @@
 {
-  "poses": { "working": "chef-working", "idle": "chef-idle", "done": "chef-done", "blocked": "chef-blocked" },
-  "glyphs": { "working": "♨", "idle": "·", "unknown": "?", "parked": "·", "done": "✓", "blocked": "!", "dead": "✗" },
-  "words": { "horse": "chef", "horses": "chefs", "herd": "kitchen line", "ranch": "kitchen", "barn": "kitchen" },
-  "scene": { "weather": false, "palette": { "--sky1": "#efe6d2", "--sky2": "#e9dcc3", "--pa": "linear-gradient(#6b5a4a,#4a3c32 40vh,#3a2f28)" } },
-  "load_scene": { "kind": "heat", "levels": { "calm": "simmer", "busy": "boil", "held": "flare-up" } },
-  "moments": { "merged": { "sprite": "chef-done", "anim": "hop" }, "fail": { "sprite": "chef-blocked", "anim": "shake" }, "needs-you": { "sprite": "chef-blocked", "anim": "pulse" } },
-  "ascii": { "impl": "» chop", "fix": "» re-fry", "rev": "» taste", "update": "» stir", "idle": "· wait", "done": "✓ plated", "blocked": "! 86'd" },
-  "modes": ["scene", "ascii"]
+ "actions": {
+  "impl": "chef-cook",
+  "fix": "chef-chop",
+  "rev": "chef-taste",
+  "update": "chef-carry",
+  "idle": "chef-wait",
+  "done": "chef-serve",
+  "blocked": "chef-bell"
+ },
+ "poses": {
+  "working": "chef-cook",
+  "idle": "chef-wait",
+  "done": "chef-serve",
+  "blocked": "chef-bell"
+ },
+ "looks": [
+  {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#5a3a24",
+   "--ap": "#34506e",
+   "--as": "#2a4058",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#1d1a17",
+   "--ap": "#4a4a52",
+   "--as": "#3a3a40",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "0",
+   "--hb": "1",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--ap": "#7a3b3b",
+   "--as": "#622f2f",
+   "--hc": "#3d6fa8",
+   "--hs": "#305886",
+   "--ht": "0",
+   "--hb": "0",
+   "--hk": "1"
+  },
+  {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#d8c9a8",
+   "--ap": "#6b7040",
+   "--as": "#555a33",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#b5652d",
+   "--ap": "#34506e",
+   "--as": "#2a4058",
+   "--hc": "#d9a53a",
+   "--hs": "#b08528",
+   "--ht": "0",
+   "--hb": "1",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#3a2a1e",
+   "--ap": "#4a4a52",
+   "--as": "#3a3a40",
+   "--hc": "#4f8a5b",
+   "--hs": "#3e6e48",
+   "--ht": "0",
+   "--hb": "0",
+   "--hk": "1"
+  },
+  {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--ap": "#7a3b3b",
+   "--as": "#622f2f",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#5a3a24",
+   "--ap": "#6b7040",
+   "--as": "#555a33",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "0",
+   "--hb": "0",
+   "--hk": "1"
+  }
+ ],
+ "load_scene": {
+  "kind": "heat",
+  "levels": {
+   "calm": "simmer",
+   "busy": "boil",
+   "held": "flare-up"
+  },
+  "fan": "chef-fan"
+ },
+ "rail": {
+  "item": "chef-ticket",
+  "needs": "chef-ticket-n"
+ },
+ "moments": {
+  "merged": {
+   "sprite": "order-up",
+   "anim": "hop"
+  },
+  "fail": {
+   "sprite": "sent-back",
+   "anim": "shake"
+  },
+  "needs-you": {
+   "sprite": "chef-ticket-n",
+   "anim": "pulse"
+  }
+ },
+ "row_sprites": {
+  "impl": "row-cook",
+  "fix": "row-chop",
+  "rev": "row-taste",
+  "update": "row-carry",
+  "idle": "row-wait",
+  "done": "row-serve",
+  "blocked": "row-bell"
+ },
+ "icons": {
+  "180": "icon-180.png",
+  "192": "icon-192.png",
+  "512": "icon-512.png",
+  "favicon": "icon-192.png"
+ },
+ "ascii": {
+  "impl": "♨\ncook",
+  "fix": "♨\nchop",
+  "rev": "♨\ntaste",
+  "update": "♨\ncarry",
+  "idle": "·\nwait",
+  "done": "✓\nserve",
+  "blocked": "!\nbell"
+ },
+ "modes": [
+  "scene",
+  "ascii"
+ ],
+ "glyphs": {
+  "working": "♨",
+  "idle": "·",
+  "unknown": "?",
+  "parked": "·",
+  "done": "✓",
+  "blocked": "!",
+  "dead": "✗"
+ },
+ "words": {
+  "horse": "chef",
+  "horses": "chefs",
+  "herd": "kitchen line",
+  "ranch": "kitchen",
+  "barn": "kitchen",
+  "impl": "cook",
+  "fix": "chop",
+  "rev": "taste",
+  "update": "carry",
+  "queued": "tickets",
+  "working": "on the line",
+  "idle": "standing by",
+  "done": "at the pass",
+  "blocked/dead": "the bell"
+ },
+ "scene": {
+  "weather": false,
+  "line": true,
+  "palette": {
+   "--pa": "repeating-conic-gradient(#4a3f38 0 25%,#41372f 0 50%) 0 0/24px 24px",
+   "--sky1": "#3a332e",
+   "--sky2": "#3a332e",
+   "--fp": "#8d9399",
+   "--fr": "#c9ced2",
+   "--done": "1",
+   "--blocked": "none",
+   "--qw": "88px",
+   "--flutter": "kflut 1.6s ease-in-out infinite alternate"
+  }
+ }
 }
