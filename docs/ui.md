@@ -76,8 +76,10 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    fail on night, the `[A]` button, the wrong level, no fanning chef or smoke while held, or `! needs you` overflowing
    its ticket; `herd-kitchen-still` is held under reduced motion and fails if `#herd` still animates.
    #241: on Queue, Lanes, Host and Events, and again in kitchen and terminal (`<view>~<theme>`, `?theme=`), it fails
-   unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 16 px
-   sprite per Queue/Events glyph, a load scene per Host group and offer `[scene] [ascii]`. `theme-switch` picks
+   unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 24 px
+   sprite per Queue/Events glyph, a load scene per Host group and offer `[scene] [ascii]`. #281: each row sprite is
+   24×24 in a 28 px slot, its row at most 4 px taller than with the glyph (no wrap), and no screenshot pixel inside it
+   is a blend of its neighbours (crisp, never smoothed). `theme-switch` picks
    terminal then kitchen in place and fails on a reload, a kept sprite or a favicon not swapped; `moment-still` runs
    with reduced motion forced and fails unless a moment is a still frame.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the

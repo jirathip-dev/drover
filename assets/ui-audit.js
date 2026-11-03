@@ -56,6 +56,9 @@
   };
   const VIEWS = {
     queue: () => tab('queue'),
+    // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
+    'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
+    'events-rows': () => { tab('events'); $('#needs').hidden = true; },
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
     // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
@@ -396,13 +399,15 @@
   const label = e => (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24) || e.tagName.toLowerCase();
   function check() {
     let res;
+    // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them; ui-audit.sh checks their pixels are crisp.
+    const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= innerHeight).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
     if (innerWidth !== 390) res.outliers.push(`viewport ${innerWidth} px wide, not 390`); // #68: new-headless Chrome keeps windows ≥ 500 px
     // #114 app-like: no pinch or double-tap zoom.
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
-    if (['queue', 'lanes', 'host', 'events'].includes(V)) res.outliers.push(...drawn());
+    if (['queue', 'lanes', 'host', 'events', 'queue-rows', 'events-rows'].includes(V)) Object.assign(res, { sprites }).outliers.push(...drawn());
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
@@ -425,6 +430,17 @@
     if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
     if (tb === 'lanes' && (!on('#mode').length || TM.join() !== 'scene,ascii')) bad.push(`Lanes modes ${TM}, button shown ${on('#mode').length}`);
     for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
+    // #281: a row sprite is 24×24 in a fixed 28 px slot, and the row with it is at most 4 px taller than with its glyph (no wrap).
+    for (const g of on('.rsg')) {
+      const s = g.firstChild.getBoundingClientRect(), w = g.getBoundingClientRect().width, sum = g.closest('summary'), h = sum.offsetHeight, svg = g.firstChild;
+      if (Math.round(s.width) !== 24 || Math.round(s.height) !== 24 || Math.round(w) !== 28) bad.push(`row sprite ${s.width}×${s.height} in a ${w} px slot, not 24×24 in 28`);
+      g.classList.remove('rsg');
+      g.textContent = g.dataset.g;
+      const d = h - sum.offsetHeight;
+      g.replaceChildren(svg);
+      g.classList.add('rsg');
+      if (d > 4) bad.push(`a row ${d} px taller with its sprite than its glyph: ${label(sum)}`);
+    }
     return bad;
   }
   function measure() {

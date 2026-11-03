@@ -153,7 +153,7 @@ thp.onchange = () => {
   if (!get('theme-hint')) { put('theme-hint', 1); toast('the home-screen icon keeps its install-time look'); }
 };
 colours();
-// #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 16 px sprite (its title and label
+// #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 24 px sprite (#281; its title and label
 // the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
 const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
 const hash = t => [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
