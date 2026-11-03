@@ -84,7 +84,7 @@ fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = get(&s, "/");
     assert!(
-        page.contains("class=tl>Nested rows show titles<") && page.contains("class=tl>Deep row<"),
+        page.contains(">Nested rows show titles</span>") && page.contains(">Deep row</span>"),
         "{page}"
     );
 }

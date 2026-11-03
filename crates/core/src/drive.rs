@@ -771,13 +771,6 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
     let mut go = start;
     let one = |n: &String| KICK.get().is_none_or(|k| n == &k.to_string());
-    // #331: a queued row's title line (serve reads caches only) before a lane caches its spec.
-    for i in queue::replay(&events, fleet)
-        .iter()
-        .filter(|i| gh::cached_spec(ctx, fleet, i.issue).is_none())
-    {
-        let _ = gh::spec(ctx, r, f, fleet, i.issue, false);
-    }
     for n in queue::startable(&events, fleet)
         .into_iter()
         .filter(one)
