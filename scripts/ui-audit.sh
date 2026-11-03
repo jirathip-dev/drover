@@ -30,7 +30,7 @@ fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
 # #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
 # mini's load/cpu chart open.
-for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes sheet sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later needs-pending \
+for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-nodone herd-night herd-night-storm herd-scroll queue-scroll toast needs-later needs-pending \
   queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal host~terminal events~terminal theme-switch moment-still; do
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png.
   th=$([[ $v == *~* ]] && echo "${v#*~}" || true) v=${v%%~*} flags=()

@@ -4,7 +4,7 @@
 //! the `.blocks.json` goldens.
 mod common;
 use common::*;
-use herdsman::lanes::{body, roll, strip, GAP};
+use herdsman::lanes::{body, now, roll, said, strip, GAP};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -193,4 +193,78 @@ console.log(JSON.stringify([ok, bad, run, diff]));
         "{run}"
     );
     assert!(diff.contains("<span class=\"ol bg-r\" style=\"--i:13\">"), "{diff}");
+}
+
+/// #260: Claude's session transcript keeps the prompts and each turn's final reply (no thinking, tool calls or
+/// results, meta lines or `<command-name>` wrappers), masked; its last tool call is the `now:` line.
+#[test]
+fn a_session_transcript_keeps_prompts_and_final_replies() {
+    let jsonl =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/session/claude.jsonl"));
+    let (said, now) = said(&jsonl.unwrap());
+    let got: Vec<(&str, &str)> = said
+        .iter()
+        .map(|s| (s["k"].as_str().unwrap(), s["text"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("me", "Read /w/issue-9/.brief.md and execute it fully."),
+            ("ai", "Done: **src/drive.rs** fixed, tests pass.\n- one\n- two"),
+            ("me", "also run the tests with token ghp_•••"),
+        ]
+    );
+    assert_eq!(said[1]["at"], "2026-11-03T10:05:00.000Z");
+    assert_eq!(now.as_deref(), Some("now: running cargo test 2>&1 | tee t.log"));
+}
+
+/// #260: the pane's `now:` line is its last tool line (prose `⏺` lines and status bars skipped), Claude and Hermes.
+#[test]
+fn now_is_the_panes_last_tool_line() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens");
+    let screen = |n: &str| std::fs::read_to_string(dir.join(format!("{n}.txt"))).unwrap();
+    let claude = now(&screen("claude-ansi")).unwrap();
+    assert!(
+        claude.starts_with("now: running git commit -q -m \"serve: choices wrap"),
+        "{claude}"
+    );
+    assert_eq!(
+        now("⏺ Update(src/drive.rs)\n  ⎿  Updated\n⏺ All green.\n").as_deref(),
+        Some("now: editing src/drive.rs")
+    );
+    assert_eq!(now("  ┊ 💻 $ cargo test\n").as_deref(), Some("now: running cargo test"));
+    assert!(now(&screen("hermes-idle")).unwrap().starts_with("now: running sleep 8"));
+    assert_eq!(now("⏺ Done (all tests pass).\n"), None);
+}
+
+/// #260: the chat's default view from pane lines: you, the last assistant run before each prompt and the notices; no
+/// tool runs or status. From a session transcript: its messages and the notices in time order.
+#[test]
+fn the_default_view_keeps_prompts_final_replies_and_asks() {
+    let js = r#"
+const lines = ['> fix it', '⏺ Looking.', '⏺ Bash(cargo test)', '  ⎿  ok', '⏺ Fixed and tested.', '> ship it', '⏺ Read(a.rs)', '⏺ Shipped.'];
+const notes = [{ at: 1, text: 'spawned w-impl-9' }, { at: 1793700600, text: 'ask: merge now?' }];
+const pane = matters(lines, null, notes, 'claude').map(b => b.k + ' ' + b.key.split(':')[1]);
+const said = [{ k: 'me', text: 'fix it', at: '2026-11-03T10:00:00.000Z' }, { k: 'ai', text: '# Fixed\nall green', at: '2026-11-03T10:20:00.000Z' }];
+const ts = matters([], said, notes, 'claude');
+console.log(JSON.stringify([pane, ts.map(b => b.k), ts[3].html]));
+"#;
+    let Some(out) = node(js) else { return };
+    let (pane, ts, html): (Vec<String>, Vec<String>, String) = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        pane,
+        [
+            "note 1",
+            "note 1793700600",
+            "me > fix it",
+            "ai ⏺ Fixed and tested.",
+            "me > ship it",
+            "ai ⏺ Shipped."
+        ]
+    );
+    assert_eq!(ts, ["note", "me", "note", "ai"]);
+    assert!(
+        html.contains("<span class=pv>Fixed</span>") && html.contains("<p class=h>Fixed</p><p>all green</p>"),
+        "{html}"
+    );
 }

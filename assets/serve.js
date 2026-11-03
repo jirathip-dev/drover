@@ -153,6 +153,7 @@ function frag(id, html) {
   nu.innerHTML = html;
   tidy(nu);
   morph(el, nu);
+  nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
   rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
@@ -402,6 +403,7 @@ document.addEventListener('submit', async e => {
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
 <div class=hd><p><b></b></p></div><div class=top></div><div class=acts><button type=button data-op=stop>Stop</button><button type=button data-op=kill>Kill</button><button type=button data-op=clean>Clean</button><button type=button data-op=close>Close pane</button></div>
 <div class=cf hidden><p></p><button type=button class=yes>Kill</button><button type=button class=no>Cancel</button></div>
+<p class=fvr><button type=button class=fv aria-pressed=false>full conversation</button></p>
 <div class=chat><button type=button class=more hidden>Load more</button><div class=now></div></div>
 <p class=live hidden></p>
 <p class=pairf hidden><button type=button class=pairb>Pair this phone</button></p>
@@ -510,6 +512,7 @@ function tidy(root) {
   rows(root);
   evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
+  root.querySelectorAll('.lane .act').forEach(a => a.classList.toggle('doing', a.textContent.startsWith('now: '))); // #260 one line
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;
     const k = el('label', 'pk'), t = el('span', '');
@@ -530,6 +533,7 @@ function tidy(root) {
   }
 }
 tidy(document);
+nows();
 rf.innerHTML = '<i>↻</i>';
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
 // you (a typed prompt), the assistant (prose), a tool run (`⏺ Name(…)`/`•`/`$`/`┊` plus its `⎿`/indented output),
@@ -659,17 +663,45 @@ function blocks(lines, harness, busy) {
     return { key, k: 'run', html: `<details class="blk run">${sum(shell ? '$' : esc(name), `<span class=cmd>${esc(cmd)}</span>${tag}`)}${text.trim() ? output(g.lines, fail) : ''}</details>` };
   });
 }
+// #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
+// verdict, merged). From `said` (Claude's session transcript, `[{k: me | ai, text, at}]`) in time order, else the pane's
+// role runs: you, and the last assistant run before each prompt (the notices first: pane lines have no times).
+function matters(lines, said, notices, harness) {
+  const ns = (notices || []).map(n => ({ key: 'n:' + n.at + ':' + n.text, k: 'note', at: n.at * 1000, html: `<p class="qs note">${esc(n.text)}</p>` }));
+  if (!said) {
+    const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
+    return ns.concat(bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i)));
+  }
+  const say = s => {
+    const ls = s.text.split('\n'), who = s.k === 'me' ? 'you' : esc(harness || 'agent'), pv = esc(ls[0].replace(/^#+\s+/, ''));
+    return { key: s.k + ':' + s.at, k: s.k, open: true, at: Date.parse(s.at) || 0, html: `<details class="blk ${s.k}"><summary><span class=k>${who}</span><span class=pv>${pv}</span><i class=cv></i></summary><div class=md>${prose(ls)}</div></details>` };
+  };
+  return ns.concat(said.map(say)).sort((a, b) => a.at - b.at);
+}
 // The longest suffix of a that is a prefix of b (as text): two reads' overlap.
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
 const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200' + q);
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
-let hist = [], tail = [], nlive = 0, harness = '', spin = false;
+let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [];
+// #260 [full conversation]: every tool run and output (the pane view), else what matters; remembered per phone.
+let full = false;
+try { full = localStorage.getItem('chat:full') === '1'; } catch (e) {}
+const fv = $('.fv');
+fv.ariaPressed = String(full);
+fv.onclick = () => {
+  full = !full;
+  fv.ariaPressed = String(full);
+  try { localStorage.setItem('chat:full', full ? '1' : ''); } catch (e) {}
+  paint();
+  chat.scrollTop = chat.scrollHeight;
+};
 const store = () => { try { return JSON.parse(sessionStorage.getItem('chat:' + agent)) || {}; } catch (e) { return {}; } };
 function paint() {
   const seen = new Map([...now.children].map(n => [n.dataset.k, n])), keep = store(), end = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 8;
-  now.replaceChildren(...blocks(hist.concat(tail), harness, spin).map(b => {
+  const bs = full ? blocks(hist.concat(tail), harness, spin) : matters(hist.concat(tail), said, notes, harness);
+  now.replaceChildren(...bs.map(b => {
     const n = seen.get(b.key);
     if (n && n.dataset.h === b.html) return n;
     const t = document.createElement('template');
@@ -696,7 +728,7 @@ async function poll() {
     opane = j.pane;
     if (!hist.length) more.hidden = !j.more;
     hist = k || !hist.length || !done.length ? hist.concat(done.slice(k)) : done;
-    [tail, nlive, harness, spin] = [j.lines.slice(done.length), j.live, j.harness, !!j.status];
+    [tail, nlive, harness, spin, said, notes] = [j.lines.slice(done.length), j.live, j.harness, !!j.status, j.said, j.notices];
     $('.live').hidden = !j.status;
     if (j.status) $('.live').innerHTML = `<b>${esc([...j.status][0])}</b>${esc(j.status.slice([...j.status][0].length))}`;
     paint();
@@ -770,7 +802,7 @@ function open(e) {
   $('[data-op=close]').hidden = !other || nopair;
   $$('.pairf, .cf, .cmds').forEach(x => x.hidden = true);
   now.replaceChildren();
-  hist = []; tail = [];
+  hist = []; tail = []; said = null; notes = [];
   $('.live').hidden = true;
   say(rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other ? null : true);
   sh.className = 'sh';
@@ -778,6 +810,15 @@ function open(e) {
   poll();
   if (!other && !B.dataset.ro && !DEMO) cleanable();
   timer = setInterval(poll, 5000);
+}
+// #260: a Queue card's lane shows its Lanes row's `now:` line under it (that row's, as /live last drew it).
+function nows() {
+  $$('#queue .qls>.ql[data-agent]').forEach(q => {
+    const r = laneOf(q.dataset.agent), t = r ? r.querySelector('.act').textContent : '', n = q.nextElementSibling;
+    const x = n && n.matches('.qnow') ? n : null;
+    if (!t.startsWith('now: ')) return x && x.remove();
+    (x || q.insertAdjacentElement('afterend', el('span', 'qnow nw el m'))).textContent = t;
+  });
 }
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
 // first, then a sheet of its own; a gone lane shows its stored transcript, read-only. No transcript: a toast.
