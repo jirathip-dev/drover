@@ -115,6 +115,8 @@ pub struct Plan {
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
     pub head: String,
     pub title: String,
+    /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
+    pub resting: Option<(String, u64)>,
 }
 
 impl Plan {
@@ -202,7 +204,8 @@ pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
 
 pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Result<Plan> {
     let f = cfg.fleet(fleet)?;
-    let r = f.role(role)?;
+    let (r, resting) = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?;
+    let r = &r;
     let (agent, branch, base, worktree, brief, head) = {
         let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), issue));
         if st.as_ref().is_some_and(|s| s.state == "merged") {
@@ -282,6 +285,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         mcp_file,
         head,
         title,
+        resting,
     })
 }
 
@@ -558,6 +562,13 @@ pub fn spawn(
     let prior = events
         .iter()
         .rfind(|e| e.kind == "spawn" && e.str("worktree") == Some(&wt));
+    // #302: the lane before went unavailable (capped, signed out): its successor carries on, and says from what.
+    let unavailable =
+        |e: &Event, sp: &Event| e.issue == Some(issue) && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
+    let rest = |e: &&Event| matches!(e.kind.as_str(), "account-capped" | "agent-unavailable");
+    let chain = !f.role(role)?.fallback.is_empty();
+    let gone = prior.filter(|sp| chain && events.iter().filter(rest).any(|e| unavailable(e, sp)));
+    let entry = |h: Option<&str>, a: Option<&str>| [h, a].into_iter().flatten().collect::<Vec<_>>().join(":");
     if on.exists(&p.worktree) && prior.is_none() {
         if let Some(why) = dirty(r, &p.worktree) {
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
@@ -656,6 +667,7 @@ pub fn spawn(
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
+            .chain(gone.map(|_| carry_over(r, &wt)))
             .map(|t| format!("\n\n{t}"));
         (
             created,
@@ -707,6 +719,21 @@ pub fn spawn(
                 .map(|e| format!("{e:#}"))
         };
         if let Some(why) = why {
+            // #302: a harness[:account] that failed to start twice in a row rests (`[limits] fallback_rest_minutes`).
+            let mine = |k: &str, e: &Event| e.is(k, fleet, issue) && e.str("agent") == Some(&p.agent);
+            let acct = p.account.as_ref().map(|a| a.0.as_str());
+            let same = |e: &Event| e.str("harness") == Some(&p.harness) && e.str("account") == acct;
+            let twice = events
+                .iter()
+                .rev()
+                .take_while(|e| !mine("spawn", e))
+                .any(|e| mine("spawn-failed", e) && same(e));
+            let until = ctx.now + cfg.limits.fallback_rest_minutes * 60;
+            let kind = ["spawn-failed", "agent-unavailable"][usize::from(twice)];
+            let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start"});
+            if chain {
+                event(kind, d)?;
+            }
             // #236: on another host the half-made workspace goes too (nobody there would close it).
             if on.machine.is_some() {
                 let _ = herdr::workspace_close(r, ws);
@@ -741,7 +768,14 @@ pub fn spawn(
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
                 d["sha"] = json!(h);
             }
+            let until = p.resting.as_ref().map(|r| crate::usage::date(base, r.1, "+%H:%M"));
+            d["resting"] = json!(p.resting.as_ref().zip(until).map(|(r, t)| format!("{} {t})", r.0)));
+            let to = entry(d["harness"].as_str(), d["account"].as_str());
             event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
+            if let Some(sp) = gone {
+                let from = entry(sp.str("harness"), sp.str("account"));
+                event("fallback", json!({"agent": p.agent, "from": from, "to": to}))?;
+            }
             let confirmed = kicked?;
             // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
             if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
@@ -804,6 +838,18 @@ fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) 
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
     Ok(())
+}
+
+/// #302: the carry-over for a lane taking over from an unavailable one: its last commits and final message.
+fn carry_over(r: &dyn Runner, wt: &str) -> String {
+    let log = ok(r, "git", &["-C", wt, "log", "--oneline", "-5"]).unwrap_or_default();
+    let jsonl =
+        crate::lanes::session_file(&crate::config::home(), wt).and_then(|f| crate::lanes::read_tail(&f, 1 << 20));
+    let said = jsonl.and_then(|t| crate::lanes::said(&t).0.into_iter().rfind(|m| m["k"] == "ai"));
+    let said = said
+        .and_then(|m| Some(m["text"].as_str()?.to_string()))
+        .unwrap_or_default();
+    format!("Carry-over: the last lane on this issue stopped (its agent became unavailable). Its last commits:\n{log}\nIts final message:\n{said}\n\nContinue; don't redo.")
 }
 
 /// The `spawn` event's data for a lane of plan `p` running in `pane`.

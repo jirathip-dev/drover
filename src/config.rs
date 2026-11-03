@@ -190,6 +190,9 @@ pub struct Role {
     pub account: Option<String>,
     #[serde(default)]
     pub accounts: Vec<String>,
+    /// #302: ordered `harness[:account]` entries a lane carries on with when its agent is unavailable; empty = off.
+    #[serde(default)]
+    pub fallback: Vec<String>,
     /// MCP servers (by `.mcp.json` name) the lane gets; none by default.
     #[serde(default)]
     pub mcp: Vec<String>,
@@ -254,6 +257,8 @@ pub struct Limits {
     /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
+    /// #302: how long an unavailable agent rests when its message names no reset.
+    pub fallback_rest_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -316,6 +321,7 @@ impl Default for Limits {
             form_rounds: 3,
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
+            fallback_rest_minutes: 60,
         }
     }
 }
@@ -443,6 +449,13 @@ impl Config {
                 }
                 if let Some(a) = r.account_list().iter().find(|a| !c.accounts.names.contains_key(*a)) {
                     bail!("fleet.{name}.role.{role}: account '{a}' is not in [accounts]");
+                }
+                let bad = |e: &&String| {
+                    let (h, a) = e.split_once(':').unwrap_or((e, ""));
+                    !crate::harness::NAMES.contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
+                };
+                if let Some(e) = r.fallback.iter().find(bad) {
+                    bail!("fleet.{name}.role.{role}: fallback '{e}' is not harness[:account] ([accounts])");
                 }
                 if let Some(e) = r.effort_or(&c.limits) {
                     let ok = crate::harness::efforts(&r.harness);
