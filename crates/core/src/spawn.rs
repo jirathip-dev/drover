@@ -616,12 +616,15 @@ pub fn spawn(
         None => {}
     }
     if o.supersede && !dup.is_empty() {
-        for a in &live {
+        let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
+        let old = crate::hosts::On::of(base, was);
+        let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
+        for a in host::live_in(&host::agents(&old).unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
-                herdr::close(r, pane)?;
+                herdr::close(&old, pane)?;
             }
         }
-        crate::check::reap(ctx, cfg, r, (fleet, Some(issue)), &wt)?; // #186: before the new lane starts
+        crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         event(
             "supersede",
@@ -676,22 +679,32 @@ pub fn spawn(
             brief(f, issue, &p, title, &decided.fold(body.to_string(), |b, d| b + &d), fix),
         )
     };
-    let ws = created["result"]["workspace"]["workspace_id"]
-        .as_str()
-        .context("herdr: no workspace_id")?;
-    herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
+    let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);
+    let mut ws = wsid(created).context("herdr: no workspace_id")?;
+    herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
-    let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
+    // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
+    let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
+        Err(e) if format!("{e:#}").contains("workspace_not_found") => {
+            *ws = wsid(herdr::json(r, &create_argv(&local, &p, true))?).context("herdr: no workspace_id")?;
+            herdr::free_pane(r, ws, &p.worktree, None)
+        }
+        x => x,
+    };
+    let mut pane = pick(&mut ws, None)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
     herdr::ok(r, &home(p.lane_cmd(&pane)))?;
     let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
     if herdr::failed_with(&start, "agent_pane_busy") {
-        let lane = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane));
+        // #327: pane ids are per host: only a lane spawned on this one left this pane.
+        let lane = events
+            .iter()
+            .any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane) && e.str("machine") == on.machine);
         let closed = lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
         event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
-        pane = herdr::free_pane(r, ws, &p.worktree, Some(&pane))?;
+        pane = pick(&mut ws, Some(&pane))?;
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
@@ -738,7 +751,7 @@ pub fn spawn(
             }
             // #236: on another host the half-made workspace goes too (nobody there would close it).
             if on.machine.is_some() {
-                let _ = herdr::workspace_close(r, ws);
+                let _ = herdr::workspace_close(r, &ws);
                 bail!("{why}; closed workspace {ws}");
             }
             let _ = herdr::close(r, &pane);
@@ -759,7 +772,7 @@ pub fn spawn(
         let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
         let res = (|| -> Result<bool> {
             let kicked = h.kick(r, &p, &pane);
-            let mut d = lane_data(&p, &pane, ws);
+            let mut d = lane_data(&p, &pane, &ws);
             d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
