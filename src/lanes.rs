@@ -400,20 +400,24 @@ pub fn now(screen: &str) -> Option<String> {
     })
 }
 
-/// #260: a lane row's `now:` line: its session transcript's last tool call (in its last 256 KB), else the pane's.
-pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
+/// #260: a file's last `n` bytes as text (a session transcript is tens of MB; a cut first line fails to parse, skipped).
+pub fn read_tail(p: &std::path::Path, n: u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let tail = l.session().and_then(|p| {
-        let (mut f, mut b) = (std::fs::File::open(p).ok()?, vec![]);
-        let from = f.metadata().ok()?.len().saturating_sub(1 << 18);
-        f.seek(SeekFrom::Start(from)).and_then(|_| f.read_to_end(&mut b)).ok()?;
-        said(&String::from_utf8_lossy(&b)).1
-    });
-    tail.or_else(|| now(screen))
+    let (mut f, mut b) = (std::fs::File::open(p).ok()?, vec![]);
+    let from = f.metadata().ok()?.len().saturating_sub(n);
+    f.seek(SeekFrom::Start(from)).and_then(|_| f.read_to_end(&mut b)).ok()?;
+    Some(String::from_utf8_lossy(&b).into_owned())
+}
+
+/// #260: a lane row's `now:` line: its session transcript's current tool call (in its last 256 KB), else the pane's.
+pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
+    let tail = l.session().and_then(|p| read_tail(&p, 1 << 18));
+    tail.map_or_else(|| now(screen), |t| said(&t).1)
 }
 
 /// #260: a Claude session transcript (`.jsonl`): its prompts and each turn's final text reply as `{k: me | ai, text, at}`
-/// (masked; meta lines, tool results and `<…>` wrappers dropped), and its last tool call as a `now:` line.
+/// (masked; meta lines, tool results and `<…>` wrappers dropped), and its last tool call as a `now:` line (none once text
+/// follows it: the turn replied).
 pub fn said(jsonl: &str) -> (Vec<Value>, Option<String>) {
     let (mut out, mut now, keys) = (Vec::<Value>::new(), None, ["command", "file_path", "path", "pattern"]);
     for v in jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
@@ -431,6 +435,7 @@ pub fn said(jsonl: &str) -> (Vec<Value>, Option<String>) {
                 if k == "ai" && out.last().is_some_and(|l| l["k"] == "ai") {
                     out.pop();
                 }
+                now = None;
                 out.push(json!({"k": k, "text": mask(t), "at": v["timestamp"]}));
             }
         }

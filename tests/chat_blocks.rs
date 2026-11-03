@@ -201,7 +201,8 @@ console.log(JSON.stringify([ok, bad, run, diff]));
 fn a_session_transcript_keeps_prompts_and_final_replies() {
     let jsonl =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/session/claude.jsonl"));
-    let (said, now) = said(&jsonl.unwrap());
+    let jsonl = jsonl.unwrap();
+    let (said, now) = said(&jsonl);
     let got: Vec<(&str, &str)> = said
         .iter()
         .map(|s| (s["k"].as_str().unwrap(), s["text"].as_str().unwrap()))
@@ -216,6 +217,9 @@ fn a_session_transcript_keeps_prompts_and_final_replies() {
     );
     assert_eq!(said[1]["at"], "2026-11-03T10:05:00.000Z");
     assert_eq!(now.as_deref(), Some("now: running cargo test 2>&1 | tee t.log"));
+    // The turn's final reply after it: nothing is running now.
+    let done = r#"{"type": "assistant", "message": {"content": [{"type": "text", "text": "Tests pass."}]}}"#;
+    assert_eq!(herdsman::lanes::said(&format!("{jsonl}{done}\n")).1, None);
 }
 
 /// #260: the pane's `now:` line is its last tool line (prose `⏺` lines and status bars skipped), Claude and Hermes.
