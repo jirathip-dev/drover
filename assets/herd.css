@@ -27,12 +27,27 @@
 .hs{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-content:center;column-gap:var(--s2);height:calc(var(--ctl) + env(safe-area-inset-top));padding:env(safe-area-inset-top) calc(2 * var(--hit) + var(--s2)) 0 var(--s3);
   background:#1f2a38f0;line-height:var(--s4);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .hs p{margin:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hs .dots{letter-spacing:2px;color:#f4ecd8aa}
 .hs .sum{color:#f4ecd8bb;font-size:var(--fs-meta);line-height:var(--s3)}
+/* #291 switching without a touch screen: [‹] [›] at the scene's edges, mid-height (28 px, the 44 px ring), the repo dots
+   under it (a 28 px button each, 16 px apart, so every ring is its own 44 px); a mouse gets the hover and the pointer. */
+#herd .hnv{position:absolute;z-index:1;top:50%;left:var(--s2);translate:0 -50%;background:#1f2a38f0;color:#f4ecd8;cursor:pointer}
+#herd .hnx{left:auto;right:var(--s2)}
+#herd.one .hnv,#herd.one .hdt{display:none}
+.hdt{display:flex;justify-content:center;gap:var(--s4);margin:0;padding-top:var(--s2)}
+#herd .hdt button{padding:0;color:#f4ecd8;cursor:pointer}
+#herd .hdt button::before{content:"";position:static;padding:var(--s1);border-radius:50%;background:currentColor;opacity:.45}
+#herd .hdt button[aria-current]::before{opacity:1}
+/* A dot overrides the global [ ] brackets: ::before becomes the dot, drawn in flow (static); ::after keeps the global
+   inset (the 44 px hit area) but drops its "]". */
+#herd .hdt button::after{content:""}
+@media (hover:hover){#herd .hnv:hover,#herd .hdt button:hover{background:#f4ecd833}}
+#herd.drag{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .hn{padding:0 var(--s2)}.hn .ask{background:#2a1416ee;color:var(--fg)}
-.hr{position:relative;height:max(120px,22vh);height:max(120px,22svh);overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
+/* #292: the band is as tall as the scene at full width (`--ar`, herd.js tiles()) up to 22 % of the screen (#58); the tiles fill it. */
+.hr{position:relative;height:min(calc(100vw * var(--ar,.82)),max(120px,22vh));height:min(calc(100vw * var(--ar,.82)),max(120px,22svh));overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
 .hc{position:absolute;filter:blur(3px);will-change:transform}
-.hc svg{display:block;width:100%;height:auto}
+.hc svg{display:block;width:100%;height:100%}
+.rs svg:not(.t0) .moon{display:none}
 .rs{position:absolute;inset:0;width:100%;height:100%}
 .rs .gt{fill:none;stroke:var(--gs);stroke-opacity:.45;stroke-width:.8}
 .storm .rs{filter:brightness(.72) saturate(.8)}
@@ -50,6 +65,10 @@
 .hcap{position:fixed;z-index:2;left:0;right:0;bottom:0;margin:0;padding:0 var(--s2) env(safe-area-inset-bottom);background:#1f2a38;font-size:var(--fs-meta);line-height:var(--ctl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .hcap[data-fps]::after{content:" · " attr(data-fps)}
 .hb{padding-top:var(--s2)}
+/* #292: the ranch's grass fades into the pasture below it, no straight seam. */
+#herd:not(.heat) .hr::after{content:"";position:absolute;left:0;right:0;bottom:0;height:25%;pointer-events:none;background:linear-gradient(#0000,var(--bl,#a3ab68))}
+#herd:not(.heat) .hb{background:linear-gradient(var(--bl,#a3ab68),#0000 calc(3 * var(--s4)))}
+#herd.night{--bl:#4f665d}.fog2{--bl:#b2b9a2}
 .band h4{margin:0;padding:var(--s3) var(--s3) var(--s1);font-size:var(--fs);color:#f4ecd8;text-shadow:0 1px 2px #0008}
 .band h4 span{opacity:.8;font-weight:400}
 .b-blocked{background:#b3261e22}
@@ -89,6 +108,7 @@
 .kf1{opacity:var(--o1,1)}.kf2{opacity:var(--o2,0)}.ksteam{opacity:var(--steam,0)}
 #herd.heat{animation:kfr 1.2s infinite}
 @keyframes kfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+.lds{--f1:#ee7a22;--f2:#ffd15a;--steam:1} /* #305: the header's loading chef cooks at busy heat */
 .heat-calm{--f1:#3d7fd9;--f2:#9cc8ff}.heat-busy{--f1:#ee7a22;--f2:#ffd15a;--steam:1}.heat-held{--f1:#e04a1e;--f2:#ffb03a;--steam:1}
 .rs :is(.h-calm,.h-busy,.h-held){display:none}
 .heat-calm .rs .h-calm,.heat-busy .rs .h-busy,.heat-held .rs .h-held{display:inline}
@@ -98,3 +118,10 @@
 .hqh.n use{animation:var(--flutter,none);transform-box:view-box;transform-origin:50% 0}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
 @media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n use{animation:none}}
+/* #292 wide screens: the cards are a grid of equal columns from the rail's left edge, as wide as the page's widest line
+   (`--cw`, herd.js patch(); ellipsised past 520 px, the whole line in `title`); the bands sit closer. */
+@media (min-width:900px){
+  .field{display:grid;grid-template-columns:repeat(auto-fill,var(--cw,320px));justify-content:start;padding-left:calc(2 * var(--s1) + var(--s2))}
+  .hh{width:var(--cw,320px)}.hl{align-self:stretch;max-width:none}.hl>*{width:max-content;max-width:100%;align-self:center}
+  .band h4{padding-top:var(--s2)}
+}

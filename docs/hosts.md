@@ -14,8 +14,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
 2. On the new host, install and log in to:
    - herdr (its server running);
    - git;
-   - `gh` (`gh auth login`): the host clones each repo itself the first time a lane goes there
-     (`gh repo clone <repo> <local>`);
+   - `gh` (`gh auth login`): lanes there open their PRs with it;
+   - git access to each fleet repo: the host clones each repo itself the first time a lane goes there, with plain
+     `git clone https://github.com/<repo>.git <local>`, so its git config (`insteadOf`, credential helper) applies;
    - the agent harness (Claude Code logged in);
    - herdsman itself, then run `herdsman profiles sync` there. The lane's tool-guard hook calls `herdsman hook`, and
      the Claude profile lives under that host's own home.
@@ -135,10 +136,12 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
   starts `herdr server`).
 - **git**: `ssh <host> git ls-remote https://github.com/<repo>.git` works for each fleet whose needs the host fits.
   herdsman's own git over SSH never has the keychain, so HTTPS fails with `could not read Username for
-  'https://github.com'`. Fix: add the host's SSH key to GitHub and run
-  `git config --global url.git@github.com:.insteadOf https://github.com/` there.
+  'https://github.com'`. A failure reads `✗ git <fleet> — can't reach <repo>: <first error line>` and keeps only
+  that fleet's lanes off the host; placement moves them to the next host. Fix: add the host's SSH key to GitHub
+  and run `git config --global url.git@github.com:.insteadOf https://github.com/` there.
 - **gh** and **claude**: `gh auth status` and `claude auth status` succeed inside a herdr pane on the host (a
-  throwaway `herdsman-health` workspace, closed again). Fix: log in from a pane there.
+  throwaway `herdsman-health` workspace, closed again). Lanes there need `gh` for their PRs, so `gh` logged out is
+  a red host problem. Fix: `ssh <host> gh auth login` for gh; for claude, log in from a pane there.
 - **herdsman**: `herdsman --version` there prints the same version and git sha as on the main host. A mismatch is
   a warning (amber), not a failure.
 
@@ -146,7 +149,7 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 When `check` sees an older herdsman on a remote host, and fleet.toml has the herdsman fleet, it rebuilds the main
 host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
-`cargo install --path . --locked --root <root> --force` in that fleet's checkout on the host, then
+`cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
 `herdsman profiles sync`. Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
 logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
 A host still on the old version stays amber. A failed update never blocks the main host.
@@ -155,6 +158,47 @@ A host still on the old version stays amber. A failed update never blocks the ma
 
 Nothing new starts. Lanes on other hosts keep running in their own herdr servers. When the main host comes back,
 `check` finds those lanes again from the log. To move the main host, follow docs/move.md.
+
+## Cloud hosts (#254)
+
+A cloud host is a `[hosts.<name>]` with a `cloud` recipe. herdsman starts it when a lane needs it and stops it when idle.
+
+```toml
+[hosts.boat1]
+machine = "boat1"          # the ssh alias herdsman writes, and the herdr machine label
+cloud = "boat"             # the built-in recipe; or <config>/recipes/<name>.toml
+size = "small"             # a key of the recipe's [rate_usd_hour]
+budget_usd_month = 50      # hard: none set means 0, so it never starts
+max_hours_day = 6          # optional
+idle_stop_minutes = 20     # the default
+tags = ["docker"]
+
+[limits]
+overflow_after_minutes = 10  # the default
+```
+
+- **The recipe** is a TOML file of `sh -c` templates: `create`, `start`, `stop`, `status` (prints `running` when up),
+  `address` (prints `user@host port`, then the host key line), `destroy`. It also sets `key_env`, the provider key's
+  variable, and `[rate_usd_hour]` per size. `{name}` is the host's name and `{size}` its size. The built-in `boat`
+  recipe is assets/recipes/boat.toml. Check its commands and rates against docs.boat.dev, and copy it to
+  `<config>/recipes/boat.toml` to change them.
+- **The provider key** is read on the main host from the environment, else from `[accounts].accounts_env`. Each
+  command gets it on stdin and exports it. It never appears in argv, fleet.toml or the event log.
+- **Start on demand.** Placement uses a stopped cloud host in two cases: every local host has been refused (busy, low
+  memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has. A respawn on a lane's
+  own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
+  It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
+  (`~/.ssh/config.d/herdsman-<name>.known`) from `address`, and then spawns. A dry run never starts a host. Add
+  `Include config.d/*` at the top of `~/.ssh/config` once.
+- **Idle stop.** `check` stops a running cloud host after `idle_stop_minutes` with no live agent on it. First, each
+  lane worktree there with unpushed or dirty work is pushed to `wip/<host>-<lane>`, after the secret scan. A secret
+  or a failed push aborts the stop (logged `cloud-abort`). The disk is kept. Lanes there show `paused: cloud host
+  stopped` on the Host card, and their next spawn starts the host again.
+- **Spend** is the running time (`cloud-start` → `cloud-stop` in the log) × the size's rate, per UTC month and day.
+  The Host card shows `spent $12 of $50 · 3.1 h today of 6`, the address age and the last start and stop. The row
+  turns amber at 80 % and red at the limit. At the limit, placement refuses `CLOUD_BUDGET` and `check` stops a running
+  host (after the wip save). Only an owner edit to fleet.toml raises a limit.
+- **Destroy** is owner only: `herdsman host destroy <name>` does the wip save, then runs the recipe's `destroy`.
 
 ## Limits
 

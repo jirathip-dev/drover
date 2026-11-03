@@ -369,6 +369,36 @@
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
       if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
     },
+    // #305 gate 2: [↻] busy in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still` with reduced motion
+    // forced): the header and the control keep their boxes (28 px, the 44 px tap is measure()'s); farm and kitchen run their
+    // `loading` sprite 24 px over the hidden glyph, terminal spins ↻; reduced motion: one still frame. A strip under the
+    // header holds its first four frames (8 fps: 0, 125, 250, 375 ms) for the shot.
+    loading: () => {
+      tab('queue');
+      const box = () => [rf, rf.firstChild, $('header')].map(e => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); }).join(' ');
+      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches, svg = rf.querySelector('svg');
+      if (rf.matches('.spin') || seen(svg)) early.push('[↻] busy before the refresh');
+      busy = true;
+      sync('a');
+      if (box() !== idle) early.push(`[↻] busy moved: ${idle} → ${box()}`);
+      if (V === 'loading-still' && !still) early.push('reduced motion not forced');
+      const t = document.documentElement.dataset.theme, cs = getComputedStyle(svg), spin = getComputedStyle(rf.firstChild);
+      if (t === 'terminal') {
+        if (rf.matches('.ld') || seen(svg) || !seen(rf.firstChild) || spin.animationName !== (still ? 'none' : 's')) early.push(`terminal: not the spinning ↻ (sprite ${seen(svg)}, ↻ ${spin.animationName})`);
+        return;
+      }
+      const r = svg.getBoundingClientRect();
+      if (!rf.matches('.ld') || !$('#hload') || !seen(svg) || seen(rf.firstChild)) early.push(`${t}: no loading sprite in [↻] (#hload ${!!$('#hload')})`);
+      if (Math.round(r.width) !== 24 || Math.round(r.height) !== 24) early.push(`${t}: loading sprite ${r.width}×${r.height}, not 24×24`);
+      if (cs.animationName !== (still ? 'none' : 'ldg, ldk')) early.push(`${t}: loading animation ${cs.animationName}`);
+      const strip = B.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);display:flex;gap:var(--s2);padding:var(--s1);background:var(--card);pointer-events:none' }));
+      [0, 1, 2, 3].forEach(i => {
+        const c = strip.appendChild(svg.cloneNode(true));
+        c.style.cssText += ';position:static;visibility:visible;animation:' + cs.animation;
+        c.getAnimations().forEach(a => { a.pause(); a.currentTime = i * 125; });
+      });
+    },
+    'loading-still': () => VIEWS.loading(),
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.
@@ -408,6 +438,39 @@
       if (!H.matches('.night.storm')) early.push(`#herd is "${H.className}", not night and storm`);
     },
     'herd-scroll': () => herd(true),
+    // #291 gate 2: 3 repos; [›], a dot, →, a horizontal wheel (one gesture of three events), shift+wheel and a mouse drag
+    // across a horse each move exactly one repo; a vertical wheel and a drag in a text field none; the drag's click opens nothing, a plain click does.
+    'herd-nav': async () => {
+      herd(true); light = 'day'; ranch();
+      await new Promise(r => setTimeout(r, 500));
+      const f = structuredClone(data);
+      f.fleets = f.fleets.slice(0, 3); f.others = [];
+      herdData(f);
+      const wh = o => PG.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ...o }));
+      const pe = (t, el, x) => el.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, buttons: t === 'pointerup' ? 0 : 1, clientX: x, clientY: 400 }));
+      const steps = [['[›]', 1, () => hp(0).querySelector('.hnx').click()], ['the next dot', 1, () => hp(0).querySelectorAll('.hdt button')[1].click()],
+        ['→', 1, () => B.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))],
+        ['a horizontal wheel', 1, () => [50, 50, 50].forEach(x => wh({ deltaX: x }))], ['a vertical wheel', 0, () => wh({ deltaY: 120 })],
+        ['shift+wheel', 1, () => wh({ deltaY: 100, shiftKey: true })],
+        ['a drag in a text field', 0, () => { const i = hp(0).appendChild(document.createElement('input')); pe('pointerdown', i, 300); [280, 240, 200].forEach(x => pe('pointermove', i, x)); pe('pointerup', i, 200); i.remove(); }],
+        ['a mouse drag', 1, () => { const h = H.querySelector('.hh'); pe('pointerdown', h, 300); [280, 240, 200].forEach(x => pe('pointermove', h, x)); pe('pointerup', h, 200); h.click(); }]];
+      // Reduced motion (the gate run): each switch lands at once; else after the smooth scroll. A step waits out a wheel gesture.
+      for (const [what, want, run] of steps) {
+        PG.scrollTo({ left: 0, behavior: 'instant' });
+        await new Promise(r => setTimeout(r, 350));
+        run();
+        if (!still.matches) await new Promise(r => setTimeout(r, 900));
+        const got = Math.round(PG.scrollLeft / PG.clientWidth);
+        if (got !== want) early.push(`${what}: on repo ${got}, not ${want}${still.matches ? ' at once (reduced motion)' : ''}`);
+      }
+      if (shown()) early.push('the click ending a drag opened a lane');
+      if (getSelection().toString()) early.push(`the drag selected "${getSelection()}"`);
+      H.querySelector('.hh').click();
+      if (!shown()) early.push('a plain click on a horse opened nothing');
+      close();
+      hide();
+      $$('.hnv, .hdt button').forEach(b => { if (getComputedStyle(b).cursor !== 'pointer') early.push(`${label(b)}: cursor ${getComputedStyle(b).cursor}`); });
+    },
     'queue-scroll': () => { tab('queue'); $$('#queue details.q').forEach(d => { d.open = true; }); },
     // #66: a fixture ▲ POST (the redirect a live server sends), through the page's fetch-submit path;
     // #140: then [Drive now], which must toast too and never navigate.
@@ -438,7 +501,7 @@
   }
   let toasted = null, drove = null, href = null;
   const dragged = [];
-  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
+  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
   const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px

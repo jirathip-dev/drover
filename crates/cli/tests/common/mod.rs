@@ -1,0 +1,317 @@
+#![allow(dead_code)]
+use herdsman::runner::{Out, Runner};
+use herdsman::Ctx;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+pub const CONFIG: &str = r#"# fleet config (test)
+[fleet.sendmeter]
+repo = "jirathip-dev/sendmeter"
+local = "/tmp/does-not-matter/sendmeter"
+integration = "staging"   # never main
+
+[fleet.sendmeter.role.impl]
+harness  =  "hermes"    # toggled in tests
+profile = "fleet-impl"
+model = "opus"
+
+[fleet.sendmeter.role.rev]
+harness = "hermes"
+profile = "fleet-rev"
+
+[limits]
+review_rounds = 3
+stall_minutes = 30
+"#;
+
+/// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).
+#[derive(Default)]
+pub struct Shared<T>(RwLock<T>);
+
+impl<T: Copy> Shared<T> {
+    pub fn new(v: T) -> Self {
+        Shared(RwLock::new(v))
+    }
+    pub fn get(&self) -> T {
+        *self.borrow()
+    }
+    pub fn set(&self, v: T) {
+        *self.borrow_mut() = v;
+    }
+}
+
+impl<T> Shared<T> {
+    pub fn borrow(&self) -> RwLockReadGuard<'_, T> {
+        self.0.read().unwrap()
+    }
+    pub fn borrow_mut(&self) -> RwLockWriteGuard<'_, T> {
+        self.0.write().unwrap()
+    }
+}
+
+/// Scripted fake: one-shot replies (`once`) are consumed first, in order; then the
+/// first reply whose prefix matches the command line wins; unscripted commands
+/// fail with exit 1. `sleep` is recorded as a `sleep <secs>` call and returns at once.
+#[derive(Default)]
+pub struct Fake {
+    pub calls: Shared<Vec<String>>,
+    pub replies: Vec<(String, Out)>,
+    pub onces: Shared<Vec<(String, Out)>>,
+}
+
+impl Fake {
+    pub fn reply(mut self, prefix: &str, stdout: &str) -> Self {
+        self.replies.push((
+            prefix.into(),
+            Out {
+                code: 0,
+                stdout: stdout.into(),
+                stderr: String::new(),
+            },
+        ));
+        self
+    }
+    pub fn once(self, prefix: &str, code: i32, stdout: &str) -> Self {
+        self.onces.borrow_mut().push((
+            prefix.into(),
+            Out {
+                code,
+                stdout: stdout.into(),
+                stderr: String::new(),
+            },
+        ));
+        self
+    }
+    pub fn once_err(self, prefix: &str, code: i32, stderr: &str) -> Self {
+        self.onces.borrow_mut().push((
+            prefix.into(),
+            Out {
+                code,
+                stdout: String::new(),
+                stderr: stderr.into(),
+            },
+        ));
+        self
+    }
+    pub fn called(&self, prefix: &str) -> bool {
+        self.calls.borrow().iter().any(|c| c.starts_with(prefix))
+    }
+    pub fn count(&self, prefix: &str) -> usize {
+        self.calls.borrow().iter().filter(|c| c.starts_with(prefix)).count()
+    }
+    pub fn index(&self, prefix: &str) -> Option<usize> {
+        self.calls.borrow().iter().position(|c| c.starts_with(prefix))
+    }
+}
+
+impl Runner for Fake {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        self.calls.borrow_mut().push(line.clone());
+        let mut onces = self.onces.borrow_mut();
+        if let Some(i) = onces.iter().position(|(p, _)| line.starts_with(p.as_str())) {
+            return Ok(onces.remove(i).1);
+        }
+        for (p, o) in &self.replies {
+            if line.starts_with(p.as_str()) {
+                return Ok(o.clone());
+            }
+        }
+        if line.starts_with("gh api graphql") {
+            return Ok(open_prs(&mut onces, &self.replies));
+        }
+        Ok(Out {
+            code: 1,
+            stdout: String::new(),
+            stderr: format!("unscripted: {line}"),
+        })
+    }
+    fn sleep(&self, secs: u64) {
+        self.calls.borrow_mut().push(format!("sleep {secs}"));
+    }
+}
+
+/// #246: the batched open-PR read, built from the `gh pr view <branch>` stubs (a `once` is spent, as one read was):
+/// one JSON line per PR, `headRefName` the stub's branch.
+fn open_prs(onces: &mut Vec<(String, Out)>, replies: &[(String, Out)]) -> Out {
+    fn branch(p: &str) -> Option<&str> {
+        p.strip_prefix("gh pr view ")
+            .map(str::trim)
+            .filter(|b| b.starts_with("issue-"))
+    }
+    let mut seen: Vec<(String, Out)> = vec![];
+    onces.retain(|(p, o)| match branch(p) {
+        Some(b) if !seen.iter().any(|s| s.0 == b) => {
+            seen.push((b.into(), o.clone()));
+            false
+        }
+        _ => true,
+    });
+    for (p, o) in replies {
+        if let Some(b) = branch(p).filter(|b| !seen.iter().any(|s| s.0 == *b)) {
+            seen.push((b.into(), o.clone()));
+        }
+    }
+    let line = |(b, o): (String, Out)| {
+        let mut v: serde_json::Value = serde_json::from_str(&o.stdout).ok().filter(|_| o.code == 0)?;
+        v.as_object()?;
+        v["headRefName"] = b.into();
+        Some(format!("{v}\n"))
+    };
+    Out {
+        stdout: seen.into_iter().filter_map(line).collect(),
+        ..Out::default()
+    }
+}
+
+/// `herdr agent list` JSON for (name, status, cwd, pane) rows.
+pub fn agents(rows: &[(&str, &str, &str, &str)]) -> String {
+    let list: Vec<_> = rows
+        .iter()
+        .map(|(n, s, cwd, p)| serde_json::json!({"name": n, "agent_status": s, "cwd": cwd, "pane_id": p}))
+        .collect();
+    serde_json::json!({"result": {"agents": list}}).to_string()
+}
+
+pub const NO_AGENTS: &str = r#"{"result":{"agents":[]}}"#;
+
+pub fn tmpdir(name: &str) -> PathBuf {
+    static N: AtomicU32 = AtomicU32::new(0);
+    let d = std::env::temp_dir().join(format!(
+        "fleet-test-{name}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+pub fn ctx(dir: &Path, config: &str) -> Ctx {
+    let cfgdir = dir.join("config");
+    std::fs::create_dir_all(&cfgdir).unwrap();
+    std::fs::write(cfgdir.join("fleet.toml"), config).unwrap();
+    Ctx {
+        config: cfgdir.join("fleet.toml"),
+        state: dir.join("state/events.jsonl"),
+        worktrees: dir.join("worktrees"),
+        hermes: dir.join("hermes"),
+        exe: "/opt/herdsman/bin/herdsman".into(),
+        now: 1_000_000,
+        home: dir.join("home"),
+        hints: vec![],
+    }
+}
+
+pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
+    let mut out = Vec::new();
+    let mut argv = vec!["herdsman".to_string()];
+    argv.extend(args.iter().map(|s| s.to_string()));
+    let code = herdsman::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
+    (code, String::from_utf8(out).unwrap())
+}
+
+/// `swift` for tests/support/webview.swift, its page based at a local server of serve's `/a/<hash>/`
+/// assets (#57: the page links them; a same-origin base lets herd.js fetch horses.svg).
+pub fn swift() -> std::process::Command {
+    static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let base = BASE.get_or_init(|| {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (c, r) = (ctx(&tmpdir("assets"), CONFIG), Fake::default());
+            let s = herdsman::serve::Server::new(&c, &r, None);
+            for mut st in l.incoming().flatten() {
+                let mut buf = [0u8; 4096];
+                let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
+                let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), 1));
+            }
+        });
+        base
+    });
+    let mut c = std::process::Command::new("swift");
+    c.env("HERDSMAN_BASE", base);
+    c
+}
+
+/// #59: pair a browser at `now` as the page does (Pair → `serve approve <code>` → claim): its `Cookie:` line.
+pub fn pair(s: &herdsman::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
+    let post = |path: &str, extra: &str| {
+        String::from_utf8_lossy(&s.respond(
+            &format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: 0\r\n\r\n"),
+            now,
+        ))
+        .into_owned()
+    };
+    let res = post("/pair/request", &format!("User-Agent: {ua}\r\n"));
+    assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
+    let code = res.rsplit("\r\n\r\n").next().unwrap().trim().to_string();
+    let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap();
+    let cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
+    let (rc, out) = run(
+        &Ctx { now, ..c.clone() },
+        &Fake::default(),
+        &["serve", "approve", &code],
+    );
+    assert_eq!(rc, 0, "{out}");
+    let res = post("/pair/claim", &cookie);
+    assert!(
+        res.starts_with("HTTP/1.1 200 OK") && res.contains("Max-Age=31536000"),
+        "{res}"
+    );
+    cookie
+}
+
+/// #138 gate 2: a sheet with every block type: you, assistant prose with markdown, a status line, a passing and a
+/// failing tool run (capped, with its tail), a diff with long lines, the gap line, a running call and the live line.
+pub fn chat_fixture() -> serde_json::Value {
+    let g = |s: &str| format!("\x1b[38;2;153;153;153m{s}\x1b[0m");
+    let mut l = vec![
+        "❯ Read ~/.herdr/worktrees/acme/issue-7/.brief.md and execute it fully.".to_string(),
+        g("  Read 1 file, ran 3 shell commands"),
+        "⏺ I read the brief. The overlap check skips **merged** issues only, so a closed one still counts.".into(),
+        "⏺ Bash(cargo test --locked)".into(),
+        "  ⎿  test result: \x1b[38;2;80;200;80mok\x1b[0m. 218 passed; 0 failed".into(),
+        herdsman::lanes::GAP.into(),
+        "⏺ # Plan".into(),
+        "  Base is green. The bug is in `src/overlap.rs`: the list keeps every issue that is not **merged**.".into(),
+        "  1. Swap `s.state != \"merged\"` for `!s.done()`, which the board already uses everywhere.".into(),
+        "  2. Run the gates: `cargo test`, `cargo fmt --check`, `cargo clippy --all-targets --locked`.".into(),
+        "  - the merge path and its refusal codes stay as they are".into(),
+        "⏺ Update(src/overlap.rs)".into(),
+        "  ⎿  Updated src/overlap.rs with 1 addition and 1 removal".into(),
+        "      49      git(r, &dir, &[\"fetch\", \"-q\", \"origin\"])?;".into(),
+        "      52 \x1b[48;2;61;1;0m-        .filter(|s| s.fleet == fleet && \x1b[48;2;92;2;0ms.state != \"merged\"\x1b[48;2;61;1;0m && s.issue != 0 && s.lane.is_some())\x1b[0m".into(),
+        "      52 \x1b[48;2;2;40;0m+        .filter(|s| s.fleet == fleet && \x1b[48;2;4;71;0m!s.done()\x1b[48;2;2;40;0m && s.issue != 0 && s.lane.is_some())\x1b[0m".into(),
+        "\x1b[38;2;255;107;128m⏺\x1b[0m Bash(cargo test --locked overlap -- --nocapture --test-threads=1 2>&1 | tee /tmp/a-very-long-log-name.log)".into(),
+        "  ⎿  Error: Exit code 101".into(),
+    ];
+    l.extend((0..26).map(|i| format!("     test overlap::tests::case_{i} ... \x1b[38;2;80;200;80mok\x1b[0m")));
+    l.push("     thread 'overlap::tests::skips_closed' panicked at src/overlap.rs:214:9: assertion `left == right` failed: a closed issue's branch is not in flight".into());
+    l.push("     test result: \x1b[38;2;220;90;90mFAILED\x1b[0m. 26 passed; 1 failed".into());
+    l.push(g("  Ran 2 shell commands"));
+    l.push(
+        "⏺ Bash(L=~/scratchpad; cargo build --release --locked >$L/build.log 2>&1; echo build=$?; cargo fmt --check)"
+            .into(),
+    );
+    serde_json::json!({"harness": "claude", "acts": ["stop", "kill", "clean"], "lines": l, "live": 1,
+        "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
+}
+
+/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the
+/// same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all]
+/// pressed, or all collapsed.
+pub fn chat_scene(open: bool) -> String {
+    let fx = chat_fixture();
+    format!(
+        "window.fetch = async u => u.includes('lane') ? new Response({j}) : new Response('', {{status: 404}}); \
+         open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]')); snap('full'); \
+         full = true; hist = {l}.slice(0, -1); tail = {l}.slice(-1); harness = 'claude'; spin = true; paint(); \
+         $('.live').hidden = false; $('.live').innerHTML = '<b>✽</b> Gusting… (2m 47s · ↓ 1.8k tokens)'; \
+         document.querySelectorAll('.blk').forEach(d => d.open = {open}); \
+         if ({open}) document.querySelectorAll('.more2 button').forEach(b => b.click())",
+        j = serde_json::to_string(&fx.to_string()).unwrap(),
+        l = fx["lines"]
+    )
+}

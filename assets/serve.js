@@ -590,7 +590,7 @@ B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=
 <p class=st></p></div></div>`);
 if (DEMO) sync();
 const S = $('#sheet'), shown = () => S.classList.contains('on'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
-let agent = null, timer = 0, nopane = false, opane = null;
+let agent = null, timer = 0, nopane = false, opane = null, spane = null;
 // The Lanes row of `agent` (its sheet card), from the needs-you cards and the herd.
 const laneOf = agent => [...$$('.lane')].find(l => l.dataset.agent === agent);
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text || '' });
@@ -712,7 +712,8 @@ function tidy(root) {
 }
 tidy(document);
 nows();
-rf.innerHTML = '<i>↻</i>';
+// #305: the theme's `loading` sprite (herd.js builds #hload and sets .ld), drawn in the ↻'s place while it spins.
+rf.innerHTML = '<i>↻</i><svg class=lds viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hload"/></svg>';
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
 // you (a typed prompt), the assistant (prose), a tool run (`⏺ Name(…)`/`•`/`$`/`┊` plus its `⎿`/indented output),
 // status (a line all in grey: `Ran 2 shell commands`), and the gap line where the rolling transcript missed lines.
@@ -833,7 +834,7 @@ function blocks(lines, harness, busy) {
       const body = [g.head, ...g.lines], pv = esc(head.replace(/^[⏺❯›>•]\s*(#+\s+)?/, ''));
       return { key, k: g.k, open: true, html: `<details class="blk ${g.k}">${sum(g.k === 'me' ? 'you' : esc(harness || 'agent'), `<span class=pv>${pv}</span>`)}<div class=md>${prose(body)}</div></details>` };
     }
-    const m = /^(?:[⏺•]\s*(\w+)\((.*?)\)?(\s+·.*)?|(?:┊\s*)?(?:💻\s*)?(\$|terminal)?\s*(.*))$/.exec(head);
+    const m = /^(?:[⏺•]\s*(\w+)\((.*?)\)?(\s+·.*)?|(?:┊\s*)?(?:💻\s*)?(\$|terminal)?\s*(.*))$/s.exec(head);
     const name = m[1] || (m[4] ? '$' : ''), shell = !name || /^(\$|Bash|Shell|terminal)$/.test(name);
     const cmd = m[1] ? m[2] : m[5], text = g.lines.map(plain).join('\n'), dot = runs(g.head).find(r => r[0].trim());
     const fail = !!dot && /\bt-r\b/.test(dot[1]), code = /exit code (\d+)/i.exec(text);
@@ -842,13 +843,16 @@ function blocks(lines, harness, busy) {
   });
 }
 // #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
-// verdict, merged). From `said` (Claude's session transcript, `[{k: me | ai, text, at}]`) in time order, else the pane's
-// role runs: you, and the last assistant run before each prompt (the notices first: pane lines have no times).
+// verdict, merged). #315 screen-first: the pane's role runs (you, and the last assistant run before each prompt; none:
+// every block), the notices first (pane lines have no times); `said` (Claude's session transcript, `[{k: me | ai, text,
+// at}]`), when it has a message, is an enhancement in time order. A Claude lane without one says so in a line.
 function matters(lines, said, notices, harness) {
-  const ns = (notices || []).map(n => ({ key: 'n:' + n.at + ':' + n.text, k: 'note', at: n.at * 1000, html: `<p class="qs note">${esc(n.text)}</p>` }));
-  if (!said) {
+  const note = (key, t, at) => ({ key, k: 'note', at, html: `<p class="qs note">${esc(t)}</p>` });
+  const ns = (notices || []).map(n => note('n:' + n.at + ':' + n.text, n.text, n.at * 1000));
+  if (!said || !said.length) {
     const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
-    return ns.concat(bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i)));
+    const rs = bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i));
+    return (harness === 'claude' ? [note('n:none', 'no transcript on this host yet')] : []).concat(ns, rs.length ? rs : bs);
   }
   const say = s => {
     const ls = s.text.split('\n'), who = s.k === 'me' ? 'you' : esc(harness || 'agent'), pv = esc(ls[0].replace(/^#+\s+/, ''));
@@ -878,7 +882,10 @@ fv.onclick = () => {
 const store = () => { try { return JSON.parse(sessionStorage.getItem('chat:' + agent)) || {}; } catch (e) { return {}; } };
 function paint() {
   const seen = new Map([...now.children].map(n => [n.dataset.k, n])), keep = store(), end = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 8;
-  const bs = full ? blocks(hist.concat(tail), harness, spin) : matters(hist.concat(tail), said, notes, harness);
+  const ls = hist.concat(tail);
+  let bs;
+  // #315: a view that fails to draw falls back to the pane view; neither is blank while the pane has lines.
+  try { bs = full ? blocks(ls, harness, spin) : matters(ls, said, notes, harness); } catch (e) { console.warn('chat', e); bs = blocks(ls, harness, spin); }
   now.replaceChildren(...bs.map(b => {
     const n = seen.get(b.key);
     if (n && n.dataset.h === b.html) return n;
@@ -891,7 +898,16 @@ function paint() {
   }));
   if (end) chat.scrollTop = chat.scrollHeight;
 }
+// #303: a setup terminal's screen (masked), an [open] link per printed login URL; closed: the reply box goes.
+async function spoll() {
+  const r = await fetch(R + 'lane?setup=' + encodeURIComponent(spane)).catch(() => null);
+  if (r && r.status === 401) unpaired();
+  const j = r && r.ok ? await r.json() : { closed: true, lines: [] };
+  now.innerHTML = `<pre class=out>${j.lines.map(esc).join('\n')}</pre>` + (j.urls || []).map(u => `<p><a href="${esc(u)}" target=_blank rel=noopener>[open]</a> <span class=m>${esc(u.slice(0, 48))}…</span></p>`).join('');
+  if (j.closed) { clearInterval(timer); $('.reply').hidden = true; say('sign-in closed', null); }
+}
 async function poll() {
+  if (spane) return spoll();
   // #83: a lane with no pane has no transcript to read.
   if (nopane) return now.replaceChildren(el('p', 'm', 'no pane: the transcript closed with it'));
   try {
@@ -965,13 +981,15 @@ async function cleanable() {
 function open(e) {
   agent = e.dataset.agent;
   opane = null;
+  spane = e.dataset.setup || null;
   const top = $('.top');
   top.innerHTML = e.querySelector('.card').innerHTML;
   top.scrollTop = 0;
   $('.hd b').textContent = agent;
   const rev = e.dataset.role === 'rev';
   $('.reply').hidden = !!B.dataset.ro || rev;
-  $('.acts').hidden = !!B.dataset.ro;
+  $('.acts').hidden = !!B.dataset.ro || !!spane;
+  $('.fvr').hidden = !!spane;
   // #83: a lane with no pane has nothing to stop or kill; #95: an Others agent is no lane, only its pane closes.
   nopane = 'gone' in e.dataset;
   const other = e.dataset.role === 'other';
@@ -982,11 +1000,11 @@ function open(e) {
   now.replaceChildren();
   hist = []; tail = []; said = null; notes = [];
   $('.live').hidden = true;
-  say(rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other ? null : true);
+  say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other || spane ? null : true);
   sh.className = 'sh';
   show(kb() ? 'full' : 'mid');
   poll();
-  if (!other && !B.dataset.ro && !DEMO) cleanable();
+  if (!other && !spane && !B.dataset.ro && !DEMO) cleanable();
   timer = setInterval(poll, 5000);
 }
 // #260: a Queue card's lane shows its Lanes row's `now:` line under it (that row's, as /live last drew it).
@@ -998,6 +1016,20 @@ function nows() {
     (x || q.insertAdjacentElement('afterend', el('span', 'qnow nw el m'))).textContent = t;
   });
 }
+// #303: [sign in ▾] on a host card: the host starts that configured login by name in a pane; its sheet shows the screen.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-su]');
+  if (!b) return;
+  const r = await post('setup', { host: b.dataset.host, name: b.dataset.su }), m = (await r.text()).trim();
+  if (r.status === 401) unpaired();
+  if (!r.ok) return toast(m);
+  const x = el('div');
+  x.innerHTML = '<div class=card><p class="nw el"></p></div>';
+  x.querySelector('p').textContent = `sign in: ${b.dataset.su} on ${b.dataset.host}; closes when it exits or in 10 min`;
+  Object.assign(x.dataset, { agent: 'sign in · ' + b.dataset.su, role: 'setup', setup: m });
+  b.closest('details').open = false;
+  open(x);
+});
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
 // first, then a sheet of its own; a gone lane shows its stored transcript, read-only. No transcript: a toast.
 async function byName(q) {
@@ -1264,7 +1296,7 @@ chat.addEventListener('touchstart', e => {
 }, { passive: true });
 $('.reply').onsubmit = async e => {
   e.preventDefault();
-  const r = await post('send', { agent, text: e.target.text.value });
+  const r = await post('send', spane ? { setup: spane, text: e.target.text.value } : { agent, text: e.target.text.value });
   const msg = (await r.text()).trim();
   if (r.status === 401) unpaired();
   say(msg, r.ok);

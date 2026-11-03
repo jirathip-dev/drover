@@ -262,7 +262,7 @@ open/closed holds for the browser session until the group's status changes (`ses
 Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %, amber to 100 %, red past it with
 `▶` and the percentage); memory's and disk's bars show the used part (`free 12 GB of 228`), their status from the
 floor (`min_free_mem_gb`, `min_free_gb`). The words
-come from one table in `src/serve.rs` (`WORDS`, golden-tested in tests/host_words.rs). The tab bar is
+come from one table in `crates/server/src/serve.rs` (`WORDS`, golden-tested in crates/cli/tests/host_words.rs). The tab bar is
 `[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
 
 ## Static export and the public demo
