@@ -640,7 +640,8 @@ function tidy(root) {
 }
 tidy(document);
 nows();
-rf.innerHTML = '<i>↻</i>';
+// #305: the theme's `loading` sprite (herd.js builds #hload and sets .ld), drawn in the ↻'s place while it spins.
+rf.innerHTML = '<i>↻</i><svg class=lds viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hload"/></svg>';
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
 // you (a typed prompt), the assistant (prose), a tool run (`⏺ Name(…)`/`•`/`$`/`┊` plus its `⎿`/indented output),
 // status (a line all in grey: `Ran 2 shell commands`), and the gap line where the rolling transcript missed lines.
