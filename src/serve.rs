@@ -2625,7 +2625,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
 
 /// #241: a valid theme.json with what it lacks filled in (docs/themes.md): an action is the theme's own, else its
 /// pose's sprite, else farm's; a row sprite its action's; the rail item its idle action, the needs variant the item;
-/// the rest farm's, key by key.
+/// `loading` only the theme's own; the rest farm's, key by key.
 pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     let mut t = farm.clone();
@@ -2645,6 +2645,7 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
         }
     }
     t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
+    t["loading"] = own.get("loading").cloned().unwrap_or_default(); // #305: none is the spinning ↻, never farm's
     t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
     t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
     t

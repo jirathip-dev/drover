@@ -312,7 +312,8 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         ctx.worktrees.clone()
     };
     let root = cfg.hosts.get(name).and_then(|h| h.root.as_deref());
-    let sick = seen.health.iter().find(|w| w.starts_with('✗'));
+    let reach = format!("can't reach {}:", f.repo); // #307: a repo only keeps its own fleet's lanes off
+    let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
     let (hs, refusal) = match cloud.map_or_else(|| host::agents(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("NO_HOST", "unreachable".to_string()))),
@@ -365,15 +366,15 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     for (name, f) in cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t))) {
         let url = format!("https://github.com/{}.git", f.repo);
         let fix = "add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`";
-        fail(
-            ok(on, "git", &["ls-remote", &url, "HEAD"]).is_ok(),
-            format!("✗ git {name} — ls-remote {url} → {fix}"),
-        );
+        let o = on.run("git", &argv(&["ls-remote", &url, "HEAD"])).ok();
+        let first = o.as_ref().and_then(|o| o.stderr.lines().next()).unwrap_or("no stderr");
+        let line = format!("✗ git {name} — can't reach {}: {first} → {fix}", f.repo);
+        fail(o.is_some_and(|o| o.code == 0), line);
     }
     let text = crate::herdr::in_pane(on, home, PANE, "hs:done").unwrap_or_default();
-    for (tool, fix) in [("gh", "gh auth login"), ("claude", "claude auth login")] {
-        let line =
-            format!("✗ {tool} — not logged in inside a herdr pane → {fix} in a pane there (else: herdr session)");
+    let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
+    for (tool, fix) in [("gh", gh.as_str()), ("claude", "claude auth login in a pane there")] {
+        let line = format!("✗ {tool} — logged out in a herdr pane → {fix} (else: herdr session)");
         fail(text.lines().any(|l| l.trim() == format!("{tool}:0")), line);
     }
     let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
