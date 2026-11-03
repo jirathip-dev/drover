@@ -254,8 +254,9 @@ function line(key) {
 function page(key) {
   const p = document.createElement('section');
   p.className = 'hp';
-  p.innerHTML = `<div class=hs><p><b></b> <span class=n></span> <span class=dots></span></p><p class=sum></p></div><div class=hn></div>
-<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${line(key) || SC || scene()}<div class=fog></div></div><div class=hb></div>`;
+  p.innerHTML = `<div class=hs><p><b></b> <span class=n></span></p><p class=sum></p></div><div class=hn></div>
+<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${line(key) || SC || scene()}<div class=fog></div>
+<button type=button class="hnv hpv" aria-label="previous repo">‹</button><button type=button class="hnv hnx" aria-label="next repo">›</button></div><p class=hdt></p><div class=hb></div>`;
   p._trees = [...p.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
   p._cel = p.querySelector('.cel');
   p._grass = [...p.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
@@ -276,7 +277,10 @@ function draw() {
     if (PG.children[n] !== p) PG.insertBefore(p, PG.children[n] || null);
     p.querySelector('.hs b').textContent = key;
     p.querySelector('.hs .n').textContent = `· ${lanes.length} here`;
-    p.querySelector('.hs .dots').textContent = list.map((_, i) => i === n ? '●' : '○').join('');
+    // #291: one dot button per repo under the scene; a tap jumps there.
+    const d = p.querySelector('.hdt'), ks = list.map(x => x[0]).join('\n');
+    if (d.dataset.k !== ks) { d.dataset.k = ks; d.innerHTML = list.map(x => `<button type=button aria-label="${hx(x[0])}"></button>`).join(''); }
+    [...d.children].forEach((b, i) => b.toggleAttribute('aria-current', i === n));
     const count = states => lanes.filter(l => states.includes(l.state)).length;
     // #65 A: queued first, zero counts left out, a bare `·` (a full mono cell) between, so the line fits the 28 px strip at 390 px without an ellipsis.
     p.querySelector('.sum').textContent = [[queue.length, 'queued'], [count(['blocked', 'dead']), 'blocked'], [count(['working']), 'working'],
@@ -288,6 +292,7 @@ function draw() {
     p._queue = queue;
     p._walk = [...p.querySelectorAll('.hh.working svg')];
   });
+  H.classList.toggle('one', list.length < 2);
   needs();
   weather(data.host);
   if (!placed && list.length) {
@@ -296,7 +301,7 @@ function draw() {
     PG.scrollLeft = i * PG.clientWidth;
   }
   place();
-  go();
+  anim();
 }
 function herdData(j) { if (!DBG.get('weather')) { data = j; draw(); } }
 async function herdPull() {
@@ -354,6 +359,51 @@ addEventListener('resize', place);
 const here = () => [...pages.values()][Math.round(PG.scrollLeft / Math.max(1, PG.clientWidth))];
 function herdPage() { return H.hidden ? null : here(); }
 PG.addEventListener('scroll', () => { const p = here(); if (p && p._key !== saved) { saved = p._key; put('herdp', saved); } }, { passive: true });
+// #291 every way to switch repos besides the native touch swipe: [‹] [›] (wrapping), the dots, ←/→, a horizontal wheel
+// (trackpad swipe, shift+wheel; one switch per gesture) and a mouse drag. One go(i); reduced motion switches instantly.
+const pageAt = () => Math.round(PG.scrollLeft / Math.max(1, PG.clientWidth));
+function go(i) {
+  const n = PG.children.length;
+  if (n) PG.scrollTo({ left: ((i % n + n) % n) * PG.clientWidth, behavior: still.matches ? 'instant' : 'smooth' });
+}
+const TEXT = 'input, textarea, select, [contenteditable]';
+let swipe = null, swiped = false, wheelAt = 0, wheelX = 0, wheelDone = false;
+H.addEventListener('click', e => {
+  if (swiped) { swiped = false; e.stopPropagation(); return; } // the click that ends a swipe opens nothing
+  const b = e.target.closest('.hnv, .hdt button');
+  if (b) go(b.matches('.hnv') ? pageAt() + (b.matches('.hnx') ? 1 : -1) : [...b.parentNode.children].indexOf(b));
+}, true);
+document.addEventListener('keydown', e => {
+  if (H.hidden || shown() || e.altKey || e.ctrlKey || e.metaKey || e.target.closest(TEXT)) return;
+  const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (k) { e.preventDefault(); go(pageAt() + k); }
+});
+PG.addEventListener('wheel', e => {
+  const x = e.deltaX || (e.shiftKey ? e.deltaY : 0), y = e.deltaX ? e.deltaY : e.shiftKey ? 0 : e.deltaY;
+  if (Math.abs(x) <= Math.abs(y)) return;
+  e.preventDefault();
+  if (e.timeStamp - wheelAt > 300) { wheelX = 0; wheelDone = false; } // a 300 ms pause ends the gesture (and its inertia)
+  wheelAt = e.timeStamp;
+  wheelX += x;
+  if (!wheelDone && Math.abs(wheelX) > 40) { wheelDone = true; go(pageAt() + Math.sign(wheelX)); }
+}, { passive: false });
+// A touch swipe scrolls natively (the browser cancels the pointer); a mouse drag past 40 px switches like one.
+// A press in a text field (a needs-you answer) is its own text selection, never a drag. The pointer is captured
+// only past 40 px, so a click with a little jitter still lands on the horse.
+PG.addEventListener('pointerdown', e => { swipe = e.button === 0 && !e.target.closest(TEXT) ? { x: e.clientX, id: e.pointerId } : null; swiped = false; });
+PG.addEventListener('pointermove', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const dx = Math.abs(e.clientX - swipe.x);
+  if (dx >= 8 && !H.classList.contains('drag')) { H.classList.add('drag'); getSelection().removeAllRanges(); }
+  if (dx > 40 && !PG.hasPointerCapture(e.pointerId)) try { PG.setPointerCapture(e.pointerId); } catch (_) {}
+});
+PG.addEventListener('pointerup', e => {
+  const dx = swipe && e.pointerId === swipe.id ? e.clientX - swipe.x : 0;
+  swipe = null;
+  H.classList.remove('drag');
+  if (Math.abs(dx) > 40) { swiped = true; go(pageAt() - Math.sign(dx)); }
+});
+PG.addEventListener('pointercancel', () => { swipe = null; H.classList.remove('drag'); });
 
 let raf = 0, lastT = 0, drift = 0, cel = 0, flashAt = -99, nextFlash = 0, frames = 0, fpsAt = 0;
 function frame(ms) {
@@ -386,7 +436,7 @@ function frame(ms) {
   if (DBG.has('fps') && t - fpsAt >= 1) { cap.dataset.fps = Math.round(frames / (t - fpsAt)) + ' fps'; frames = 0; fpsAt = t; }
   raf = requestAnimationFrame(frame);
 }
-function go() { if (!raf && !H.hidden && !document.hidden && !still.matches) { lastT = 0; nextFlash = performance.now() / 1000 + 4; raf = requestAnimationFrame(frame); } }
+function anim() { if (!raf && !H.hidden && !document.hidden && !still.matches) { lastT = 0; nextFlash = performance.now() / 1000 + 4; raf = requestAnimationFrame(frame); } }
 
 // Taps: a horse opens the Lanes sheet (#43: card, transcript, Stop/Kill/Clean, reply); a queued one its row.
 H.addEventListener('click', e => {
@@ -406,7 +456,7 @@ function herd(on) {
   H.hidden = !on;
   document.documentElement.classList.toggle('herding', on);
   put('herd', on ? '1' : '');
-  if (on) { herdPull(); go(); }
+  if (on) { herdPull(); anim(); }
 }
 $('#herd-on').onclick = () => herd(true);
 $('.hx').onclick = () => herd(false);
@@ -425,7 +475,7 @@ function ranch() {
 lb.onclick = () => { light = LIGHTS[(LIGHTS.indexOf(light) + 1) % 3]; put('herd-light', light); ranch(); };
 ranch();
 setInterval(ranch, 60000);
-document.addEventListener('visibilitychange', () => { go(); ranch(); });
+document.addEventListener('visibilitychange', () => { anim(); ranch(); });
 // #39 demo: a weather switcher sets the host values client-side, as `/herd.json?weather=` does on loopback.
 const WX = { calm: [0.1, 'normal'], gusty: [0.7, 'normal'], storm: [1.3, 'normal'], fog: [0.3, 'warn'] };
 if (DEMO) H.insertAdjacentHTML('beforeend', `<p class=hwx>${Object.keys(WX).map(w => `<button type=button value=${w}>${w}</button>`).join('')}</p>`);

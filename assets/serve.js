@@ -762,7 +762,7 @@ function blocks(lines, harness, busy) {
       const body = [g.head, ...g.lines], pv = esc(head.replace(/^[⏺❯›>•]\s*(#+\s+)?/, ''));
       return { key, k: g.k, open: true, html: `<details class="blk ${g.k}">${sum(g.k === 'me' ? 'you' : esc(harness || 'agent'), `<span class=pv>${pv}</span>`)}<div class=md>${prose(body)}</div></details>` };
     }
-    const m = /^(?:[⏺•]\s*(\w+)\((.*?)\)?(\s+·.*)?|(?:┊\s*)?(?:💻\s*)?(\$|terminal)?\s*(.*))$/.exec(head);
+    const m = /^(?:[⏺•]\s*(\w+)\((.*?)\)?(\s+·.*)?|(?:┊\s*)?(?:💻\s*)?(\$|terminal)?\s*(.*))$/s.exec(head);
     const name = m[1] || (m[4] ? '$' : ''), shell = !name || /^(\$|Bash|Shell|terminal)$/.test(name);
     const cmd = m[1] ? m[2] : m[5], text = g.lines.map(plain).join('\n'), dot = runs(g.head).find(r => r[0].trim());
     const fail = !!dot && /\bt-r\b/.test(dot[1]), code = /exit code (\d+)/i.exec(text);
@@ -771,13 +771,16 @@ function blocks(lines, harness, busy) {
   });
 }
 // #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
-// verdict, merged). From `said` (Claude's session transcript, `[{k: me | ai, text, at}]`) in time order, else the pane's
-// role runs: you, and the last assistant run before each prompt (the notices first: pane lines have no times).
+// verdict, merged). #315 screen-first: the pane's role runs (you, and the last assistant run before each prompt; none:
+// every block), the notices first (pane lines have no times); `said` (Claude's session transcript, `[{k: me | ai, text,
+// at}]`), when it has a message, is an enhancement in time order. A Claude lane without one says so in a line.
 function matters(lines, said, notices, harness) {
-  const ns = (notices || []).map(n => ({ key: 'n:' + n.at + ':' + n.text, k: 'note', at: n.at * 1000, html: `<p class="qs note">${esc(n.text)}</p>` }));
-  if (!said) {
+  const note = (key, t, at) => ({ key, k: 'note', at, html: `<p class="qs note">${esc(t)}</p>` });
+  const ns = (notices || []).map(n => note('n:' + n.at + ':' + n.text, n.text, n.at * 1000));
+  if (!said || !said.length) {
     const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
-    return ns.concat(bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i)));
+    const rs = bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i));
+    return (harness === 'claude' ? [note('n:none', 'no transcript on this host yet')] : []).concat(ns, rs.length ? rs : bs);
   }
   const say = s => {
     const ls = s.text.split('\n'), who = s.k === 'me' ? 'you' : esc(harness || 'agent'), pv = esc(ls[0].replace(/^#+\s+/, ''));
@@ -807,7 +810,10 @@ fv.onclick = () => {
 const store = () => { try { return JSON.parse(sessionStorage.getItem('chat:' + agent)) || {}; } catch (e) { return {}; } };
 function paint() {
   const seen = new Map([...now.children].map(n => [n.dataset.k, n])), keep = store(), end = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 8;
-  const bs = full ? blocks(hist.concat(tail), harness, spin) : matters(hist.concat(tail), said, notes, harness);
+  const ls = hist.concat(tail);
+  let bs;
+  // #315: a view that fails to draw falls back to the pane view; neither is blank while the pane has lines.
+  try { bs = full ? blocks(ls, harness, spin) : matters(ls, said, notes, harness); } catch (e) { console.warn('chat', e); bs = blocks(ls, harness, spin); }
   now.replaceChildren(...bs.map(b => {
     const n = seen.get(b.key);
     if (n && n.dataset.h === b.html) return n;
