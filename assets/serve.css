@@ -76,7 +76,7 @@ nav a.on .n{color:inherit}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)} /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
+#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)}#scp{margin-left:var(--s4)} /* #244: [▦]'s select reaches 8 px left; the gap keeps it off [◐]'s */ /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
