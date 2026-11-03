@@ -251,6 +251,9 @@ pub struct Limits {
     /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
+    /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
+    pub import_max_age_hours: u64,
+    pub max_pushes_per_pass: usize,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -311,6 +314,8 @@ impl Default for Limits {
             .map(String::from)
             .into(),
             form_rounds: 3,
+            import_max_age_hours: 24,
+            max_pushes_per_pass: 3,
         }
     }
 }
