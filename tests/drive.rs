@@ -929,7 +929,10 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
     assert_eq!(steps, ["merge"], "{out}");
     assert!(!out.contains("SERIAL_UNMARKED"), "{out}");
     assert_eq!(state(&c), "merged");
-    let auto = read(&c.state).unwrap().into_iter().filter(|e| e.kind == "serial-joined");
+    let auto = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "serial-joined");
     (c, r, out, auto.collect())
 }
 

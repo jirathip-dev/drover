@@ -123,8 +123,7 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
     let (exit, out) = spawn(&c, 3, "impl");
     assert_eq!(exit, 3, "{out}");
     assert!(
-        out.contains("REFUSED SERIAL_BUSY")
-            && out.contains("db: #1 #2 hold 2/2"),
+        out.contains("REFUSED SERIAL_BUSY") && out.contains("db: #1 #2 hold 2/2"),
         "names both: {out}"
     );
     // A merged one frees a slot.
@@ -146,10 +145,7 @@ fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     spawned(&c, 2, "impl");
     log(&c, 2, "serial-auto", json!({"path": "supabase/migrations/x.sql"}));
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
-    assert!(
-        status.contains("sendmeter: serial: db 2/1\n"),
-        "{status}"
-    );
+    assert!(status.contains("sendmeter: serial: db 2/1\n"), "{status}");
     let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
     assert!(board.contains(", serial: db 2/1"), "{board}");
     for n in [1, 2] {
