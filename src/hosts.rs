@@ -159,9 +159,8 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
         let a = (!stopped).then(|| host::agents(&on).ok()).flatten();
         s.up = a.is_some();
-        if a.as_ref().is_some_and(|a| !a.is_empty()) {
-            s.busy = ctx.now;
-        }
+        let live = a.as_ref().is_some_and(|a| !a.is_empty());
+        s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
             if refresh || s.probed + 3600 <= ctx.now {
@@ -471,9 +470,9 @@ pub fn place(
     // #254: a stopped cloud host only when every local host has been refused `overflow_after_minutes`, or it alone fits.
     let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
     let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
-    let stopped = |p: &Placed| p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED");
     let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
-    let i = (!wake && stopped(&on[0])).then(|| on.iter().position(local)).flatten();
+    let top = on[0].refusal.is_some() && !local(&on[0]);
+    let i = (!wake && top).then(|| on.iter().position(local)).flatten();
     Ok(Some(on.remove(i.unwrap_or(0))))
 }
 

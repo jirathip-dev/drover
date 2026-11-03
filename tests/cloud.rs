@@ -189,6 +189,18 @@ fn lane_fake() -> Fake {
         .reply(&git, "")
 }
 
+/// `check`'s cloud step: its output lines.
+fn tick(
+    c: &herdsman::Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    live: &BTreeMap<String, Option<Vec<serde_json::Value>>>,
+) -> Vec<String> {
+    let mut out = vec![];
+    herdsman::cloud::tick(c, cfg, r, live, &mut out).unwrap();
+    String::from_utf8(out).unwrap().lines().map(String::from).collect()
+}
+
 fn idle() -> BTreeMap<String, Option<Vec<serde_json::Value>>> {
     BTreeMap::from([("cloud1".to_string(), Some(vec![]))])
 }
@@ -197,7 +209,7 @@ fn idle() -> BTreeMap<String, Option<Vec<serde_json::Value>>> {
 fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     let (c, cfg) = running("cloud-idle");
     let r = lane_fake();
-    let out = herdsman::cloud::tick(&c, &cfg, &r, &idle());
+    let out = tick(&c, &cfg, &r, &idle());
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(out[0].contains("stopped (idle 20 min)"), "{out:?}");
     let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
@@ -213,9 +225,9 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     // A live agent there, or a recent one, keeps it running.
     let (c, cfg) = running("cloud-busy");
     let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);
-    assert!(herdsman::cloud::tick(&c, &cfg, &lane_fake(), &live).is_empty());
+    assert!(tick(&c, &cfg, &lane_fake(), &live).is_empty());
     let soon = herdsman::Ctx { now: NOW - 1000, ..c };
-    assert!(herdsman::cloud::tick(&soon, &cfg, &lane_fake(), &idle()).is_empty());
+    assert!(tick(&soon, &cfg, &lane_fake(), &idle()).is_empty());
 }
 
 #[test]
@@ -223,7 +235,7 @@ fn a_failed_wip_push_aborts_the_stop() {
     let (c, cfg) = running("cloud-abort");
     let push = format!("{SSH}'git' '-C' '{WT}' 'push'");
     let r = lane_fake().once_err(&push, 1, "rejected");
-    let out = herdsman::cloud::tick(&c, &cfg, &r, &idle());
+    let out = tick(&c, &cfg, &r, &idle());
     assert!(
         out[0].contains("stop aborted, sendmeter-impl-12's work not saved"),
         "{out:?}"
@@ -244,8 +256,8 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     let c = setup("cloud-budget");
     ev(&c, NOW - 7200, "cloud-start");
     ev(&c, NOW, "cloud-stop");
-    let (head, tone, text) = card(&c);
-    assert_eq!(head.as_deref(), Some("stopped · 0 lane(s) paused: cloud host stopped"));
+    let [head, tone, text] = card(&c);
+    assert_eq!(head, "stopped · 0 lane(s) paused: cloud host stopped");
     assert_eq!(tone, "g");
     assert!(
         text.starts_with("fake small · spent $2 of $10 · 2.0 h today of 20 · address never"),
@@ -255,21 +267,21 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     let c = setup("cloud-budget-80");
     ev(&c, NOW - 30_600, "cloud-start");
     ev(&c, NOW - 30_000, "cloud-up");
-    let (head, tone, text) = card(&c);
-    assert_eq!((head, tone), (None, "a"), "{text}");
+    let [head, tone, text] = card(&c);
+    assert_eq!((head.as_str(), tone.as_str()), ("", "a"), "{text}");
     assert!(text.contains("spent $8 of $10 · 8.5 h today"), "{text}");
     // 11 h: red, and placement refuses CLOUD_BUDGET even when forced.
     let c = setup("cloud-budget-over");
     ev(&c, NOW - 39_600, "cloud-start");
     ev(&c, NOW - 39_000, "cloud-up");
-    assert_eq!(card(&c).1, "r");
+    assert_eq!(card(&c)[1], "r");
     assert_eq!(
         placed(&c, &fake(0.1), Some("cloud1")).unwrap_err(),
         "CLOUD_BUDGET: cloud1: spent $11.00 of $10 this month"
     );
     // A running host at its limit is stopped (after the wip save).
     let cfg = Config::load(&c.config).unwrap();
-    let out = herdsman::cloud::tick(&c, &cfg, &fake(0.1), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
+    let out = tick(&c, &cfg, &fake(0.1), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
     assert!(out[0].contains("stopped (spent $11.00 of $10 this month)"), "{out:?}");
     // Last month's spend does not count: on 10 Feb 1970, a span from 31 Jan 02:13 to 1 Feb 01:00 counts 1 h.
     let c = herdsman::Ctx {
@@ -278,7 +290,7 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     };
     ev(&c, 2_600_000, "cloud-start");
     ev(&c, 31 * 86_400 + 3600, "cloud-stop");
-    assert!(card(&c).2.contains("spent $1 of $10 · 0.0 h today"), "{}", card(&c).2);
+    assert!(card(&c)[2].contains("spent $1 of $10 · 0.0 h today"), "{}", card(&c)[2]);
 }
 
 #[test]

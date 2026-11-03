@@ -12,10 +12,9 @@ fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> 
     let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
     let file = format!("recipes/{}.toml", c.as_deref().unwrap_or(""));
     let p = ctx.config.with_file_name(file);
-    let text = std::fs::read_to_string(&p).or_else(|e| match c.as_deref() {
-        Some("boat") => Ok(include_str!("../assets/recipes/boat.toml").into()),
-        _ => Err(e).with_context(|| format!("cloud recipe {}", p.display())),
-    })?;
+    let boat = || (c.as_deref() == Some("boat")).then(|| include_str!("../assets/recipes/boat.toml").into());
+    let text = std::fs::read_to_string(&p).ok().or_else(boat);
+    let text = text.with_context(|| format!("cloud recipe {}", p.display()))?;
     Ok((toml::from_str(&text)?, size))
 }
 
@@ -87,8 +86,7 @@ pub fn over(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Option<Str
     );
     let month = |usd: f64| (usd >= b).then(|| format!("spent ${usd:.2} of ${b} this month"));
     let day = |hrs: f64| m.filter(|m| hrs >= *m).map(|m| format!("{hrs:.1} h today of {m}"));
-    let at = |(usd, hrs)| month(usd).or_else(|| day(hrs));
-    spend(ctx, cfg, events, name).map_or_else(|e| Some(format!("{e:#}")), at)
+    spend(ctx, cfg, events, name).map_or_else(|e| Some(format!("{e:#}")), |(u, h)| month(u).or_else(|| day(h)))
 }
 
 /// What keeps placement off cloud host `name` as it is: `CLOUD_BUDGET` at a limit, else `CLOUD_STOPPED` (startable).
@@ -133,17 +131,14 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     write_atomic(&known, &format!("{} {key}\n", at[usize::from(port == "22")]))?;
     let (a, b) = (format!("# herdsman {name}\n"), format!("# end {name}\n"));
+    let m = cfg.hosts[name].machine.as_deref().unwrap_or(name);
     let k = known.display();
-    let alias = cfg.hosts[name].machine.as_deref().unwrap_or(name);
-    let block =
-        format!("{a}Host {alias}\n  HostName {host}\n  User {user}\n  Port {port}\n  UserKnownHostsFile {k}\n{b}");
+    let s = format!("{a}Host {m}\n  HostName {host}\n  User {user}\n  Port {port}\n  UserKnownHostsFile {k}\n{b}");
     let p = dir.join("herdsman");
     let old = std::fs::read_to_string(&p).unwrap_or_default();
-    let rest = match (old.find(&a), old.find(&b)) {
-        (Some(i), Some(j)) if i < j => format!("{}{}", &old[..i], &old[j + b.len()..]),
-        _ => old,
-    };
-    write_atomic(&p, &(rest + &block))?;
+    let (keep, tail) = old.split_once(&a).unwrap_or((&old, ""));
+    let rest = keep.to_string() + tail.split_once(&b).map_or("", |x| x.1);
+    write_atomic(&p, &(rest + &s))?;
     log(ctx, cfg, "cloud-up", name, json!({"address": format!("{dest} {port}")}))
 }
 
@@ -156,10 +151,11 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
     for e in events.iter().filter(mine) {
         lanes.extend(e.str("agent").zip(e.str("worktree")));
     }
-    for (lane, wt) in lanes.into_iter().filter(|l| on.exists(std::path::Path::new(l.1))) {
+    let unsaved = |wt: &str| on.exists(wt.as_ref()) && crate::spawn::dirty(&on, wt.as_ref()).is_some();
+    for (lane, wt) in lanes.into_iter().filter(|l| unsaved(l.1)) {
         let w = format!("wip/{name}-{lane}");
         match crate::check::save_wip(&on, wt, &w, &format!("wip: cloud host {verb}")) {
-            Ok(saved) => wip.extend(saved.then_some(w)),
+            Ok(()) => wip.push(w),
             Err(e) => {
                 let d = json!({"lane": lane, "why": format!("{e:#}")});
                 log(ctx, cfg, "cloud-abort", name, d)?;
@@ -174,8 +170,9 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
 }
 
 /// `check`: stop each running cloud host at its spend limit, or once it has had no live agent for `idle_stop_minutes`.
-pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &BTreeMap<String, Option<Vec<Value>>>) -> Vec<String> {
-    let (events, seen, mut out) = (read(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx), vec![]);
+pub type Live = BTreeMap<String, Option<Vec<Value>>>;
+pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn std::io::Write) -> Result<()> {
+    let (events, seen) = (read(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()) {
         let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
             continue;
@@ -186,26 +183,27 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &BTreeMap<String, Opt
         let quiet = (agents.is_empty() && busy + idle <= ctx.now).then(|| format!("idle {} min", idle / 60));
         if let Some(why) = over(ctx, cfg, &events, name).or(quiet) {
             let res = stop(ctx, cfg, r, name, "stop", &why);
-            out.push(res.map_or_else(|e| format!("{e:#}"), |w| format!("{name}: stopped ({why}); wip {w:?}")));
+            let said = res.map_or_else(|e| format!("{e:#}"), |w| format!("{name}: stopped ({why}); wip {w:?}"));
+            writeln!(out, "cloud {said}")?;
         }
     }
-    out
+    Ok(())
 }
 
-/// Host card: head words unless running; the `cloud` row's tone (amber from 80 %, red at a limit) and text.
-pub type Card = (Option<String>, &'static str, String);
-pub fn card(ctx: &Ctx, cfg: &Config, events: &[Event], (name, lanes): (&str, usize)) -> Option<Card> {
+/// Host card: head words (none when running); the `cloud` row's tone (amber from 80 %, red at a limit) and text.
+pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> Option<[String; 3]> {
     let h = cfg.hosts.get(name).filter(|h| h.cloud.is_some())?;
-    let (st, paused) = (state(events, name), "stopped · paused: cloud host stopped".to_string());
-    let w = if st == "starting" { st.into() } else { paused };
-    let head = (st != "running").then_some(w.replace("paused", &format!("{lanes} lane(s) paused")));
+    let st = state(ev, name);
+    let paused = format!("stopped · {n} lane(s) paused: cloud host stopped");
+    let head = [st.replace("running", ""), paused][usize::from(st == "stopped")].clone();
     let (b, m) = (h.budget_usd_month.unwrap_or(0.0), h.max_hours_day.unwrap_or(24.0));
-    let (usd, hrs) = spend(ctx, cfg, events, name).unwrap_or((f64::INFINITY, 0.0));
-    let at = usize::from((usd / b).max(hrs / m) >= 0.8) + usize::from(over(ctx, cfg, events, name).is_some());
-    let ago = |k| last(events, name, &[k]).map_or("never".into(), |e| format!("{} ago", age(ctx.now - e.ts)));
+    let (usd, hrs) = spend(ctx, cfg, ev, name).unwrap_or((f64::INFINITY, 0.0));
+    let at = usize::from((usd / b).max(hrs / m) >= 0.8) + usize::from(over(ctx, cfg, ev, name).is_some());
+    let ago = |k| last(ev, name, &[k]).map_or("never".into(), |e| format!("{} ago", age(ctx.now - e.ts)));
     let (rc, size) = (h.cloud.as_deref().unwrap_or_default(), h.size.as_deref().unwrap_or("?"));
     let (a, s, t) = (ago("cloud-up"), ago("cloud-start"), ago("cloud-stop"));
     let text =
         format!("{rc} {size} · spent ${usd:.0} of ${b} · {hrs:.1} h today of {m} · address {a} · last start {s}");
-    Some((head, ["g", "a", "r"][at.min(2)], format!("{text} · last stop {t}")))
+    let tone = ["g", "a", "r"][at.min(2)].to_string();
+    Some([head, tone, format!("{text} · last stop {t}")])
 }
