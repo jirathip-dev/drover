@@ -70,6 +70,8 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
     for w in ["check", "drive"] {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
+    // #237: the tick and fast jobs as this build writes them.
+    assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
     (c, d)
 }
 
@@ -256,7 +258,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                std::fs::remove_dir_all(c.home.join("Library")).unwrap();
+                std::fs::remove_file(c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist")).unwrap();
                 r
             },
             "launchd",
@@ -302,7 +304,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 false => r.once("systemctl --user is-active", 3, ""),
             },
             "timer",
-            "dev.herdsman.tick loaded → herdsman timer install",
+            "dev.herdsman.tick missing → herdsman timer install",
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
