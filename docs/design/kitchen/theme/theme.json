@@ -1,0 +1,230 @@
+{
+ "actions": {
+  "impl": "chef-cook",
+  "fix": "chef-chop",
+  "rev": "chef-taste",
+  "update": "chef-carry",
+  "idle": "chef-wait",
+  "done": "chef-serve",
+  "blocked": "chef-bell"
+ },
+ "poses": {
+  "working": "chef-cook",
+  "idle": "chef-wait",
+  "done": "chef-serve",
+  "blocked": "chef-bell"
+ },
+ "looks": {
+  "#8a5a33": {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#5a3a24",
+   "--ap": "#34506e",
+   "--as": "#2a4058",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": 1,
+   "--hb": 0,
+   "--hk": 0
+  },
+  "#a05c2c": {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#1d1a17",
+   "--ap": "#4a4a52",
+   "--as": "#3a3a40",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": 0,
+   "--hb": 1,
+   "--hk": 0
+  },
+  "#3b3b44": {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--ap": "#7a3b3b",
+   "--as": "#622f2f",
+   "--hc": "#3d6fa8",
+   "--hs": "#305886",
+   "--ht": 0,
+   "--hb": 0,
+   "--hk": 1
+  },
+  "#b9bcc6": {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#d8c9a8",
+   "--ap": "#6b7040",
+   "--as": "#555a33",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": 1,
+   "--hb": 0,
+   "--hk": 0
+  },
+  "#c89a56": {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#b5652d",
+   "--ap": "#34506e",
+   "--as": "#2a4058",
+   "--hc": "#d9a53a",
+   "--hs": "#b08528",
+   "--ht": 0,
+   "--hb": 1,
+   "--hk": 0
+  },
+  "#b08d5e": {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#3a2a1e",
+   "--ap": "#4a4a52",
+   "--as": "#3a3a40",
+   "--hc": "#4f8a5b",
+   "--hs": "#3e6e48",
+   "--ht": 0,
+   "--hb": 0,
+   "--hk": 1
+  },
+  "#96685a": {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--ap": "#7a3b3b",
+   "--as": "#622f2f",
+   "--hc": "#f4f1ea",
+   "--hs": "#d6cfc1",
+   "--ht": 1,
+   "--hb": 0,
+   "--hk": 0
+  },
+  "#bd8f4e": {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#5a3a24",
+   "--ap": "#6b7040",
+   "--as": "#555a33",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": 0,
+   "--hb": 0,
+   "--hk": 1
+  }
+ },
+ "load_scene": {
+  "kind": "heat",
+  "levels": {
+   "calm": {
+    "below": 0.5
+   },
+   "busy": {
+    "from": 0.5
+   },
+   "held": {
+    "gate": true,
+    "idle": "chef-fan"
+   }
+  }
+ },
+ "rail": {
+  "item": "chef-ticket",
+  "needs": "needs-t"
+ },
+ "moments": {
+  "merged": "order-up",
+  "fail": "sent-back",
+  "needs-you": "needs-t"
+ },
+ "row_sprites": {
+  "impl": "row-cook",
+  "fix": "row-chop",
+  "rev": "row-taste",
+  "update": "row-carry",
+  "idle": "row-wait",
+  "done": "row-serve",
+  "blocked": "row-bell",
+  "queued": "row-ticket",
+  "fail": "row-back"
+ },
+ "icons": {
+  "180": "icon-180.png",
+  "192": "icon-192.png",
+  "512": "icon-512.png",
+  "favicon": "favicon.png"
+ },
+ "ascii": {
+  "impl": [
+   "♨",
+   "cook"
+  ],
+  "fix": [
+   "♨",
+   "chop"
+  ],
+  "rev": [
+   "♨",
+   "taste"
+  ],
+  "update": [
+   "♨",
+   "carry"
+  ],
+  "idle": [
+   "·",
+   "wait"
+  ],
+  "done": [
+   "✓",
+   "serve"
+  ],
+  "blocked": [
+   "!",
+   "bell"
+  ],
+  "dead": [
+   "✗",
+   "out"
+  ]
+ },
+ "modes": [
+  "scene",
+  "ascii"
+ ],
+ "board": {
+  "--bg": "#1a1816",
+  "--fg": "#efe3cb",
+  "--mute": "#a89a87",
+  "--line": "#2e2a26",
+  "--l": "#e89a62",
+  "--p": "#d39ad0",
+  "--c": "#62c9c0",
+  "--g": "#6cc96e",
+  "--a": "#f4d24e",
+  "--r": "#ff5c84",
+  "--brass": "#c9a55a",
+  "--edge": "#4a3f2e"
+ },
+ "glyphs": {
+  "working": "♨",
+  "idle": "·",
+  "unknown": "?",
+  "parked": "·",
+  "done": "✓",
+  "blocked": "!",
+  "dead": "✗"
+ },
+ "words": {
+  "horse": "chef",
+  "horses": "chefs",
+  "herd": "kitchen line",
+  "ranch": "kitchen",
+  "barn": "kitchen"
+ },
+ "scene": {
+  "weather": false,
+  "palette": {
+   "--pa": "repeating-conic-gradient(#4a3f38 0 25%,#41372f 0 50%) 0 0/24px 24px"
+  }
+ }
+}
