@@ -83,7 +83,7 @@ jobs:
       - name: sheet close in WebKit (chat, config, legend)
         run: |
           mkdir -p ui-webkit
-          HERDSMAN_SNAPSHOTS=ui-webkit cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
+          HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
           test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
       - uses: actions/upload-artifact@v4
         if: always()
