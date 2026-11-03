@@ -544,10 +544,7 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let cfg = Config::parse(&text)?;
     match cfg.hosts.get(name) {
         None => bail!("no [hosts.{name}] in fleet.toml"),
-        Some(h) if h.machine.is_none() && !on => {
-            let why = "it runs herdsman, the board and the log; set `enabled = false` in fleet.toml by hand";
-            return refused("MAIN_HOST", format!("{name} is the main host: {why}"));
-        }
+        Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
         _ => {}
     }
     let new = set_in(&text, &format!("[hosts.{name}]"), "enabled", &on.to_string())?;
