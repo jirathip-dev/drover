@@ -620,9 +620,10 @@ pub fn spawn(
     let mut sha = None;
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
-        // #157: first use on a host: it clones the repo itself, with its own `gh` login.
+        // #157: first use on a host: it clones the repo itself; #307: plain git, so its insteadOf/SSH and helpers apply.
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
-            ok(r, "gh", &["repo", "clone", &f.repo, &local])?;
+            let url = format!("https://github.com/{}.git", f.repo);
+            ok(r, "git", &["clone", &url, &local])?;
         }
         ok(
             r,
