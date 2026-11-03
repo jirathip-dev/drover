@@ -1,6 +1,7 @@
-//! Claude `PreToolUse` / Hermes `pre_tool_call` hook: the tool guard of `herdsman help --agent`.
+//! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::Deny;
-use serde_json::{json, Value};
+use crate::harness::{dialects, Dialect};
+use serde_json::Value;
 
 pub struct Policy {
     pub branches: Vec<String>,
@@ -12,8 +13,6 @@ pub struct Policy {
     pub deny: Vec<Deny>,
 }
 
-/// Claude and Hermes file-writing tools.
-const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit", "patch", "write_file"];
 /// git subcommands that make commits or move refs; denied to reviewers.
 const GIT_WRITES: &[&str] = &[
     "commit",
@@ -27,20 +26,34 @@ const GIT_WRITES: &[&str] = &[
 ];
 const WRITERS: &[&str] = &["rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd"];
 
-/// Some(reason) denies Claude's (`Bash`) or Hermes' (`terminal`, `args`) call; `cur_branch` resolves HEAD.
+/// The call's tool input: the first of any dialect's input keys holding an object.
+fn tool_input(input: &Value) -> &Value {
+    let mut keys = dialects().flat_map(|d| d.input.iter());
+    keys.find_map(|k| input.get(k).filter(|v| v.is_object()))
+        .unwrap_or(&Value::Null)
+}
+
+/// The dialect that sent `input`, else the first harness's.
+fn dialect(input: &Value) -> Option<&'static Dialect> {
+    dialects().find(|d| (d.sent)(input)).or_else(|| dialects().next())
+}
+
+/// After the fact (a post-tool or turn-end call): nothing left to guard.
+pub fn after(input: &Value) -> bool {
+    let ev = input["hook_event_name"].as_str().unwrap_or_default();
+    dialects().any(|d| d.post == ev || d.stop == ev)
+}
+
+/// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD.
 pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
-    let ti = if input["tool_input"].is_object() {
-        &input["tool_input"]
-    } else {
-        &input["args"]
-    };
-    if tool == "Bash" || tool == "terminal" {
+    let ti = tool_input(input);
+    if dialects().any(|d| d.shell == tool) {
         let cmd = ti["command"].as_str().unwrap_or_default();
         let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
         return bash(cmd, cwd, p, cur_branch);
     }
-    if !EDIT_TOOLS.contains(&tool) {
+    if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
     }
     // A V4A `patch` names its files inside the patch text.
@@ -272,11 +285,7 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
 
 /// #198: the repo dir of a `git push` in a Bash/terminal call (for the co-author warning).
 pub fn push_dir(input: &Value) -> Option<String> {
-    let ti = if input["tool_input"].is_object() {
-        &input["tool_input"]
-    } else {
-        &input["args"]
-    };
+    let ti = tool_input(input);
     let cwd = ti["workdir"].as_str().or(input["cwd"].as_str()).unwrap_or(".");
     ti["command"]
         .as_str()?
@@ -299,9 +308,10 @@ pub fn ai_coauthor(log: &str) -> Option<&str> {
 /// #304: a post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:`
 /// or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
 pub fn kick_why(input: &Value) -> Option<&'static str> {
-    match input["hook_event_name"].as_str()? {
-        "Stop" | "on_session_end" => Some("stop"),
-        "PostToolUse" | "post_tool_call" if push_dir(input).is_some() => {
+    let ev = input["hook_event_name"].as_str()?;
+    match dialects().find(|d| d.post == ev || d.stop == ev)? {
+        d if d.stop == ev => Some("stop"),
+        _ if push_dir(input).is_some() => {
             let res = input["tool_response"].to_string() + &input["result"].to_string();
             let failed = [
                 "rejected",
@@ -316,11 +326,7 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
-/// The deny answer in the caller's dialect: Hermes `block`, Claude `deny`.
+/// The deny answer in the caller's dialect (`Dialect::deny`).
 pub fn deny_json(input: &Value, reason: &str) -> Value {
-    if input["hook_event_name"] == "pre_tool_call" || input.get("args").is_some() {
-        return json!({"action": "block", "message": format!("herdsman: {reason}")});
-    }
-    let reason = format!("herdsman: {reason}");
-    json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
+    dialect(input).map_or(Value::Null, |d| (d.deny)(&format!("herdsman: {reason}")))
 }

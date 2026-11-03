@@ -240,10 +240,9 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     };
     let kick = format!("Read {} and execute it fully.", brief.display());
     let lane = format!("{fleet}:{issue}:{role}");
-    let account = if harness::get(&r.harness).accounts() {
-        access::pick(ctx, cfg, &read(&ctx.state)?, r)?
-    } else {
-        None
+    let account = match harness::get(&r.harness).credential() {
+        harness::Credential::Token(var) => access::pick(ctx, cfg, &read(&ctx.state)?, r, var)?,
+        _ => None,
     };
     let mcp_file = worktree.join(".mcp.lane.json");
     // Ports of the logged lanes of open issues, this branch's own aside.

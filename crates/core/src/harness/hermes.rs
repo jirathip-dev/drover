@@ -1,5 +1,5 @@
 //! Hermes: the `hooks:` key + its consent in the role's existing profile; the kick is typed at the `❯` prompt.
-use super::{attempts, hook_command, Harness};
+use super::{attempts, hook_command, Credential, Dialect, Harness};
 use crate::herdr;
 use crate::runner::{argv, Runner};
 use crate::spawn::Plan;
@@ -12,6 +12,20 @@ use std::path::Path;
 const HERMES_HOOKS: &str = include_str!("../../hooks/hermes-hooks.yaml");
 
 pub struct Hermes;
+
+/// Hermes' `pre_tool_call` / `post_tool_call` / `on_session_end` shell hooks (older ones: `args`, no event name).
+static DIALECT: Dialect = Dialect {
+    sent: |v| {
+        let ev = v["hook_event_name"].as_str().unwrap_or_default();
+        ["pre_tool_call", "post_tool_call", "on_session_end"].contains(&ev) || v.get("args").is_some()
+    },
+    input: &["tool_input", "args"],
+    shell: "terminal",
+    edits: &["patch", "write_file"],
+    post: "post_tool_call",
+    stop: "on_session_end",
+    deny: |reason| json!({"action": "block", "message": reason}),
+};
 
 impl Harness for Hermes {
     fn sync(&self, ctx: &Ctx, role: &str, profile: &str, _usage: &str, out: &mut dyn Write) -> Result<()> {
@@ -72,8 +86,20 @@ impl Harness for Hermes {
         Ok(false)
     }
 
+    fn credential(&self) -> Credential {
+        Credential::Own
+    }
+    fn hook_dialect(&self) -> Option<&'static Dialect> {
+        Some(&DIALECT)
+    }
     fn now_line(&self, line: &str) -> bool {
         line.contains('💻') || line.starts_with('┊')
+    }
+    /// `┊ 💻 cargo test` (or `$ …`) as a shell call.
+    fn tool_line(&self, line: &str) -> Option<(String, String)> {
+        let t = line.trim_start_matches(['┊', ' ']);
+        let cmd = t.strip_prefix("💻").or(t.strip_prefix("$ "))?.trim_start();
+        Some(("$".into(), cmd.strip_prefix("$ ").unwrap_or(cmd).into()))
     }
 }
 

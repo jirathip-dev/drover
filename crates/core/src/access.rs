@@ -1,4 +1,5 @@
-//! What a lane may use: its Claude account (first uncapped of an ordered list; tokens never read out) and MCP servers.
+//! What a lane may use: its `[accounts]` account (first uncapped of an ordered list; tokens never read out) and MCP
+//! servers.
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::gate::refused;
@@ -9,14 +10,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
-
-/// The env var Claude Code reads its OAuth token from.
-pub const TOKEN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
-/// `|`-separated, case-insensitive substrings of Claude Code's usage-limit banner.
-pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
-
-/// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
-const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
 
 /// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged
 /// `until`, else `cap_reset_minutes` after it.
@@ -50,14 +43,15 @@ pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(R
     Ok((to, until.map(|t| (format!("on {entry} ({resting} resting until"), t))))
 }
 
-/// #302: the pane shows Claude Code's signed-out error.
-pub fn signed_out(screen: &str) -> bool {
-    AUTH_PATTERN.split('|').any(|p| screen.to_lowercase().contains(p))
-}
-
 /// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and the
-/// pane-shell assignment that exports its token straight from the env file.
-pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<(String, String)>> {
+/// pane-shell assignment that exports its token as `token_var` straight from the env file.
+pub fn pick(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    role: &Role,
+    token_var: &str,
+) -> Result<Option<(String, String)>> {
     let now = ctx.now;
     let mut names = role.account_list();
     if names.is_empty() {
@@ -110,7 +104,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
     let src = file.to_string_lossy().replace('\'', r"'\''");
     Ok(Some((
         name.clone(),
-        format!("{TOKEN_VAR}=\"$(. '{src}' && printf %s \"${var}\")\""),
+        format!("{token_var}=\"$(. '{src}' && printf %s \"${var}\")\""),
     )))
 }
 
@@ -171,15 +165,9 @@ pub fn has_var(text: &str, var: &str) -> bool {
         .any(|(k, v)| k.trim() == var && !v.trim().trim_matches(['"', '\'']).is_empty())
 }
 
-/// The pane shows Claude Code's usage-limit banner.
-pub fn capped_screen(cfg: &Config, screen: &str) -> bool {
-    let screen = screen.to_lowercase();
-    let pat = cfg
-        .accounts
-        .cap_pattern
-        .as_deref()
-        .unwrap_or(CAP_PATTERN)
-        .to_lowercase();
+/// The screen holds one of `pat`'s `|`-separated, case-insensitive substrings (a usage-limit banner).
+pub fn banner(pat: &str, screen: &str) -> bool {
+    let (screen, pat) = (screen.to_lowercase(), pat.to_lowercase());
     pat.split('|').any(|p| !p.is_empty() && screen.contains(p))
 }
 

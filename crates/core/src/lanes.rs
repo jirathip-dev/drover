@@ -476,17 +476,20 @@ pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
     harness::get(harness).status_word(screen)
 }
 
-/// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.
+/// #260: the pane's last tool line, as any harness reads it (`Harness::tool_line`), as a `now:` line.
 pub fn now(screen: &str) -> Option<String> {
     chat(screen).0.iter().rev().find_map(|l| {
-        let t = strip(l).trim().trim_start_matches(['┊', ' ']).to_string();
-        if let Some((n, a)) = t.strip_prefix(['⏺', '•']).and_then(|r| r.trim_start().split_once('(')) {
-            let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
-            return word.then(|| doing(n, a.rsplit_once(')').map_or(a, |x| x.0)));
-        }
-        let cmd = t.strip_prefix("💻").or(t.strip_prefix("$ "))?.trim_start();
-        Some(doing("$", cmd.strip_prefix("$ ").unwrap_or(cmd)))
+        let t = strip(l);
+        let (tool, arg) = harness::NAMES
+            .iter()
+            .find_map(|h| harness::get(h).tool_line(t.trim()))?;
+        Some(doing(&tool, &arg))
     })
+}
+
+/// A blocked pane's pending prompt, as any harness reads it (`Harness::pending_menu`).
+pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
+    harness::NAMES.iter().find_map(|h| harness::get(h).pending_menu(screen))
 }
 
 /// #260: a file's last `n` bytes as text (a session transcript is tens of MB; a cut first line fails to parse, skipped).
@@ -541,52 +544,7 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// A blocked pane's pending prompt: the question and a numbered menu's options (a `❯`-marked run
-/// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.
-pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
-    let lines: Vec<&str> = screen
-        .lines()
-        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '│'))
-        .filter(|l| !l.is_empty())
-        .collect();
-    let opt = |l: &str| {
-        let (n, t) = l.trim_start_matches(['❯', '›']).trim_start().split_once(". ")?;
-        Some((n.parse::<usize>().ok()?, t.trim().to_string()))
-    };
-    let question = |ls: &[&str]| {
-        ls.iter()
-            .rev()
-            .take(6)
-            .find(|l| l.contains('?'))
-            .map(std::string::ToString::to_string)
-    };
-    let (mut opts, mut i, mut gap) = (
-        vec![],
-        lines.iter().rposition(|l| opt(l).is_some()).map_or(0, |i| i + 1),
-        0,
-    );
-    while i > 0 && gap <= 2 && opts.last().is_none_or(|o: &(usize, String)| o.0 > 1) {
-        i -= 1;
-        match opt(lines[i]) {
-            Some(o) => (opts.push(o), gap = 0).1,
-            None => gap += 1,
-        }
-    }
-    opts.reverse();
-    let menu = opts.len() >= 2
-        && opts.iter().zip(1..).all(|(o, n)| o.0 == n)
-        && lines[i..].iter().any(|l| l.starts_with('❯') && opt(l).is_some());
-    if menu {
-        Some((
-            question(&lines[..i]).or(lines[..i].last().map(std::string::ToString::to_string))?,
-            opts.into_iter().map(|o| o.1).collect(),
-        ))
-    } else {
-        Some((question(&lines)?, vec![]))
-    }
-}
-
-/// #127: a menu's card from its block (after the last divider above the question): `title` its first line, `command`
+/// #127: menu (`Harness::pending_menu`)'s card from its block (after the last divider above the question): `title` its first line, `command`
 /// the `│` lines but those opening with a word (`Dangerous rm …`), `countdown` from `in M:SS`, the rest `reason`.
 pub fn prompt(screen: &str) -> Option<Value> {
     let (question, options) = pending(screen).filter(|p| !p.1.is_empty())?;

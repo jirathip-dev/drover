@@ -15,7 +15,15 @@ const MENU: &str = "⏺ Bash(cargo test)\nWhich database should the meter use?\n
 #[test]
 fn the_generic_harness_has_every_fallback() {
     let h = harness::get("codex");
-    assert!(h.env().is_empty() && !h.accounts() && h.health_check().is_none() && h.process_names().is_empty());
+    assert!(h.env().is_empty() && h.health_check().is_none() && h.process_names().is_empty());
+    assert_eq!(h.credential(), harness::Credential::None);
+    assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage_meter().is_none());
+    let c = ctx(&tmpdir("generic-fallbacks"), CONFIG);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let banner = "Claude usage limit reached. Your limit will reset at 3pm.";
+    assert!(!h.signed_out("Please run /login") && h.usage_limited(&cfg, &Fake::default(), banner, T).is_none());
+    assert_eq!(h.tool_line("⏺ Bash(cargo test)"), None);
+    assert_eq!(h.answer_keys(2), "2");
     assert_eq!(
         (h.pending_menu(MENU), h.status_word("✻ Herding… (4m 12s)")),
         (None, None)

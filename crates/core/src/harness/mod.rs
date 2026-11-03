@@ -1,6 +1,7 @@
 //! Harness adapters (profile + hook install, launch argv, kick, screen readers, transcript, logins): a new harness is
 //! one file plus its `NAMES` entry; core never names one, and any other name gets the generic fallbacks (#316).
 mod claude;
+mod claude_meter;
 mod dsh;
 mod hermes;
 
@@ -9,10 +10,12 @@ use crate::runner::Runner;
 use crate::spawn::Plan;
 use crate::Ctx;
 use anyhow::Result;
+use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub use claude::root as profiles_root;
+pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
@@ -29,7 +32,58 @@ pub fn efforts(harness: &str) -> &'static [&'static str] {
     }
 }
 
-pub trait Harness {
+/// How a harness's lanes sign in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Credential {
+    /// Nothing herdsman knows of.
+    None,
+    /// An `[accounts]` token (`access::pick`), exported as this env var.
+    Token(&'static str),
+    /// The harness's own login on the host.
+    Own,
+}
+
+/// A harness's hook protocol, as `herdsman hook` reads and answers it.
+pub struct Dialect {
+    /// This harness sent the call.
+    pub sent: fn(&Value) -> bool,
+    /// Keys of the call's tool input, the first object wins.
+    pub input: &'static [&'static str],
+    /// Its shell tool and its file-writing tools.
+    pub shell: &'static str,
+    pub edits: &'static [&'static str],
+    /// `hook_event_name` after a tool call and at a turn's end.
+    pub post: &'static str,
+    pub stop: &'static str,
+    /// The deny answer.
+    pub deny: fn(&str) -> Value,
+}
+
+/// The hook dialects of every harness that has one, in `NAMES` order.
+pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
+    NAMES.iter().filter_map(|n| get(n).hook_dialect())
+}
+
+/// (used %, reset epoch) of a usage window, either part unread.
+pub type Part = (Option<f64>, Option<u64>);
+
+/// A harness's usage meter for an `[accounts]` login (#258).
+pub trait UsageMeter: Sync {
+    /// Read the 5-hour and 7-day windows of the login in `dir` (`[accounts.usage]`).
+    fn poll(&self, r: &dyn Runner, dir: &Path, now: u64) -> crate::usage::Poll;
+    /// The (5-hour, 7-day) parts of its status-line JSON (`herdsman statusline`).
+    fn status(&self, v: &Value) -> (Part, Part);
+}
+
+/// The harness `[accounts]` tokens are for: the first that runs on one.
+pub fn accounts() -> Option<&'static dyn Harness> {
+    NAMES
+        .iter()
+        .map(|n| get(n))
+        .find(|h| matches!(h.credential(), Credential::Token(_)))
+}
+
+pub trait Harness: Sync {
     /// Write this harness's files for role `role`'s `profile` (prompts, hooks).
     fn sync(&self, _ctx: &Ctx, _role: &str, _profile: &str, _usage: &str, _out: &mut dyn Write) -> Result<()> {
         Ok(())
@@ -61,8 +115,29 @@ pub trait Harness {
     fn env(&self) -> &'static [&'static str] {
         &[]
     }
-    /// Lanes run on an `[accounts]` token (`access::TOKEN_VAR`); else on the harness's own login.
-    fn accounts(&self) -> bool {
+    /// How its lanes sign in (generic: unknown).
+    fn credential(&self) -> Credential {
+        Credential::None
+    }
+    /// The interactive login a person runs for it (setup panes, login hints).
+    fn login(&self) -> Option<&'static str> {
+        None
+    }
+    /// Its `herdsman hook` protocol (generic: none, no tool guard but git's pre-push).
+    fn hook_dialect(&self) -> Option<&'static Dialect> {
+        None
+    }
+    /// Its accounts' usage meter (generic: none).
+    fn usage_meter(&self) -> Option<&'static dyn UsageMeter> {
+        None
+    }
+    /// The pane shows a usage-limit banner: until when (generic: only a configured `cap_pattern`).
+    fn usage_limited(&self, cfg: &crate::config::Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
+        let pat = cfg.accounts.cap_pattern.as_deref()?;
+        crate::access::banner(pat, screen).then(|| crate::access::cap_until(cfg, r, screen, now))
+    }
+    /// The pane shows a signed-out error (#302).
+    fn signed_out(&self, _screen: &str) -> bool {
         false
     }
     /// The live spinner's word and, past a minute, its elapsed time; None when idle or without one.
@@ -73,9 +148,17 @@ pub trait Harness {
     fn now_line(&self, line: &str) -> bool {
         !crate::lanes::chrome(line)
     }
-    /// A blocked pane's question and numbered options (answered by digit); None: a screen excerpt and reply box.
+    /// A pane line's tool call as (tool, argument) for the `now:` line (generic: a `$ ` shell line).
+    fn tool_line(&self, line: &str) -> Option<(String, String)> {
+        shell_line(line)
+    }
+    /// A blocked pane's question and numbered options (answered by `answer_keys`); None: a screen excerpt and reply box.
     fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
         None
+    }
+    /// The keys that pick menu option `n` (1-based).
+    fn answer_keys(&self, n: usize) -> String {
+        n.to_string()
     }
     /// The newest local session transcript (`.jsonl`) of worktree `wt` under `home`; None: the chat reads the pane.
     fn transcript(&self, _home: &Path, _wt: &str) -> Option<PathBuf> {
@@ -89,6 +172,12 @@ pub trait Harness {
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }
+}
+
+/// `$ cargo test` as (`$`, `cargo test`).
+fn shell_line(line: &str) -> Option<(String, String)> {
+    let cmd = line.strip_prefix("$ ")?.trim_start();
+    Some(("$".into(), cmd.into()))
 }
 
 struct Generic;

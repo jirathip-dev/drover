@@ -1025,7 +1025,7 @@ impl<'a> Server<'a> {
         Ok((l, fleet, pane))
     }
 
-    /// A blocked lane's menu option (`Harness::pending_menu`): its digit via `pane send-keys`, then a re-read ("sent" or
+    /// A blocked lane's menu option (`Harness::pending_menu`): its keys (`answer_keys`) via `pane send-keys`, then a re-read ("sent" or
     /// "still waiting"); logs an `answer` event without the question. No menu parsed, or not the
     /// menu the tapped card showed (`h`, read afresh): no key.
     fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &BTreeMap<String, String>) -> Result<String> {
@@ -1036,7 +1036,8 @@ impl<'a> Server<'a> {
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let on = l.on(self.r);
         let screen = || herdr::read(&on, &pane);
-        let menu = crate::harness::get(&l.harness).pending_menu(&screen()?);
+        let h = crate::harness::get(&l.harness);
+        let menu = h.pending_menu(&screen()?);
         let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
             return refused(
                 "BAD_VALUE",
@@ -1056,11 +1057,11 @@ impl<'a> Server<'a> {
         if f.get("h") != Some(&seen(&q, &opts).to_string()) {
             return refused("STALE", "menu changed — refreshed");
         }
-        herdr::keys(&on, &pane, choice)?;
+        herdr::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         self.r.sleep(1);
-        Ok(if lanes::pending(&screen()?) == Some((q, opts)) {
+        Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
             format!("still waiting: {agent}")
         } else {
             format!("sent to {agent}")
@@ -1475,8 +1476,8 @@ impl<'a> Server<'a> {
             .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
-        let c = lanes::prompt(&screen).unwrap_or_default();
         let h = crate::harness::get(&l.harness);
+        let c = lanes::prompt(&screen).unwrap_or_default();
         let body = match h.pending_menu(&screen) {
             None if h.status_word(&screen).is_some() => return String::new(),
             _ if !paired => format!(
@@ -2275,9 +2276,7 @@ impl<'a> Server<'a> {
                     let h = crate::harness::NAMES
                         .iter()
                         .find(|h| crate::harness::get(h).process_names().contains(&label));
-                    by.entry(h.map_or(label.trim_end_matches("-tui"), |h| h).into())
-                        .or_default()
-                        .push(a);
+                    by.entry(h.map_or(label, |h| h).into()).or_default().push(a);
                 }
                 for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();

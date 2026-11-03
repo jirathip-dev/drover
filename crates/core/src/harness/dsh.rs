@@ -1,5 +1,5 @@
 //! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
-use super::{attempts, Harness};
+use super::{attempts, Credential, Harness};
 use crate::herdr;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
@@ -113,6 +113,13 @@ impl Harness for Dsh {
             }
         }
         Ok(false)
+    }
+
+    fn credential(&self) -> Credential {
+        Credential::Own
+    }
+    fn process_names(&self) -> &'static [&'static str] {
+        &[LABEL]
     }
 }
 

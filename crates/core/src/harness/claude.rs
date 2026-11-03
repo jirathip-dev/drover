@@ -1,17 +1,39 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
-use super::{hook_command, Harness};
+use super::{hook_command, shell_line, Credential, Dialect, Harness, UsageMeter};
+use crate::config::Config;
 use crate::herdr;
 use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
 use crate::spawn::{role_prompt, Plan};
 use crate::Ctx;
 use anyhow::{bail, Result};
+use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 
 pub struct Claude;
+
+/// `|`-separated, case-insensitive substrings of Claude Code's usage-limit banner (`[accounts].cap_pattern` overrides).
+pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
+
+/// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
+const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
+
+/// Claude Code's `PreToolUse` / `PostToolUse` / `Stop` hooks.
+static DIALECT: Dialect = Dialect {
+    sent: |v| {
+        let ev = v["hook_event_name"].as_str().unwrap_or_default();
+        ["PreToolUse", "PostToolUse", "Stop"].contains(&ev) && v.get("args").is_none()
+    },
+    input: &["tool_input"],
+    shell: "Bash",
+    edits: &["Edit", "Write", "MultiEdit", "NotebookEdit"],
+    post: "PostToolUse",
+    stop: "Stop",
+    deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
+};
 
 /// `<config dir>/claude`, the generated per-role profiles.
 pub fn root(ctx: &Ctx) -> PathBuf {
@@ -91,8 +113,25 @@ impl Harness for Claude {
     fn env(&self) -> &'static [&'static str] {
         &["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"]
     }
-    fn accounts(&self) -> bool {
-        true
+    /// The env var Claude Code reads its OAuth token from.
+    fn credential(&self) -> Credential {
+        Credential::Token("CLAUDE_CODE_OAUTH_TOKEN")
+    }
+    fn login(&self) -> Option<&'static str> {
+        Some("claude /login")
+    }
+    fn hook_dialect(&self) -> Option<&'static Dialect> {
+        Some(&DIALECT)
+    }
+    fn usage_meter(&self) -> Option<&'static dyn UsageMeter> {
+        Some(&super::claude_meter::Meter)
+    }
+    fn usage_limited(&self, cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
+        let pat = cfg.accounts.cap_pattern.as_deref().unwrap_or(CAP_PATTERN);
+        crate::access::banner(pat, screen).then(|| crate::access::cap_until(cfg, r, screen, now))
+    }
+    fn signed_out(&self, screen: &str) -> bool {
+        AUTH_PATTERN.split('|').any(|p| screen.to_lowercase().contains(p))
     }
 
     /// #276: `✻ Herding… (4m 12s · ↓ 3k tokens)` is (`✻ Herding…`, `4m`).
@@ -106,8 +145,19 @@ impl Harness for Claude {
     fn now_line(&self, line: &str) -> bool {
         line.starts_with('⏺')
     }
+    /// `⏺ Bash(cargo test)` (or `•`), else a `$ ` shell line.
+    fn tool_line(&self, line: &str) -> Option<(String, String)> {
+        if let Some((n, a)) = line
+            .strip_prefix(['⏺', '•'])
+            .and_then(|r| r.trim_start().split_once('('))
+        {
+            let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
+            return word.then(|| (n.into(), a.rsplit_once(')').map_or(a, |x| x.0).into()));
+        }
+        shell_line(line)
+    }
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
-        crate::lanes::pending(screen)
+        pending(screen)
     }
 
     /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
@@ -123,5 +173,50 @@ impl Harness for Claude {
     }
     fn process_names(&self) -> &'static [&'static str] {
         &["claude"]
+    }
+}
+
+/// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run
+/// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.
+fn pending(screen: &str) -> Option<(String, Vec<String>)> {
+    let lines: Vec<&str> = screen
+        .lines()
+        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '│'))
+        .filter(|l| !l.is_empty())
+        .collect();
+    let opt = |l: &str| {
+        let (n, t) = l.trim_start_matches(['❯', '›']).trim_start().split_once(". ")?;
+        Some((n.parse::<usize>().ok()?, t.trim().to_string()))
+    };
+    let question = |ls: &[&str]| {
+        ls.iter()
+            .rev()
+            .take(6)
+            .find(|l| l.contains('?'))
+            .map(std::string::ToString::to_string)
+    };
+    let (mut opts, mut i, mut gap) = (
+        vec![],
+        lines.iter().rposition(|l| opt(l).is_some()).map_or(0, |i| i + 1),
+        0,
+    );
+    while i > 0 && gap <= 2 && opts.last().is_none_or(|o: &(usize, String)| o.0 > 1) {
+        i -= 1;
+        match opt(lines[i]) {
+            Some(o) => (opts.push(o), gap = 0).1,
+            None => gap += 1,
+        }
+    }
+    opts.reverse();
+    let menu = opts.len() >= 2
+        && opts.iter().zip(1..).all(|(o, n)| o.0 == n)
+        && lines[i..].iter().any(|l| l.starts_with('❯') && opt(l).is_some());
+    if menu {
+        Some((
+            question(&lines[..i]).or(lines[..i].last().map(std::string::ToString::to_string))?,
+            opts.into_iter().map(|o| o.1).collect(),
+        ))
+    } else {
+        Some((question(&lines)?, vec![]))
     }
 }
