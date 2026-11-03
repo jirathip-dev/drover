@@ -239,7 +239,7 @@ fn the_noise_fold_never_hides_a_failure() {
         "{}",
         all[0]
     );
-    assert!(all[1].contains("<i class=\"kg t-r\">✗</i>") && all[1].contains("alert failed"));
+    assert!(all[1].contains("<i class=\"kg t-r\" data-act=blocked>✗</i>") && all[1].contains("alert failed"));
     assert!(all[2].contains("clean ×2 · lanes cleaned"));
     assert!(!all.iter().any(|r| r.contains("clean") && r.contains("alert failed")));
     let imp = view(&h, "imp");

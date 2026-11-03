@@ -72,6 +72,11 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    iframe (virtual time runs no reload) and fails unless it comes back at night.
    `herd-kitchen` and `herd-nodone` (#172) shoot Herd page 1 in the kitchen theme, and in it with `done` missing:
    each fails unless the chefs and counter scene are drawn, and in `herd-nodone` the done pose is farm's horse.
+   #241: on Queue, Lanes, Host and Events, and again in kitchen and terminal (`<view>~<theme>`, `?theme=`), it fails
+   unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 16 px
+   sprite per Queue/Events glyph, a load scene per Host group and offer `[scene] [ascii]`. `theme-switch` picks
+   terminal then kitchen in place and fails on a reload, a kept sprite or a favicon not swapped; `moment-still` runs
+   with reduced motion forced and fails unless a moment is a still frame.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).

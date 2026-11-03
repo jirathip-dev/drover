@@ -660,7 +660,7 @@ fn page_fits_390px_without_horizontal_scroll() {
                 .contains("overflow-wrap:anywhere")
     );
     assert!(
-        html.contains("<details class=\"q\" data-q><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"),
+        html.contains("<details class=\"q\" data-q data-act=blocked><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"),
         "rows are details"
     );
     assert!(
@@ -817,7 +817,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     assert!(rows
         .iter()
         .filter(|r| r.contains("alert failed"))
-        .all(|r| r.contains("t-r\">✗") && !r.contains("clean")));
+        .all(|r| r.contains("t-r\" data-act=blocked>✗") && !r.contains("clean")));
     assert!(ev.contains("alert failed") && !ev.contains("clean ×"), "{ev}");
     let all = get(&s, "/?all=1");
     assert!(
@@ -842,7 +842,7 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
             && page.contains("Cache-Control: no-store")
             && !page.contains("<style>")
             && page.matches("<script>").count() == 1 // #206: the head's tab pick, before the first paint
-            && page.contains("<script>let t=location.hash")
+            && page.contains("<script>let h=document.documentElement,t=location.hash")
     );
     let i = page.find("<script src=/a/").unwrap() + 15;
     let v = &page[i..i + 8];
