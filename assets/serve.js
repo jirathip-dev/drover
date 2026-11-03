@@ -29,11 +29,80 @@ const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { se
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
-const MODES = ['horse', 'ascii', 'glyph'];
-// The mode button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
-function mode(m) { B.dataset.mode = m; const b = $('#mode span') || $('#mode'); if (b) b.textContent = m; put('mode', m); }
-mode(MODES.includes(get('mode')) ? get('mode') : 'horse');
-document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(MODES[(MODES.indexOf(B.dataset.mode) + 1) % MODES.length]); });
+// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone, no button); TT is
+// the theme herd.js loaded (docs/themes.md). The button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
+let TT = null, TM = ['scene', 'ascii'];
+function mode(m) {
+  B.dataset.mode = m = TM.includes(m) ? m : TM[0];
+  const b = $('#mode span') || $('#mode');
+  if (b) { b.textContent = m; b.closest('.lh').hidden = TM.length < 2; }
+  put('mode', m);
+}
+mode(get('mode'));
+document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
+// #241: the `[◐]` picker: this phone's theme, applied in place (no reload); the home-screen icon is iOS's from the install.
+const thp = $('#theme');
+thp.value = document.documentElement.dataset.theme;
+thp.closest('.pk').title = 'theme: ' + thp.value;
+thp.onchange = () => {
+  document.documentElement.dataset.theme = thp.value;
+  thp.closest('.pk').title = 'theme: ' + thp.value;
+  put('theme', thp.value);
+  theme(thp.value);
+  if (!get('theme-hint')) { put('theme-hint', 1); toast('the home-screen icon keeps its install-time look'); }
+};
+// #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 16 px sprite (its title and label
+// the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
+const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
+const hash = t => [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+function rows(root) {
+  root.querySelectorAll('.rsg').forEach(g => { g.textContent = g.dataset.g; g.classList.remove('rsg'); ['title', 'role', 'aria-label', 'data-g'].forEach(a => g.removeAttribute(a)); });
+  const rs = TT && TT.row_sprites, sp = (g, act, word) => {
+    if (!g || !rs || !rs[act]) return;
+    Object.assign(g.dataset, { g: g.textContent });
+    g.classList.add('rsg');
+    g.title = word;
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', word);
+    g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`;
+  };
+  root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
+  const L = (TT && TT.looks) || [];
+  root.querySelectorAll('.av[data-act]').forEach(v => {
+    const a = v.querySelector('.asc'), px = v.querySelector('.px'), t = TT && TT.ascii && TT.ascii[v.dataset.act], n = v.closest('[data-agent]');
+    if (a.dataset.o == null) Object.assign(a.dataset, { o: a.innerHTML, c: px.getAttribute('style') });
+    a.innerHTML = t ? '<b></b>' : a.dataset.o;
+    if (t) a.firstChild.textContent = t;
+    a.classList.toggle('w', !!t);
+    px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
+  });
+}
+// #241: a Host group's load scene in miniature (its status: calm, busy or held): wind and clouds, or flame height.
+const MINI = {
+  weather: ['<circle cx=8 cy=8 r=4 fill="var(--a)"/>', '<path d="M3 12h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M1 4h5M2 7h3" stroke="var(--mute)"/>',
+    '<path d="M3 9h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M5 11l-1 4M8 11l-1 4M11 11l-1 4" stroke="var(--l)"/>'],
+  heat: [5, 9, 13].map((h, i) => `<path d="M8 ${15 - h}C12 ${15 - h / 2} 12 15 8 15C4 15 4 ${15 - h / 2} 8 ${15 - h}Z" fill="var(--${i > 1 ? 'r' : 'a'})"/>`),
+};
+function mini(g) {
+  const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
+  s.querySelector('.lsc')?.remove();
+  if (!ls || !MINI[ls.kind]) return;
+  const word = esc('load: ' + ((ls.levels || {})[l] || l));
+  s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
+}
+// #241: a moment (`moment` on /live: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
+function moment(k) {
+  const m = TT && TT.moments && TT.moments[k];
+  if (!m || !m.sprite) return;
+  let o = $('#mo');
+  if (!o) B.append(o = Object.assign(document.createElement('i'), { id: 'mo' }));
+  o.className = 'mo-' + (m.anim || 'hop');
+  o.innerHTML = `<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hm-${k}"/></svg>`;
+  o.hidden = false;
+  clearTimeout(o.t);
+  o.t = setTimeout(() => { o.hidden = true; }, 2400);
+}
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
 let last = Number(B.dataset.ts) * 1000, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
@@ -93,24 +162,129 @@ function frag(id, html) {
   if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
-// #141: the Host groups. A group takes its worst row's status (grey rows don't count); problems go first (red, then
-// amber) and start open, the header summing up the rows at that status. A tap's open/closed holds for the session
-// until the group's status changes.
+// #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
+// (1 h / 6 h / 24 h from `frag?id=hist`; an export carries it as `data-x`). The value's line is red past the limit
+// (dashed), lanes a purple step line on a right axis, memory pressure a band along the floor. Inline SVG, no library.
+// Scales are fixed per metric (a multiple of the limit), so cards compare at a glance and the limit sits clear of zero.
+const K = { load: ['load/cpu', 2, 1.6, ''], swap: ['swap-out', 0, 2, ' pages/2s'], mem: ['free memory', 1, 4, ' GB'], disk: ['free disk', 0, 4, ' GB'], lanes: ['lanes', 0] };
+const fl = k => k === 'mem' || k === 'disk', OPEN = new Map(), DATA = new Map(), NSS = ' vector-effect=non-scaling-stroke';
+const nums = s => (s || '').split(',').map(x => x === '' ? null : +x);
+const hsvg = (w, h, body) => `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio=none>${body}</svg>`;
+// A series as polylines (a null breaks the line); `step` draws a stepped line.
+function segs(v, w, h, top, step) {
+  const out = [], dx = w / v.length;
+  let cur = [];
+  v.forEach((y, j) => {
+    if (y == null) { if (cur.length) out.push(cur); cur = []; return; }
+    const Y = h - Math.min(y, top) / top * h;
+    if (step) cur.push([j * dx, Y], [(j + 1) * dx, Y]); else cur.push([(j + .5) * dx, Y]);
+  });
+  if (cur.length) out.push(cur);
+  return out;
+}
+const pts = s => s.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(2)).join(' ');
+let uid = 0;
+// The value's area and line, its part past the limit red (clipped at the limit), the dashed limit, pressure bands,
+// lanes, a dotted line where there is no data. Sparkline and chart share it.
+function plot(v, k, l, w, h, press, lanes) {
+  const top = k === 'lanes' ? 10 : l * K[k][2], s = segs(v, w, h, top, k === 'lanes'), ly = l ? h - l / top * h : null;
+  let b = '';
+  (press || []).forEach((p, j) => {
+    if (!p || press[j - 1] === p) return;
+    let e = j;
+    while (press[e + 1] === p) e++;
+    const dx = w / press.length;
+    b += `<rect class=${p > 1 ? 'pc' : 'pw'} x=${(j * dx).toFixed(1)} y=${h * .92} width=${((e - j + 1) * dx).toFixed(1)} height=${h * .08} />`;
+  });
+  for (const p of s) {
+    if (k !== 'lanes') b += `<polygon class=ar points="${p[0][0]},${h} ${pts(p)} ${p[p.length - 1][0]},${h}"/>`;
+    b += `<polyline class=${k === 'lanes' ? 'st' : 'ln'}${NSS} points="${pts(p)}"/>`;
+  }
+  if (ly != null) {
+    const clip = fl(k) ? `<rect x=0 y=${ly} width=${w} height=${h - ly} />` : `<rect x=0 y=-10 width=${w} height=${ly + 10} />`;
+    b += `<clipPath id=hc${++uid}>${clip}</clipPath><g clip-path=url(#hc${uid})>${s.map(p => `<polyline class=ov${NSS} points="${pts(p)}"/>`).join('')}</g>`;
+    b += `<line class=lm${NSS} x1=0 x2=${w} y1=${ly} y2=${ly} />`;
+  }
+  if (lanes) b += segs(lanes, w, h, 10, true).map(p => `<polyline class=st${NSS} points="${pts(p)}"/>`).join('');
+  const gap = v.findLastIndex(x => x != null) + 1;
+  if (gap < v.length) b += `<line class=na${NSS} x1=${(gap * w / v.length).toFixed(1)} x2=${w} y1=${h - .5} y2=${h - .5} />`;
+  return b;
+}
+function sparks() {
+  $$('#host .hcd').forEach(c => c.querySelectorAll('.rw[data-k]').forEach(r => {
+    const k = r.dataset.k, sp = r.querySelector('.spk'), o = OPEN.get(c.dataset.h + k);
+    if (sp && !sp.childElementCount) sp.outerHTML = hsvg(120, 24, plot(nums(r.dataset.s), k, +r.dataset.l, 120, 24, nums(r.dataset.p), k === 'lanes' ? null : nums(c.dataset.n))).replace('<svg', '<svg class=spk aria-hidden=true');
+    if (r.open && o && !r.querySelector('.hch')) chart(r, o, null, true);
+  }));
+}
+const clock = t => new Date(t * 1000).toTimeString().slice(0, 5), X = q => `calc(5ch + (100% - 8ch) * ${(q / 100).toFixed(4)})`;
+async function chart(r, range, pin, fresh) {
+  const c = r.closest('.hcd'), k = r.dataset.k, l = +r.dataset.l || null, h = c.dataset.h, [name, p, , u] = K[k];
+  OPEN.set(h + k, range);
+  if (fresh || !DATA.has(h + k)) DATA.set(h + k, r.dataset.x || await part(`frag?id=hist&host=${encodeURIComponent(h)}&k=${k}`));
+  const d = DATA.get(h + k);
+  if (!d || !r.open) return;
+  const i = ['24h', '6h', '1h'].indexOf(range), [v, lanes, press, ago] = d.split('|').map(x => nums(x.split(';')[i]));
+  const secs = { '1h': 3600, '6h': 21600, '24h': 86400 }[range], n = v.length, top = k === 'lanes' ? 10 : l * K[k][2];
+  const now = +B.dataset.ts || Date.now() / 1000, W = 1000, H = 100, f = x => x.toFixed(p);
+  let body = plot(v, k, l, W, H, k === 'mem' ? press : null, k === 'lanes' ? null : lanes) + `<line class=cx${NSS} x1=0 x2=${W} y1=${H} y2=${H} />`, lab = '', rd = 'no data yet';
+  // The read-out: the window's worst point (or the finger's), the worst row's own minute, the lanes then.
+  const j = pin ?? v.reduce((b, x, q) => x != null && (b < 0 || (fl(k) ? x < v[b] : x > v[b])) ? q : b, -1);
+  if (j >= 0 && v[j] != null) {
+    const x = (j + .5) / n * 100, y = 100 - Math.min(v[j], top) / top * 100, over = l && (fl(k) ? v[j] < l : v[j] > l);
+    body += `<line class=cx${NSS} x1=${x * 10} x2=${x * 10} y1=0 y2=${H} />`;
+    lab += `<i class="dot${over ? ' r' : ''}" style="left:${X(x)};top:${y.toFixed(1)}%"></i>`;
+    if (k !== 'lanes' && lanes[j] != null) lab += `<i class="dot l" style="left:${X(x)};top:${100 - Math.min(lanes[j], 10) * 10}%"></i>`;
+    rd = `${clock(now - ago[j] * 60)} · <b class=${over ? 'r' : ''}>${over ? '▶ ' : ''}${f(v[j])}${u}</b>` + (k !== 'lanes' && lanes[j] != null ? ` · <span class=p>${lanes[j]} lanes</span>` : '');
+  }
+  (l ? [0, l, top] : [0, top / 2, top]).forEach(q => lab += `<i class="yl${q === l ? ' ylm' : ''}" style=top:${(100 - q / top * 100).toFixed(1)}%>${f(q)}</i>`);
+  if (k !== 'lanes') [0, 5, 10].forEach(q => lab += `<i class=yr style=top:${100 - q * 10}%>${q}</i>`);
+  const every = { '1h': 900, '6h': 3600, '24h': 21600 }[range];
+  for (let t = Math.ceil((now - secs) / every) * every; t < now; t += every) {
+    const q = (t - now + secs) / secs * 100;
+    if (q > 6 && q < 94) lab += `<i class=xl style="left:${X(q)}">${clock(t)}</i>`;
+  }
+  lab += `<i class=xl style="left:${X(100)}">now</i>`;
+  const lim = l ? `<span><i>┄</i> ${fl(k) ? 'floor' : 'limit'} ${l}${u}</span>` : '';
+  const rule = k === 'swap' ? `<span>new lanes wait while the average stays over ${l} and memory is under pressure</span>` : '';
+  const tabs = ['1h', '6h', '24h'].map(x => `<button type=button aria-pressed=${x === range} data-r=${x}><span>${x}</span></button>`).join('');
+  let ch = r.querySelector('.hch');
+  if (!ch) r.append(ch = Object.assign(document.createElement('div'), { className: 'hch' }));
+  ch.innerHTML = `<div class=htb>${tabs}<span class=hrd>${rd}</span></div><div class=hpl data-n=${n}>${hsvg(W, H, body)}${lab}</div>`
+    + `<p class=hlg><span><i>━</i> ${name}</span>${lim}${k !== 'lanes' ? '<span><i class=p>⌐</i> lanes (right)</span>' : ''}${k === 'mem' ? '<span><i class=a>▬</i> pressure warn</span>' : ''}${rule}</p>`;
+  ch.dataset.r = range;
+}
+// A tab picks the range; a touch on the plot moves the read-out to that point; closing a row forgets its chart.
+document.addEventListener('click', e => { const b = e.target.closest('.htb button'); if (b) chart(b.closest('.rw'), b.dataset.r); });
+document.addEventListener('pointermove', e => {
+  const p = e.target.closest('.hpl'), n = p && +p.dataset.n;
+  if (!p) return;
+  const box = p.querySelector('svg').getBoundingClientRect();
+  chart(p.closest('.rw'), p.closest('.hch').dataset.r, Math.max(0, Math.min(n - 1, Math.floor((e.clientX - box.left) / box.width * n))));
+});
+document.addEventListener('toggle', e => {
+  const r = e.target, k = r.matches('.hcd .rw[data-k]') && r.closest('.hcd').dataset.h + r.dataset.k;
+  if (k && r.open && !r.querySelector('.hch')) chart(r, OPEN.get(k) || '24h', null, true);
+  else if (k && !r.open) OPEN.delete(k);
+}, true);
+// #141: the Host groups, in the server's fixed order (#234: HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS). A group takes
+// its worst row's status (grey rows don't count); a red or amber one starts open, the header summing up the rows at
+// that status (a host card's rows by host). A tap's open/closed holds for the session until the group's status changes.
 const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
 const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
-const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
+const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children, h = r.closest('.hcd'); return (h ? h.dataset.h + ' ' : '') + k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t,.sp')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
 function groups() {
-  const host = $('#host'), rank = t => ({ r: 0, a: 1 })[t] ?? 2;
-  [...host.querySelectorAll(':scope>.grp')].map(g => {
+  const rank = t => ({ r: 0, a: 1 })[t] ?? 2;
+  $$('#host>.grp').forEach(g => {
     const rows = [...g.querySelectorAll('[data-t]')], w = Math.min(2, ...rows.map(r => rank(r.dataset.t))), s = sget(gname(g));
-    const grey = g.matches('.h') && rows.every(r => r.dataset.t === 'm'); // #157: an offline or off host, ranked last
-    g.dataset.t = grey ? 'm' : 'rag'[w];
+    g.dataset.t = 'rag'[w];
     g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
     g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
-    return [grey ? 3 : w, g];
-  }).sort((a, b) => a[0] - b[0]).forEach(([, g]) => host.append(g));
+    mini(g);
+  });
+  sparks();
 }
 document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
 // #141: `[queue·N]`, N the needs-you cards above the tabs.
@@ -177,6 +351,7 @@ function connect() {
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
   es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
   es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
+  es.addEventListener('moment', e => moment(e.data));
   es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
@@ -332,6 +507,7 @@ document.addEventListener('click', e => {
 });
 function tidy(root) {
   graph(root);
+  rows(root);
   evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {

@@ -60,9 +60,12 @@ A lane needs the union of three lists:
 `herdsman spawn` picks the host like this:
 
 1. `--host <name>` forces that host.
-2. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
+2. Otherwise, a role pinned with `[fleet.<n>.role.<r>] host = "main"` (or a host name) goes there. `main` is the host
+   without `machine`. A `design` lane always runs on the main host, in the owner's herdr: it defaults to `main`,
+   and `--host` or a pin naming another host is refused `DESIGN_MAIN_ONLY`.
+3. Otherwise, an issue that already had a lane stays on that lane's host, because its worktree is there. This holds
    even when the host has been turned off.
-3. Otherwise, herdsman takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
+4. Otherwise, herdsman takes the enabled hosts whose tags cover the needs, and picks the least busy: lowest load per
    CPU first, then the most free memory.
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
@@ -74,9 +77,12 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `--machine` (pane reads, prompts, stop, kill, close), and its worktree work runs over ssh on that host:
 `git worktree`, the brief and MCP files, the reviewer's `verdict.md`, the dirty and unpushed checks, and `clean`.
 
+`spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
+paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
+
 ## Turn a host off
 
-`herdsman hosts off <name>` (or the `[off]` button on the host's group in the Host tab, paired devices only) sets
+`herdsman hosts off <name>` (or the `[off]` button on the host's card in the Host tab, paired devices only) sets
 `enabled = false` in fleet.toml and logs `host-off` with `by`. `hosts on` and `[on]` undo it, logging `host-on`.
 
 An off host gets no new issues. It keeps being monitored, and its running lanes drain there: their reviews and fix
@@ -87,8 +93,16 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
 
 - `herdsman hosts` prints, per host: on or off, reachable or offline, its tags, load/cpu, memory, disk, and its lanes.
 - `herdsman status` gets a `HOST` column once fleet.toml has `[hosts]`.
-- The Host tab has one group per host: a status dot, the gauges (from the last `check`), its tags and lanes. An
-  unreachable host is grey (`offline · last seen 33m`), and its lanes never page (`lane-dead` and `stall` skip them).
+- The Host tab's HOSTS section has one card per host, main first, then A→Z, each with the same rows (#234): load/cpu,
+  swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
+  values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
+  (`offline · last seen 33m`) in the same layout, and its lanes never page (`lane-dead` and `stall` skip them).
+- History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
+  disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
+  survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
+  about 180 KB a host. Each row on a card has a 24 h sparkline; a tap opens a 1 h / 6 h / 24 h chart with the limit
+  dashed and the lane count as a step line. Downsampling keeps the worst row of each bucket (the max; free space the
+  min), so a peak is never hidden.
 - Each lane card, and each horse in the Herd, shows its host name.
 
 ## Health (#235)

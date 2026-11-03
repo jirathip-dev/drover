@@ -22,7 +22,7 @@ manifest are `public, max-age=86400`. The page is HTML only (`no-store`); its sc
 `/a/<hash8>/serve.js`, `serve.css`, `herd.js`, `herd.css` and the built-in themes (`themes/…`; `<hash8>` is FNV-1a over
 their content at build time) with `cache-control: public, max-age=31536000, immutable`, precached by
 the service worker. The SW serves the page stale-while-revalidate: the cached copy paints at once (the
-dot amber) and the live stream's first `?frag=all` fills it in (green). In horse mode a Lanes avatar shows its
+dot amber) and the live stream's first `?frag=all` fills it in (green). In scene mode a Lanes avatar shows its
 glyph until herd.js has built the horse symbols from the theme's `sprites.svg`.
 
 Page size (#60): `GET /` leaves out what the first paint does not show. A fleet's `roles` row is empty
@@ -192,26 +192,12 @@ Milky Way drifting as one at 0.7 pt/s, the moon fixed at (306, 56) (above the st
 clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog compose with it. Debug:
 `/?light=auto|day|night`.
 
-### Themes (#172)
+### Themes (#172, #241)
 
-The Herd's look is data, no code: a theme is one folder `themes/<name>/` holding
-
-- `theme.json`: `poses` (the sprite id for `working`, `idle`, `done`, `blocked`), `glyphs` (the label's mark per
-  lane state: `working`, `idle`, `unknown`, `parked`, `done`, `blocked`, `dead`), `words` (label overrides:
-  `horses`, `herd`, `ranch`, e.g. `{"horses": "chefs", "herd": "kitchen line"}`) and optional `scene`:
-  `weather: false` (no clouds, rain or fog) and `palette` (CSS custom properties set on the Herd, e.g. `--sky1`,
-  `--sky2`, `--pa`: the pasture's background);
-- `sprites.svg`: one `<g id=…>` per pose, drawn in a 132 × 100 box; coats are the CSS vars `--c`, `--d`, `--m`,
-  `--b` (one per lane name); a `.leg` group swings with the trot, `var(--m)` fills skew in a storm;
-- optionally `scene.svg`: the strip's background, `viewBox="0 0 390 320"` (the strip shows its lower part).
-
-Built in: `farm` (the horses and the ranch drawn by herd.js) and `kitchen` (pixel chefs at a counter). Your own go
-in `<config dir>/themes/<name>/` (next to fleet.toml); one named like a built-in wins, file by file. Pick one per
-board with `[serve] theme = "<name>"` (default `farm`); the Host tab shows it. A pose, glyph or word the theme
-lacks is farm's; an invalid or missing theme.json means farm, with an amber `theme` row on the Host tab.
-`serve` serves the active theme's three files at `/theme/sprites.svg`, `/theme/theme.json` and
-`/theme/scene.svg` and nothing else under `/theme/`; `--export` writes them to `theme/`. Debug (demo only):
-`?theme=<built-in>` and `?nopose=<pose>`.
+The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
+rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` picker, `[serve] theme` (its
+default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
+writes them to `themes/`.
 
 ## Alerts (web push)
 
@@ -255,13 +241,16 @@ client). CI's deps gate fails on any other direct dependency.
 
 ## Host tab (#141)
 
-Four groups: MACHINE (load/cpu, swap-out, memory, disk, the spawn gate), SERVICES (board, tick, herdr, accounts,
+Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,
+top memory, lanes, tags, each with a 24 h sparkline that opens a 1 h / 6 h / 24 h chart; docs/hosts.md), FLEET DISK
+(the worktree budget, orphan folders, processes left in closed lanes), SERVICES (board, tick, herdr, accounts,
 deepseek), FLEETS (each fleet's last `herdsman drive` result in plain words, the raw line on tap) and ALERTS (push,
 alert devices, paired devices). A group takes its worst row's status, red over amber over green (a paused fleet is
-grey and counts as none); problem groups go first and open, green ones collapse to one summary line. A tap's
+grey and counts as none); problem groups open, green ones collapse to one summary line. A tap's
 open/closed holds for the browser session until the group's status changes (`sessionStorage`, `host:<GROUP>`).
 Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %, amber to 100 %, red past it with
-`▶` and the percentage); disk's gauge fills as free space nears `min_free_gb`, its floor the closing tick. The words
+`▶` and the percentage); memory's and disk's bars show the used part (`free 12 GB of 228`), their status from the
+floor (`min_free_mem_gb`, `min_free_gb`). The words
 come from one table in `src/serve.rs` (`WORDS`, golden-tested in tests/host_words.rs). The tab bar is
 `[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
 

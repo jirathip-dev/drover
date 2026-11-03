@@ -129,7 +129,10 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).into_owned();
     assert!(page.contains("<span class=k>leftovers</span>"), "no leftovers row");
-    assert!(page.contains("2 running</b> <span class=mt>300 MB"), "count + memory");
+    assert!(
+        page.contains("<b class=a>2</b> processes left in closed lanes <span class=mt>· 300 MB"),
+        "count + memory"
+    );
     assert!(
         page.contains("name=op value=reap") && page.contains("data-confirm="),
         "a confirmed [reap]"
@@ -287,10 +290,7 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
     let page =
         String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000)).into_owned();
     assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
-    assert!(
-        page.contains("16G com.apple.Virtua (VM (colima))"),
-        "the VM is classified"
-    );
+    assert!(page.contains("16G VM (colima) · "), "the VM is classified");
     assert!(
         page.contains("2210M node (lane impl-12)"),
         "a lane's process names the lane"

@@ -233,6 +233,10 @@ pub fn workspace_rename(r: &dyn Runner, ws: &str, label: &str) -> Result<Out> {
     exec(r, &argv(&["workspace", "rename", ws, label]))
 }
 
+pub fn workspace_close(r: &dyn Runner, ws: &str) -> Result<Out> {
+    exec(r, &argv(&["workspace", "close", ws]))
+}
+
 /// Remove the lane's worktree through herdr (by its workspace); false when herdr would not.
 pub fn worktree_remove(r: &dyn Runner, ws: &str) -> Result<bool> {
     Ok(exec(r, &argv(&["worktree", "remove", "--workspace", ws]))?.code == 0)

@@ -555,7 +555,7 @@ fn page_has_no_dash_placeholders() {
     );
     // #115: the card no longer repeats `#n state`; the row is the summary.
     assert!(
-        html.contains("<details class=\"q\" data-q><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/18\">#18</a></span><span class=a>queued</span>"),
+        html.contains("<details class=\"q\" data-q data-act=idle><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/18\">#18</a></span><span class=a>queued</span>"),
         "{html}"
     );
     assert!(
@@ -572,7 +572,7 @@ fn page_has_no_dash_placeholders() {
 #[test]
 fn ascii_horse_snapshots() {
     let asc = |state: &str| {
-        let a = herdsman::serve::avatar("x", state);
+        let a = herdsman::serve::avatar("x", "impl", state);
         a[a.find("</i>").unwrap() + 4..a.find("</i><svg").unwrap() + 4].to_string()
     };
     let stand = "<i class=asc><b>    _/>\n~(___)\n  | |</b></i>";
@@ -591,9 +591,9 @@ fn ascii_horse_snapshots() {
 #[test]
 fn vector_horses_keep_a_coat_per_name() {
     use herdsman::serve::avatar;
-    let w = avatar("sendmeter-impl-12", "working");
+    let w = avatar("sendmeter-impl-12", "impl", "working");
     assert!(
-        w.contains("class=\"av g working\"") && w.contains("<use href=#hp1 />"),
+        w.contains("class=\"av g working\"") && w.contains("<use href=#ha-impl />") && w.contains("data-act=impl"),
         "{w}"
     );
     let horses =
@@ -606,9 +606,12 @@ fn vector_horses_keep_a_coat_per_name() {
             .contains("class=\"leg leg-nf\" style=\"--a:28deg\"")
             && horses.contains("fill=\"var(--c)\"")
     );
-    assert!(avatar("a", "blocked").contains("class=\"av r blocked\"") && avatar("a", "done").contains("av g done"));
+    assert!(
+        avatar("a", "impl", "blocked").contains("class=\"av r blocked\"")
+            && avatar("a", "impl", "done").contains("av g done")
+    );
     let coat = |n: &str| {
-        let a = avatar(n, "idle");
+        let a = avatar(n, "impl", "idle");
         a[a.find("--c:").unwrap()..a.find(";--d").unwrap()].to_string()
     };
     assert_eq!(coat("synergy-impl-7"), coat("synergy-impl-7"));
