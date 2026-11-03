@@ -369,11 +369,10 @@ fn services_rows_go_green_amber_and_red() {
         page.contains("/ 25 GB</span> (104%) <span class=\"mt fx\">· 4m ago</span>"),
         "{page}"
     );
-    assert!(
-        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
-        "{page}"
-    );
-    for (k, d) in [("fast step", "ran 3m ago"), ("dev.herdsman.fast", "missing")] {
+    for (k, d) in [
+        ("tick", "failed: herdr: gone · job missing"),
+        ("fast step", "ran 3m ago · job missing"),
+    ] {
         let want = format!("<span class=k>{k}</span><span class=w><b class=r>{d}</b> <span class=\"mt fx\">→ herdsman");
         assert!(page.contains(&want), "{want}\n{page}");
     }
