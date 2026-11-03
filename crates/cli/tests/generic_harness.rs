@@ -30,7 +30,7 @@ fn the_generic_harness_has_every_fallback() {
 }
 
 #[test]
-fn a_generic_lane_reads_its_pane_answers_by_reply_and_holds_no_claude_memory() {
+fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() {
     let d = tmpdir("generic-harness");
     let c = ctx(&d, CONFIG);
     let wt = d.join("wt").to_string_lossy().into_owned();
@@ -77,7 +77,11 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_holds_no_claude_memory() {
     );
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(res.contains("no menu on") && !r.called("herdr pane send-keys"), "{res}");
-    // Memory: no Claude row for a codex lane, and no row of its own.
-    assert!(page.contains("<span class=k>memory</span>"), "the Host tab renders");
-    assert!(!page.contains("<span class=k>claude</span>") && !page.contains("<span class=k>codex</span>"));
+    // Memory: the codex lane's pane tree in a row of its own, none under Claude.
+    assert!(!page.contains("<span class=k>claude</span>"), "{page}");
+    assert!(
+        page.contains("<span class=k>codex</span>")
+            && page.contains("<b>1.0 GB</b> <span class=mt>(1 lanes: working 0 / done 0)</span>"),
+        "{page}"
+    );
 }

@@ -85,7 +85,7 @@ pub trait Harness {
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         None
     }
-    /// The herdr agent labels whose pane trees the Host tab's memory row sums; none: no row.
+    /// The herdr agent labels of its panes, for the Host tab's memory row (generic: an agent's own label is its row).
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }

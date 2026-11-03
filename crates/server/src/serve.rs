@@ -2261,17 +2261,27 @@ impl<'a> Server<'a> {
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
                 let all = herdr::agents(r).unwrap_or_default();
                 s.top = host::top(r, &all);
-                // #248: what each harness's lanes hold (`Harness::process_names`), working and done apart.
-                for h in crate::harness::NAMES {
-                    let names = crate::harness::get(h).process_names();
-                    let ours: Vec<&serde_json::Value> =
-                        all.iter().filter(|a| names.iter().any(|n| a["agent"] == *n)).collect();
+                // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
+                // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
+                let mut by: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
+                for a in &all {
+                    let Some(label) = a["agent"].as_str().filter(|l| !l.is_empty()) else {
+                        continue;
+                    };
+                    let h = crate::harness::NAMES
+                        .iter()
+                        .find(|h| crate::harness::get(h).process_names().contains(&label));
+                    by.entry(h.map_or(label.trim_end_matches("-tui"), |h| h).into())
+                        .or_default()
+                        .push(a);
+                }
+                for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
                     let mb: u64 = host::held(r, &ours).iter().sum();
                     let gb = format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024);
                     let (w, d) = (n("working"), n("done"));
                     let ls = format!("({} lanes: working {w} / done {d})", ours.len());
-                    mem.extend((!ours.is_empty()).then(|| (h, format!("<b>{gb} GB</b> <span class=mt>{ls}</span>"))));
+                    mem.push((h, format!("<b>{gb} GB</b> <span class=mt>{ls}</span>")));
                 }
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
             }
