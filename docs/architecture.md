@@ -43,12 +43,21 @@ the hook for one release, and `HERDSMAN_LANE` wins when both are set.
 
 ## Module map
 
-Every module under `src/`, one job each. External tools go through one seam: `runner` (any program), `herdr` (every
+Three crates (#264): `crates/core` (every module below but `serve`), `crates/server` (`serve`, over core only) and
+`crates/cli` (the `herdsman` binary: core plus server, and the integration tests). `cargo install --path crates/cli`.
+Core never depends on server or cli: `herdsman serve` reaches it through the `SERVE` hook the binary sets. CI checks
+both rules: no server or cli crate in core's dependency tree, and `std::process::Command` in core only in `runner`
+(the `Runner` implementation), `events` (notifiers) and `webpush` (curl).
+The split is a pure move by what compiles today, so core still holds I/O modules (`drive`, `spawn`, `harness`,
+`devices`, `webpush`): their cycles (`gate` → `spawn`/`drive`/`check`, `config` → `harness`/`devices`,
+`events` → `webpush`, `serve` → `drive` → `cli`) run through them. #265–#269 move them out step by step.
+
+Every module under `crates/*/src/`, one job each. External tools go through one seam: `runner` (any program), `herdr` (every
 herdr argv) and `gh` (cached GitHub reads).
 
 | Module | Job |
 |---|---|
-| `cli` | clap CLI, `help --agent`, dispatch |
+| `cli` | clap CLI, `help --agent`, dispatch (`main.rs`, `lib.rs` in `crates/cli`: the binary, `serve` wired in) |
 | `lib` | `Ctx` (paths, clock); `ask`, `answer`, `asks` |
 | `config` | fleet.toml: load, validate, in-place edits that keep every other byte |
 | `events` | the append-only log, the state fold, notifiers |
@@ -81,8 +90,8 @@ herdr argv) and `gh` (cached GitHub reads).
   - `format_push_string`: the HTML page is built with `+= &format!(..)`; one extra allocation per row is nothing.
   - `format_collect`: `.map(|x| format!(..)).collect()` reads better than a `fold` with `write!`.
   - `many_single_char_names`: short names in small math and parsing closures (dates, hex, crypto).
-- **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` (tests live in
-  `tests/`), counted after `cargo fmt`. CI runs `herdsman cap-check --config ci/cap.toml`; a fleet can set its own
+- **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
+  live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `herdsman cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
 
 History: one file per change in `docs/cap-history/<date>-<issue>.md`, so no two PRs edit the same line.
