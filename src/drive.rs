@@ -446,6 +446,13 @@ fn serial(
     let mine = queue::groups(&q, &ev, f, fleet, n);
     let (mut wait, mut text) = (mine.iter().any(|g| queue::held(&ev, fleet, n, &g.name)), None);
     let (num, head) = (pr["number"].to_string(), pr["headRefOid"].as_str().unwrap_or_default());
+    for g in queue::groups(&q, &[], f, fleet, n) {
+        let has = |e: &Event| e.is("serial-joined", fleet, n) && e.str("group") == Some(&g.name);
+        if !ev.iter().any(has) {
+            let d = json!({"group": g.name, "by": "mark"});
+            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
+        }
+    }
     let new = crate::gate::unjoined(ctx, r, f, (fleet, n), (&num, head)).unwrap_or_default();
     for (g, p) in &new {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
@@ -463,6 +470,21 @@ fn serial(
             (wait, text) = (true, text.or(Some(stop)));
         }
     }
+    // Ordered locking: held in one group, it lets go of its slots in later ones, so no two issues hold-and-wait crossed.
+    let (now, mut blocker) = (read(&ctx.state)?, None);
+    for g in queue::groups(&q, &now, f, fleet, n) {
+        let h = queue::held(&now, fleet, n, &g.name);
+        if let (false, Some(b)) = (h, blocker) {
+            let d = json!({"group": g.name, "holder": b, "by": "order"});
+            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
+        } else if h && blocker.is_none() {
+            let last = now
+                .iter()
+                .rev()
+                .find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&g.name));
+            blocker = Some(last.and_then(|e| e.data["holder"].as_u64()).unwrap_or(0));
+        }
+    }
     if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {
         writeln!(out, "{fleet} #{n} serial-held: {text}")?;
         let sp = crate::events::last_spawn(&ev, lane);
@@ -475,8 +497,17 @@ fn serial(
     }
     let pos = |i: u64| q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX);
     for g in mine.into_iter().filter(|g| queue::held(&ev, fleet, n, &g.name)) {
+        // Another waiter is a candidate only once this is its first held group (its earlier slots taken).
+        let first_held = |i: u64| {
+            queue::groups(&q, &ev, f, fleet, i)
+                .into_iter()
+                .find(|y| queue::held(&ev, fleet, i, &y.name))
+        };
         let waits = |x: &&IssueState| {
-            x.fleet == fleet && queue::in_flight(&x.state) && queue::held(&ev, fleet, x.issue, &g.name)
+            x.fleet == fleet
+                && queue::in_flight(&x.state)
+                && queue::held(&ev, fleet, x.issue, &g.name)
+                && (x.issue == n || first_held(x.issue).is_some_and(|y| y.name == g.name))
         };
         let first = st.values().filter(waits).min_by_key(|x| (pos(x.issue), x.issue));
         if queue::holders(&ev, &st, f, fleet, &g.name).len() >= g.max || first.map(|x| x.issue) != Some(n) {

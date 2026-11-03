@@ -374,3 +374,47 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
         "blocked"
     );
 }
+
+#[test]
+fn crossed_joins_over_two_groups_never_deadlock() {
+    let groups = "[[fleet.sendmeter.serial]]\nname = \"aa\"\npaths = [\"a/**\"]\n\n\
+                  [[fleet.sendmeter.serial]]\nname = \"bb\"\npaths = [\"b/**\"]\n";
+    let c = ctx(&tmpdir("sg-cross"), &config("", groups));
+    let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    ok(&["queue", "sendmeter", "add", "13", "12"]);
+    lane(&c, 12);
+    lane(&c, 13);
+    // #12 holds aa, #13 holds bb; then each one's push touches the other's group.
+    ev(&c, 12, "serial-joined", json!({"group": "aa", "by": "diff"}));
+    ev(&c, 13, "serial-joined", json!({"group": "bb", "by": "diff"}));
+    let r = fake(&[(12, "a/x\nb/x\n"), (13, "b/y\na/y\n")]);
+    drive(&c, &r);
+    assert_eq!(logged(&c, 12, "serial-held"), ["bb (13)"]);
+    // #13 waits on aa, the earlier group, so it lets go of bb: #12 takes it and updates, though #13 is first in queue.
+    assert_eq!(logged(&c, 13, "serial-held"), ["aa (12)", "bb (12)"]);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(logged(&c, 12, "serial-slot"), ["bb"]);
+    ev(&c, 12, "merged", json!({}));
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(logged(&c, 13, "serial-slot"), ["aa", "bb"]);
+}
+
+#[test]
+fn a_marked_issue_logs_its_join_by_mark() {
+    let c = ctx(&tmpdir("sg-mark-log"), &config("", DB_CI));
+    let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    ok(&["queue", "sendmeter", "add", "12", "--serial", "ci"]);
+    lane(&c, 12);
+    let r = fake(&[(12, "README.md\n")]);
+    drive(&c, &r);
+    drive(&c, &r);
+    let all = read(&c.state).unwrap();
+    let by: Vec<_> = all
+        .iter()
+        .filter(|e| e.kind == "serial-joined")
+        .map(|e| (e.str("group"), e.str("by")))
+        .collect();
+    assert_eq!(by, [(Some("ci"), Some("mark"))], "logged once");
+}

@@ -106,7 +106,12 @@ pub fn waiting_on(
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
-    if let Some(g) = fc.serial.iter().find(|g| crate::queue::held(events, f, n, &g.name)) {
+    if let Some(g) = fc
+        .serial
+        .iter()
+        .filter(|g| crate::queue::held(events, f, n, &g.name))
+        .min_by_key(|g| &g.name)
+    {
         let st = crate::events::fold(events);
         let h = crate::queue::holders(events, &st, fc, f, &g.name);
         let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
