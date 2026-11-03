@@ -497,6 +497,10 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
         .parked
         .as_ref()
         .map_or((tone, shown), |h| ("m", format!("parked · {}", on(h))));
+    let shown = match &l.kept {
+        Some(k) => format!("{shown} · kept open: {k}"),
+        None => shown,
+    };
     (title, tone, shown, ago(ctx.now, l.since))
 }
 
@@ -1000,9 +1004,20 @@ impl<'a> Server<'a> {
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &fold(&events))?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
-        // #218: a lane with no pane (herdr no longer lists it): its stored transcript, no live block.
+        // #218: a lane with no pane (herdr no longer lists it): its stored transcript, no live block; #248: Claude's
+        // saved session for its worktree first.
         let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
-            let all: Vec<String> = std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect();
+            let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
+            let closed = events
+                .iter()
+                .rev()
+                .find(|e| e.kind == "lane-closed" && e.str("agent") == Some(agent));
+            let id = closed.and_then(|e| e.str("session"));
+            let saved = wt
+                .and_then(|wt| lanes::session(&ctx.home, wt, id))
+                .filter(|_| self.export.is_none());
+            let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
+            let all: Vec<String> = saved.or_else(rolled)?;
             let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
             return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
         };
@@ -2027,6 +2042,7 @@ impl<'a> Server<'a> {
         let mut out = String::new();
         for (name, h) in crate::hosts::cards(cfg, r) {
             let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
+            let mut claude = None;
             let mut s = seen.get(&name).cloned().unwrap_or_default();
             let word = |p: Option<u8>| p.and_then(|p| ["normal", "warn", "critical"].get(usize::from(p)).copied());
             let mut gate = Host {
@@ -2040,7 +2056,21 @@ impl<'a> Server<'a> {
                 gate = hs.clone();
                 (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
-                s.top = host::top(r, &herdr::agents(r).unwrap_or_default());
+                let all = herdr::agents(r).unwrap_or_default();
+                s.top = host::top(r, &all);
+                // #248: what the Claude lanes hold, working and done apart, so done-lane memory shows.
+                let ours: Vec<&serde_json::Value> = all.iter().filter(|a| a["agent"] == "claude").collect();
+                let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
+                let mb: u64 = host::held(r, &ours).iter().sum();
+                let gb = format!("{}.{} GB", mb / 1024, mb % 1024 * 10 / 1024);
+                claude = (!ours.is_empty()).then(|| {
+                    format!(
+                        "<b>{gb}</b> <span class=mt>({} lanes: working {} / done {})</span>",
+                        ours.len(),
+                        n("working"),
+                        n("done")
+                    )
+                });
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
@@ -2113,6 +2143,9 @@ impl<'a> Server<'a> {
             let mut rows = row("load/cpu", "load", grey(lt), &lv, &dl(lim.load_per_cpu));
             rows += &row("swap-out", "swap", grey(st), &sv, &dl(lim.swapout_rate));
             rows += &row("memory", "mem", grey(mt), &mv, &dl(lim.min_free_mem_gb));
+            if let Some(c) = &claude {
+                rows += &kv("claude", grey("g"), c);
+            }
             rows += &row("disk", "disk", grey(dt), &dv, &dl(lim.min_free_gb));
             // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
             if !s.top.is_empty() {

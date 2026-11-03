@@ -1,5 +1,6 @@
 {
   "autoMemoryEnabled": false,
+  "cleanupPeriodDays": "{{TRANSCRIPT_DAYS}}",
   "attribution": { "commit": "", "pr": "" },
   "includeCoAuthoredBy": false,
   "enabledPlugins": {

@@ -78,7 +78,12 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             } else {
                 format!("{}:{lane}", s.last_ts)
             };
-            if status.is_none() {
+            // #248: a lane herdsman closed once its handoff was logged is not gone.
+            let closed = spawned.is_some_and(|sp| {
+                let me = |e: &&Event| e.kind == "lane-closed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
+                events.iter().any(|e| me(&e) && e.str("reason") == Some("done"))
+            });
+            if status.is_none() && !closed {
                 hits.push((
                     "lane-dead",
                     key.clone(),
@@ -158,6 +163,35 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     let open = open_asks(&events);
+    // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
+    for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
+        let (Some(name), Some(pane)) = (a["name"].as_str(), a["pane_id"].as_str()) else {
+            continue;
+        };
+        let Some(e) = last_spawn(&events, name).filter(|e| On::of(r, Some(e)).machine.is_none()) else {
+            continue;
+        };
+        let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
+            continue;
+        };
+        let asking = open.iter().any(|q| q.str("agent") == Some(name));
+        let due =
+            handoff(r, &events, e, (n, wt)).filter(|t| !asking && ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let Some(at) = due else { continue };
+        if let Some(why) = kept(r, wt) {
+            let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
+            fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+            continue;
+        }
+        let mb = host::held(r, &[a]).first().copied().unwrap_or_default();
+        if herdr::close(r, pane).is_ok() {
+            let id = a["agent_session"]["value"].as_str();
+            let d = json!({"agent": name, "freed_mb": mb, "reason": "done", "session": id});
+            let ev = Event::new(ctx.now, &e.fleet, Some(n), "lane-closed", d);
+            writeln!(out, "{}", plain(&ev))?;
+            emit(&ctx.state, cfg, ev)?;
+        }
+    }
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
     let due = |a: &&&Event| ctx.now.saturating_sub(a.ts) >= cfg.limits.ask_default_minutes * 60;
     for a in open.iter().filter(routine).filter(due) {
@@ -245,6 +279,37 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         format!("{} {}", du(&ctx.worktrees), ctx.now),
     );
     Ok(())
+}
+
+/// #248: when lane `e`'s handoff was logged: its issue's latest `pushed`/`verdict` since it spawned, or a design
+/// lane's latest commit since then.
+fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
+    if e.str("role") == Some("design") {
+        let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"])
+            .ok()?
+            .trim()
+            .parse()
+            .ok();
+        return t.filter(|t| *t > e.ts);
+    }
+    let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
+    events.iter().rev().find(by).map(|x| x.ts)
+}
+
+/// #248: why a done lane stays open: uncommitted changes (lane scratch and generated folders aside) or unpushed commits.
+fn kept(r: &dyn Runner, wt: &str) -> Option<String> {
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
+    let made = |l: &&str| ["?? ui-390/", "?? node_modules/"].contains(&l.trim_end());
+    let st = git(&["status", "--porcelain"]).map(|s| s.lines().filter(|l| !made(l)).collect::<Vec<_>>().join("\n"));
+    match (
+        st.map(|s| changes(&s)),
+        git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]),
+    ) {
+        (Ok(0), Ok(n)) if n.trim() == "0" => None,
+        (Ok(0), Ok(n)) => Some(format!("{} unpushed commit(s)", n.trim())),
+        (Ok(0), Err(e)) | (Err(e), _) => Some(format!("unreadable git state ({e:#})")),
+        (Ok(c), _) => Some(format!("{c} uncommitted change(s)")),
+    }
 }
 
 /// Log and print one alert unless one of its kind already carries `d`'s `key`.

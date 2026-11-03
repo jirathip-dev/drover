@@ -109,6 +109,8 @@ update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart f
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
+done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
+transcript_days = 14      # Claude lanes' cleanupPeriodDays (Claude's own transcript retention)
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /

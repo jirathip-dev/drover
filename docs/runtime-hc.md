@@ -269,6 +269,8 @@ would get):
   not `working`. Correct enough: a lane that reports nothing cannot prove it is busy.
 - **check, idle reap** (#223, `check.rs:112-113`): needs `done` or `idle`, so it never trims the lane's children.
   Safe.
+- **check, done close** (#248): needs `done` plus a logged `pushed`/`verdict` (a design lane: a commit) older than
+  `[limits] done_close_minutes`, and a clean, pushed worktree; so an `unknown` lane is never closed. Safe.
 - **check, DECISION re-delivery** (#143, `check.rs:175`): needs `idle` or `done`, so an undelivered DECISION is never
   typed again. A real loss.
 - **gate, after a verdict** (`gate.rs:155`, `gate.rs:169-171`): "not `working`" counts as free, so it purges the

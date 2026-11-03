@@ -125,6 +125,13 @@ impl Plan {
         let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
         c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| a.1.clone()));
+        // #248: no updater, telemetry or other background traffic in a Claude lane (names as of Claude Code 2.1.311).
+        if self.harness == "claude" {
+            c.extend([
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1".into(),
+                "DISABLE_AUTOUPDATER=1".into(),
+            ]);
+        }
         c
     }
 
