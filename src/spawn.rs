@@ -486,6 +486,11 @@ pub fn spawn(
         p.at(&pl.root, f.repo_name());
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
+
+            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh).
+            if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
+                p.env.insert("HERDSMAN_MAIN".into(), format!("{}:{}", main.0, ctx.exe));
+            }
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -672,6 +677,11 @@ pub fn spawn(
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
+    // #275: on another host the name can be lost while the harness came up: retry only when none did.
+    let lost = |s: &crate::runner::Out| herdr::failed_with(s, "agent_name_not_found");
+    if lost(&start) && herdr::harness_in(r, &pane).is_none() {
+        start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
+    }
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
@@ -679,11 +689,11 @@ pub fn spawn(
         }
         // Under load herdr can time out while the harness still comes up: keep it as the lane.
         // #182: any other failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
-        let why = if !herdr::failed_with(&start, "timeout") {
+        let why = if !herdr::failed_with(&start, "timeout") && !lost(&start) {
             Some(format!("herdr agent start failed: {}", start.stderr.trim()))
         } else if herdr::harness_in(r, &pane).is_none() {
             Some(format!(
-                "herdr agent start timed out and no harness came up: {}",
+                "herdr agent start failed and no harness came up: {}",
                 start.stderr.trim()
             ))
         } else {

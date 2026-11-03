@@ -593,3 +593,97 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     assert!(r.called("herdr --machine bazzite pane close w8:p1"));
     assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
 }
+
+/// #275: a remote lane is told the main host (`HERDSMAN_MAIN`, its path never rehomed) and an answer to it lands
+/// with `--machine`: the prompt, then Enter, then the wait that confirms it.
+#[test]
+fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
+    let c = setup("hosts-answer", "", true, 0);
+    with_account(&c);
+    let r = remote_fake();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 0, "{out}");
+    let export = "herdr --machine bazzite pane run w9:p1 export";
+    let calls = r.calls.borrow().clone();
+    let lane = calls.iter().find(|c| c.starts_with(export)).unwrap();
+    assert!(
+        lane.ends_with(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
+        "{lane}"
+    );
+    let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
+    ev(&c, NOW, 12, "needs-decision", d);
+    let r = Fake::default()
+        .reply(
+            "herdr --machine bazzite agent prompt sendmeter-impl-12 DECISION q1: a",
+            "{}",
+        )
+        .reply("herdr --machine bazzite pane send-keys w9:p1 Enter", "{}")
+        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "sendmeter q1: a -> sendmeter-impl-12\n"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(r.calls.borrow().len(), 3, "{:?}", r.calls.borrow());
+}
+
+/// #275: `agent_name_not_found` on another host: one more start when no harness came up, none when one did (it is
+/// named instead); every call on that host, and no workspace closed.
+#[test]
+fn a_lost_agent_name_retries_once_without_a_double_start() {
+    let lost =
+        r#"{"error":{"code":"agent_name_not_found","message":"named agent no longer owns the target terminal"}}"#;
+    let start = "herdr --machine bazzite agent start";
+    for up in [false, true] {
+        let c = setup("hosts-lost", "", true, 0);
+        with_account(&c);
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": if up { "claude" } else { "" }}}});
+        let mut r = remote_fake()
+            .once_err(start, 1, lost)
+            .reply("herdr --machine bazzite agent rename w9:p1 sendmeter-impl-12", "{}");
+        if up {
+            r = r.reply("herdr --machine bazzite pane get w9:p1", &pane.to_string());
+        }
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        assert_eq!(r.count(start), if up { 1 } else { 2 });
+        assert_eq!(r.called("herdr --machine bazzite agent rename"), up);
+        assert!(!r.called("herdr --machine bazzite workspace close"));
+        let calls = r.calls.borrow();
+        assert!(calls
+            .iter()
+            .filter(|c| c.starts_with("herdr "))
+            .all(|c| c.starts_with("herdr --machine bazzite ")));
+    }
+}
+
+/// #275: asks a lane logged on its own host before forwarding are imported into the main log once, under a new id.
+#[test]
+fn asks_stranded_on_a_remote_host_are_imported_once() {
+    let c = setup("hosts-import", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let d = json!({"id": "q1", "question": "Old?", "options": [], "agent": "x"});
+    ev(&c, NOW - 800, 9, "needs-decision", d);
+    let stranded = json!({"ts": NOW - 600, "fleet": "sendmeter", "issue": 12, "type": "needs-decision",
+                          "id": "q59", "question": "Which way?", "options": ["a"], "agent": null});
+    let log = "/home/me/.local/state/herdsman/events.jsonl";
+    let r = fake(1.0, 1.0).reply(&format!("{SSH}'cat' '{log}'"), &format!("{stranded}\n"));
+    for _ in 0..2 {
+        assert_eq!(run(&c, &r, &["check"]).0, 0);
+    }
+    let all = read(&c.state).unwrap();
+    let asks: Vec<_> = all
+        .iter()
+        .filter(|e| e.kind == "needs-decision" && e.issue == Some(12))
+        .collect();
+    assert_eq!(asks.len(), 1, "imported once");
+    let a = asks[0];
+    assert_eq!(
+        (a.str("id"), a.str("from"), a.str("agent"), a.ts),
+        (Some("q2"), Some("bazzite:q59"), Some("sendmeter-impl-12"), NOW - 600)
+    );
+    let (_, out) = run(&c, &r, &["asks", "sendmeter"]);
+    assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
+}

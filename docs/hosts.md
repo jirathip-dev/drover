@@ -80,6 +80,18 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
 
+## Asks, answers and verdicts from another host (#275)
+
+A lane on another host gets `HERDSMAN_MAIN` (`<main host's [hosts] name>:<its herdsman path>`). Its `herdsman ask`,
+`answer`, `verdict` and its own events (`hook-denied`, `coauthor-trailer`) run on the main host over
+`ssh <main host's name>`, so the main host's log is the only one written and only the main host pushes. So the main
+host's `[hosts]` name must also work as an SSH name on every other host (an `~/.ssh/config` entry back to it, key-based).
+That host's own `events.jsonl` is never written; herdsman warns when it finds one. Each `check` imports the asks a lane
+left in a remote host's own log (lanes started before this) under a new id, with `from` naming the old one.
+
+An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` there fails
+`agent_name_not_found`, herdsman names the harness if one came up, else starts it once more.
+
 ## Turn a host off
 
 `herdsman hosts off <name>` (or the `[off]` button on the host's card in the Host tab, paired devices only) sets
