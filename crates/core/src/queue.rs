@@ -1,4 +1,5 @@
 //! The per-fleet work queue (`queue` events): `herdsman queue`, `next` and `board`.
+use crate::config::{Fleet, Serial};
 use crate::events::{age, fold, Event, IssueState, States};
 use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
@@ -8,8 +9,8 @@ use serde_json::{json, Value};
 pub struct Item {
     pub issue: u64,
     pub blocked_by: Option<u64>,
-    /// `queue add --serial`: touches the fleet's `serial_paths`.
-    pub serial: bool,
+    /// #294: the serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
+    pub serial: Vec<String>,
     /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
     pub needs: Vec<String>,
 }
@@ -52,20 +53,20 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 ensure!(!issues.contains(&a), "#{a} cannot be placed relative to itself");
                 pos(q, a)?;
             }
-            let serial = d["serial"].as_bool() == Some(true);
+            let serial = strs(&d["serial"]);
             let mut moved: Vec<Item> = issues
                 .iter()
                 .map(|&n| Item {
                     issue: n,
                     blocked_by: None,
-                    serial,
-                    needs: needs(d),
+                    serial: serial.clone(),
+                    needs: strs(&d["needs"]),
                 })
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blocked_by = old.blocked_by;
-                    m.serial |= old.serial;
+                    m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
                     m.needs.dedup();
                 }
@@ -90,17 +91,29 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
         }
         "set" => {
             let i = pos(q, issues[0])?;
-            q[i].needs = needs(d);
+            if d.get("serial").is_some() {
+                q[i].serial = strs(&d["serial"]);
+            } else {
+                q[i].needs = strs(&d["needs"]);
+            }
         }
         o => anyhow::bail!("unknown queue op `{o}`"),
     }
     Ok(())
 }
 
-/// #157: a change's `needs` tags.
-fn needs(d: &Value) -> Vec<String> {
-    let all = d["needs"].as_array().into_iter().flatten();
-    all.filter_map(|t| t.as_str().map(String::from)).collect()
+/// #157: a change's `needs` tags; #294: its `serial` marks (#115's `true`: `[""]`, the first group).
+fn strs(v: &Value) -> Vec<String> {
+    match v {
+        Value::Bool(b) => vec![String::new(); usize::from(*b)],
+        Value::String(g) => vec![g.clone()],
+        v => v
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect(),
+    }
 }
 
 /// #157: the queued issue's `needs` (its queue item's, merged ones included).
@@ -125,30 +138,59 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
     st.get(&(fleet.to_string(), n)).map_or("queued", |s| s.state.as_str())
 }
 
-/// The fleet's issues marked `--serial` or by drive (`serial-auto`, #149), merged ones included.
-pub fn serial(events: &[Event], fleet: &str) -> Vec<u64> {
-    let auto = events.iter().filter(|e| e.kind == "serial-auto" && e.fleet == fleet);
-    let q = replay(events, fleet).into_iter().filter(|i| i.serial).map(|i| i.issue);
-    q.chain(auto.filter_map(|e| e.issue)).collect()
+/// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff
+/// (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
+pub fn groups<'a>(q: &[Item], events: &[Event], f: &'a Fleet, fleet: &str, n: u64) -> Vec<&'a Serial> {
+    let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
+    let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let joined = joined.filter_map(|e| match e.kind.as_str() {
+        "serial-joined" => e.str("group"),
+        "serial-auto" => Some(""),
+        _ => None,
+    });
+    let (all, first): (Vec<&str>, _) = (marks.map(String::as_str).chain(joined).collect(), f.serial.first());
+    let is = |g: &&Serial| {
+        all.iter()
+            .any(|&a| a == g.name || a.is_empty() && first.is_some_and(|x| x.name == g.name))
+    };
+    let mut gs: Vec<_> = f.serial.iter().filter(is).collect();
+    gs.sort_by(|a, b| a.name.cmp(&b.name));
+    gs
 }
 
-/// The fleet's `--serial` issues in flight: a live impl/fix lane, or at review/ready (`SERIAL_BUSY`).
-pub fn serial_in_flight<'a>(events: &[Event], st: &'a States, fleet: &str) -> Vec<&'a IssueState> {
-    let serial = serial(events, fleet);
-    let busy = |s: &str| s == "impl" || s.starts_with("fix") || s.starts_with("review") || s == "ready";
-    st.values()
-        .filter(|s| s.fleet == fleet && serial.contains(&s.issue) && busy(&s.state))
-        .collect()
+/// In flight: a live impl/fix lane, or at review/ready.
+pub fn in_flight(state: &str) -> bool {
+    state == "impl" || state.starts_with("fix") || state.starts_with("review") || state == "ready"
 }
 
-/// `serial n/max` for a fleet with `serial_paths`: board and status.
+/// #294: `n` waits for a slot in group `g`: its last `serial-held` / `serial-slot` there is a hold.
+pub fn held(events: &[Event], fleet: &str, n: u64, g: &str) -> bool {
+    let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n) && e.str("group") == Some(g);
+    let e = events.iter().rev().filter(mine).find(|e| e.kind.starts_with("serial-"));
+    e.is_some_and(|e| e.kind == "serial-held")
+}
+
+/// #294: the issues holding a slot in group `g`: in flight, in it and not held; over `max` only if grandfathered.
+pub fn holders<'a>(events: &[Event], st: &'a States, f: &Fleet, fleet: &str, g: &str) -> Vec<&'a IssueState> {
+    let q = replay(events, fleet);
+    let isin = |s: &IssueState| groups(&q, events, f, fleet, s.issue).iter().any(|x| x.name == g);
+    let holds = |s: &&IssueState| in_flight(&s.state) && !held(events, fleet, s.issue, g) && isin(s);
+    st.values().filter(|s| s.fleet == fleet).filter(holds).collect()
+}
+
+/// #294: `ci: #2968 holds 1/1`, group `g`'s holders.
+pub fn holds(g: &Serial, h: &[&IssueState]) -> String {
+    let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
+    let s = ["", "s"][usize::from(h.len() == 1)];
+    format!("{}: {} hold{s} {}/{}", g.name, who.join(" "), h.len(), g.max)
+}
+
+/// `serial: db 3/10 · ci 1/1` for a fleet with serial groups: board, status and the Host tab.
 pub fn serial_use(events: &[Event], st: &States, fleet: &str, cfg: Option<&crate::config::Config>) -> Option<String> {
-    let f = cfg
-        .and_then(|c| c.fleet.get(fleet))
-        .filter(|f| !f.serial_paths.is_empty())?;
-    let (n, max) = (serial_in_flight(events, st, fleet).len(), f.serial_max.unwrap_or(1));
-    let over = if n > max { " (over: auto-marked)" } else { "" }; // #232: serial-auto marks issues already in flight
-    Some(format!("serial {n}/{max}{over}"))
+    let f = cfg.and_then(|c| c.fleet.get(fleet)).filter(|f| !f.serial.is_empty())?;
+    let one = |g: &Serial| format!("{} {}/{}", g.name, holders(events, st, f, fleet, &g.name).len(), g.max);
+    let gs: Vec<_> = f.serial.iter().map(one).collect();
+    Some(format!("serial: {}", gs.join(" · ")))
 }
 
 /// The queue as shown: merged issues drop out; a blocker counts until it is merged.
@@ -201,7 +243,7 @@ pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u
 
 pub fn ls_json(events: &[Event], fleet: &str) -> Value {
     let st = fold(events);
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(&st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": i.serial, "needs": i.needs});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(&st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs});
     Value::Array(view(events, &st, fleet).iter().enumerate().map(row).collect())
 }
 

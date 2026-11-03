@@ -105,6 +105,24 @@ pub fn waiting_on(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
+    // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
+    if let Some(g) = fc
+        .serial
+        .iter()
+        .filter(|g| crate::queue::held(events, f, n, &g.name))
+        .min_by_key(|g| &g.name)
+    {
+        let st = crate::events::fold(events);
+        let h = crate::queue::holders(events, &st, fc, f, &g.name);
+        let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
+        let by = if who.is_empty() {
+            "for a slot".into()
+        } else {
+            format!("held by {}", who.join(" "))
+        };
+        let what = format!("waits: {} {by} ({}/{})", g.name, h.len(), g.max);
+        return w("drive", &what, s.last_ts, None);
+    }
     // #104: an impl/fix/review lane whose account capped since its spawn respawns on a free one (`kill` pushes `wip/`).
     let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
     let spawned = last_spawn(events, &lane).filter(|_| active);
