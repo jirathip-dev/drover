@@ -97,7 +97,13 @@ phone** (header, blocked cards, the sheet) POSTs `/pair/request`, which shows a 
 an HttpOnly, Secure, SameSite=Strict `hd=` cookie with a random token for 10 minutes. The token pairs
 nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
 use; `serve pending` lists requests). The approval is logged, so the waiting page's live Events frag
-changes and the page POSTs `/pair/claim`, which keeps the same cookie for a year. At most 4 requests
+changes (or the page's 2 s claim poll, #288) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
+each page load claims again, renewing it, and a device unused for a year (365 days) no longer counts as paired
+(`herdsman serve devices` lists each paired device's days left). Opened on the host itself (a loopback peer whose
+`Host` is `127.0.0.1`/`localhost`, no `X-Forwarded-For` or `Tailscale-User-Login`), the panel also shows the
+exact `herdsman serve approve <code>` line with a `[copy]` button: paste it in Terminal (a browser can't run a
+command; there is no `herdsman://` link). Local doesn't mean trusted: lanes run on the host too, so the lane
+hook refuses `serve approve`, `serve unpair` and `serve devices --revoke` (`REFUSED OWNER_ONLY`). At most 4 requests
 are open, 2 per peer address (behind `tailscale serve`, a loopback peer, the `X-Forwarded-For` address or
 `Tailscale-User-Login`; trusted from loopback only), and a new code never repeats an open one. A re-tap of
 Pair replaces the browser's own open request, and the panel's `[cancel]` (`/pair/cancel`) drops it. Only the token's SHA-256 is kept, in `<state>/serve/devices.json`

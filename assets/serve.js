@@ -1219,16 +1219,22 @@ async function claim() {
   refresh();
   if (agent) poll();
 }
+// #288: claim polls too, so the page pairs itself within 2 s of `serve approve`; a paired browser's
+// one claim per load renews its year-long cookie (unpaired: a harmless 403).
+setInterval(claim, 2000);
+fetch(R + 'pair/claim', { method: 'POST' }).catch(() => null);
 document.addEventListener('click', async e => {
+  const cp = e.target.closest('.pairc');
+  if (cp) { navigator.clipboard.writeText(cp.previousElementSibling.textContent).then(() => { cp.textContent = 'copied'; }).catch(() => null); return; }
   if (e.target.closest('.pairx')) { pairing = false; clearTimeout(ttl); pp.hidden = true; fetch(R + 'pair/cancel', { method: 'POST' }).catch(() => null); return; }
   if (!e.target.closest('.pairb')) { if (e.target.closest('#pairp')) { pairing = false; clearTimeout(ttl); pp.hidden = true; } return; }
-  const r = await fetch(R + 'pair/request', { method: 'POST' }).catch(err => ({ ok: false, text: () => 'error: ' + err.message })), s = (await r.text()).trim(), [t, h] = s.split('\n');
+  const r = await fetch(R + 'pair/request', { method: 'POST' }).catch(err => ({ ok: false, text: () => 'error: ' + err.message })), s = (await r.text()).trim(), [t, h, c] = s.split('\n');
   pairing = r.ok;
   pp.className = 'pairp' + (r.ok ? '' : ' r');
   if (!e.target.closest('#pairp')) (e.target.closest('.pairf') || $('header')).after(pp);
   pp.hidden = false;
   clearTimeout(ttl);
-  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), el('button', 'pairx', 'cancel'));
+  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), ...(c ? [el('p', '', c), el('button', 'pairc', 'copy'), el('span', 'm', ' paste in Terminal ')] : []), el('button', 'pairx', 'cancel'));
   else pp.replaceChildren(el('p', '', s));
   pp.scrollIntoView({ block: 'nearest' });
   if (!r.ok) return;

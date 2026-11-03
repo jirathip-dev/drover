@@ -171,11 +171,13 @@ pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
     Ok(())
 }
 
-/// The paired (approved) device whose token the `Cookie` header carries (`hd=`); marks it used at most hourly (#122).
+pub const YEAR: u64 = 365 * 86_400;
+/// The paired (approved) device whose token the `Cookie` header carries (`hd=`), used within a `YEAR` (#288); marks it used at most hourly (#122).
 pub fn find(ctx: &Ctx, cookie: &str) -> Option<Device> {
     let tok = token(cookie)?;
     let mut all = load(ctx);
-    let i = all.iter().position(|d| d.code.is_none() && same(&d.hash, &tok))?;
+    let ok = |d: &Device| d.code.is_none() && d.used + YEAR > ctx.now && same(&d.hash, &tok);
+    let i = all.iter().position(ok)?;
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
     let _ = stale.then(|| store(ctx, &all));
     Some(all.swap_remove(i))

@@ -369,6 +369,8 @@ enum ServeCmd {
     Approve { code: String },
     /// The open pairing requests: code, device, minutes left
     Pending,
+    /// The paired devices and the days until each expires (a year after its last use)
+    Devices,
 }
 
 #[derive(Subcommand)]
@@ -648,6 +650,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             cmd: Some(ServeCmd::Approve { code }),
             ..
         } => writeln!(out, "paired {}", devices::approve(ctx, &code)?)?,
+        Cmd::Serve {
+            cmd: Some(ServeCmd::Devices),
+            ..
+        } => {
+            for d in devices::load(ctx).into_iter().filter(|d| d.code.is_none()) {
+                let left = (d.used + devices::YEAR).saturating_sub(ctx.now);
+                if left > 0 {
+                    writeln!(out, "{} expires in {}d", d.label, left / 86_400)?;
+                }
+            }
+        }
         Cmd::Serve {
             cmd: Some(ServeCmd::Pending),
             ..
