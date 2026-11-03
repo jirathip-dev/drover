@@ -94,6 +94,12 @@ fn lane(c: &herdsman::Ctx, seed: &Path, n: u64, pass: bool) {
     std::fs::write(cache.join(format!("pr-sendmeter-{n}.json")), pr.to_string()).unwrap();
 }
 
+/// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
+fn strict(c: &herdsman::Ctx) {
+    let p = c.state.with_file_name("cache").join("strict-sendmeter-0.json");
+    std::fs::write(p, json!({"ts": c.now, "strict": true}).to_string()).unwrap();
+}
+
 fn green_pr(n: u64, head: &str) -> String {
     let ok = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     json!({"number": 10 + n, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": ok})
@@ -115,6 +121,7 @@ fn merger(n: u64, head: &str) -> Mixed {
 fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (_d, seed, c, cfg) = repos("au-clean");
     lane(&c, &seed, 3, true);
+    strict(&c);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
@@ -240,6 +247,7 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     let (_d, seed, mut c, _) = repos("au-ci-pending");
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, true);
+    strict(&c);
     let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
     commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
     let st = |c: &herdsman::Ctx| {
@@ -444,6 +452,7 @@ fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
     let (_d, seed, c, _) = repos("au-order");
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, false);
+    strict(&c);
     let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
     reviewed(&c, 3, &from);
     commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
@@ -550,6 +559,129 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     let want = format!("review was for {x:.7}, head moved to {m:.7} (not a clean merge): review again");
     assert!(out.contains(&want), "{out}");
+}
+
+/// #285: the fleet config with `merge_label = "merge-ready"` for the `repos` in `d`.
+fn labelled(d: &Path) -> Config {
+    let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", d.join("local").to_str().unwrap());
+    Config::parse(&config.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
+    ))
+    .unwrap()
+}
+
+fn pr3(head: &str, labels: &[&str]) -> serde_json::Value {
+    let labels: Vec<_> = labels.iter().map(|l| json!({"name": l})).collect();
+    json!({"number": 13, "state": "OPEN", "headRefOid": head, "labels": labels})
+}
+
+const PROTECTION: &str = "gh api repos/jirathip-dev/sendmeter/branches/staging/protection";
+const RULES: &str = "gh api repos/jirathip-dev/sendmeter/rules/branches/staging";
+
+#[test]
+fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
+    let (_d, seed, mut c, cfg) = repos("au-non-strict");
+    lane(&c, &seed, 3, true);
+    let from = head(&seed, "issue-3");
+    commit(&seed, "c.txt", "c\n", "staging");
+    let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
+    herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
+    let ev = read(&c.state).unwrap();
+    assert!(
+        ev.iter().all(|e| e.kind != "auto-updated" && e.kind != "driven"),
+        "{ev:?}"
+    );
+    // The status says so, never a silent catch-up loop.
+    let behind = json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": from,
+        "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []});
+    let w = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &behind.to_string())
+            .reply("herdr", NO_AGENTS),
+    );
+    let ws = herdsman::waiting::scan(&c, &cfg, &w, &read(&c.state).unwrap(), &[], true);
+    let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
+    assert!(
+        what.starts_with("PASS · behind staging (not required) · merging when CI green"),
+        "{what}"
+    );
+    // Green while still behind: merged as it is.
+    c.now += 120;
+    let mut green: serde_json::Value = serde_json::from_str(&green_pr(3, &from)).unwrap();
+    (green["mergeable"], green["mergeStateStatus"]) = (json!("MERGEABLE"), json!("BEHIND"));
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &green.to_string())
+            .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string()),
+    );
+    let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", "").reply("herdr", NO_AGENTS));
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {from}");
+    assert!(r.0.called(&merge), "{out}");
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
+}
+
+#[test]
+fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
+    let (d, seed, c, _) = repos("au-strict");
+    let cfg = labelled(&d);
+    lane(&c, &seed, 3, true);
+    commit(&seed, "c.txt", "c\n", "staging");
+    let r = Mixed(
+        Fake::default()
+            .reply(RULES, "true\n")
+            .reply("gh pr edit", "")
+            .reply("herdr", NO_AGENTS),
+    );
+    let mut out = vec![];
+    herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    let out = String::from_utf8_lossy(&out);
+    let to = head(&seed, "issue-3");
+    assert!(out.contains("auto-updated"), "{out}");
+    assert!(
+        r.0.called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"),
+        "{out}"
+    );
+    let ev = read(&c.state).unwrap();
+    assert!(
+        ev.iter()
+            .any(|e| e.kind == "labelled" && e.str("sha") == Some(to.as_str())),
+        "{ev:?}"
+    );
+    assert!(ev.iter().all(|e| e.kind != "unlabelled"));
+    // The ruleset decides (synergy has no classic protection), read once.
+    assert_eq!((r.0.count(RULES), r.0.count(PROTECTION)), (1, 0));
+}
+
+#[test]
+fn a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it() {
+    let (d, seed, c, _) = repos("au-label");
+    let cfg = labelled(&d);
+    lane(&c, &seed, 3, true);
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let m = head(&seed, "issue-3");
+    let st = || fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)].clone();
+    let r = Mixed(Fake::default().reply("gh pr edit", ""));
+    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &["merge-ready"])).unwrap();
+    assert!(!r.0.called("gh pr edit"), "kept: {:?}", r.0.calls.borrow());
+    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &[])).unwrap();
+    assert!(r
+        .0
+        .called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"));
+    // A merge that folds in its own change is new work: the label comes off.
+    commit(&seed, "d.txt", "d\n", "staging");
+    std::fs::remove_dir_all(d.join("w")).unwrap();
+    merge_staging(&d, Some("sneaky\n"));
+    let h = head(&seed, "issue-3");
+    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&h, &["merge-ready"])).unwrap();
+    assert!(r
+        .0
+        .called("gh pr edit 13 -R jirathip-dev/sendmeter --remove-label merge-ready"));
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "unlabelled"));
 }
 
 /// #293: issue-3's head moved past the rev spawn head by a commit of its own; returns (spawn head, new head).
