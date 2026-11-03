@@ -45,6 +45,20 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("terminal/icon-192.png", PNG),
     th!("terminal/icon-512.png", PNG),
 ];
+/// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
+macro_rules! sc {
+    ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
+}
+const SCHEMES: [(&str, &[u8]); 8] = sc![
+    "github-dark",
+    "solarized-dark",
+    "gruvbox",
+    "nord",
+    "dracula",
+    "paper",
+    "farm",
+    "kitchen"
+];
 const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
 const I180: &[u8] = include_bytes!("../assets/icon-180.png");
@@ -1250,8 +1264,38 @@ impl<'a> Server<'a> {
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
         let opts: String = names.iter().map(|n| format!("<option>{}</option>", esc(n))).collect();
-        let pick =
-            format!("<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme>{opts}</select></label>");
+        let pick = format!(
+            "<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme>{opts}</select></label>\
+             <label class=pk id=scp><span>▦</span><select id=scheme aria-label=colours></select></label>"
+        );
+        // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
+        // scheme (serve.js keeps its block), else the board theme's built-in default.
+        let def: BTreeMap<_, serde_json::Value> = names
+            .iter()
+            .map(|n| (*n, theme(ctx, n, "theme.json").0.unwrap_or_default()))
+            .map(|(n, j)| {
+                (
+                    n,
+                    serde_json::from_slice(&j).map_or(json!(null), |t: serde_json::Value| t["scheme"].clone()),
+                )
+            })
+            .collect();
+        let b = SCHEMES
+            .iter()
+            .find(|s| def[name.as_str()] == s.0)
+            .unwrap_or(&SCHEMES[0]);
+        let b: serde_json::Value = serde_json::from_slice(b.1)?;
+        let tokens = b["tokens"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
+        let first = format!(
+            ":root{{{}color-scheme:{}}}",
+            tokens.collect::<String>(),
+            b["color-scheme"].as_str().unwrap_or("dark")
+        );
+        let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
         let badge = if demo {
             "<span class=tag id=demo>demo</span>"
         } else {
@@ -1262,8 +1306,9 @@ impl<'a> Server<'a> {
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
-             <title>herdsman</title><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th}</script></head>\
+             <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
+             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
+             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
              <section id=queue>{}</section><section id=lanes>{}</section><section id=host>{}</section>\
@@ -2455,8 +2500,9 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             !a.is_empty() && m.len() == a.len()
         })
     };
-    let rules: [(&str, Check, &str); 4] = [
+    let rules: [(&str, Check, &str); 5] = [
         ("scene", &Value::is_object, "an object"),
+        ("scheme", &Value::is_string, "a colour scheme's name"),
         (
             "looks",
             &|x| x.as_array().is_some_and(|a| a.iter().all(look)),
@@ -2496,9 +2542,27 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
             t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
         }
     }
+    t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
     t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());
     t["rail"]["needs"] = pick("rail", "needs").unwrap_or_else(|| t["rail"]["item"].clone());
     t
+}
+
+/// #244: every colour scheme by name: the built-ins, then `<config dir>/schemes/<name>.json` (one named like a
+/// built-in wins). Unchecked here: the page gates each one (serve.js) before it offers it; unreadable JSON is `null`.
+fn schemes(ctx: &Ctx) -> BTreeMap<String, serde_json::Value> {
+    let own = std::fs::read_dir(ctx.config.with_file_name("schemes"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let (p, ok) = (e.path(), |b: u8| b.is_ascii_alphanumeric() || b == b'-');
+            let n = p.file_stem()?.to_str()?.to_string();
+            (p.extension()? == "json" && n.bytes().all(ok)).then(|| (n, std::fs::read(&p).unwrap_or_default()))
+        });
+    let all = SCHEMES.iter().map(|(n, j)| (n.to_string(), j.to_vec())).chain(own);
+    all.map(|(n, j)| (n, serde_json::from_slice(&j).unwrap_or_default()))
+        .collect()
 }
 
 /// Theme `name`'s `file` (`<config dir>/themes/<name>/`, then the built-in `<name>`, then farm's; an icon then the

@@ -192,12 +192,13 @@ Milky Way drifting as one at 0.7 pt/s, the moon fixed at (306, 56) (above the st
 clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog compose with it. Debug:
 `/?light=auto|day|night`.
 
-### Themes (#172, #241)
+### Themes and colour schemes (#172, #241, #244)
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` picker, `[serve] theme` (its
 default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
-writes them to `themes/`.
+writes them to `themes/`. Colours are a separate per-phone pick, `[▦]`: 8 built-in schemes plus your own
+`<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
 ## Alerts (web push)
 

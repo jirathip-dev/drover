@@ -1,0 +1,25 @@
+{
+  "label": "GitHub dark (today)",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#0d1117",
+    "--card": "#161b22",
+    "--edge": "#30363d",
+    "--line": "#21262d",
+    "--scrim": "#000000aa",
+    "--fg": "#c9d1d9",
+    "--mute": "#8b949e",
+    "--l": "#58a6ff",
+    "--link": "#58a6ff",
+    "--g": "#3fb950",
+    "--a": "#d29922",
+    "--r": "#f85149",
+    "--p": "#bc8cff",
+    "--c": "#39c5cf",
+    "--fk-l": "#58a6ff",
+    "--fk-p": "#bc8cff",
+    "--fk-c": "#39c5cf",
+    "--fk-g": "#3fb950",
+    "--fk-a": "#d29922"
+  }
+}
