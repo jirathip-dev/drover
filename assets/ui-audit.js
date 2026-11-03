@@ -149,9 +149,8 @@
         frag('lanes', c.innerHTML);
       };
       const one = what => $$('.lane .act.now').forEach(a => {
-        const g = document.createRange();
-        g.selectNodeContents(a);
-        const lines = new Set([...g.getClientRects()].map(r => Math.round(r.top))).size, r = a.getBoundingClientRect();
+        // Lines by box height (a Range's rects mix the span boxes and their text runs, whose tops differ on one line).
+        const r = a.getBoundingClientRect(), lines = Math.round(r.height / parseFloat(getComputedStyle(a).lineHeight));
         const cut = [...a.querySelectorAll('.el')].some(e => getComputedStyle(e).textOverflow !== 'ellipsis' || e.getBoundingClientRect().right > r.right + 1);
         if (lines !== 1 || cut || r.right > a.closest('.lane').getBoundingClientRect().right + 1) early.push(`${what}: now-line "${a.textContent.slice(0, 30)}…" ${lines} lines, right ${r.right}`);
         const [w, x] = a.querySelectorAll('.el');
