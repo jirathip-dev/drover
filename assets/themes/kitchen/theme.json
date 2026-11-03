@@ -1,4 +1,5 @@
 {
+  "scheme": "kitchen",
   "poses": { "working": "chef-working", "idle": "chef-idle", "done": "chef-done", "blocked": "chef-blocked" },
   "glyphs": { "working": "♨", "idle": "·", "unknown": "?", "parked": "·", "done": "✓", "blocked": "!", "dead": "✗" },
   "words": { "horse": "chef", "horses": "chefs", "herd": "kitchen line", "ranch": "kitchen", "barn": "kitchen" },

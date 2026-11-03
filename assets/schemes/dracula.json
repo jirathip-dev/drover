@@ -1,0 +1,25 @@
+{
+  "label": "Dracula",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#282a36",
+    "--card": "#303341",
+    "--edge": "#44475a",
+    "--line": "#343746",
+    "--scrim": "#14151baa",
+    "--fg": "#f8f8f2",
+    "--mute": "#a9b1d6",
+    "--l": "#bd93f9",
+    "--link": "#8be9fd",
+    "--g": "#50fa7b",
+    "--a": "#ffb86c",
+    "--r": "#ff5555",
+    "--p": "#ff79c6",
+    "--c": "#8be9fd",
+    "--fk-l": "#bd93f9",
+    "--fk-p": "#ff79c6",
+    "--fk-c": "#8be9fd",
+    "--fk-g": "#50fa7b",
+    "--fk-a": "#ffb86c"
+  }
+}

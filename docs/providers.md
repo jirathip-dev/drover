@@ -33,6 +33,13 @@ that account until then, or until `herdsman accounts reset <name>`; with every a
 refuses `ALL_CAPPED` (drive stops starting for the pass). The capped lane waits on drive, which
 respawns it with `--supersede` on a free account (the kill pushes its work to `wip/` first).
 
+**Usage meter from the lanes.** Claude lanes run `herdsman statusline` as their status line. Claude Code hands
+it the account's 5 h / 7 d limits on every refresh; it appends at most one row per account per minute to
+`<state>/usage.jsonl` (the account from `HERDSMAN_ACCOUNT`, set at spawn) and prints `myapp #12 · 5h 41% · 7d 63%`
+in the pane. The meter shows an account's newest row (with its age), preferring a row under 10 min old over the
+`/login` reading below, which is now optional. `[accounts] pick = "headroom"` makes spawns take the uncapped
+account with the lowest live 5 h / 7 d use; the default, `order`, keeps today's pick.
+
 **Usage meter.** Setup tokens can't read the usage API: they lack the `user:profile` scope, and
 `/api/oauth/usage` answers 403. To get the real meter, log each account in once with a full `claude`
 login in its own config folder:

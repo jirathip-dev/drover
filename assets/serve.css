@@ -1,5 +1,4 @@
-:root{--bg:#0d1117;--fg:#c9d1d9;--mute:#8b949e;--line:#21262d;--g:#3fb950;--a:#d29922;--r:#f85149;--l:#58a6ff;--p:#bc8cff;--c:#39c5cf;color-scheme:dark;
-  --fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
+:root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 /* #114 app-like: no pinch/double-tap zoom, no text-size jump on rotate, no rubber band (inner scrollers contain).
@@ -11,7 +10,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs)/1.5 ui-monospa
 p,li,h2,h3,summary,.kv,.m,.act,.why,.tl,.card *,.msg,.st,code{min-width:0;overflow-wrap:anywhere}
 header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:var(--s2);min-height:calc(var(--hit) + var(--s1));background:var(--bg);border-bottom:1px solid var(--line)}
 header b{flex:1}
-a{color:var(--l)}
+a{color:var(--link)}
 .m{color:var(--mute)}.g{color:var(--g)}.a{color:var(--a)}.r{color:var(--r)}
 h2{font-size:var(--fs);margin:var(--s4) 0 var(--s1);display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4)}
 h2>span:first-child{flex:1}
@@ -77,7 +76,7 @@ nav a.on .n{color:inherit}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)} /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
+#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)}#scp{margin-left:var(--s4)} /* #244: [▦]'s select reaches 8 px left; the gap keeps it off [◐]'s */ /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
@@ -85,7 +84,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html[data-tab=queue] #thp,html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html[data-tab=queue] :is(#thp,#scp),html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -127,24 +126,24 @@ html[data-tab=queue] #thp,html:not([data-tab=queue]) :is(#queue,header .qhelp),h
 #sheet{position:fixed;inset:0;z-index:3;visibility:hidden;pointer-events:none;overscroll-behavior:contain}
 #sheet.on{visibility:visible;pointer-events:auto}
 #sheet.on>.sh{will-change:transform}#sheet.on>.bd{will-change:opacity}
-.bd{position:absolute;inset:0;background:#000a;touch-action:none;overscroll-behavior:contain;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
+.bd{position:absolute;inset:0;background:var(--scrim);touch-action:none;overscroll-behavior:contain;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
 /* #70: a full-height box placed by translateY (serve.js: half 50 %, mid 78 %, full); it follows the finger
    (.drag), snaps (.28 s) and slides off to close (.shut, #166: .2 s ease-out; #200: not .out, the chat blocks' grey box); the backdrop fades with it. */
-.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid #30363d;border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid var(--edge);border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
 .sh.full{border-radius:0}
 #sheet.drag>*{transition:none}
 #sheet.shut>*{transition-duration:.2s;transition-timing-function:ease-out}
 @media (prefers-reduced-motion:reduce){#sheet>*{transition:none!important}}
 /* The handle: the pill plus the title row, at least 56 px; it alone drags (the chat hands off at its top). */
 .hd{flex:none;min-height:calc(var(--hit) + var(--s3));padding-bottom:var(--s2);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
-.hd::before{content:"";display:block;width:40px;height:var(--s1);margin:var(--s2) auto;border-radius:3px;background:#30363d}
+.hd::before{content:"";display:block;width:40px;height:var(--s1);margin:var(--s2) auto;border-radius:3px;background:var(--edge)}
 .hd p{margin:0}
 /* #63 q8: the card takes at most 40 % of the sheet and scrolls inside; it never drags. */
 .top{flex:none;max-height:40%;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;border-bottom:1px solid var(--line);padding-bottom:var(--s2)}
 .top p{margin:var(--s1) 0}
 .chat{flex:1;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
 .reply,.pairf{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0;flex:none}
-.reply textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:#161b22;border:1px solid #30363d;border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
+.reply textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
 /* #59: the pairing panel in the flow under the header (or the sheet's Pair button): the code large, how to approve it under it. */
 .pairp{flex:none;margin:var(--s2) 0;padding:var(--s3);border:1px solid var(--a);border-radius:8px;cursor:pointer;scroll-margin-top:calc(var(--hit) + var(--s3))}
 .pairp.g{border-color:var(--g);color:var(--g)}.pairp.r{border-color:var(--r)}.pairp p{margin:0}
@@ -168,12 +167,12 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .acts,.cf{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .acts [data-op=kill],.cf .yes{color:var(--r)}
 .cf{border:1px solid var(--r);border-radius:8px;padding:var(--s2)}.cf p{flex-basis:100%;margin:0;font-size:var(--fs-meta)}
-.cmds{flex:none;list-style:none;margin:0;padding:0;border:1px solid #30363d;border-radius:6px}
+.cmds{flex:none;list-style:none;margin:0;padding:0;border:1px solid var(--edge);border-radius:6px}
 .cmds li{padding:var(--s3);min-height:var(--hit);border-bottom:1px solid var(--line);cursor:pointer}
 .chat>.now{display:flex;flex-direction:column;gap:var(--s2)}
 /* #138 (docs/design/chat-blocks): a block per role run, a rounded surface with a 2 px left edge in the role colour --k
    (you blue, assistant purple, tool run amber); status is a quiet line recessed toward the base colour. */
-.blk{--k:var(--mute);margin:0;border:0;border-left:2px solid var(--k);border-radius:6px;background:#161b22;padding:0 var(--s2) var(--s2)}
+.blk{--k:var(--mute);margin:0;border:0;border-left:2px solid var(--k);border-radius:6px;background:var(--card);padding:0 var(--s2) var(--s2)}
 .blk.me{--k:var(--l)}.blk.ai{--k:var(--p)}.blk.run{--k:var(--a)}
 /* The header is the whole width: 28 px visible plus an 8 px ring above and below, a 44 px tap (#58); a collapsed block keeps its 8 px
    bottom padding, so with the 8 px gap two headers' rings tile instead of overlapping (#147). The role in its
@@ -208,7 +207,7 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .bg-r{background:color-mix(in srgb,var(--r) 15%,transparent)}.bg-g{background:color-mix(in srgb,var(--g) 15%,transparent)}
 .bg-r2{background:color-mix(in srgb,var(--r) 35%,transparent)}.bg-g2{background:color-mix(in srgb,var(--g) 35%,transparent)}
 /* Status (`Ran 2 shell commands`, `✻ Cogitated for 37s`): one quiet 11 px line, no header; dashed: a gap in the transcript. */
-.qs{margin:0;padding:var(--s1) var(--s2);border-left:2px solid color-mix(in srgb,var(--mute) 40%,var(--bg));border-radius:6px;background:color-mix(in srgb,#161b22 40%,var(--bg));color:var(--mute);font-size:var(--fs-meta)}
+.qs{margin:0;padding:var(--s1) var(--s2);border-left:2px solid color-mix(in srgb,var(--mute) 40%,var(--bg));border-radius:6px;background:color-mix(in srgb,var(--card) 40%,var(--bg));color:var(--mute);font-size:var(--fs-meta)}
 .qs.gap{border-left-style:dashed;text-align:center}
 /* #105's live status line: the spinner, under the chat and above the composer, one line. */
 .live{flex:none;margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -233,7 +232,7 @@ details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-c
 details.q .tl{grid-column:2/-1}
 details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
-.cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid #30363d;border-radius:6px;background:#161b22}
+.cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
 .gt,.gt i{font-style:normal;white-space:pre;color:var(--mute)}
 .gt b{font-weight:400}
@@ -278,7 +277,7 @@ details.q[open]{padding-bottom:var(--s2)}
 .rw>summary{align-content:center;padding:var(--s1) 0}
 .rw>summary>.x{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .rw>summary>.t{align-self:start;line-height:calc(var(--fs) * 1.5);font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
-.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .rw>.sub{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch)}.rw>.sub>p{margin:0;padding:var(--s1) 0}
 .grp form.role{border-top:0}
 /* #234: HOSTS, one card per host in a grid, main first, then A→Z; side by side when there is room (#162's 56ch column).
@@ -338,8 +337,8 @@ body:not(.unf) .ask.lt{display:none}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
 /* #162: a fleet card: a bordered box with a 3 px top bar in the fleet's colour --fk (an accent token; red means "needs
    you", so it is never a bar). The header: name in the colour, need-you count, [drive now] [pause] [config]; then the drive line (.dp). */
-.fc{--fk:var(--l);margin:var(--s3) 0;border:1px solid #30363d;border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
-.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fc{--fk:var(--fk-l);margin:var(--s3) 0;border:1px solid var(--edge);border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
+.k-l{--fk:var(--fk-l)}.k-p{--fk:var(--fk-p)}.k-c{--fk:var(--fk-c)}.k-g{--fk:var(--fk-g)}.k-a{--fk:var(--fk-a)}
 .fh{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit)}
 .fn{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--s2);white-space:nowrap;overflow:hidden}
 .fn>b{color:var(--fk)}
@@ -351,7 +350,7 @@ body:not(.unf) .ask.lt{display:none}
 .fc>.done>summary{display:flex;gap:var(--s2);color:var(--mute);font-size:var(--fs-meta)}.fc>.done>summary>span{flex:1}
 .fc>.done>p{margin:0 0 var(--s1);font-size:var(--fs-meta)}
 /* A paused fleet: one grey line, its bar muted; [resume] on the right (paired devices only); a tap peeks its rows. */
-.fc.off{--fk:var(--mute);border-bottom:1px solid #30363d;padding-bottom:0;color:var(--mute)}
+.fc.off{--fk:var(--mute);border-bottom:1px solid var(--edge);padding-bottom:0;color:var(--mute)}
 .fc.off>summary{display:flex;align-items:center;gap:var(--s4);min-height:var(--hit)}
 .fc.off>summary>.fn{flex:1;text-overflow:ellipsis}
 /* The [config] sheet: the lane sheet with the fleet's bar on top; groups of read-only rows (key 11 px, value 13 px)
@@ -371,7 +370,7 @@ body:not(.unf) .ask.lt{display:none}
 .cs .top .rh,.cs .top .rk{margin:0}
 .cs .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
 .cs .rk{font-size:var(--fs-meta);color:var(--mute)}
-.cs .soon{padding:var(--s2);border:1px dashed #30363d;border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
+.cs .soon{padding:var(--s2);border:1px dashed var(--edge);border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
 /* #166, #162 A: a card's second line, the drive state in the pass's colour: one full-width line that ellipsises (no
    7ch grid column); a tap lists the stall check, lanes, serial and each action in plain words, a tap on one its code. */
 .dp summary{display:flex;align-items:center;gap:var(--s2)}.dp>summary{font-size:var(--fs-meta)}
@@ -388,7 +387,7 @@ body:not(.unf) .ask.lt{display:none}
 .pg>*{position:relative;min-width:0;margin:0}
 /* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome
    that leaves the spine. Every line is one line: it ellipsises, the full text is its title. */
-.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:#161b22;border:solid #30363d;border-width:0 1px;white-space:nowrap;overflow:hidden}
+.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:var(--card);border:solid var(--edge);border-width:0 1px;white-space:nowrap;overflow:hidden}
 .nb.t{border-top-width:1px;border-radius:6px 6px 0 0}.nb.b{border-bottom-width:1px;border-radius:0 0 6px 6px}.nb.t.b{border-radius:6px}
 .nb>b{font-weight:600}
 .nb>.tag{margin-left:auto;line-height:1.5}
@@ -400,7 +399,7 @@ body:not(.unf) .ask.lt{display:none}
 .nb.po::after{content:"";flex:1 0 var(--s2);margin-right:-1ch;border-top:1px solid var(--mute)}
 .nb.po.l::after{display:none}
 .nb.po.l::before{content:"";flex:0 0 1ch;margin-left:-1ch;border-top:1px dashed var(--r)}
-.nb.end{border-color:#30363d}
+.nb.end{border-color:var(--edge)}
 /* Errors: a broken stage gets a red edge; an unreachable one is dashed and dimmed. */
 .nb.bad{border-color:var(--r)}
 .nb.dead{border-style:dashed;border-color:var(--r)}.nb.dead>:not(.dt){opacity:.55}
@@ -432,7 +431,7 @@ body:not(.unf) .ask.lt{display:none}
 .pp .lg i{font-style:normal}
 .tm{border:0;margin:var(--s2) 0}
 .tm>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);font-size:var(--fs-meta);color:var(--mute)}
-.tm pre{margin:0;padding:var(--s2);background:#161b22;border:1px solid #30363d;border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.tm pre{margin:0;padding:var(--s2);background:var(--card);border:1px solid var(--edge);border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 /* A refused pipeline: what stops, then one line per broken rule, each with its place in fleet.toml. */
 .pe{margin:var(--s1) 0 var(--s2);padding:0 var(--s2);border:1px solid var(--r);border-radius:6px}
 .pe>p{margin:var(--s2) 0}
@@ -471,6 +470,6 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .ex{padding:0 0 var(--s2) calc(2ch + 3 * var(--s2))}
 .lk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin:var(--s2) 0;min-height:var(--ctl)}
 .lk>.m{font-size:var(--fs-meta)}
-.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}

@@ -16,7 +16,10 @@ impl Harness for Claude {
         let dir = profile_dir(ctx, profile);
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
-        let settings = SETTINGS.replace("\"{{FLEET_HOOK}}\"", &hook_cmd);
+        let line = serde_json::to_string(&format!("'{}' statusline", ctx.exe))?;
+        let settings = SETTINGS
+            .replace("\"{{FLEET_HOOK}}\"", &hook_cmd)
+            .replace("\"{{FLEET_STATUSLINE}}\"", &line);
         std::fs::write(dir.join("settings.json"), settings)?;
         std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(role)))?;
         std::fs::write(dir.join("fleet.md"), usage)?;

@@ -9,6 +9,7 @@ use crate::Ctx;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Claude Code's OAuth client id (its token endpoint wants it on a refresh).
@@ -404,7 +405,16 @@ pub fn shown(r: &dyn Runner, m: &Meter, login: &str, now: u64) -> Result<Shown, 
     }
     let mut parts = vec![];
     if let Some((p, t)) = m.session {
-        parts.push((format!("session {p:.0}% (resets {})", age(t.saturating_sub(now))), p));
+        let read = now.saturating_sub(m.ts);
+        let read = if read < 60 {
+            String::new()
+        } else {
+            format!(", read {} ago", age(read))
+        };
+        parts.push((
+            format!("session {p:.0}% (resets {}{read})", age(t.saturating_sub(now))),
+            p,
+        ));
     }
     if let Some((p, t)) = m.week {
         parts.push((format!("week {p:.0}% (resets {})", date(r, t, "+%a %H:%M")), p));
@@ -440,4 +450,80 @@ pub fn meter_line(r: &dyn Runner, m: &Meter, login: &str, now: u64) -> String {
         Ok(_) => "usage: not read yet".into(),
         Err(hint) => hint,
     }
+}
+
+/// One `herdsman statusline` reading of an account's limits, a line of `<state>/usage.jsonl`.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Row {
+    pub ts: u64,
+    pub account: String,
+    pub five_hour_pct: Option<f64>,
+    pub five_hour_reset: Option<u64>,
+    pub seven_day_pct: Option<f64>,
+    pub seven_day_reset: Option<u64>,
+}
+
+/// The newest row of each account.
+pub fn rows(ctx: &Ctx) -> std::collections::BTreeMap<String, Row> {
+    let text = std::fs::read_to_string(ctx.state.with_file_name("usage.jsonl")).unwrap_or_default();
+    let rows = text.lines().filter_map(|l| serde_json::from_str::<Row>(l).ok());
+    rows.map(|r| (r.account.clone(), r)).collect()
+}
+
+/// The account's reading: its status-line row while fresh, else `login()` (the `/login` meter), else an older row.
+pub fn reading(ctx: &Ctx, name: &str, login: impl FnOnce() -> Option<Meter>) -> Option<Meter> {
+    let row = rows(ctx).remove(name).map(|w| Meter {
+        checked: w.ts,
+        ts: w.ts,
+        session: w.five_hour_pct.zip(w.five_hour_reset),
+        week: w.seven_day_pct.zip(w.seven_day_reset),
+        ..Default::default()
+    });
+    match (row, login()) {
+        (Some(w), _) if ctx.now < w.ts + POLL => Some(w),
+        (w, Some(m)) if !m.login_needed || w.is_none() => Some(m),
+        (w, _) => w,
+    }
+}
+
+/// `herdsman statusline`: Claude Code's status-line JSON on stdin; appends at most one row per account per minute
+/// and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
+pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut dyn Write) {
+    let v: Value = serde_json::from_str(input).unwrap_or_default();
+    let w = |k: &str| {
+        let x = &v["rate_limits"][k];
+        let reset = x["resets_at"].as_u64().or_else(|| epoch(x["resets_at"].as_str()?));
+        (x["used_percentage"].as_f64(), reset)
+    };
+    let ((fp, fr), (sp, sr)) = (w("five_hour"), w("seven_day"));
+    let fresh = |r: &Row| ctx.now < r.ts + 60;
+    let mut all = rows(ctx);
+    if !account.is_empty() && (fp.is_some() || sp.is_some()) && !all.get(account).is_some_and(fresh) {
+        let row = Row {
+            ts: ctx.now,
+            account: account.into(),
+            five_hour_pct: fp,
+            five_hour_reset: fr,
+            seven_day_pct: sp,
+            seven_day_reset: sr,
+        };
+        let p = ctx.state.with_file_name("usage.jsonl");
+        // Over 1 MB, keep only each account's newest row.
+        if std::fs::metadata(&p).is_ok_and(|m| m.len() > 1 << 20) {
+            all.insert(account.into(), row);
+            let _ = std::fs::write(&p, all.values().map(|r| format!("{}\n", json!(r))).collect::<String>());
+        } else {
+            let _ = std::fs::create_dir_all(ctx.state.parent().unwrap_or(&ctx.state));
+            let f = std::fs::OpenOptions::new().create(true).append(true).open(p);
+            let _ = f.map(|mut f| writeln!(f, "{}", json!(row)));
+        }
+    }
+    let mut parts: Vec<String> = match lane.split(':').collect::<Vec<_>>()[..] {
+        [f, i, _] if i != "-" => vec![format!("{f} #{i}")],
+        _ => vec![],
+    };
+    parts.extend(fp.map(|p| format!("5h {p:.0}%")));
+    parts.extend(sp.map(|p| format!("7d {p:.0}%")));
+    let _ = writeln!(out, "{}", parts.join(" · "));
 }
