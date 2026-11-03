@@ -115,17 +115,15 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
     assert_eq!(exit, 0, "second serial admitted: {out}");
     let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
     assert!(
-        board.starts_with("sendmeter: 3 queued, 2 active, serial 2/2\n"),
+        board.starts_with("sendmeter: 3 queued, 2 active, serial: db 2/2\n"),
         "{board}"
     );
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
-    assert!(status.contains("sendmeter: serial 2/2\n"), "{status}");
+    assert!(status.contains("sendmeter: serial: db 2/2\n"), "{status}");
     let (exit, out) = spawn(&c, 3, "impl");
     assert_eq!(exit, 3, "{out}");
     assert!(
-        out.contains("REFUSED SERIAL_BUSY")
-            && out.contains("#1 is unmerged (impl)")
-            && out.contains("#2 is unmerged (impl)"),
+        out.contains("REFUSED SERIAL_BUSY") && out.contains("db: #1 #2 hold 2/2"),
         "names both: {out}"
     );
     // A merged one frees a slot.
@@ -147,12 +145,9 @@ fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     spawned(&c, 2, "impl");
     log(&c, 2, "serial-auto", json!({"path": "supabase/migrations/x.sql"}));
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
-    assert!(
-        status.contains("sendmeter: serial 2/1 (over: auto-marked)\n"),
-        "{status}"
-    );
+    assert!(status.contains("sendmeter: serial: db 2/1\n"), "{status}");
     let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
-    assert!(board.contains(", serial 2/1 (over"), "{board}"); // the board cuts at 60 cols
+    assert!(board.contains(", serial: db 2/1"), "{board}");
     for n in [1, 2] {
         let argv = ["spawn", "sendmeter", &n.to_string(), "impl", "--supersede"];
         let (exit, out) = run(&c, &happy(NO_AGENTS), &argv);
