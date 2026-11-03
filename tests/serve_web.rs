@@ -2,6 +2,7 @@
 //! read-only, pause, the Lanes join/grouping, masking, PWA assets, 390 px layout.
 mod common;
 use common::*;
+use herdsman::devices;
 use herdsman::events::{append, read, Event};
 use herdsman::serve::Server;
 use serde_json::json;
@@ -527,9 +528,10 @@ fn lanes_group_by_fleet_with_others() {
     );
     // Rendered: state sections, fleet subgroups (Others last), the mismatch flagged.
     let list = json!({"result": {"agents": agents}}).to_string();
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read w1:p2", "⏺ Bash(cargo test)\n> \n");
+    let r = Fake::default().reply("herdr agent list", &list).reply(
+        "herdr pane read w1:p2",
+        "⏺ Bash(cd ~/w; cargo test 2>&1 | tail -5)\n\n✻ Herding… (4m 2s · ↓ 1k tokens)\n────────────────────\n> \n────────────────────\n",
+    );
     let page = get(&Server::new(&c, &r, None), "/");
     let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
     let working = &page[at("<h2><span class=g>working (2)</span></h2><h3>sendmeter (1)</h3>")..];
@@ -538,7 +540,13 @@ fn lanes_group_by_fleet_with_others() {
         rest.find("<h3>synergy (1)</h3>") < rest.find("<h2>"),
         "synergy subgroup inside working"
     );
-    assert!(page.contains("⚠ log/pane mismatch") && page.contains("<span class=act>now: running cargo test</span>"));
+    assert!(
+        page.contains("⚠ log/pane mismatch")
+            && page.contains(concat!(
+                "<span class=\"act nw el now\" title=\"✻ Herding… · now: running cd ~/w; cargo test 2&gt;&amp;1 | tail -5 · 4m\">",
+                "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
+            ))
+    );
     // One herdr agent list per 10 s, one pane read per 30 s.
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
@@ -1013,4 +1021,47 @@ fn pair_request_carries_the_optional_approve_hint() {
         format!("{code}\nor send 'pair {code}' to <b>ops</b>\n"),
         "text/plain; the page sets it as text"
     );
+}
+
+/// #288: opened on the host itself (loopback peer naming localhost, no `tailscale serve` headers) the pairing card
+/// carries the exact approve line with `[copy]`; the page polls claim, and pairing lasts a year after last use.
+#[test]
+fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
+    let js = include_str!("../assets/serve.js");
+    assert!(
+        js.contains("el('button', 'pairc', 'copy')") && js.contains("paste in Terminal"),
+        "the copy button"
+    );
+    assert!(
+        js.contains("setInterval(claim, 2000)"),
+        "the page pairs itself once approved"
+    );
+    let c = ctx(&tmpdir("pair-host"), &config());
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let request = |extra: &str| {
+        let req = format!("POST /pair/request HTTP/1.1\r\n{extra}Content-Length: 0\r\n\r\n");
+        let res = String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned();
+        assert!(res.starts_with("HTTP/1.1 200 "), "{res}");
+        devices::cancel(&c, res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap()).unwrap();
+        res.rsplit("\r\n\r\n").next().unwrap().to_string()
+    };
+    let body = request("X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\n");
+    assert_eq!(body, format!("{0}\n\nherdsman serve approve {0}\n", &body[..6]));
+    for extra in [
+        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nX-Forwarded-For: 100.64.0.2\r\n",
+        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nTailscale-User-Login: a@b\r\n",
+        "X-Peer: 10.0.0.1\r\nHost: 127.0.0.1:7777\r\n",
+        "X-Peer: 127.0.0.1\r\nHost: mac.tail1.ts.net\r\n",
+    ] {
+        assert_eq!(request(extra).len(), 8, "not on the host: code only: {extra:?}");
+    }
+    let cookie = common::pair(&s, &c, "Mac Safari", 1_000_000);
+    let devs = |now| run(&herdsman::Ctx { now, ..c.clone() }, &r, &["serve", "devices"]).1;
+    assert!(devs(1_000_000).ends_with(" expires in 365d\n"), "{}", devs(1_000_000));
+    let paired = |now| devices::find(&herdsman::Ctx { now, ..c.clone() }, &cookie[8..]).is_some();
+    assert!(paired(1_000_000 + 300 * 86_400), "used: renewed for a year from now");
+    assert!(paired(1_000_000 + 600 * 86_400), "still within a year of that use");
+    assert!(!paired(1_000_000 + 966 * 86_400), "a year unused: unpaired");
+    assert_eq!(devs(1_000_000 + 966 * 86_400), "");
 }

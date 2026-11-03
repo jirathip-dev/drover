@@ -1,6 +1,6 @@
 # Themes (#172, #241, #244)
 
-A theme is one folder `themes/<name>/` that every tab of the phone page draws from: the Lanes avatars, a 16 px
+A theme is one folder `themes/<name>/` that every tab of the phone page draws from: the Lanes avatars, a 24 px
 sprite on each Queue and Events row, a load scene on each Host group, the Herd, the moments, the icon. It is data
 only: `theme.json`, `sprites.svg`, and optionally `scene.svg` and its icons. No theme ships CSS or JS.
 
@@ -29,7 +29,7 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `load_scene` | `{"kind": "weather" \| "heat" \| "none", "levels": {"calm", "busy", "held"}, "fan": id}`: the Host group headers' miniature (clouds and rain, or flame height) at the group's status (green, amber, red); `levels` are the words its label reads. `none`: text only. `heat` also heats the Herd: `heat-calm` (load/limit < 0.5), `heat-busy`, `heat-held` (the spawn gate refuses) on `#herd`, no night and no `[A]`; idle lanes draw `fan` while held | farm's (`weather`: clear, windy, storm) |
 | `rail` | `{"item", "needs"}`: the sprite of a queued issue at the Herd's gate, and its needs-you variant | `item`: the `idle` action; `needs`: the item |
 | `moments` | `{"merged" \| "fail" \| "needs-you": {"sprite": id, "anim": "hop" \| "shake" \| "pulse"}}`, played for 2.4 s when the log gets that event (an `ev` with its `k` on `/live`, once per seq). Silent; reduced motion shows a still frame. `false`: none | farm's |
-| `row_sprites` | sprite id per action for the 16 px Queue and Events row sprite (its title and label is the plain state word). `false`: rows keep their state glyph | the action's sprite |
+| `row_sprites` | sprite id per action for the Queue and Events row sprite (16 × 12 art drawn at 24 px, 1.5× with crisp pixels, #281; its title and label is the plain state word). `false`: rows keep their state glyph | the action's sprite |
 | `icons` | `180`, `192`, `512`, `favicon`: one of `icon-180.png`, `icon-192.png`, `icon-512.png` in the folder | the same names; a file the folder lacks is the board's icon |
 | `ascii` | per action, the Lanes `[ascii]` mode's words: at most 3 lines of 8 narrow characters (no CJK, emoji or control characters) | farm's ASCII horses |
 | `modes` | the Lanes modes offered, from `scene`, `ascii`, `glyph`; one mode hides the button | `["scene", "ascii"]` |

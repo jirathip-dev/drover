@@ -4,7 +4,7 @@
 //! the `.blocks.json` goldens.
 mod common;
 use common::*;
-use herdsman::lanes::{body, now, roll, said, strip, GAP};
+use herdsman::lanes::{body, now, roll, said, short, spin, strip, GAP};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -239,6 +239,55 @@ fn now_is_the_panes_last_tool_line() {
     assert_eq!(now("  ┊ 💻 $ cargo test\n").as_deref(), Some("now: running cargo test"));
     assert!(now(&screen("hermes-idle")).unwrap().starts_with("now: running sleep 8"));
     assert_eq!(now("⏺ Done (all tests pass).\n"), None);
+}
+
+/// #276: a `now:` shell command reads as its first real command and target, `+N` for the rest of a chain; paths under
+/// $HOME read `~`.
+#[test]
+fn a_now_command_is_summarised_to_its_first_command() {
+    for (cmd, want) in [
+        (
+            "git fetch origin && git merge origin/staging 2>&1 | tail -5; just --list; cat ci/cap.toml",
+            "git fetch origin +3",
+        ),
+        ("cd ~/w/issue-9 && git merge origin/staging 2>&1 | tail -5; just --list", "git merge origin/staging +1"),
+        (
+            "cd /Users/jk/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v '^docs/'); cargo fmt --check $FILES",
+            "cargo fmt",
+        ),
+        ("sed -n '1,80p' src/usage.rs", "sed src/usage.rs"),
+        ("pnpm vitest > t.log 2>&1", "pnpm vitest"),
+        ("RUST_LOG=debug cargo test --test chat_blocks 2>&1 | tee t.log", "cargo test chat_blocks"),
+        ("python3 - <<'EOF'", "python3 (script)"),
+        ("cargo build >/dev/null || cargo build 2>&1 | head -40", "cargo build +1"),
+    ] {
+        assert_eq!(short(cmd), want, "{cmd}");
+    }
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(
+        now(&format!("⏺ Bash(cat {home}/w/a.rs)\n")).as_deref(),
+        Some("now: running cat ~/w/a.rs")
+    );
+}
+
+/// #276 Amendment A: Claude's live spinner as its word as shown and, past a minute, its elapsed time (tokens dropped); no
+/// word when idle or for a harness without a spinner line (dsh, Hermes).
+#[test]
+fn a_claude_spinner_is_its_word_and_elapsed_time() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens");
+    let screen = |n: &str| std::fs::read_to_string(dir.join(format!("{n}.txt"))).unwrap();
+    let s = |w: &str, t: Option<&str>| Some((w.to_string(), t.map(String::from)));
+    assert_eq!(
+        spin("claude", &screen("claude-working")),
+        s("✶ Pontificating…", Some("12m"))
+    );
+    assert_eq!(spin("claude", &screen("claude-tip")), s("✻ Deliberating…", Some("1m")));
+    let short_run = "⏺ Bash(cargo test)\n\n✻ Herding… (42s · ↓ 1.2k tokens · esc to interrupt)\n";
+    assert_eq!(spin("claude", short_run), s("✻ Herding…", None));
+    assert_eq!(spin("claude", &screen("claude-idle")), None);
+    assert_eq!(spin("dsh", &screen("dsh-working")), None);
+    assert_eq!(spin("hermes", &screen("hermes-working")), None);
+    assert_eq!(spin("hermes", short_run), None);
 }
 
 /// #260: the chat's default view from pane lines: you, the last assistant run before each prompt and the notices; no

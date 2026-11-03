@@ -841,6 +841,8 @@ impl<'a> Server<'a> {
         let paired_op = form(body.trim())
             .get("op")
             .is_some_and(|o| PAIRED_OPS.contains(&o.as_str()));
+        let loopback =
+            header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
             ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some()).map_or_else(fail, |f| {
                 ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
@@ -858,7 +860,6 @@ impl<'a> Server<'a> {
                 |j| ("200 OK", JSON, j.into_bytes()),
             ),
             ("GET", "/herd.json") => {
-                let loopback = header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
                 let weather = form(query).get("weather").filter(|_| loopback).cloned();
                 self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, j.to_string().into_bytes()))
             }
@@ -889,14 +890,17 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out.
+            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out. #288: opened on the
+            // host itself (a loopback peer naming localhost, no `tailscale serve` headers), the reply adds the approve line.
             ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
                 .and_then(|()| devices::request(ctx, &kind(head), client(head)))
             {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
-                    ("200 OK", "text/plain", format!("{code}\n{}\n", hint.replace("{code}", &code)).into_bytes())
+                    let host = loopback && client(head).parse::<std::net::IpAddr>().is_ok_and(|p| p.is_loopback());
+                    let line = if host { format!("herdsman serve approve {code}\n") } else { String::new() };
+                    ("200 OK", "text/plain", format!("{code}\n{}\n{line}", hint.replace("{code}", &code)).into_bytes())
                 }
                 Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
                 Err(e) => fail(e),
@@ -1975,7 +1979,23 @@ impl<'a> Server<'a> {
                 String::new()
             };
         let screen = screen.unwrap_or_default();
-        let act = esc(&lanes::now_of(l, &screen).unwrap_or_else(|| lanes::activity(&l.harness, &screen)));
+        // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
+        // command summarised; cut first), the elapsed time.
+        let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
+        let act = if now.is_none() && spin.is_none() {
+            format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen)))
+        } else {
+            let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
+            let n = now.as_ref().map(|n| match n.strip_prefix("now: running ") {
+                Some(c) => format!("{}running {}", if w.is_some() { "" } else { "now: " }, lanes::short(c)),
+                None => n.strip_prefix("now: ").filter(|_| w.is_some()).unwrap_or(n).to_string(),
+            });
+            let title: Vec<_> = [&w, &now, &t].into_iter().flatten().cloned().collect();
+            let tag = |(x, c): (Option<String>, &str)| Some(format!("<span class={c}>{}</span>", esc(&x?)));
+            let parts: Vec<_> = [(w, "el"), (n, "el"), (t, "t")].into_iter().filter_map(tag).collect();
+            let (title, parts) = (esc(&title.join(" · ")), parts.join("<i> · </i>"));
+            format!("<span class=\"act nw el now\" title=\"{title}\">{parts}</span>")
+        };
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -1989,7 +2009,7 @@ impl<'a> Server<'a> {
         let a = ago(ctx.now, since);
         format!(
             "<div class=lane data-agent=\"{}\" data-role={}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
-             {why}<span class=act>{act}</span></button><div class=card hidden>{card}</div></div>",
+             {why}{act}</button><div class=card hidden>{card}</div></div>",
             esc(&l.name),
             esc(&l.role) + if l.pane.is_none() { " data-gone" } else { "" },
             avatar(&l.name, &l.role, &l.state),
@@ -2348,7 +2368,7 @@ impl<'a> Server<'a> {
                 (t, words) = (dot, format!("{words} · {}", why.join(", ")));
             }
             let to = if on { "off" } else { "on" };
-            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none()).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button>{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name)));
+            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none() && !(main && on)).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button data-confirm=\"turn {1} {to}?{}\">{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name), if on { format!(" no new lanes; {} running lanes finish", lanes.len()) } else { String::new() }));
             let tag = ["", "<span class=\"tag m\">main</span>"][usize::from(main)];
             let (n, ln) = (esc(&name), crate::hosts::series(&hist, &name, "lanes", now, false));
             out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{btn}</div>{rows}</article>", esc(&words));
