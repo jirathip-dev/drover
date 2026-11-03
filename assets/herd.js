@@ -137,8 +137,6 @@ function theme(name) {
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
     sym('hfan', T.load_scene?.fan); // #239: an idle lane's sprite while the heat is held
-    sym('hload', T.loading); // #305: [↻] while busy; none (terminal): the spinning glyph
-    $('#rf').classList.toggle('ld', !!defs.querySelector('#hload'));
     Object.keys(PAL).forEach(k => H.style.removeProperty(k));
     PAL = T.scene.palette || {};
     Object.entries(PAL).forEach(([k, v]) => H.style.setProperty(k, v));
@@ -172,6 +170,10 @@ const pages = new Map();
 const ACT = l => ({ done: 'done', blocked: 'blocked', dead: 'blocked' })[l.state] || (l.state === 'working' ? ({ fix: 'fix', update: 'update', rev: 'rev', review: 'rev' })[l.role] || 'impl' : 'idle');
 const BANDS = [['working', ['working']], ['idle', ['idle', 'unknown', 'parked']], ['done', ['done']], ['blocked/dead', ['blocked', 'dead']]];
 let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
+// #334: the last Herd data this phone saw paints the scene at once (no request blocks the first paint); the live answer
+// replaces it. The demo (fixed fixtures) never keeps one.
+const keep = j => { if (!DEMO) put('herd:data', j); };
+try { data = DEMO ? null : JSON.parse(get('herd:data')); } catch (e) {}
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
 // #239: a working lane draws its role's action (cook, chop…) and says its word; an idle one fans while the heat is held.
@@ -335,11 +337,11 @@ function draw() {
   place();
   anim();
 }
-function herdData(j) { if (!DBG.get('weather')) { data = j; draw(); } }
+function herdData(j) { if (!DBG.get('weather')) { data = j; keep(JSON.stringify(j)); draw(); } }
 async function herdPull() {
   if (H.hidden) return;
   const w = DBG.get('weather'), t = await part('herd.json' + (w ? '?weather=' + encodeURIComponent(w) : ''));
-  try { if (t) { data = JSON.parse(t); draw(); } } catch (e) {}
+  try { if (t) { data = JSON.parse(t); if (!w) keep(t); draw(); } } catch (e) {}
 }
 
 // #40/#42: each page carries its fleet's needs-you cards (the same per-audience HTML as the tabs).
@@ -487,7 +489,7 @@ function herd(on) {
   H.hidden = !on;
   document.documentElement.classList.toggle('herding', on);
   put('herd', on ? '1' : '');
-  if (on) { herdPull(); anim(); }
+  if (on) { draw(); herdPull(); anim(); }
 }
 $('#herd-on').onclick = () => herd(true);
 $('.hx').onclick = () => herd(false);

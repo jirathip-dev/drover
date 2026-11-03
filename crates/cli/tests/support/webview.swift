@@ -8,19 +8,30 @@
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
 // #206: `HERDSMAN_TAB` is the stored tab (a private localStorage) before the page loads; tab `-`: no tab()/mode() and no
 // <details> opened, the page as it loaded (with its scripts cut, as it first paints).
+// #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `HERDSMAN_COOKIE` (`name=value`) set;
+// `HERDSMAN_WAIT` is the wait (s) before `window.late` is read (default 0.5).
+// `HERDSMAN_PRE`: js run at document start (before the page's own scripts).
 // swift webview.swift <page.html> <width> <tab> <mode> [out.png] [js] [close]
 import AppKit
 import WebKit
 
 let a = CommandLine.arguments
-let html = try! String(contentsOfFile: a[1], encoding: .utf8)
+let url = a[1].hasPrefix("http") ? URL(string: a[1]) : nil
+let html = url == nil ? try! String(contentsOfFile: a[1], encoding: .utf8) : ""
+let env = ProcessInfo.processInfo.environment
 let width = CGFloat(Double(a[2])!)
 let (tab, mode, png, extra) = (a[3], a[4], a.count > 5 ? a[5] : nil, a.count > 6 ? a[6] : "")
 let close = a.count > 7 ? a[7] : nil
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let conf = WKWebViewConfiguration()
-if let t = ProcessInfo.processInfo.environment["HERDSMAN_TAB"] {
+if url != nil {
+    conf.websiteDataStore = .nonPersistent()
+    // Errors from the first script on (window.errs; a console.error counts too).
+    conf.userContentController.addUserScript(WKUserScript(source: "window.errs = []; addEventListener('error', e => errs.push(String(e.message))); addEventListener('unhandledrejection', e => errs.push(String(e.reason))); const ce = console.error; console.error = (...m) => (errs.push(m.join(' ')), ce(...m))", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    if let pre = env["HERDSMAN_PRE"] { conf.userContentController.addUserScript(WKUserScript(source: pre, injectionTime: .atDocumentStart, forMainFrameOnly: true)) }
+}
+if let t = env["HERDSMAN_TAB"] {
     conf.websiteDataStore = .nonPersistent() // its own localStorage: other runs' tab() writes never reach it
     conf.userContentController.addUserScript(WKUserScript(source: "localStorage.tab = '\(t)'", injectionTime: .atDocumentStart, forMainFrameOnly: true))
 }
@@ -93,6 +104,7 @@ func gate(_ w: WKWebView, _ close: String) {
 final class Nav: NSObject, WKNavigationDelegate {
     func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
         if let close { return gate(w, close) }
+        if url != nil { win.orderFrontRegardless() } // timers and animations run at full rate only on screen
         let js = tab == "-" ? "\(extra); [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]" : """
         tab('\(tab)'); mode('\(mode)'); \(extra);
         \(png == nil ? "document.querySelectorAll('details').forEach(d => d.open = true);" : "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });")
@@ -103,7 +115,7 @@ final class Nav: NSObject, WKNavigationDelegate {
             let wide = [Int(v[0]), Int(v[1])].map { "\($0)" }
             guard let png else { print((wide + v.dropFirst(3).map { "\($0)" }).joined(separator: " ")); exit(0) }
             w.setFrameSize(NSSize(width: width, height: extra.isEmpty ? CGFloat(v[2]) : 844))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (env["HERDSMAN_WAIT"].flatMap(Double.init) ?? 0.5)) {
                 // #315: numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
                 w.evaluateJavaScript("window.late || null") { m, _ in
                     print((wide + ((m as? [Double]) ?? Array(v.dropFirst(3))).map { "\($0)" }).joined(separator: " "))
@@ -119,6 +131,12 @@ final class Nav: NSObject, WKNavigationDelegate {
 }
 let nav = Nav()
 web.navigationDelegate = nav
-web.loadHTMLString(html, baseURL: ProcessInfo.processInfo.environment["HERDSMAN_BASE"].flatMap(URL.init(string:)))
+if let url {
+    let kv = (env["HERDSMAN_COOKIE"] ?? "").split(separator: "=", maxSplits: 1).map(String.init)
+    let ck = kv.count == 2 ? HTTPCookie(properties: [.name: kv[0], .value: kv[1], .domain: url.host!, .path: "/"]) : nil
+    if let ck { web.configuration.websiteDataStore.httpCookieStore.setCookie(ck) { web.load(URLRequest(url: url)) } } else { web.load(URLRequest(url: url)) }
+} else {
+    web.loadHTMLString(html, baseURL: env["HERDSMAN_BASE"].flatMap(URL.init(string:)))
+}
 DispatchQueue.main.asyncAfter(deadline: .now() + 30) { print("timeout"); exit(3) }
 app.run()
