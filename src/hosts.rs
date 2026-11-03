@@ -183,6 +183,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             if let Some(ag) = a.as_ref().filter(|_| h.machine.is_some()) {
                 s.top = host::top(&on, ag);
                 rows.push(row(ctx.now, name, s, lanes_on(cfg, &events, name).len()));
+                import(ctx, cfg, &on, name, &s.home);
             }
         }
         agents.insert(name.clone(), a);
@@ -192,6 +193,37 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         eprintln!("host history: {e:#}");
     }
     agents
+}
+
+/// #275: the asks a lane on host `name` logged in that host's own log (before lanes forwarded them), each imported once
+/// under a new id with `from` naming the remote one; its agent is the issue's newest lane there.
+fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
+    let Some(text) = on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl")) else {
+        return;
+    };
+    let events = read(&ctx.state).unwrap_or_default();
+    let mut n = events.iter().filter(|e| e.kind == "needs-decision").count();
+    let asks = text.lines().filter_map(|l| serde_json::from_str::<Event>(l).ok());
+    for e in asks.filter(|e| e.kind == "needs-decision") {
+        let from = format!("{name}:{}", e.str("id").unwrap_or_default());
+        if events.iter().any(|m| m.str("from") == Some(&from)) {
+            continue;
+        }
+        let lane = (events.iter().rev()).find(|s| s.kind == "spawn" && s.fleet == e.fleet && s.issue == e.issue);
+        let mut d = Value::Object(e.data.clone());
+        n += 1;
+        (d["id"], d["from"]) = (json!(format!("q{n}")), json!(from));
+        if d["agent"].is_null() {
+            d["agent"] = json!(lane
+                .filter(|s| s.str("host") == Some(name))
+                .and_then(|s| s.str("agent")));
+        }
+        let _ = emit(
+            &ctx.state,
+            cfg,
+            Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d),
+        );
+    }
 }
 
 /// Detected tags plus the hand ones from fleet.toml.
@@ -479,7 +511,17 @@ pub fn wake(
 pub fn rehome(a: Vec<String>, home: Option<&str>) -> Vec<String> {
     let mine = crate::config::home().to_string_lossy().into_owned();
     match home.filter(|_| mine.len() > 1) {
-        Some(h) => a.into_iter().map(|w| w.replace(&mine, h)).collect(),
+        // #275: `HERDSMAN_MAIN` names a path on the main host.
+        Some(h) => a
+            .into_iter()
+            .map(|w| {
+                if w.starts_with("HERDSMAN_MAIN=") {
+                    w
+                } else {
+                    w.replace(&mine, h)
+                }
+            })
+            .collect(),
         None => a,
     }
 }
