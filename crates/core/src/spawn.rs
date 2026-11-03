@@ -585,7 +585,7 @@ pub fn spawn(
         );
     }
 
-    admit(ctx, f, &events, (fleet, issue, role))?;
+    lane_admit(ctx, f, &events, fleet, issue, role)?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -807,22 +807,9 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
     (!logged).then(|| pane.into())
 }
 
-/// #318: `lane_admit` counting the spawns other kicks are still starting as lanes, so concurrent kicks can't race past it.
-pub(crate) fn admit(ctx: &Ctx, f: &Fleet, events: &[Event], at: (&str, u64, &str)) -> Result<()> {
-    let (fleet, issue, role) = at;
-    let mut seen = events.to_vec();
-    let starting = crate::drive::pending(ctx)
-        .into_iter()
-        .filter(|(fl, n, _)| fl == fleet && *n != issue);
-    seen.extend(starting.map(|(_, n, r)| {
-        let d = json!({"role": r, "check": f.flow().is_check(&r)});
-        Event::new(ctx.now, fleet, Some(n), "spawn", d)
-    }));
-    lane_admit(f, &seen, fleet, issue, role)
-}
-
 /// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).
-fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");

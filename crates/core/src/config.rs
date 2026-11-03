@@ -277,8 +277,7 @@ pub struct Limits {
     /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
-    /// #318: a pass's spawns run as this many concurrent detached kicks at most (0: in the pass itself).
-    pub max_parallel_spawns: usize,
+    pub max_parallel_spawns: usize, // #318: concurrent detached spawn kicks (0: in the pass)
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
 }
