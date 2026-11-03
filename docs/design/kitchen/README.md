@@ -144,7 +144,7 @@ links and the active tab, and brass `#c9a55a` for the title, card edges and grou
 ## Approved (2026-11-03, "Approve all with fixes") and built
 
 Built to #241's merged contract with the README's recommendations. No `theme.css` or board scheme (that is #244). The
-conductor's 8 fixes are in `art.mjs` and the build:
+owner-approved 8 fixes are in `art.mjs` and the build:
 
 1. Idle: crossed forearms, diagonal, hands at the elbows.
 2. The bell has a knob and a highlight. Cook has a curved wok over a bigger flame burst. The 16 px cook, chop (cleaver),
