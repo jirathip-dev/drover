@@ -289,7 +289,7 @@ impl Default for Limits {
             ask_default_minutes: 30,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
-            transcript_days: 14,
+            transcript_days: 30,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
                 .ok()

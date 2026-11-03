@@ -110,8 +110,8 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("fleet-impl/settings.json")).unwrap()).unwrap();
     assert_eq!(s["attribution"], serde_json::json!({"commit": "", "pr": ""}));
     assert_eq!(s["includeCoAuthoredBy"], false);
-    // #248: lane transcripts are kept `[limits] transcript_days` (14).
-    assert_eq!(s["cleanupPeriodDays"], 14);
+    // #248: lane transcripts are kept `[limits] transcript_days` (30, Claude's default: lanes share ~/.claude, so no lower).
+    assert_eq!(s["cleanupPeriodDays"], 30);
     // #223: lanes don't inherit the user's IDE/LSP plugins (tsserver ~2 GB per lane).
     for p in ["typescript-lsp", "pyright-lsp", "swift-lsp", "vercel"] {
         assert_eq!(

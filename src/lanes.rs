@@ -117,7 +117,7 @@ pub fn join(
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
         let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
-        l.kept = why.map(String::from);
+        l.kept = why.filter(|_| l.state == "done").map(String::from);
     }
     out
 }
