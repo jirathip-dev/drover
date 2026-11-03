@@ -1,15 +1,4 @@
 //! fleet: agents act only through this CLI; it owns state and refuses rule breaks.
-#![warn(clippy::pedantic)]
-// Pure style noise for a CLI; reasons in docs/architecture.md (Code rules).
-#![allow(
-    clippy::must_use_candidate,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::too_many_lines,
-    clippy::format_push_string,
-    clippy::format_collect,
-    clippy::many_single_char_names
-)]
 pub mod access;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim

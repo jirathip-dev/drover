@@ -1,4 +1,3 @@
-//! #264: the `herdsman` binary's crate: `herdsman_core` plus the server's `serve`, under the one `herdsman::` path.
-#![warn(clippy::pedantic)]
+//! #264: `herdsman_core` plus the server's `serve`, under the one `herdsman::` path.
 pub use herdsman_core::*;
 pub use herdsman_server::serve;

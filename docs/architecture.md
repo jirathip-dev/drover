@@ -80,7 +80,7 @@ herdr argv) and `gh` (cached GitHub reads).
 
 - **Format:** rustfmt with `max_width = 120` (`rustfmt.toml`); CI runs `cargo fmt --check`. The formatter decides
   layout, not the lane: no golf, no joined or packed lines to fit the cap. Run `cargo fmt` before committing.
-- **Lints:** `#![warn(clippy::pedantic)]` at the crate roots, and CI's `-D warnings` makes it an error. Other
+- **Lints:** clippy `pedantic` as warnings: `[workspace.lints]` in `Cargo.toml` for core and server (#264), `#![warn(clippy::pedantic)]` in the binary's `main.rs`; CI's `-D warnings` makes it an error. Other
   exceptions sit inline at the narrowest scope as `#[allow(clippy::<lint>)] // reason`. The crate-level allows, all
   style noise for a CLI:
   - `must_use_candidate`: return values here are read or deliberately dropped; `#[must_use]` everywhere is noise.

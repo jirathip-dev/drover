@@ -8,6 +8,17 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# Lints for every crate root (moved from the old lib.rs, #264); the allows are style noise, docs/architecture.md (Code rules).
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+format_push_string = "allow"
+format_collect = "allow"
+many_single_char_names = "allow"
+
 [workspace.dependencies]
 aes-gcm = "0.11.1"
 anyhow = "1"

@@ -669,10 +669,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             export: Some(dir),
             demo,
             ..
-        } => (SERVE.get().context("no serve in this build")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => {
-            (SERVE.get().context("no serve in this build")?.0)(ctx, r, &addr, read_only)?;
-        }
+        } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
+        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
