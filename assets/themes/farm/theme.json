@@ -12,5 +12,6 @@
   "row_sprites": { "impl": "row-plough", "fix": "row-anvil", "rev": "row-vet", "update": "row-hay", "idle": "row-graze", "done": "row-stable", "blocked": "row-rear" },
   "icons": { "180": "icon-180.png", "192": "icon-192.png", "512": "icon-512.png", "favicon": "icon-192.png" },
   "ascii": { "impl": "     _/>\n\\=~(___)\n \\ /  \\", "fix": "    _/>\n~(___) *\n  |\\ =n=", "rev": "#   _/>\n#~(___)\n# |  |o/", "update": "  ##_/>\n~(___)\n /  \\", "idle": "\n~(____)\n | | \\>,", "done": "   _/|##\n~(__)|##\n /\\  |##", "blocked": "   />! H\n ~(_/  H\n  / \\  H" },
-  "modes": ["scene", "ascii"]
+  "modes": ["scene", "ascii"],
+  "loading": "horse-working"
 }
