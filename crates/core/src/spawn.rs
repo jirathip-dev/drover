@@ -585,7 +585,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(f, &events, fleet, issue, role)?;
+    lane_admit(ctx, f, &events, fleet, issue, role)?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -807,24 +807,19 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
     (!logged).then(|| pane.into())
 }
 
-/// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).
-fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+/// `SERIAL_BUSY` (a group of the issue's is full, unless it holds a slot there) and CAP (`max_impl` / `max_rev`).
+pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
-    if role == "impl" && crate::queue::serial(events, fleet).contains(&issue) {
-        let in_flight = crate::queue::serial_in_flight(events, &st, fleet);
-        // #232: an issue already in flight holds its slot; only one entering the serial set needs a free one.
-        let holds = in_flight.iter().any(|s| s.issue == issue);
-        let busy: Vec<_> = in_flight
-            .into_iter()
-            .map(|s| format!("#{} is unmerged ({})", s.issue, s.state))
-            .collect();
-        if !holds && busy.len() >= f.serial_max.unwrap_or(1) {
-            return refused(
-                "SERIAL_BUSY",
-                format!("serial {}; retry after they merge", busy.join(", ")),
-            );
+    // #294: each of its groups (name order) needs a free slot, unless it holds one there already (#232).
+    let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
+    for g in gs.into_iter().filter(|_| role == "impl") {
+        let h = crate::queue::holders(events, &st, f, fleet, &g.name);
+        if !h.iter().any(|s| s.issue == issue) && h.len() >= g.max {
+            let why = format!("{}; retry after they merge", crate::queue::holds(g, &h));
+            return refused("SERIAL_BUSY", why);
         }
     }
     let fam = f.family(role);

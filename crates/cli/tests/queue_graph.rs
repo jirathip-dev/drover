@@ -11,7 +11,7 @@ use serde_json::json;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// `acme` names its serial mark, `beta` keeps the default.
+/// `acme` names its serial mark, `beta` keeps the default (`db`, #294).
 fn config(label: &str) -> String {
     format!(
         r#"[fleet.acme]
@@ -37,16 +37,17 @@ fn load(label: &str) -> anyhow::Result<Config> {
 }
 
 #[test]
-fn serial_label_defaults_to_serial_and_takes_an_override() {
+fn serial_label_defaults_to_db_and_takes_an_override() {
+    // #294: the old form is one group named `serial_label`, `db` when unset.
     let c = load("").unwrap();
-    assert_eq!(c.fleet["acme"].serial_label(), "serial");
-    let c = load("serial_label = \"db\"").unwrap();
     assert_eq!(c.fleet["acme"].serial_label(), "db");
-    assert_eq!(c.fleet["beta"].serial_label(), "serial");
+    let c = load("serial_label = \"schema\"").unwrap();
+    assert_eq!(c.fleet["acme"].serial_label(), "schema");
+    assert_eq!(c.fleet["beta"].serial_label(), "db");
     for bad in ["serial_label = \"\"", "serial_label = \"migrations\""] {
         let e = format!("{:#}", load(bad).unwrap_err());
         assert!(
-            e.contains("fleet.acme.serial_label: must be 1 to 8 characters"),
+            e.contains("fleet.acme.serial: a name (serial_label) must be 1 to 8 characters"),
             "{bad}: {e}"
         );
     }
@@ -81,7 +82,7 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains("<button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf"));
     assert!(page.contains("<div class=\"fc k-l\" data-s=\"db\" data-sp=\"db/migrations/**, db/seed.sql\"><div class=fh><span class=fn><b>acme</b>"));
     assert!(page.contains(
-        "<div class=\"fc k-a\" data-s=\"serial\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
+        "<div class=\"fc k-a\" data-s=\"db\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
     ));
     // #242: a row with a lane carries its coat for the row sprite.
     let at = page
@@ -94,7 +95,7 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
         .starts_with("<summary><span><a href=\"https://github.com/acme/app/issues/1\">#1</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-b=99 data-act=idle><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-s=\"db\" data-act=idle><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"serial\" data-act=idle><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"db\" data-act=idle><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
     // Change 1 of the approval: the card no longer repeats `#n state · age`; the lane stays.
     assert!(!page.contains("<p>#1 impl"), "{page}");
     assert!(page.contains("<p>acme-impl-1</p>"));
@@ -122,8 +123,8 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         "#6 └─○ queued ▲before2",
         "#7 ○ queued ! #99 ▲before1 ▼after8",
         "#8 ○ queued 🔒db ▲before7",
-        "#21 ○ queued 🔒serial",
-        "#22 └─○ queued 🔒serial",
+        "#21 ○ queued 🔒db",
+        "#22 └─○ queued 🔒db",
     ]
     .join("|");
     let graph = format!(
@@ -137,7 +138,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     );
     let legend = "legend(); const l = [...document.querySelectorAll('.top p')].map(p => p.textContent).join('|'); \
          for (const w of ['queued = waiting its turn', 'review(n) = being checked, round n', 'needs you = waiting for your answer', \
-         '! needs you', '🔒db one at a time: touches db/migrations/**, db/seed.sql', '🔒serial one at a time: touches schema/**']) \
+         '! needs you', '🔒db one at a time: touches db/migrations/**, db/seed.sql', '🔒db one at a time: touches schema/**']) \
          if (!l.includes(w)) throw new Error('legend: ' + l); \
          sh.style.willChange = 'auto'; sh.style.transition = 'none'";
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";

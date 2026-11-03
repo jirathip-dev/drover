@@ -638,7 +638,7 @@ function tree(p, rows, end) {
     w.append(st);
     tip(st);
     const tag = (cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
-    if (d.dataset.s) tag('tag m', '🔒' + d.dataset.s, 'serial: one lane at a time');
+    for (const g of (d.dataset.s || '').split(' ').filter(Boolean)) tag('tag m', '🔒' + g, 'serial: one lane at a time');
     if (d.dataset.b && !par(d)) tag('tag r', '! #' + d.dataset.b);
     if (deep) tag('m', 'after #' + d.dataset.b);
     const cd = el('div', 'cd');
@@ -1055,7 +1055,8 @@ function legend() {
   agent = null;
   sh.className = 'sh lg';
   $('.hd b').textContent = 'what the marks mean';
-  const serial = new Set([...$$('#queue [data-sp]')].map(f => `🔒${f.dataset.s} one at a time: touches ${f.dataset.sp}`));
+  // #294: a card's groups: names by spaces, their paths by ` | `.
+  const serial = new Set([...$$('#queue [data-sp]')].flatMap(f => f.dataset.sp.split(' | ').map((p, i) => `🔒${f.dataset.s.split(' ')[i]} one at a time: touches ${p}`)));
   const dots = ['● a lane is on it', '○ waiting', '✓ ready', '! needs you'];
   $('.top').replaceChildren(...Object.entries(HINT).map(([w, h]) => el('p', '', `${w} = ${h}`)), ...[...dots, ...serial].map(t => el('p', '', t)));
   show('mid');
