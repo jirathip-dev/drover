@@ -10,7 +10,11 @@ event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on
 every 15 s, for ages) it re-renders the needs-you cards and the four tabs and pushes only
 the changed ones as `event: frag` (`{id, html}`), rendered per audience (paired or not; a stream whose device was removed is closed at the next
 tick, and the page reconnects unpaired), swapped in place: open rows stay open,
-changed rows flash. The dot next to ↻ is green (live; it pulses on an update), amber
+changed rows flash. #259: every event in `events.jsonl` has a monotonic `seq` (written under the log's lock;
+old rows are numbered by line), each new one goes out as `event: ev` (`{seq, ts, k}`, `k` the moment), and every
+message carries `id: <seq>`. A reconnect sends `Last-Event-ID` or `/live?since=N` and gets every event after N
+once (over 500: one `event: refresh`, a full refresh); the page keeps the tab's last seq, drops any seq it has seen
+and plays a moment only within 2 minutes of its event. The dot next to ↻ is green (live; it pulses on an update), amber
 (reconnecting, ↻ spins; back-off 1, 2, 5, 10 s, then a `/?frag=all` poll every 10 s after 30 s
 down) or red (offline). Tapping ↻, or pulling down from the top (past ~70 px), fetches
 `/?frag=all` from the network.
@@ -192,12 +196,13 @@ Milky Way drifting as one at 0.7 pt/s, the moon fixed at (306, 56) (above the st
 clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog compose with it. Debug:
 `/?light=auto|day|night`.
 
-### Themes (#172, #241)
+### Themes and colour schemes (#172, #241, #244)
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` picker, `[serve] theme` (its
 default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
-writes them to `themes/`.
+writes them to `themes/`. Colours are a separate per-phone pick, `[▦]`: 8 built-in schemes plus your own
+`<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
 ## Alerts (web push)
 

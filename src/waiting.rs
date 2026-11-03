@@ -333,7 +333,8 @@ pub fn scan(
         }
         let pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
-            (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).unwrap_or_default(),
+            (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now)
+                .unwrap_or_else(|_| gh::cached_pr(ctx, &s.fleet, s.issue)),
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
         let sp = last_spawn(events, &lane);

@@ -118,6 +118,9 @@ impl Runner for Fake {
                 return Ok(o.clone());
             }
         }
+        if line.starts_with("gh api graphql") {
+            return Ok(open_prs(&mut onces, &self.replies));
+        }
         Ok(Out {
             code: 1,
             stdout: String::new(),
@@ -126,6 +129,39 @@ impl Runner for Fake {
     }
     fn sleep(&self, secs: u64) {
         self.calls.borrow_mut().push(format!("sleep {secs}"));
+    }
+}
+
+/// #246: the batched open-PR read, built from the `gh pr view <branch>` stubs (a `once` is spent, as one read was):
+/// one JSON line per PR, `headRefName` the stub's branch.
+fn open_prs(onces: &mut Vec<(String, Out)>, replies: &[(String, Out)]) -> Out {
+    fn branch(p: &str) -> Option<&str> {
+        p.strip_prefix("gh pr view ")
+            .map(str::trim)
+            .filter(|b| b.starts_with("issue-"))
+    }
+    let mut seen: Vec<(String, Out)> = vec![];
+    onces.retain(|(p, o)| match branch(p) {
+        Some(b) if !seen.iter().any(|s| s.0 == b) => {
+            seen.push((b.into(), o.clone()));
+            false
+        }
+        _ => true,
+    });
+    for (p, o) in replies {
+        if let Some(b) = branch(p).filter(|b| !seen.iter().any(|s| s.0 == *b)) {
+            seen.push((b.into(), o.clone()));
+        }
+    }
+    let line = |(b, o): (String, Out)| {
+        let mut v: serde_json::Value = serde_json::from_str(&o.stdout).ok().filter(|_| o.code == 0)?;
+        v.as_object()?;
+        v["headRefName"] = b.into();
+        Some(format!("{v}\n"))
+    };
+    Out {
+        stdout: seen.into_iter().filter_map(line).collect(),
+        ..Out::default()
     }
 }
 

@@ -17,8 +17,10 @@ impl Harness for Claude {
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
         let days = crate::config::Config::load(&ctx.config).map_or(14, |c| c.limits.transcript_days);
+        let line = serde_json::to_string(&format!("'{}' statusline", ctx.exe))?;
         let settings = SETTINGS
             .replace("\"{{FLEET_HOOK}}\"", &hook_cmd)
+            .replace("\"{{FLEET_STATUSLINE}}\"", &line)
             .replace("\"{{TRANSCRIPT_DAYS}}\"", &days.to_string());
         std::fs::write(dir.join("settings.json"), settings)?;
         std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(role)))?;
