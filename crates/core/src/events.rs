@@ -415,7 +415,7 @@ pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
                     format!("fix({}{})", s.rounds, s.form_mark())
                 };
             }
-            "merged" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             "round-extended" => {
                 s.extra += 1;
                 // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.
