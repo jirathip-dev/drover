@@ -1027,7 +1027,7 @@ fn pair_request_carries_the_optional_approve_hint() {
 /// carries the exact approve line with `[copy]`; the page polls claim, and pairing lasts a year after last use.
 #[test]
 fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
-    let js = include_str!("../assets/serve.js");
+    let js = include_str!("../../../assets/serve.js");
     assert!(
         js.contains("el('button', 'pairc', 'copy')") && js.contains("paste in Terminal"),
         "the copy button"
