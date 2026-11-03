@@ -120,6 +120,8 @@ pub struct Seen {
     pub disk_total: Option<f64>,
     /// #254: when it last had a live agent (a cloud host's idle stop).
     pub busy: u64,
+    /// #255: a cloud host's gh token, as its card says it.
+    pub github: String,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -170,6 +172,11 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 }
                 if h.machine.is_some() && h.enabled {
                     s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
+                    // #255: a cloud host's GitHub token too.
+                    if h.cloud.is_some() {
+                        let (card, warn) = crate::cloud::github(&on, ctx.now);
+                        (s.github, ()) = (card, s.health.extend(warn));
+                    }
                     if s.health.iter().any(|w| w.starts_with("! herdsman")) && update(ctx, cfg, &on, name, &s.home) {
                         s.probed = ctx.now.saturating_sub(3000); // read its version back in 10 minutes
                     }
@@ -337,7 +344,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
 }
 
 /// `p` with a leading `~/` under the host's `home` (none: this one's).
-fn under(p: &str, home: Option<&str>) -> PathBuf {
+pub fn under(p: &str, home: Option<&str>) -> PathBuf {
     match (p.strip_prefix("~/"), home) {
         (Some(rest), Some(h)) => Path::new(h).join(rest),
         _ => expand(p),

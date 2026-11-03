@@ -49,8 +49,12 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let remote = crate::hosts::survey(ctx, cfg, r, false);
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     crate::setup::reap(ctx, r, &events)?;
-    for name in cfg.fleet.keys() {
+    for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
+        // #331: a queued issue never spawned had no cached spec, so no Queue row title: fetch it once (cached after).
+        for i in crate::queue::replay(&events, name) {
+            let _ = gh::spec(ctx, r, f, name, i.issue, false);
+        }
     }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);

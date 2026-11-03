@@ -7,6 +7,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/jirathip-dev/herdsman"
 
 # Lints for every crate root (moved from the old lib.rs, #264); the allows are style noise, docs/architecture.md (Code rules).
 [workspace.lints.clippy]

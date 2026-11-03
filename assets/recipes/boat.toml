@@ -9,6 +9,9 @@ stop = "boat stop {name}"
 status = "boat status {name} --format '{{.State}}'"
 address = "boat ssh-info {name}"
 destroy = "boat destroy {name} --yes"
+# #255: `hosts snapshot` saves a bootstrapped host; `create_from` makes a new one from that snapshot, ready to use.
+snapshot = "boat snapshot create {name} --name herdsman-{name}"
+create_from = "boat create {name} --size {size} --from herdsman-{name}"
 
 # USD per running hour by size; check docs.boat.dev pricing and override in your own recipe file.
 [rate_usd_hour]
