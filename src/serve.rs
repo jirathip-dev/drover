@@ -2364,7 +2364,7 @@ impl<'a> Server<'a> {
                 (t, words) = (dot, format!("{words} · {}", why.join(", ")));
             }
             let to = if on { "off" } else { "on" };
-            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none()).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button>{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name)));
+            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none() && !(main && on)).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button data-confirm=\"turn {1} {to}?{}\">{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name), if on { format!(" no new lanes; {} running lanes finish", lanes.len()) } else { String::new() }));
             let tag = ["", "<span class=\"tag m\">main</span>"][usize::from(main)];
             let (n, ln) = (esc(&name), crate::hosts::series(&hist, &name, "lanes", now, false));
             out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{btn}</div>{rows}</article>", esc(&words));
