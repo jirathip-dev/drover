@@ -104,7 +104,7 @@ pub fn parse_balance(body: &str, ts: u64) -> Option<Balance> {
 }
 
 /// `var`'s value in an env file (`VAR=value` / `export VAR="value"` lines).
-fn env_value(text: &str, var: &str) -> Option<String> {
+pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
     let kv = text
         .lines()
         .filter_map(|l| l.trim().trim_start_matches("export ").split_once('='));

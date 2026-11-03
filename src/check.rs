@@ -47,6 +47,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let stall = cfg.limits.stall_minutes * 60;
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
     let remote = crate::hosts::survey(ctx, cfg, r, false);
+    crate::cloud::tick(ctx, cfg, r, &remote, out)?;
     crate::setup::reap(ctx, r, &events)?;
     for name in cfg.fleet.keys() {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
@@ -882,6 +883,14 @@ fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
     let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
     format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() })
+}
+
+/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first).
+pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<()> {
+    snapshot(r, wt, w, msg).map_err(|e| match e {
+        Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
+        Snap::Failed(e) | Snap::Push(e) => e,
+    })
 }
 
 /// Why a wip snapshot stopped: git failed (index restored), a secret in the diff (index restored), or the push.
