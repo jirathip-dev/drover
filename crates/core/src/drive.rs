@@ -131,7 +131,8 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
     }
     std::fs::create_dir_all(state_dir(ctx))?;
     let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
-    let _pending = Lock(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))); // #318: cleared on any end
+    // #318: only the kick a pass launched owns its marker; it goes when that kick's first run ends, however it ends.
+    let mut pending = (why == "drive").then(|| Lock(marker(ctx, fleet, n)));
     let Some(_k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
         return Ok(std::fs::write(&again, why)?);
     };
@@ -140,6 +141,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         KICK.set(Some(n));
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
         KICK.set(None);
+        drop(pending.take());
         let text = String::from_utf8_lossy(&buf).into_owned();
         out.write_all(&buf)?;
         if text.starts_with("drive: ") {
@@ -158,23 +160,40 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 }
 
 /// #318: a pass's spawn runs as its own detached kick (the slow harness start there), at most `max_parallel_spawns`
-/// at once; its `spawn-<fleet>-<n>.pending` (stale after `STALE_LOCK_SECS`) keeps later passes off the issue meanwhile.
-fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, n: u64) -> Result<i32> {
-    let mine = state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"));
-    let age = |e: &std::fs::DirEntry| e.metadata().ok()?.modified().ok()?.elapsed().ok();
-    let live = |e: &std::fs::DirEntry| age(e).is_some_and(|a| a.as_secs() < STALE_LOCK_SECS);
-    let all = std::fs::read_dir(state_dir(ctx))?.flatten();
-    let live: Vec<_> = all
-        .filter(|e| e.path().extension() == Some("pending".as_ref()) && live(e))
-        .map(|e| e.path())
-        .collect();
-    if live.len() >= cfg.limits.max_parallel_spawns || live.contains(&mine) {
+/// at once, admitted (`SERIAL_BUSY`, `CAP`) with the spawns still starting counted; its marker keeps later passes off it.
+fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], at: (&str, u64, &str)) -> Result<i32> {
+    let (fleet, n, role) = at;
+    let live = pending(ctx);
+    if live.iter().any(|(f, m, _)| f == fleet && *m == n) {
+        return crate::gate::refused("SPAWN_PENDING", format!("#{n} is still starting"));
+    }
+    crate::spawn::admit(ctx, cfg.fleet(fleet)?, ev, (fleet, n, role))?;
+    if live.len() >= cfg.limits.max_parallel_spawns {
         return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
     }
-    std::fs::write(&mine, "")?;
+    std::fs::write(marker(ctx, fleet, n), format!("{fleet} {n} {role}"))?;
     IN_ACT.set(false);
     kick(ctx, r, fleet, n, "drive");
     Ok(0)
+}
+
+fn marker(ctx: &Ctx, fleet: &str, n: u64) -> std::path::PathBuf {
+    state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))
+}
+
+/// #318: the spawns launched kicks are still starting: each live marker's `(fleet, issue, role)`.
+pub(crate) fn pending(ctx: &Ctx) -> Vec<(String, u64, String)> {
+    let young = |p: &Path| Some(p.metadata().ok()?.modified().ok()?.elapsed().ok()?.as_secs() < STALE_LOCK_SECS);
+    let Ok(dir) = std::fs::read_dir(state_dir(ctx)) else {
+        return vec![];
+    };
+    let mine = |p: &std::path::PathBuf| p.extension() == Some("pending".as_ref()) && young(p) == Some(true);
+    let parse = |p: std::path::PathBuf| {
+        let s = std::fs::read_to_string(p).ok()?;
+        let mut w = s.split_whitespace();
+        Some((w.next()?.into(), w.next()?.parse().ok()?, w.next()?.into()))
+    };
+    dir.flatten().map(|e| e.path()).filter(mine).filter_map(parse).collect()
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -295,7 +314,9 @@ pub fn drive(
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
     // #318: a kick holds its own issue's locks, never the pass's, so many run at once.
-    let kick = KICK.get().map(|n| format!("drive-kick-{n}.lock"));
+    let kick = KICK
+        .get()
+        .map(|n| format!("drive-kick-{}-{n}.lock", only.unwrap_or_default()));
     let lock = state_dir(ctx).join(kick.as_deref().unwrap_or(["drive.lock", "drive-fast.lock"][i]));
     let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
         if manual {
@@ -821,7 +842,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
     IN_ACT.set(true);
     let res = match issue.filter(|_| kicks) {
-        Some(n) => launch(ctx, cfg, r, fleet, n),
+        Some(n) => launch(ctx, cfg, r, ev, (fleet, n, c[3])),
         None => crate::cli::run(c, ctx, r, &mut buf),
     };
     IN_ACT.set(false);

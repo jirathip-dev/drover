@@ -585,7 +585,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(f, &events, fleet, issue, role)?;
+    admit(ctx, f, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -805,6 +805,20 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
     let pane = host::live_in(agents, "\0", &p.worktree).into_iter().find(mine)?["pane_id"].as_str()?; // by cwd only
     let logged = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(pane));
     (!logged).then(|| pane.into())
+}
+
+/// #318: `lane_admit` counting the spawns other kicks are still starting as lanes, so concurrent kicks can't race past it.
+pub(crate) fn admit(ctx: &Ctx, f: &Fleet, events: &[Event], at: (&str, u64, &str)) -> Result<()> {
+    let (fleet, issue, role) = at;
+    let mut seen = events.to_vec();
+    let starting = crate::drive::pending(ctx)
+        .into_iter()
+        .filter(|(fl, n, _)| fl == fleet && *n != issue);
+    seen.extend(starting.map(|(_, n, r)| {
+        let d = json!({"role": r, "check": f.flow().is_check(&r)});
+        Event::new(ctx.now, fleet, Some(n), "spawn", d)
+    }));
+    lane_admit(f, &seen, fleet, issue, role)
 }
 
 /// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).

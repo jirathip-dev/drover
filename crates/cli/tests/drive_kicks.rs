@@ -5,13 +5,29 @@ use common::*;
 use herdsman::events::read;
 
 fn fleet(name: &str, max: usize, issues: u64) -> herdsman::Ctx {
-    let cfg = CONFIG.replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"));
+    fleet_with(name, max, "", issues, &[])
+}
+
+/// A fleet with `extra` config lines and issues 1..=`issues` queued with `flags`.
+fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) -> herdsman::Ctx {
+    let cfg = CONFIG
+        .replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"))
+        .replace(
+            "integration = \"staging\"",
+            &format!("integration = \"staging\"\n{extra}"),
+        );
     let c = ctx(&tmpdir(name), &cfg);
     let mut add = vec!["queue".to_string(), "sendmeter".into(), "add".into()];
     add.extend((1..=issues).map(|n| n.to_string()));
+    add.extend(flags.iter().map(|f| f.to_string()));
     let add: Vec<&str> = add.iter().map(String::as_str).collect();
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
     c
+}
+
+fn codes(d: &serde_json::Value) -> Vec<String> {
+    let a = d["actions"].as_array().unwrap();
+    a.iter().map(|a| a["code"].as_str().unwrap_or("").to_string()).collect()
 }
 
 /// Spawns succeed; `load` is the 1-min load on 10 cores (≥ 25 is a busy host).
@@ -134,4 +150,38 @@ fn a_stale_marker_does_not_hold_the_issue_forever() {
     let r = fake("1.0");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
+}
+
+/// The pass counts the spawns its kicks are still starting: one `serial_max = 1` slot, one `max_impl = 1` lane.
+#[test]
+fn a_pass_counts_starting_spawns_against_serial_and_cap() {
+    let c = fleet_with("kicks-serial", 6, r#"serial_paths = ["db/**"]"#, 2, &["--serial"]);
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
+    assert_eq!(codes(&d)[1], "SERIAL_BUSY", "{d}");
+    // Kick #2 on its own (a lane hook) is refused too while #1 starts.
+    let hook = fake("1.0");
+    let (code, out) = run(&c, &hook, &["kick", "sendmeter", "2", "--why", "stop", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!hook.called("herdr agent start"), "{out}");
+
+    let c = fleet_with("kicks-cap", 6, "max_impl = 1", 3, &[]);
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!(d["spawns_launched"], 1, "{d}");
+    assert_eq!(codes(&d), ["", "CAP"], "CAP ends the fleet's starts: {d}");
+}
+
+/// #304's lane-hook kick on an issue a pass launched leaves that kick's marker alone.
+#[test]
+fn a_hook_kick_never_clears_a_launched_kicks_marker() {
+    let c = fleet("kicks-hook", 6, 1);
+    pass(&c, &fake("1.0"));
+    let (code, out) = run(&c, &fake("1.0"), &["kick", "sendmeter", "1", "--why", "stop", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(marker(&c, 1).exists());
+    let r = fake("1.0");
+    pass(&c, &r);
+    assert_eq!(launched(&r, 1), 0);
 }
