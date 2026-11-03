@@ -133,6 +133,7 @@ effort = "high"      # default for roles without `effort`; dsh accepts only "non
 fast_secs = 60       # `herdsman timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
 slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once (0: spawn in the pass)
+spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or whose pid is gone) is stale
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

@@ -768,7 +768,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
         cmd => {
             let cfg = Config::load(&ctx.config)?;
-            let kick = |f: &str, n, why| crate::drive::kick(ctx, r, f, n, why);
+            let kick = |f: &str, n, why| {
+                let _ = crate::drive::kick(ctx, r, f, n, why);
+            };
             match cmd {
                 Cmd::Profiles {
                     cmd: ProfilesCmd::Sync { check: true },
