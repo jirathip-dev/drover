@@ -27,7 +27,7 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `looks` | a list of variant sets, `{"--c": "#…", "--d": …}`; a lane takes one by a stable hash of its name. Sprites may also use `var(--fk)`, the fleet's colour | the built-in coats |
 | `load_scene` | `{"kind": "weather" \| "heat" \| "none", "levels": {"calm", "busy", "held"}}`: the Host group headers' miniature (clouds and rain, or flame height) at the group's status (green, amber, red); `levels` are the words its label reads. `none`: text only | farm's (`weather`: clear, windy, storm) |
 | `rail` | `{"item", "needs"}`: the sprite of a queued issue at the Herd's gate, and its needs-you variant | `item`: the `idle` action; `needs`: the item |
-| `moments` | `{"merged" \| "fail" \| "needs-you": {"sprite": id, "anim": "hop" \| "shake" \| "pulse"}}`, played for 2.4 s when the log gets that event (`moment` on `/live`). Silent; reduced motion shows a still frame. `false`: none | farm's |
+| `moments` | `{"merged" \| "fail" \| "needs-you": {"sprite": id, "anim": "hop" \| "shake" \| "pulse"}}`, played for 2.4 s when the log gets that event (an `ev` with its `k` on `/live`, once per seq). Silent; reduced motion shows a still frame. `false`: none | farm's |
 | `row_sprites` | sprite id per action for the 16 px Queue and Events row sprite (its title and label is the plain state word). `false`: rows keep their state glyph | the action's sprite |
 | `icons` | `180`, `192`, `512`, `favicon`: one of `icon-180.png`, `icon-192.png`, `icon-512.png` in the folder | the same names; a file the folder lacks is the board's icon |
 | `ascii` | per action, the Lanes `[ascii]` mode's words: at most 3 lines of 8 narrow characters (no CJK, emoji or control characters) | farm's ASCII horses |

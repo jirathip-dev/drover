@@ -193,7 +193,7 @@ function mini(g) {
   const word = esc('load: ' + ((ls.levels || {})[l] || l));
   s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
 }
-// #241: a moment (`moment` on /live: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
+// #241: a moment (`ev` on /live with a `k`: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
 function moment(k) {
   const m = TT && TT.moments && TT.moments[k];
   if (!m || !m.sprite) return;
@@ -207,7 +207,7 @@ function moment(k) {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -448,13 +448,17 @@ async function refresh() {
 function connect() {
   if (DEMO) return;
   if (es) es.close();
-  try { es = new EventSource('live'); } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
+  // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
+  // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
+  const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
   // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
-  es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
-  es.addEventListener('moment', e => moment(e.data));
-  es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
+  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
+  es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
+  es.addEventListener('refresh', e => (at(e), refresh()));
+  es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
     es = null;
