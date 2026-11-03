@@ -84,13 +84,16 @@ fn approve_hook(path: &Path, cmd: &str) -> Result<()> {
         data["approvals"] = json!([]);
     }
     let list = data["approvals"].as_array_mut().context("approvals")?;
-    if list
-        .iter()
-        .any(|e| e["event"] == "pre_tool_call" && e["command"] == cmd)
-    {
+    // #304: `post_tool_call` kicks the issue after a push.
+    let n = list.len();
+    for ev in ["pre_tool_call", "post_tool_call"] {
+        if !list.iter().any(|e| e["event"] == ev && e["command"] == cmd) {
+            list.push(json!({"event": ev, "command": cmd}));
+        }
+    }
+    if list.len() == n {
         return Ok(());
     }
-    list.push(json!({"event": "pre_tool_call", "command": cmd}));
     crate::config::write_atomic(path, &serde_json::to_string_pretty(&data)?)
 }
 
