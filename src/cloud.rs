@@ -248,12 +248,12 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 }
 
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
-const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
+pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-/// Bootstrap's steps after herdr, `name|read-back check|install` each.
-const TOOLS: &str = "git|command -v git|apt_ git\ngh|command -v gh|apt_ gh
-claude|command -v claude|curl -fsSL https://claude.ai/install.sh | bash
-rust|command -v cargo|curl -sSf https://sh.rustup.rs | sh -s -- -y";
+/// Bootstrap's steps after herdr, `name⇥read-back check⇥install` each.
+const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh
+claude\tcommand -v claude\tcurl -fsSL https://claude.ai/install.sh | bash
+rust\tcommand -v cargo\tcurl -sSf https://sh.rustup.rs | sh -s -- -y";
 
 /// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
 /// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token, the
@@ -276,7 +276,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let sh = |s: &str| on.run("sh", &argv(&["-c", &format!("{SH}{s}")]));
     let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
     let step = |out: &mut dyn Write, line: &str| -> Result<()> {
-        let [what, check, install] = <[&str; 3]>::try_from(line.splitn(3, '|').collect::<Vec<_>>()).unwrap_or_default();
+        let [what, check, install] =
+            <[&str; 3]>::try_from(line.splitn(3, '\t').collect::<Vec<_>>()).unwrap_or_default();
         if pass(check) {
             return Ok(writeln!(out, "✓ {what} — there")?);
         }
@@ -287,16 +288,16 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         ensure!(pass(check), "{name}: {what} installed, `{check}` fails: {err}");
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
-    let mut steps = format!("herdr|herdr --version | grep -qx 'herdr {v}'|\n{TOOLS}");
+    let mut steps = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n{TOOLS}");
     for b in fleets.iter().flat_map(|f| &f.bootstrap) {
         let pkg = if b == "node" { "nodejs npm" } else { b };
-        if !steps.contains(&format!("\n{b}|")) {
-            steps += &format!("\n{b}|command -v {b}|apt_ {pkg}");
+        if !steps.contains(&format!("\n{b}\t")) {
+            steps += &format!("\n{b}\tcommand -v {b}\tapt_ {pkg}");
         }
     }
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
     let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
-    steps += &format!("\nherdsman|[ \"$('{exe}' --version)\" = 'herdsman {version}' ]|{build}");
+    steps += &format!("\nherdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
     steps.lines().try_for_each(|l| step(out, l))?;
     let mut panes = vec![];
     for (tool, setup) in [("claude", "claude"), ("gh", "gh-token")] {
@@ -309,13 +310,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         p.is_empty(),
         "{name}: log in in pane {p} there (herdr or the board), then bootstrap again"
     );
-    let git = "git over https|git config --global --get credential.https://github.com.helper|gh auth setup-git";
+    let git = "git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git";
     step(out, git)?;
     if !on.exists(Path::new(&conf)) {
         // Only the `[fleet.*]` tables, without their notifiers (a notify command may hold a token).
         let mut t: toml::Table = toml::from_str(&std::fs::read_to_string(&ctx.config)?)?;
         t.retain(|k, _| k == "fleet");
-        for (_, f) in t.iter_mut().flat_map(|f| f.1.as_table_mut()).flat_map(|f| f.iter_mut()) {
+        let tables = t.iter_mut().filter_map(|f| f.1.as_table_mut());
+        for (_, f) in tables.flat_map(|f| f.iter_mut()) {
             f.as_table_mut().map(|f| f.remove("notify"));
         }
         on.write(Path::new(&conf), &t.to_string())?;
@@ -323,12 +325,12 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     for f in &fleets {
         let (l, repo) = (crate::hosts::under(&f.local, Some(&home)), &f.repo);
         let line = format!(
-            "clone {repo}|test -d '{0}/.git'|git clone https://github.com/{repo}.git '{0}'",
+            "clone {repo}\ttest -d '{0}/.git'\tgit clone https://github.com/{repo}.git '{0}'",
             l.display()
         );
         step(out, &line)?;
     }
-    step(out, &format!("profiles sync|'{exe}' profiles sync >/dev/null|true"))?;
+    step(out, &format!("profiles sync\t'{exe}' profiles sync >/dev/null\ttrue"))?;
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::recheck(ctx, cfg, r, name);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)

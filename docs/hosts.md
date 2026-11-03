@@ -200,6 +200,37 @@ overflow_after_minutes = 10  # the default
   host (after the wip save). Only an owner edit to fleet.toml raises a limit.
 - **Destroy** is owner only: `herdsman host destroy <name>` does the wip save, then runs the recipe's `destroy`.
 
+## Bootstrap, snapshot and the GitHub token (#255)
+
+`herdsman hosts bootstrap <name>` (owner only; it starts a stopped cloud host first) sets up a fresh host over SSH.
+Each step checks first and is skipped when already done, then is read back after its install, so it is safe to run
+again. In order:
+
+1. **herdr** at this host's version (`herdr machine add <machine>` from here), then git, gh, Claude Code and Rust
+   (apt and the official install scripts), and whatever each fleet the host fits lists in `[fleet.<n>] bootstrap`
+   (`node`, or any apt package name).
+2. **herdsman** at this host's exact sha: `cargo install --git <herdsman repo> --rev <sha>` into the same root as
+   here (e.g. `~/.local`).
+3. **Logins**, once and by you: for each of Claude and gh that is logged out, bootstrap opens a herdr pane on the
+   host (visible in herdr and as a sign-in on the board) and stops. In the Claude pane run the login; in the gh pane
+   paste the host's fine-grained token and press Enter (read without echo, never on a command line or in a log). Then
+   run bootstrap again. herdsman never copies a token from this host.
+4. **git over HTTPS** with that token (`gh auth setup-git`): never your SSH key.
+5. **fleet.toml** there, when it has none: only the `[fleet.*]` tables, without their notifiers.
+6. A clone of each fleet's repo the host fits, then `herdsman profiles sync`. Logged `host-bootstrap`.
+
+**The token.** Make one fine-grained token per cloud host, limited to the fleets' repos, with contents and pull
+requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
+`gh api -i` there: the Host card shows `github: token · 2 repos · expires in 80d`, and from 14 days before the
+expiry the host turns amber (`! github — token expires in 12d`); past it, red.
+
+**Health on every start.** After a cloud host starts and its address is refreshed, herdsman runs the health checks
+above (and the token look) before placement uses it, so an unhealthy host never takes the lane.
+
+**Snapshot.** Once `herdsman doctor` is all ✓, `herdsman hosts snapshot <name>` runs a fresh health look and, with no
+✗, the recipe's `snapshot` command (logged `cloud-snapshot`). The recipe's `create_from` template makes a new
+sandbox from it that starts ready. Check both against docs.boat.dev.
+
 ## Limits
 
 Remote lanes run the Claude harness. The dsh harness writes its pre-push hook file on the main host only.

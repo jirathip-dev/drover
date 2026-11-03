@@ -62,9 +62,25 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
     .unwrap();
 }
 
-/// mini at load/cpu `mini`; cloud1 reachable, idle, and its recipe answering.
+/// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
+fn healthy(f: Fake) -> Fake {
+    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
+        .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
+        .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(
+            "herdr --machine cloud1 workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w5:p1"}}}"#,
+        )
+        .reply("herdr --machine cloud1 pane read w5:p1", "gh:0\nclaude:0\nhs:done\n")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            &format!("herdsman {}\n", herdsman::VERSION),
+        )
+}
+
+/// mini at load/cpu `mini`; cloud1 reachable, idle, healthy, and its recipe answering.
 fn fake(mini: f64) -> Fake {
-    Fake::default()
+    healthy(Fake::default())
         .reply("herdr agent list", NO_AGENTS)
         .reply("herdr --machine cloud1 agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
@@ -433,4 +449,179 @@ fn the_provider_key_never_reaches_argv_or_the_log() {
     );
     let log = std::fs::read_to_string(&c.state).unwrap();
     assert!(!log.contains(KEY) && log.contains("cloud-up"), "{log}");
+}
+
+/// The start of the ssh line a bootstrap step's shell `cmd` runs as on cloud1.
+fn step(cmd: &str) -> String {
+    let s = format!("{}{cmd}", herdsman::cloud::SH).replace('\'', "'\\''");
+    format!("{SSH}'sh' '-c' '{s}")
+}
+
+/// cloud1 running, reachable, herdr 0.9.5 here and there; every tool there but gh (installed once) and herdsman
+/// (built once); claude logged in and gh `gh_in` (logged in or not).
+fn boot_fake(gh_in: bool) -> Fake {
+    let ws = r#"{"result":{"root_pane":{"pane_id":"w7:p1"}}}"#;
+    let mine = format!(
+        "[ \"$('/opt/herdsman/bin/herdsman' --version)\" = 'herdsman {}' ]",
+        herdsman::VERSION
+    );
+    let f = Fake::default()
+        .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
+        .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
+        .reply(&step("herdr --version | grep -qx 'herdr 0.9.5'"), "")
+        .once(&step("command -v gh"), 1, "")
+        .once(&step(&mine), 1, "")
+        .reply(&step("command -v"), "")
+        .reply(&step("apt_ gh"), "")
+        .reply(
+            &step("cargo install --git https://github.com/jirathip-dev/herdsman --rev"),
+            "",
+        )
+        .reply(&step(&mine), "")
+        .reply(&step("claude auth status"), "")
+        .reply("herdr --machine cloud1 workspace create", ws)
+        .reply("herdr --machine cloud1 pane run w7:p1", "{}")
+        .reply(&step("git config --global --get credential"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+        .reply(&step("git clone"), "")
+        .reply(&step("'/opt/herdsman/bin/herdsman' profiles sync"), "");
+    if gh_in {
+        f.reply(&step("gh auth status"), "")
+    } else {
+        f
+    }
+}
+
+#[test]
+fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_pane() {
+    let (c, cfg) = running("cloud-boot");
+    let r = boot_fake(false);
+    let mut out = vec![];
+    let e = herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap_err();
+    assert!(format!("{e:#}").contains("log in in pane w7:p1"), "{e:#}");
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        out.contains("✓ git — there") && out.contains("✓ gh — installed"),
+        "{out}"
+    );
+    assert!(out.contains("✓ herdsman — installed"), "{out}");
+    let order = [
+        "herdr --version",
+        "command -v git",
+        "apt_ gh",
+        "command -v claude",
+        "command -v cargo",
+    ];
+    let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
+    assert!(!r.called(&step("apt_ git")) && !r.called("herdr machine add"));
+    let sha = env!("HERDSMAN_SHA");
+    let build = format!(
+        "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/herdsman'"
+    );
+    assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
+    // claude is logged in: only gh's pane, the token read there without echo, never on a command line.
+    let runs: Vec<_> = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.contains("pane run"))
+        .cloned()
+        .collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert!(
+        runs[0].contains("read -rs T; printf %s \"$T\" | gh auth login --with-token"),
+        "{runs:?}"
+    );
+    assert!(!r.called(&step("gh auth setup-git")) && !r.called(&step("git clone")));
+}
+
+#[test]
+fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_secrets() {
+    let (c, _) = running("cloud-boot2");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let extra = "\n[[fleet.sendmeter.notify]]\ncmd = \"curl https://api.telegram.org/botSEKRIT/send\"\n";
+    std::fs::write(&c.config, text + extra).unwrap();
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Stdin(
+        boot_fake(true)
+            .once(&step("git config --global --get credential"), 1, "")
+            .once(&step("test -d"), 1, "")
+            .reply(&step("test -d"), ""),
+        Shared::default(),
+    );
+    let r = Stdin(r.0.reply(&step("gh auth setup-git"), ""), r.1);
+    let mut out = vec![];
+    herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
+        "{out}"
+    );
+    let clone = "git clone https://github.com/jirathip-dev/sendmeter.git '/tmp/does-not-matter/sendmeter'";
+    assert!(r.0.called(&step(clone)), "{:?}", r.0.calls.borrow());
+    assert!(
+        !r.0.calls.borrow().iter().any(|c| c.contains("--with-token")),
+        "no login pane"
+    );
+    let written = r.1.borrow().join("\n");
+    assert!(
+        written.contains("[fleet.sendmeter") && written.contains("jirathip-dev/sendmeter"),
+        "{written}"
+    );
+    assert!(
+        !written.contains("SEKRIT") && !written.contains("accounts_env"),
+        "{written}"
+    );
+    let log = std::fs::read_to_string(&c.state).unwrap();
+    assert!(
+        log.contains("host-bootstrap") && !log.contains("SEKRIT") && !log.contains(KEY),
+        "{log}"
+    );
+    assert!(!r
+        .0
+        .calls
+        .borrow()
+        .iter()
+        .any(|c| c.contains(KEY) || c.contains("SEKRIT")));
+}
+
+#[test]
+fn the_token_expiry_parses_and_warns_from_14_days() {
+    let day = 86_400;
+    let now = 20_000 * day; // 2024-10-04
+    let head = |d: &str| {
+        format!("HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: {d}\n\n[{{\"full_name\":\"a/b\"}},{{\"full_name\":\"a/c\"}}]")
+    };
+    let (card, warn) = herdsman::cloud::token(&head("2024-12-23 10:00:00 UTC"), now);
+    assert_eq!(card, "github: token · 2 repos · expires in 80d");
+    assert_eq!(warn, None);
+    let (card, warn) = herdsman::cloud::token(&head("2024-10-18 00:00:00 +0000"), now);
+    assert!(card.ends_with("expires in 14d"), "{card}");
+    assert!(warn.unwrap().starts_with("! github — token expires in 14d"));
+    let (_, warn) = herdsman::cloud::token(&head("2024-03-01 00:00:00 UTC"), now);
+    assert!(warn.unwrap().starts_with("✗ github — token expires in -217d"));
+    assert_eq!(
+        herdsman::cloud::token("HTTP/2.0 200 OK\n\n[]", now).0,
+        "github: token · 0 repos · no expiry"
+    );
+    assert_eq!(herdsman::cloud::token("", now), ("github: unreadable".into(), None));
+}
+
+#[test]
+fn a_snapshot_needs_a_green_health_check_first() {
+    let (c, cfg) = running("cloud-snap");
+    let recipe = RECIPE.replace("[rate", "snapshot = \"fakecloud snapshot {name}\"\n[rate");
+    std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
+    let r = Fake::default().reply(&rc("snapshot"), "");
+    let e = herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap_err();
+    assert!(format!("{e:#}").contains("not healthy: ✗ herdr"), "{e:#}");
+    assert!(!r.called(&rc("snapshot")));
+    let r = healthy(Fake::default()).reply(&rc("snapshot"), "");
+    herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap();
+    assert!(r.called(&rc("snapshot")) && std::fs::read_to_string(&c.state).unwrap().contains("cloud-snapshot"));
+    assert!(
+        herdsman::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
+        "the look reads the token too"
+    );
 }
