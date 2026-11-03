@@ -618,12 +618,25 @@ pub fn set_value(text: &str, fleet: &str, role: &str, key: &str, val: &str) -> R
     )
 }
 
+/// #286: a header line as `set_in` compares it: whitespace and the `# comment` outside quotes dropped.
+fn bare(l: &str) -> String {
+    let (mut q, mut s) = (false, String::new());
+    for c in l.chars() {
+        q ^= c == '"';
+        if c == '#' && !q {
+            break;
+        }
+        if q || !c.is_whitespace() {
+            s.push(c);
+        }
+    }
+    s
+}
+
 /// Set `key = <lit>` (a TOML literal) in the table `header`, as `set_value` does.
 pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let start = lines
-        .iter()
-        .position(|l| l.split_whitespace().collect::<String>() == header);
+    let start = lines.iter().position(|l| bare(l) == header);
     let start = start.ok_or_else(|| anyhow!("no {header} table in fleet.toml; add it first"))?;
     let end = lines[start + 1..]
         .iter()

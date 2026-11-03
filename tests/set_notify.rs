@@ -57,6 +57,19 @@ fn set_inserts_missing_key_in_place() {
     );
 }
 
+#[test]
+fn set_finds_a_header_with_an_inline_comment_spaces_or_quotes() {
+    use herdsman::config::set_in;
+    for (head, find) in [
+        ("[hosts.mini]   # the main host: herdsman, board", "[hosts.mini]"),
+        ("[ hosts.mini ]", "[hosts.mini]"),
+        ("[hosts.\"a #b\"]  # quoted", "[hosts.\"a #b\"]"),
+    ] {
+        let t = set_in(&format!("{head}\nenabled = true\n"), find, "enabled", "false").unwrap();
+        assert_eq!(t, format!("{head}\nenabled = false\n"));
+    }
+}
+
 fn notify_cfg(cmd: &str, on: &str) -> String {
     format!("{CONFIG}\n[[notify]]\ncmd = {cmd:?}\non = [{on:?}]\n")
 }

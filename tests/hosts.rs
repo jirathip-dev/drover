@@ -413,8 +413,18 @@ fn cli_and_board_toggles_both_log() {
     let page = get();
     assert!(
         page.contains("<span class=\"hw m\">off · not used for lanes</span>")
-            && page.contains("name=to value=on><button>on</button>")
+            && page.contains(
+                "name=to value=on><button data-confirm=\"turn bazzite on? new lanes may start here\">on</button>"
+            )
     );
+    // #286: the main host has no [off]; the CLI refuses it.
+    let mini = &page[page.find("data-h=\"mini\"").unwrap()..page.find("data-h=\"bazzite\"").unwrap()];
+    assert!(!mini.contains("name=to value="), "{mini}");
+    let (code, out) = run(&c, &r, &["hosts", "off", "mini"]);
+    assert!(code == 3 && out.contains("REFUSED MAIN_HOST"), "{out}");
+    assert!(!std::fs::read_to_string(&c.config)
+        .unwrap()
+        .contains("[hosts.mini]\ntags = [\"fast\"]\nenabled"));
     let i = page.find("name=mtime value=").unwrap() + 17;
     let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=host&fleet=&host=bazzite&to=on&mtime={mt}");
