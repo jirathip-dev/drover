@@ -340,7 +340,9 @@ pub fn answer(
         ),
     )?;
     let why = via.map_or("answer", |_| "board");
-    ask.issue.inspect(|n| crate::drive::kick(ctx, r, fleet, *n, why)); // #304: after the decision is logged
+    if let Some(n) = ask.issue {
+        let _ = crate::drive::kick(ctx, r, fleet, n, why); // #304: after the decision is logged
+    }
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());

@@ -2154,6 +2154,12 @@ impl<'a> Server<'a> {
             );
             m += &kv("leftovers", "a", &val);
         }
+        // #333: spawns starting against `max_parallel_spawns`, and the stale markers swept in the last day.
+        if let Some(c) = cfg {
+            let line = crate::drive::spawns_line(ctx, c, r, events);
+            let (k, v) = line.split_once(' ').unwrap_or_default();
+            m += &kv(k, ["g", "a"][usize::from(line.contains(" · stale"))], &esc(v));
+        }
         // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &&crate::timer::Row| ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {

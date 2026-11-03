@@ -185,3 +185,134 @@ fn a_hook_kick_never_clears_a_launched_kicks_marker() {
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 0);
 }
+
+/// #333: a marker for `n` holding `pid`, last written `age` secs ago.
+fn mark(c: &herdsman::Ctx, n: u64, pid: u32, age: u64) {
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": n, "type": "spawn", "role": "impl", "pid": pid});
+    std::fs::write(marker(c, n), e.to_string()).unwrap();
+    let f = std::fs::File::options().append(true).open(marker(c, n)).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(age))
+        .unwrap();
+}
+
+fn stale(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
+    read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "stale-marker")
+        .collect()
+}
+
+#[test]
+fn a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies() {
+    let c = fleet("kicks-pid", 6, 1);
+    pass(&c, &fake("1.0").reply("sh -c nohup", "4242\n"));
+    let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(marker(&c, 1)).unwrap()).unwrap();
+    assert_eq!(m["pid"], 4242, "{m}");
+    // The kick runs: the issue is held back, no second launch.
+    let r = fake("1.0")
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:30\n");
+    pass(&c, &r);
+    assert_eq!(launched(&r, 1), 0);
+    assert!(stale(&c).is_empty());
+    // Its pid is gone: the marker is removed, logged, not counted; the next pass launches #1 again.
+    let r = fake("1.0");
+    pass(&c, &r);
+    assert_eq!(launched(&r, 1), 1);
+    let s = stale(&c);
+    assert_eq!(
+        (s.len(), s[0].issue, &s[0].data["pid"]),
+        (1, Some(1), &serde_json::json!(4242)),
+        "{s:?}"
+    );
+    assert_eq!(s[0].str("file"), Some("spawn-sendmeter-1.pending"));
+}
+
+#[test]
+fn an_old_or_reused_pid_marker_is_stale() {
+    // Live pid, but older than spawn_pending_max_secs (300).
+    let c = fleet("kicks-old", 6, 1);
+    mark(&c, 1, 4242, 400);
+    let r = fake("1.0").reply("kill -0 4242", "");
+    pass(&c, &r);
+    assert_eq!((launched(&r, 1), stale(&c).len()), (1, 1));
+    // Live pid that started after the marker was written: a reused pid.
+    let c = fleet("kicks-reused", 6, 1);
+    mark(&c, 1, 4242, 100);
+    let r = fake("1.0")
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "00:30\n");
+    pass(&c, &r);
+    assert_eq!((launched(&r, 1), stale(&c).len()), (1, 1));
+}
+
+#[test]
+fn six_dead_markers_never_hold_a_new_spawn() {
+    let c = fleet("kicks-six-dead", 6, 1);
+    (11..=16).for_each(|n| mark(&c, n, 4242, 10));
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 1), d["spawns_launched"].as_u64()), (1, Some(1)), "{d}");
+    assert_eq!(stale(&c).len(), 6);
+    assert!((11..=16).all(|n| !marker(&c, n).exists()));
+}
+
+/// A runner whose harness start panics.
+struct Panics(Fake);
+impl herdsman::runner::Runner for Panics {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        assert!(
+            !(prog == "herdr" && args.starts_with(&["agent".into(), "start".into()])),
+            "boom"
+        );
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_panicking_kick_leaves_no_marker_or_lock() {
+    let c = fleet("kicks-panic", 6, 1);
+    pass(&c, &fake("1.0"));
+    assert!(marker(&c, 1).exists());
+    let p = Panics(fake("1.0"));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(&c, &p, &["kick", "sendmeter", "1", "--why", "drive", "--now"])
+    }));
+    assert!(res.is_err(), "the kick panicked");
+    let lock = c.state.with_file_name("kick-sendmeter-1.lock");
+    assert!(!marker(&c, 1).exists() && !lock.exists());
+}
+
+#[test]
+fn spawn_pending_for_15_minutes_alerts_once() {
+    let c = fleet("kicks-held", 6, 1);
+    let held = |ts| {
+        let a = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
+        let e = herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
+        herdsman::events::append(&c.state, &e).unwrap();
+    };
+    held(c.now - 600);
+    let alerts = || {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "spawn-held")
+            .count()
+    };
+    assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
+    assert_eq!(alerts(), 0, "held 10 min");
+    // Still held in every pass 7 min later: 17 min in all.
+    let later = herdsman::Ctx {
+        now: c.now + 420,
+        ..c.clone()
+    };
+    held(c.now + 360);
+    let (code, out) = run(&later, &Fake::default(), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("#3 held back by SPAWN_PENDING for 17m"), "{out}");
+    run(&later, &Fake::default(), &["check"]);
+    assert_eq!(alerts(), 1, "once per episode");
+}
