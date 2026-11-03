@@ -20,6 +20,13 @@ pub struct Waiting {
 }
 
 impl Waiting {
+    /// The same row for another lane of the issue.
+    fn on(&self, lane: &str) -> Waiting {
+        Waiting {
+            lane: lane.into(),
+            ..self.clone()
+        }
+    }
     /// `idle · <what> (<age>)`
     pub fn label(&self, now: u64) -> String {
         format!("idle · {} ({})", self.what, age(now.saturating_sub(self.since)))
@@ -320,15 +327,7 @@ pub fn scan(
                 since: s.last_ts,
                 next_cmd: None,
             };
-            out.extend(s.lanes.values().filter(|l| !busy(l)).map(|l| {
-                (
-                    s.clone(),
-                    Waiting {
-                        lane: l.clone(),
-                        ..w.clone()
-                    },
-                )
-            }));
+            out.extend(s.lanes.values().filter(|l| !busy(l)).map(|l| (s.clone(), w.on(l))));
             continue;
         }
         let pr = match (s.state.as_str(), live) {
@@ -356,19 +355,23 @@ pub fn scan(
         };
         // #157: on another host the rev spawn removed any older verdict.md, so one there is this round's.
         let there = crate::hosts::On::of(r, spawn);
-        let word = path
-            .as_ref()
-            .and_then(|p| match there.machine {
-                Some(_) => there.read(std::path::Path::new(p)),
-                None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
-            })
+        let text = path.as_ref().and_then(|p| match there.machine {
+            Some(_) => there.read(std::path::Path::new(p)),
+            None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
+        });
+        let word = text
+            .as_deref()
             .map(|v| v.lines().next().unwrap_or_default().trim().to_string())
             // #228: a form-only FAIL is recorded as `FAIL`; `verdict` reads the tag from the file.
             .map(|v| if v == "FAIL (form-only)" { "FAIL".into() } else { v });
-        // In review, `head` is the one the rev lane was spawned at (logged since #92; else its worktree's).
+        let named = text
+            .as_deref()
+            .and_then(|t| t.lines().find(|l| l.contains("Reviewed head")))
+            .and_then(|l| l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40));
+        // In review, `head` is the sha verdict.md names (#293), or the rev spawn head (#92; else its worktree's).
         let at = spawn
             .filter(|_| s.check_lane() == Some(&lane))
-            .and_then(|e| Some((e.str("sha")?, e.ts)));
+            .and_then(|e| Some((named.or(e.str("sha"))?, e.ts)));
         // #207: a PR head that merges the reviewed one with integration and adds nothing carries its verdict, as a
         // logged auto-update does: read as one, the verdict is recorded at the reviewed sha.
         let pushed = pr["headRefOid"].as_str().unwrap_or_default();
@@ -435,15 +438,12 @@ pub fn scan(
                 .map_or(String::new(), |p| format!(" (resume to review PR #{p})"));
             (w.who, w.what, w.next_cmd) = ("none", format!("parked: fleet paused{pr}"), None);
         }
-        out.extend(s.lanes.values().filter(|l| **l != lane && !busy(l)).map(|l| {
-            (
-                s.clone(),
-                Waiting {
-                    lane: l.clone(),
-                    ..w.clone()
-                },
-            )
-        }));
+        out.extend(
+            s.lanes
+                .values()
+                .filter(|l| **l != lane && !busy(l))
+                .map(|l| (s.clone(), w.on(l))),
+        );
         out.push((s, w));
     }
     out

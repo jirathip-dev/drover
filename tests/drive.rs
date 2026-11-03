@@ -668,7 +668,11 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         &herdsman::serve::Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
         &c,
         "",
-        c.now,
+        // #288: a pairing lasts a year after last use; `serve_on` reads the real clock.
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
     );
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();

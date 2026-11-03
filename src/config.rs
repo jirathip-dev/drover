@@ -623,14 +623,15 @@ pub fn set_value(text: &str, fleet: &str, role: &str, key: &str, val: &str) -> R
 /// Set `key = <lit>` (a TOML literal) in the table `header`, as `set_value` does.
 pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let start = lines
-        .iter()
-        .position(|l| l.split_whitespace().collect::<String>() == header);
+    let start = lines.iter().position(|l| {
+        let (mut q, n) = (false, l.len());
+        let n = l.find(|c| (q ^= c == '"', c == '#' && !q).1).unwrap_or(n);
+        l[..n].split_whitespace().collect::<String>() == header
+    });
     let start = start.ok_or_else(|| anyhow!("no {header} table in fleet.toml; add it first"))?;
-    let end = lines[start + 1..]
-        .iter()
-        .position(|l| l.trim_start().starts_with('['))
-        .map_or(lines.len(), |i| start + 1 + i);
+    let end = (start + 1..lines.len())
+        .find(|&i| lines[i].trim_start().starts_with('['))
+        .unwrap_or(lines.len());
     let mut out: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     let hit = (start + 1..end).find(|&i| {
         let t = lines[i].trim_start();
@@ -651,9 +652,7 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
                     .unwrap_or(l.len() - v),
             )
         };
-        let Some(end) = end else {
-            bail!("{header} {key}: value must be a \"string\"");
-        };
+        let end = end.ok_or_else(|| anyhow!("{header} {key}: value must be a \"string\""))?;
         out[i] = format!("{}{lit}{}", &l[..v], &l[end..]);
     } else {
         let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
@@ -668,6 +667,5 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
 pub fn write_atomic(path: &Path, text: &str) -> Result<()> {
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    Ok(std::fs::rename(&tmp, path)?)
 }
