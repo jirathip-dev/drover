@@ -399,8 +399,10 @@
   const label = e => (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24) || e.tagName.toLowerCase();
   function check() {
     let res;
-    // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them; ui-audit.sh checks their pixels are crisp.
-    const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= innerHeight).map(r => [r.left, r.top, r.width, r.height]);
+    // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them, above the fixed tab bar (one under it
+    // would take in the bar's text); ui-audit.sh checks their pixels are crisp.
+    const nav = $('nav').getBoundingClientRect().top;
+    const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
     if (innerWidth !== 390) res.outliers.push(`viewport ${innerWidth} px wide, not 390`); // #68: new-headless Chrome keeps windows ≥ 500 px
     // #114 app-like: no pinch or double-tap zoom.
