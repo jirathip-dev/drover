@@ -1652,6 +1652,11 @@ impl<'a> Server<'a> {
                 if let Some(b) = blocked_by {
                     card.push(format!("<span class=r>blocked by #{b}</span>"));
                 }
+                // #325: an answer that never reached the lane stays red until drive types it in.
+                for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
+                    let (id, why) = (esc(u.str("id").unwrap_or("?")), esc(u.str("reason").unwrap_or("?")));
+                    card.push(format!("<span class=r>answer {id} not delivered: {why}</span>"));
+                }
                 // #99: a decision taken by default, with [change]: a new decision on the same ask.
                 let last = events.iter().rev().find(|e| e.is("decision", f, n));
                 if let Some(d) = last.filter(|d| d.str("by") == Some("default")) {
