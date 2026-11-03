@@ -123,6 +123,11 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     let mut l = out.lines().map(str::trim);
     let (dest, port) = l.next().and_then(|a| a.split_once(' ')).with_context(bad)?;
     let ((user, host), key) = (dest.split_once('@').with_context(bad)?, l.next().with_context(bad)?);
+    // The reply goes into ssh config verbatim: a numeric port and no whitespace, so it can't add a directive.
+    ensure!(
+        port.parse::<u16>().is_ok() && !dest.contains(char::is_whitespace),
+        bad()
+    );
     let dir = ctx.home.join(".ssh/config.d");
     let at = [format!("[{host}]:{port}"), host.into()];
     let known = dir.join(format!("herdsman-{name}.known"));
@@ -135,7 +140,9 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     let p = dir.join("herdsman");
     let old = std::fs::read_to_string(&p).unwrap_or_default();
     let (keep, tail) = old.split_once(&a).unwrap_or((&old, ""));
-    let rest = keep.to_string() + tail.split_once(&b).map_or("", |x| x.1);
+    // A block whose end marker is lost ends at the next block, never swallowing it.
+    let next = || tail.find("# herdsman ").map_or("", |i| &tail[i..]);
+    let rest = keep.to_string() + tail.split_once(&b).map_or_else(next, |x| x.1);
     write_atomic(&p, &(rest + &s))?;
     log(ctx, cfg, "cloud-up", name, json!({"address": format!("{dest} {port}")}))
 }

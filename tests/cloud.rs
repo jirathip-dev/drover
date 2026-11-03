@@ -351,6 +351,31 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
     assert_eq!(known, "10.0.0.9 ssh-ed25519 BBBB\n");
 }
 
+#[test]
+fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
+    let c = setup("cloud-include-bad");
+    let cfg = Config::load(&c.config).unwrap();
+    let dir = c.home.join(".ssh/config.d");
+    std::fs::create_dir_all(&dir).unwrap();
+    let other = "# herdsman other\nHost other\n# end other\n";
+    std::fs::write(dir.join("herdsman"), format!("# herdsman cloud1\nHost cloud1\n{other}")).unwrap();
+    herdsman::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    let now = std::fs::read_to_string(dir.join("herdsman")).unwrap();
+    assert!(
+        now.starts_with(other) && now.matches("Host cloud1").count() == 1,
+        "{now}"
+    );
+    // A reply that would add an ssh directive (`Port 22 ProxyCommand …`) is refused; the file is untouched.
+    let r = fake(0.1).once(
+        &rc("address"),
+        0,
+        "ubuntu@10.0.0.9 22 ProxyCommand sh\nssh-ed25519 BBBB\n",
+    );
+    let e = herdsman::cloud::start(&c, &cfg, &r, "cloud1").unwrap_err();
+    assert!(format!("{e:#}").contains("not `user@host port`"), "{e:#}");
+    assert_eq!(std::fs::read_to_string(dir.join("herdsman")).unwrap(), now);
+}
+
 /// Records each call's stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
 
