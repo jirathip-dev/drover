@@ -330,6 +330,8 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
     let ev = read(&c.state).unwrap();
     let p: Vec<_> = ev.iter().filter(|e| e.kind == "conflict-predicted").collect();
     assert_eq!((p.len(), p[0].issue, &p[0].data["other"]), (1, Some(2), &json!(1)));
+    let card = "may conflict with #1; keep going, herdsman updates you after it merges";
+    assert_eq!(p[0].str("reason"), Some(card), "#320");
     // Same heads: cached, no merge-tree run and no second event.
     let trees = r.0.count("git -C");
     let r2 = Mixed(Fake::default());
@@ -387,8 +389,8 @@ fn heads_up_reaches_a_working_lane_once() {
         herdsman::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
     }
     let want =
-        "herdr agent prompt sendmeter-impl-1 HEADS-UP: your branch will conflict with #2 on a.txt (ready to merge). \
-                Merge origin/staging after #2 lands.";
+        "herdr agent prompt sendmeter-impl-1 HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
+                with #2; keep going, herdsman updates you after it merges.";
     assert_eq!(r.0.count(want), 1, "{:?}", r.0.calls.borrow());
     assert_eq!(
         r.0.count("herdr agent prompt sendmeter-impl-2"),

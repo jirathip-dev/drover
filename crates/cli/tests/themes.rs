@@ -362,6 +362,27 @@ fn terminal_has_no_sprites() {
     assert!(page.contains("h.dataset.theme=m||\"terminal\";"));
 }
 
+/// #305: the busy `[↻]` is a theme's own `loading` sprite: farm's trotting horse and the kitchen's cooking chef, each in
+/// its sprites.svg; terminal and a theme without the key keep the spinning ↻ (never farm's horse).
+#[test]
+fn loading_is_the_themes_own_or_the_spinning_glyph() {
+    let (c, r) = server(None, &[("plain", "theme.json", "{}")]);
+    for (t, id, sheet) in [
+        ("farm", "horse-working", FARM_SPRITES),
+        ("kitchen", "chef-cook", KITCHEN_SPRITES),
+    ] {
+        assert_eq!(json(&c, &r, &format!("/themes/{t}/theme.json"))["loading"], id, "{t}");
+        assert!(sheet.contains(&format!("id=\"{id}\"")), "{t}: {id}");
+    }
+    for t in ["terminal", "plain"] {
+        assert_eq!(
+            json(&c, &r, &format!("/themes/{t}/theme.json"))["loading"],
+            Value::Null,
+            "{t}"
+        );
+    }
+}
+
 #[test]
 fn the_theme_icon_route_and_its_fallback() {
     let (c, r) = server(None, &[("space", "theme.json", "{}"), ("space", "icon-192.png", "own")]);

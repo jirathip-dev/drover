@@ -39,6 +39,11 @@ fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
         .collect()
 }
 
+/// #320: a predicted conflict is information, not a hold.
+fn keep_going(o: u64) -> String {
+    format!("may conflict with #{o}; keep going, herdsman updates you after it merges")
+}
+
 /// Every pair of pushed, unmerged branches and each against integration, cached by head pair; logs one
 /// `conflict-predicted` per new pair and prompts an impl/fix lane once per head about a ready PR or integration.
 pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[Event]) -> Result<Conflicts> {
@@ -66,7 +71,7 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
                 ev(
                     *b,
                     "conflict-predicted",
-                    json!({"other": a, "files": files, "heads": key}),
+                    json!({"other": a, "files": files, "heads": key, "reason": (*a > 0).then(|| keep_going(*a))}),
                 )?;
             }
             for (x, y) in [(b, a), (a, b)]
@@ -96,7 +101,10 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
         let text = if *o == 0 {
             format!("HEADS-UP: your branch conflicts with {into} on {files}. Merge {into} now.")
         } else {
-            format!("HEADS-UP: your branch will conflict with #{o} on {files} (ready to merge). Merge {into} after #{o} lands.")
+            format!(
+                "HEADS-UP: #{o} is ready to merge and touches {files}: your branch {}.",
+                keep_going(*o)
+            )
         };
         let sp = crate::events::last_spawn(events, lane);
         let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();

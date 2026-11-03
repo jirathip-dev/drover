@@ -214,7 +214,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 r.once("git -C ", 128, "")
             },
             "local demo",
-            "|| gh repo clone o/demo",
+            "|| git clone https://github.com/o/demo.git",
         ),
         (
             |c, _, r| {

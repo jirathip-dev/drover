@@ -353,6 +353,36 @@
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
       if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
     },
+    // #305 gate 2: [↻] busy in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still` with reduced motion
+    // forced): the header and the control keep their boxes (28 px, the 44 px tap is measure()'s); farm and kitchen run their
+    // `loading` sprite 24 px over the hidden glyph, terminal spins ↻; reduced motion: one still frame. A strip under the
+    // header holds its first four frames (8 fps: 0, 125, 250, 375 ms) for the shot.
+    loading: () => {
+      tab('queue');
+      const box = () => [rf, rf.firstChild, $('header')].map(e => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); }).join(' ');
+      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches, svg = rf.querySelector('svg');
+      if (rf.matches('.spin') || seen(svg)) early.push('[↻] busy before the refresh');
+      busy = true;
+      sync('a');
+      if (box() !== idle) early.push(`[↻] busy moved: ${idle} → ${box()}`);
+      if (V === 'loading-still' && !still) early.push('reduced motion not forced');
+      const t = document.documentElement.dataset.theme, cs = getComputedStyle(svg), spin = getComputedStyle(rf.firstChild);
+      if (t === 'terminal') {
+        if (rf.matches('.ld') || seen(svg) || !seen(rf.firstChild) || spin.animationName !== (still ? 'none' : 's')) early.push(`terminal: not the spinning ↻ (sprite ${seen(svg)}, ↻ ${spin.animationName})`);
+        return;
+      }
+      const r = svg.getBoundingClientRect();
+      if (!rf.matches('.ld') || !$('#hload') || !seen(svg) || seen(rf.firstChild)) early.push(`${t}: no loading sprite in [↻] (#hload ${!!$('#hload')})`);
+      if (Math.round(r.width) !== 24 || Math.round(r.height) !== 24) early.push(`${t}: loading sprite ${r.width}×${r.height}, not 24×24`);
+      if (cs.animationName !== (still ? 'none' : 'ldg, ldk')) early.push(`${t}: loading animation ${cs.animationName}`);
+      const strip = B.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);display:flex;gap:var(--s2);padding:var(--s1);background:var(--card);pointer-events:none' }));
+      [0, 1, 2, 3].forEach(i => {
+        const c = strip.appendChild(svg.cloneNode(true));
+        c.style.cssText += ';position:static;visibility:visible;animation:' + cs.animation;
+        c.getAnimations().forEach(a => { a.pause(); a.currentTime = i * 125; });
+      });
+    },
+    'loading-still': () => VIEWS.loading(),
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.

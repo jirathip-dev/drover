@@ -78,6 +78,12 @@ nav a.on .n{color:inherit}
 @keyframes p{50%{transform:scale(1.9)}}
 #rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)}#scp{margin-left:var(--s4)} /* #244: [▦]'s select reaches 8 px left; the gap keeps it off [◐]'s */ /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
+/* #305: a theme's `loading` sprite runs in [↻]'s place while busy, 24 px over the glyph (hidden, so the box never moves):
+   8 fps through steps(), the trot by --gait, the kf1/kf2 frames (with the flame) by --o1/--o2; reduced motion: one still frame. */
+.lds{width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2));image-rendering:pixelated;shape-rendering:crispEdges}
+#rf{position:relative}#rf .lds{position:absolute;inset:0;margin:auto;visibility:hidden}#rf.ld.spin i{visibility:hidden}#rf.ld.spin .lds{visibility:visible;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+@keyframes ldg{0%{--gait:-16deg}50%{--gait:16deg}100%{--gait:-16deg}}
+@keyframes ldk{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
 #ptr{position:fixed;top:calc(var(--hit) + var(--s3));left:calc(50% - var(--s2));z-index:1}
@@ -92,7 +98,7 @@ html[data-tab=queue] :is(#thp,#scp),html:not([data-tab=queue]) :is(#queue,header
 .ask .reason{margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ask .command{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}.ask .command.open{display:block}
 .ask .title,.ask .cd{margin:0;font-size:var(--fs-meta)}.ask .cd{color:var(--r)}.ask :is(.title,.reason,.command):empty{display:none}
-@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
+@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#rf.ld.spin .lds,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
 .av{display:flex;align-items:center;justify-content:center;width:48px;height:40px;overflow:hidden}
 .av>*{display:none}
 /* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
