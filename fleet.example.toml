@@ -52,6 +52,7 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # serial_max = 2   # serial issues in flight at once; default 1 (board/status: `serial n/max`)
 # serial_label = "schema"   # the Queue graph's lock mark for serial issues (🔒schema), ≤ 8 characters; default "serial"
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
+# premerge = ["herdsman cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
 # merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves
 # line_cap = 10000   # `herdsman cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
@@ -89,6 +90,7 @@ B = "CLAUDE_CODE_OAUTH_TOKEN_B"
 C = "CLAUDE_CODE_OAUTH_TOKEN_C"
 # cap_reset_minutes = 300
 # cap_pattern = "usage limit reached|hit your limit"   # `|`-separated, case-insensitive
+# pick = "headroom"   # spawns take the uncapped account with the most 5h/7d headroom; default "order"
 
 # The usage meter: each account's own `claude` login folder (docs/providers.md); never given to lanes.
 # [accounts.usage]
@@ -109,6 +111,8 @@ update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart f
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
+done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
+transcript_days = 30      # Claude lanes' cleanupPeriodDays; lanes share ~/.claude, so below 30 (Claude's default) also prunes your own transcripts
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /

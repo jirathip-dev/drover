@@ -1,5 +1,4 @@
-:root{--bg:#0d1117;--fg:#c9d1d9;--mute:#8b949e;--line:#21262d;--g:#3fb950;--a:#d29922;--r:#f85149;--l:#58a6ff;--p:#bc8cff;--c:#39c5cf;color-scheme:dark;
-  --fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
+:root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 /* #114 app-like: no pinch/double-tap zoom, no text-size jump on rotate, no rubber band (inner scrollers contain).
@@ -11,7 +10,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs)/1.5 ui-monospa
 p,li,h2,h3,summary,.kv,.m,.act,.why,.tl,.card *,.msg,.st,code{min-width:0;overflow-wrap:anywhere}
 header{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:var(--s2);min-height:calc(var(--hit) + var(--s1));background:var(--bg);border-bottom:1px solid var(--line)}
 header b{flex:1}
-a{color:var(--l)}
+a{color:var(--link)}
 .m{color:var(--mute)}.g{color:var(--g)}.a{color:var(--a)}.r{color:var(--r)}
 h2{font-size:var(--fs);margin:var(--s4) 0 var(--s1);display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4)}
 h2>span:first-child{flex:1}
@@ -77,7 +76,7 @@ nav a.on .n{color:inherit}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on{margin-left:var(--s2)}header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
+#rf,#herd-on{width:40px}#herd-on,#thp{margin-left:var(--s2)}#scp{margin-left:var(--s4)} /* #244: [▦]'s select reaches 8 px left; the gap keeps it off [◐]'s */ /* #241: [◐] takes [?]'s room off the Queue tab, so no header grows */header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
@@ -85,7 +84,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html[data-tab=queue] :is(#thp,#scp),html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -96,9 +95,19 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 @media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
 .av{display:flex;align-items:center;justify-content:center;width:48px;height:40px;overflow:hidden}
 .av>*{display:none}
-/* Horse mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
-[data-mode=glyph] .av .gl,[data-mode=horse]:not(.hz) .av .gl,[data-mode=horse].hz .av .px{display:block}
+/* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
+[data-mode=glyph] .av .gl,[data-mode=scene]:not(.hz) .av .gl,[data-mode=scene].hz .av .px{display:block}
 [data-mode=ascii] .av .asc{display:grid}
+.asc.w b{animation:none}
+/* #241 terminal (docs/themes.md): today's glyph board from the first paint, before herd.js loads it: glyph avatars, no mode button. */
+[data-theme=terminal] .av>*{display:none!important}[data-theme=terminal] .av .gl{display:block!important}[data-theme=terminal] .lh{display:none}
+/* #241: a row's 16 px action sprite in its glyph's place, a Host group's load scene, a moment (silent; reduced motion: still). */
+.rsp,.lsc{display:inline-block;flex:none;width:var(--s4);height:var(--s4);vertical-align:middle}
+.gt .rsp{width:2ch}details.q:has(>summary .gt>.rsg){--gw:calc((2 * var(--d, 0) + 2) * 1ch)}
+#mo{position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);width:calc(3 * var(--s4));height:calc(2 * var(--s4) + var(--s1));pointer-events:none;animation:.8s ease-in-out 3 hop}
+#mo svg{width:100%;height:100%}#mo.mo-shake{animation-name:shake}#mo.mo-pulse{animation-name:pulse}
+@keyframes hop{50%{translate:0 calc(-1 * var(--s2))}}@keyframes shake{25%{translate:calc(-1 * var(--s1)) 0}75%{translate:var(--s1) 0}}@keyframes pulse{50%{scale:1.2}}
+@media (prefers-reduced-motion:reduce){#mo{animation:none}}
 .gl{font-style:normal;font-size:20px}
 .px{width:48px;height:36px}
 .av .asc{font:10px/1 ui-monospace,Menlo,monospace;white-space:pre;font-style:normal}
@@ -117,24 +126,24 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 #sheet{position:fixed;inset:0;z-index:3;visibility:hidden;pointer-events:none;overscroll-behavior:contain}
 #sheet.on{visibility:visible;pointer-events:auto}
 #sheet.on>.sh{will-change:transform}#sheet.on>.bd{will-change:opacity}
-.bd{position:absolute;inset:0;background:#000a;touch-action:none;overscroll-behavior:contain;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
+.bd{position:absolute;inset:0;background:var(--scrim);touch-action:none;overscroll-behavior:contain;transition:opacity .28s cubic-bezier(.2,.8,.2,1)}
 /* #70: a full-height box placed by translateY (serve.js: half 50 %, mid 78 %, full); it follows the finger
    (.drag), snaps (.28 s) and slides off to close (.shut, #166: .2 s ease-out; #200: not .out, the chat blocks' grey box); the backdrop fades with it. */
-.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid #30363d;border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.sh{position:absolute;left:0;right:0;top:env(safe-area-inset-top);bottom:0;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid var(--edge);border-radius:14px 14px 0 0;padding:0 var(--s3) env(safe-area-inset-bottom);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
 .sh.full{border-radius:0}
 #sheet.drag>*{transition:none}
 #sheet.shut>*{transition-duration:.2s;transition-timing-function:ease-out}
 @media (prefers-reduced-motion:reduce){#sheet>*{transition:none!important}}
 /* The handle: the pill plus the title row, at least 56 px; it alone drags (the chat hands off at its top). */
 .hd{flex:none;min-height:calc(var(--hit) + var(--s3));padding-bottom:var(--s2);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
-.hd::before{content:"";display:block;width:40px;height:var(--s1);margin:var(--s2) auto;border-radius:3px;background:#30363d}
+.hd::before{content:"";display:block;width:40px;height:var(--s1);margin:var(--s2) auto;border-radius:3px;background:var(--edge)}
 .hd p{margin:0}
 /* #63 q8: the card takes at most 40 % of the sheet and scrolls inside; it never drags. */
 .top{flex:none;max-height:40%;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;border-bottom:1px solid var(--line);padding-bottom:var(--s2)}
 .top p{margin:var(--s1) 0}
 .chat{flex:1;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
 .reply,.pairf{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0;flex:none}
-.reply textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:#161b22;border:1px solid #30363d;border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
+.reply textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
 /* #59: the pairing panel in the flow under the header (or the sheet's Pair button): the code large, how to approve it under it. */
 .pairp{flex:none;margin:var(--s2) 0;padding:var(--s3);border:1px solid var(--a);border-radius:8px;cursor:pointer;scroll-margin-top:calc(var(--hit) + var(--s3))}
 .pairp.g{border-color:var(--g);color:var(--g)}.pairp.r{border-color:var(--r)}.pairp p{margin:0}
@@ -158,12 +167,12 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .acts,.cf{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .acts [data-op=kill],.cf .yes{color:var(--r)}
 .cf{border:1px solid var(--r);border-radius:8px;padding:var(--s2)}.cf p{flex-basis:100%;margin:0;font-size:var(--fs-meta)}
-.cmds{flex:none;list-style:none;margin:0;padding:0;border:1px solid #30363d;border-radius:6px}
+.cmds{flex:none;list-style:none;margin:0;padding:0;border:1px solid var(--edge);border-radius:6px}
 .cmds li{padding:var(--s3);min-height:var(--hit);border-bottom:1px solid var(--line);cursor:pointer}
 .chat>.now{display:flex;flex-direction:column;gap:var(--s2)}
 /* #138 (docs/design/chat-blocks): a block per role run, a rounded surface with a 2 px left edge in the role colour --k
    (you blue, assistant purple, tool run amber); status is a quiet line recessed toward the base colour. */
-.blk{--k:var(--mute);margin:0;border:0;border-left:2px solid var(--k);border-radius:6px;background:#161b22;padding:0 var(--s2) var(--s2)}
+.blk{--k:var(--mute);margin:0;border:0;border-left:2px solid var(--k);border-radius:6px;background:var(--card);padding:0 var(--s2) var(--s2)}
 .blk.me{--k:var(--l)}.blk.ai{--k:var(--p)}.blk.run{--k:var(--a)}
 /* The header is the whole width: 28 px visible plus an 8 px ring above and below, a 44 px tap (#58); a collapsed block keeps its 8 px
    bottom padding, so with the 8 px gap two headers' rings tile instead of overlapping (#147). The role in its
@@ -198,12 +207,16 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .bg-r{background:color-mix(in srgb,var(--r) 15%,transparent)}.bg-g{background:color-mix(in srgb,var(--g) 15%,transparent)}
 .bg-r2{background:color-mix(in srgb,var(--r) 35%,transparent)}.bg-g2{background:color-mix(in srgb,var(--g) 35%,transparent)}
 /* Status (`Ran 2 shell commands`, `✻ Cogitated for 37s`): one quiet 11 px line, no header; dashed: a gap in the transcript. */
-.qs{margin:0;padding:var(--s1) var(--s2);border-left:2px solid color-mix(in srgb,var(--mute) 40%,var(--bg));border-radius:6px;background:color-mix(in srgb,#161b22 40%,var(--bg));color:var(--mute);font-size:var(--fs-meta)}
+.qs{margin:0;padding:var(--s1) var(--s2);border-left:2px solid color-mix(in srgb,var(--mute) 40%,var(--bg));border-radius:6px;background:color-mix(in srgb,var(--card) 40%,var(--bg));color:var(--mute);font-size:var(--fs-meta)}
 .qs.gap{border-left-style:dashed;text-align:center}
 /* #105's live status line: the spinner, under the chat and above the composer, one line. */
 .live{flex:none;margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .live b{font-weight:400;color:var(--a)}
 .more{align-self:center}
+.fvr{position:relative;z-index:1;flex:none;display:flex;justify-content:flex-end;margin:0;padding-top:var(--s1)}
+.fv[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
+.qs.note{border-left-color:var(--a)}
+.act.doing,.qnow{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.qnow{font-size:var(--fs-meta);padding-left:2ch}
 .unp{margin:auto;padding:var(--s3);text-align:center;border:1px solid var(--a);border-radius:8px;color:var(--a)}
 #dot.demo{color:var(--l)}
 [inert]{opacity:.6}
@@ -219,7 +232,7 @@ details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-c
 details.q .tl{grid-column:2/-1}
 details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
-.cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid #30363d;border-radius:6px;background:#161b22}
+.cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
 .gt,.gt i{font-style:normal;white-space:pre;color:var(--mute)}
 .gt b{font-weight:400}
@@ -227,7 +240,7 @@ details.q[open]{padding-bottom:var(--s2)}
 .gt .e::before{bottom:auto;height:var(--y)}
 .gt .k::before{top:calc(var(--y) + var(--fs) * .4)}
 /* #115 amendment A: the [?] legend (#162: in the header, Queue tab only); it opens in the lane sheet with the lane parts hidden. */
-.sh.lg :is(.acts,.cf,.chat,.live,.pairf,.cmds,.reply,.st){display:none}
+.sh.lg :is(.acts,.cf,.chat,.fvr,.live,.pairf,.cmds,.reply,.st){display:none}
 .sh.lg .top{max-height:none;border:0}
 /* #141: the Host tab's groups. A group's 44 px header: one status dot, the name, a one-line summary (hidden while open),
    the caret; a problem group's header takes its colour on a 12 % tint. serve.js ranks and opens them. */
@@ -264,9 +277,59 @@ details.q[open]{padding-bottom:var(--s2)}
 .rw>summary{align-content:center;padding:var(--s1) 0}
 .rw>summary>.x{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .rw>summary>.t{align-self:start;line-height:calc(var(--fs) * 1.5);font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}.rw>summary>.t .cv{margin-left:.5ch}
-.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.rw>pre{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch);padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);color:var(--fg);font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .rw>.sub{margin:0 0 var(--s2) calc(var(--kw,9ch) + 1ch)}.rw>.sub>p{margin:0;padding:var(--s1) 0}
 .grp form.role{border-top:0}
+/* #234: HOSTS, one card per host in a grid, main first, then A→Z; side by side when there is room (#162's 56ch column).
+   Every group's rows sit in the cards' columns (one inset), so FLEET DISK lines up with the cards. */
+#host>.grp>:is(.gr,.rw,form){padding-left:var(--s2);padding-right:var(--s2)}
+.hgd{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:0 var(--s3);align-items:start}
+.hcd{margin:var(--s2) 0 0;box-shadow:inset 0 0 0 1px var(--line);border-radius:6px;padding:0 var(--s2) var(--s1);min-width:0}
+/* A card's head: status dot, name, `main`, the state and why in words, [off]/[on]; it wraps under the name at 390. */
+.hhd{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit);border-bottom:1px solid var(--line)}
+.hhd>.hnm{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:var(--s2);white-space:nowrap;overflow:hidden}
+.hhd .dt{flex:none;width:var(--s2);height:var(--s2);border-radius:50%;background:currentColor}
+.hhd .hw{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta)}
+.hhd>form{padding:var(--s1) 0}
+.hcd>:is(.gr,.rw)+:is(.gr,.rw){border-top:1px solid var(--line)}
+/* One-line values: names ellipsise, never break mid-token; a card's bar is in the meta size, so `free 12 GB of 228` fits at 390. */
+.hcd .bar{min-width:0;font-size:var(--fs-meta)}
+.hcd :is(.gr>.w,.rw>summary>.w){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+/* An offline or off host: grey (it never pages), the same layout; its history stays readable. */
+.hcd[data-c=m],.hcd[data-c=m] :is(.bar,b,.hnm b){color:var(--mute)}
+/* A row with history: line 1 is #183's label | value | caret; line 2 the 24 h sparkline under the value, labelled. */
+.sp{grid-column:2/-1;display:flex;align-items:end;gap:1ch;margin:var(--s1) 0 0}
+.sp>i{font-style:normal;font-size:var(--fs-meta);line-height:1;color:var(--mute)}
+.spk{flex:1;min-width:0;display:block;height:calc(var(--s4) + var(--s2));overflow:visible}
+/* Lines: the value in the text colour, its part past the limit red; the limit dashed; lanes a purple step line;
+   memory pressure a band along the floor (amber warn, red critical); no data a dotted muted line. */
+.spk .ln,.hpl .ln{fill:none;stroke:var(--fg);stroke-width:1.25;stroke-linejoin:round}
+.spk .ar,.hpl .ar{fill:color-mix(in srgb,var(--fg) 10%,transparent);stroke:none}
+.spk .ov,.hpl .ov{fill:none;stroke:var(--r);stroke-width:1.5;stroke-linejoin:round}
+.spk .lm,.hpl .lm{stroke:var(--mute);stroke-width:1;stroke-dasharray:3 3}
+.spk .st,.hpl .st{fill:none;stroke:var(--p);stroke-width:1.25}
+.spk .na,.hpl .na{stroke:var(--mute);stroke-width:1;stroke-dasharray:1 3}
+.pw{fill:var(--a)}.pc{fill:var(--r)}
+.hcd[data-c=m] .spk .ln{stroke:var(--mute)}
+/* The open chart: [1h] [6h] [24h] and the read-out on one line, the plot with a left (value) and right (lanes) axis,
+   the times under it, then the legend. Labels are HTML on %-positions, so text never stretches with the SVG. */
+.hch{margin:0 0 var(--s2);padding:var(--s1) 0 0}
+.htb{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s4);min-height:var(--hit);padding:0 var(--s2)}
+.htb button[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
+.hrd{flex:1 1 auto;min-width:0;text-align:right;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrd b{font-weight:400;color:var(--fg)}.hrd .r{color:var(--r)}.hrd .p{color:var(--p)}
+.hpl{position:relative;height:calc(var(--hit) * 3);margin:var(--s2) 0 calc(var(--fs-meta) + var(--s1));padding:0 3ch 0 5ch;touch-action:pan-y}
+.hpl>svg{position:absolute;top:0;bottom:0;left:5ch;right:3ch;width:calc(100% - 8ch);height:100%;overflow:visible}
+.hpl .cx{stroke:var(--mute);stroke-width:1}
+.hpl i{position:absolute;font-style:normal;font-size:var(--fs-meta);line-height:1;color:var(--mute);white-space:nowrap}
+.hpl .yl{right:calc(100% - 5ch);padding-right:.5ch;transform:translateY(-50%)}
+.hpl .yr{left:calc(100% - 3ch);padding-left:.5ch;transform:translateY(-50%);color:var(--p)}
+.hpl .ylm{color:var(--fg)}
+.hpl .xl{top:100%;padding-top:var(--s1);transform:translateX(-50%)}
+.hpl .dot{width:var(--s2);height:var(--s2);border-radius:50%;background:var(--fg);transform:translate(-50%,-50%)}
+.hpl .dot.r{background:var(--r)}.hpl .dot.l{background:var(--p)}
+.hlg{display:flex;flex-wrap:wrap;gap:0 var(--s3);margin:var(--s4) 0 0;padding-left:5ch;font-size:var(--fs-meta);color:var(--mute)}
+.hlg i{font-style:normal;color:var(--fg)}.hlg .p{color:var(--p)}.hlg .a{color:var(--a)}
 /* #154: [later] folds a needs-you card into one red line, `n need you ▸ [later all]`; a tap on it shows them in place.
    The line is 28 px controls in 8 px padding: 44 px tall, the rings inside it. */
 body:not(.unf) .ask.lt{display:none}
@@ -274,8 +337,8 @@ body:not(.unf) .ask.lt{display:none}
 .later .lo{flex:1 1 auto;justify-content:flex-start;color:var(--r);text-transform:none}.later .lo::before{content:none}.later .lo::after{content:""}
 /* #162: a fleet card: a bordered box with a 3 px top bar in the fleet's colour --fk (an accent token; red means "needs
    you", so it is never a bar). The header: name in the colour, need-you count, [drive now] [pause] [config]; then the drive line (.dp). */
-.fc{--fk:var(--l);margin:var(--s3) 0;border:1px solid #30363d;border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
-.k-l{--fk:var(--l)}.k-p{--fk:var(--p)}.k-c{--fk:var(--c)}.k-g{--fk:var(--g)}.k-a{--fk:var(--a)}
+.fc{--fk:var(--fk-l);margin:var(--s3) 0;border:1px solid var(--edge);border-top:3px solid var(--fk);border-radius:6px;padding:0 var(--s2) var(--s1)}
+.k-l{--fk:var(--fk-l)}.k-p{--fk:var(--fk-p)}.k-c{--fk:var(--fk-c)}.k-g{--fk:var(--fk-g)}.k-a{--fk:var(--fk-a)}
 .fh{display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);min-height:var(--hit)}
 .fn{flex:1 1 auto;min-width:0;display:flex;align-items:baseline;gap:var(--s2);white-space:nowrap;overflow:hidden}
 .fn>b{color:var(--fk)}
@@ -287,7 +350,7 @@ body:not(.unf) .ask.lt{display:none}
 .fc>.done>summary{display:flex;gap:var(--s2);color:var(--mute);font-size:var(--fs-meta)}.fc>.done>summary>span{flex:1}
 .fc>.done>p{margin:0 0 var(--s1);font-size:var(--fs-meta)}
 /* A paused fleet: one grey line, its bar muted; [resume] on the right (paired devices only); a tap peeks its rows. */
-.fc.off{--fk:var(--mute);border-bottom:1px solid #30363d;padding-bottom:0;color:var(--mute)}
+.fc.off{--fk:var(--mute);border-bottom:1px solid var(--edge);padding-bottom:0;color:var(--mute)}
 .fc.off>summary{display:flex;align-items:center;gap:var(--s4);min-height:var(--hit)}
 .fc.off>summary>.fn{flex:1;text-overflow:ellipsis}
 /* The [config] sheet: the lane sheet with the fleet's bar on top; groups of read-only rows (key 11 px, value 13 px)
@@ -307,7 +370,7 @@ body:not(.unf) .ask.lt{display:none}
 .cs .top .rh,.cs .top .rk{margin:0}
 .cs .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
 .cs .rk{font-size:var(--fs-meta);color:var(--mute)}
-.cs .soon{padding:var(--s2);border:1px dashed #30363d;border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
+.cs .soon{padding:var(--s2);border:1px dashed var(--edge);border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
 /* #166, #162 A: a card's second line, the drive state in the pass's colour: one full-width line that ellipsises (no
    7ch grid column); a tap lists the stall check, lanes, serial and each action in plain words, a tap on one its code. */
 .dp summary{display:flex;align-items:center;gap:var(--s2)}.dp>summary{font-size:var(--fs-meta)}
@@ -324,7 +387,7 @@ body:not(.unf) .ask.lt{display:none}
 .pg>*{position:relative;min-width:0;margin:0}
 /* A box is a run of lines: the header (glyph, name, kind, "n here"), the role line, then one line per outcome
    that leaves the spine. Every line is one line: it ellipsises, the full text is its title. */
-.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:#161b22;border:solid #30363d;border-width:0 1px;white-space:nowrap;overflow:hidden}
+.nb{grid-column:2;display:flex;align-items:center;gap:var(--s2);padding:0 1ch;background:var(--card);border:solid var(--edge);border-width:0 1px;white-space:nowrap;overflow:hidden}
 .nb.t{border-top-width:1px;border-radius:6px 6px 0 0}.nb.b{border-bottom-width:1px;border-radius:0 0 6px 6px}.nb.t.b{border-radius:6px}
 .nb>b{font-weight:600}
 .nb>.tag{margin-left:auto;line-height:1.5}
@@ -336,7 +399,7 @@ body:not(.unf) .ask.lt{display:none}
 .nb.po::after{content:"";flex:1 0 var(--s2);margin-right:-1ch;border-top:1px solid var(--mute)}
 .nb.po.l::after{display:none}
 .nb.po.l::before{content:"";flex:0 0 1ch;margin-left:-1ch;border-top:1px dashed var(--r)}
-.nb.end{border-color:#30363d}
+.nb.end{border-color:var(--edge)}
 /* Errors: a broken stage gets a red edge; an unreachable one is dashed and dimmed. */
 .nb.bad{border-color:var(--r)}
 .nb.dead{border-style:dashed;border-color:var(--r)}.nb.dead>:not(.dt){opacity:.55}
@@ -368,7 +431,7 @@ body:not(.unf) .ask.lt{display:none}
 .pp .lg i{font-style:normal}
 .tm{border:0;margin:var(--s2) 0}
 .tm>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);font-size:var(--fs-meta);color:var(--mute)}
-.tm pre{margin:0;padding:var(--s2);background:#161b22;border:1px solid #30363d;border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.tm pre{margin:0;padding:var(--s2);background:var(--card);border:1px solid var(--edge);border-radius:6px;font:inherit;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 /* A refused pipeline: what stops, then one line per broken rule, each with its place in fleet.toml. */
 .pe{margin:var(--s1) 0 var(--s2);padding:0 var(--s2);border:1px solid var(--r);border-radius:6px}
 .pe>p{margin:var(--s2) 0}
@@ -407,6 +470,6 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .ex{padding:0 0 var(--s2) calc(2ch + 3 * var(--s2))}
 .lk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin:var(--s2) 0;min-height:var(--ctl)}
 .lk>.m{font-size:var(--fs-meta)}
-.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:#161b22;font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
+.ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}

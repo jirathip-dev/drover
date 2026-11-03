@@ -29,14 +29,185 @@ const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { se
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
-const MODES = ['horse', 'ascii', 'glyph'];
-// The mode button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
-function mode(m) { B.dataset.mode = m; const b = $('#mode span') || $('#mode'); if (b) b.textContent = m; put('mode', m); }
-mode(MODES.includes(get('mode')) ? get('mode') : 'horse');
-document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(MODES[(MODES.indexOf(B.dataset.mode) + 1) % MODES.length]); });
+// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone, no button); TT is
+// the theme herd.js loaded (docs/themes.md). The button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
+let TT = null, TM = ['scene', 'ascii'];
+function mode(m) {
+  B.dataset.mode = m = TM.includes(m) ? m : TM[0];
+  const b = $('#mode span') || $('#mode');
+  if (b) { b.textContent = m; b.closest('.lh').hidden = TM.length < 2; }
+  put('mode', m);
+}
+mode(get('mode'));
+document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
+// #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
+// { "label", "color-scheme": "dark" | "light", "tokens": { "--bg": "#rrggbb", … } } (docs/themes.md, docs/design/schemes).
+// gate() is every check it must pass, with what failed; a refused one is named on the Host tab and never shown.
+const TOKENS = ['--bg', '--card', '--edge', '--line', '--scrim', '--fg', '--mute', '--l', '--link',
+  '--g', '--a', '--r', '--p', '--c', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'];
+const hex = s => {
+  const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(s);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+};
+const lin = c => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+// `color-mix(in srgb, c p%, transparent)` over bg, as the board's tints are (.ask, .later, .grp[data-t]).
+const over = (c, bg, p) => c.map((v, i) => v * p + bg[i] * (1 - p));
+function lab([r, g, b]) {
+  const [x, y, z] = [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]
+    .map(row => row[0] * lin(r) + row[1] * lin(g) + row[2] * lin(b));
+  const f = t => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  const [fx, fy, fz] = [x / 0.95047, y, z / 1.08883].map(f);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+// CIEDE2000 (Sharma et al. 2005).
+function de(c1, c2) {
+  const [L1, a1, b1] = lab(c1), [L2, a2, b2] = lab(c2), rad = Math.PI / 180;
+  const C = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2, G = 0.5 * (1 - Math.sqrt(C ** 7 / (C ** 7 + 25 ** 7)));
+  const ap1 = a1 * (1 + G), ap2 = a2 * (1 + G), C1 = Math.hypot(ap1, b1), C2 = Math.hypot(ap2, b2);
+  const h = (b, a) => { const v = Math.atan2(b, a) / rad; return v < 0 ? v + 360 : v; };
+  const h1 = h(b1, ap1), h2 = h(b2, ap2), dL = L2 - L1, dC = C2 - C1;
+  const dh = C1 * C2 === 0 ? 0 : h2 - h1 > 180 ? h2 - h1 - 360 : h2 - h1 < -180 ? h2 - h1 + 360 : h2 - h1;
+  const dH = 2 * Math.sqrt(C1 * C2) * Math.sin(dh * rad / 2), Lm = (L1 + L2) / 2, Cm = (C1 + C2) / 2;
+  const hm = C1 * C2 === 0 ? h1 + h2 : Math.abs(h1 - h2) > 180 ? (h1 + h2 + 360) / 2 : (h1 + h2) / 2;
+  const T = 1 - 0.17 * Math.cos((hm - 30) * rad) + 0.24 * Math.cos(2 * hm * rad) + 0.32 * Math.cos((3 * hm + 6) * rad) - 0.2 * Math.cos((4 * hm - 63) * rad);
+  const SL = 1 + 0.015 * (Lm - 50) ** 2 / Math.sqrt(20 + (Lm - 50) ** 2), SC = 1 + 0.045 * Cm, SH = 1 + 0.015 * Cm * T;
+  const RT = -2 * Math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((hm - 275) / 25) ** 2)) * rad);
+  return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
+}
+// Every check as [what, value, minimum]: text 4.5:1 (on --bg, --card and the tinted surfaces: the needs-you card with
+// its option buttons, the red and amber group headers), status colours 3:1, green/amber/red ΔE2000 ≥ 20 apart, and
+// the accent and links ≥ 20 from each status colour (a control never reads as a warning).
+function gate(s) {
+  const t = (s && s.tokens) || {}, missing = TOKENS.filter(k => !hex(t[k] || ''));
+  if (missing.length) return [[`missing or not #rrggbb[aa]: ${missing.join(' ')}`, 0, 1]];
+  const c = Object.fromEntries(TOKENS.map(k => [k, hex(t[k])])), rows = [];
+  const on = (ks, bg, min, name = bg) => ks.forEach(k => rows.push([`${k} on ${name}`, ratio(c[k], bg.map ? bg : c[bg]), min]));
+  const card = over(c['--r'], c['--bg'], 0.15), red = over(c['--r'], c['--bg'], 0.12), amber = over(c['--a'], c['--bg'], 0.12);
+  for (const bg of ['--bg', '--card']) {
+    on(['--fg', '--mute', '--l', '--link', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'], bg, 4.5);
+    on(['--g', '--a', '--r'], bg, 3);
+  }
+  on(['--bg'], '--l', 4.5, '--l (pressed control, active tab)');
+  on(['--fg', '--mute', '--l'], card, 4.5, 'the needs-you card');
+  on(['--r'], card, 3, 'the needs-you card');
+  on(['--r'], red, 3, 'a red group header');
+  on(['--a'], amber, 3, 'an amber group header');
+  for (const [x, y] of [['--g', '--a'], ['--a', '--r'], ['--g', '--r'], ...['--l', '--link'].flatMap(x => ['--g', '--a', '--r'].map(y => [x, y]))])
+    rows.push([`ΔE2000 ${x} ↔ ${y}`, de(c[x], c[y]), 20]);
+  if (!['dark', 'light'].includes(s['color-scheme'])) rows.push(['color-scheme is not "dark" or "light"', 0, 1]);
+  return rows;
+}
+// What a scheme fails, in words (none: it passes).
+const fails = s => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
+// A passing scheme's token block, as the head script applies it.
+const block = s => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
+// The scheme a phone shows: its pick, else its theme's default, else github-dark; each only if it passes.
+const choose = (all, pick, def) => [pick, def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
+// schemes:end
+// #244: the `[▦]` colours: every scheme that passes the gate (built-in and `<config dir>/schemes/`; SD from the head
+// script), this phone's pick (localStorage) else its theme's default. Applied in place; the block is kept so the head
+// script paints it first next time (no flash), and the status bar takes its --bg.
+const scp = $('#scheme'), SQ = new URLSearchParams(location.search).get('scheme');
+scp.replaceChildren(...Object.keys(SD.s).filter(n => !fails(SD.s[n]).length).map(n => Object.assign(document.createElement('option'), { textContent: n })));
+function colours() {
+  const h = document.documentElement, n = choose(SD.s, SQ || get('scheme'), SD.t[h.dataset.theme]), b = block(SD.s[n]);
+  h.dataset.scheme = scp.value = n;
+  scp.closest('.pk').title = 'colours: ' + n;
+  $('#sch').textContent = b;
+  $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
+  put('sb', b);
+  hostrow(document);
+}
+scp.onchange = () => { put('scheme', scp.value); colours(); };
+// #244: the Host tab's `theme` row names this phone's theme and colours; under it, each refused scheme with why.
+function hostrow(root) {
+  const r = [...root.querySelectorAll('.gr')].find(p => p.firstChild.textContent === 'theme'), h = document.documentElement;
+  if (!r) return;
+  const w = r.querySelector('.w'), b = t => Object.assign(document.createElement('b'), { textContent: t });
+  if (r.dataset.t === 'g') w.replaceChildren(b(h.dataset.theme));
+  w.querySelectorAll('.sx').forEach(x => x.remove());
+  w.append(...[Object.assign(document.createElement('span'), { textContent: ' · colours ' }), b(h.dataset.scheme)].map(x => (x.classList.add('sx'), x)));
+  root.querySelectorAll('.gr.sx').forEach(x => x.remove());
+  r.after(...Object.entries(SD.s).map(([n, s]) => [n, fails(s)]).filter(([, f]) => f.length).map(([n, f]) => {
+    const p = Object.assign(document.createElement('p'), { className: 'gr sx', innerHTML: '<span class=k>colours</span><span class=w><b class=a></b> <span class=mt></span></span>' });
+    p.dataset.t = 'a';
+    p.querySelector('b').textContent = n;
+    p.querySelector('.mt').textContent = `refused: ${f[0]}${f.length > 1 ? ` (+${f.length - 1} more)` : ''}; phones show their theme's default`;
+    return p;
+  }));
+}
+// #241: the `[◐]` picker: this phone's theme, applied in place (no reload); the home-screen icon is iOS's from the install.
+const thp = $('#theme');
+thp.value = document.documentElement.dataset.theme;
+thp.closest('.pk').title = 'theme: ' + thp.value;
+thp.onchange = () => {
+  document.documentElement.dataset.theme = thp.value;
+  thp.closest('.pk').title = 'theme: ' + thp.value;
+  put('theme', thp.value);
+  theme(thp.value);
+  colours();
+  if (!get('theme-hint')) { put('theme-hint', 1); toast('the home-screen icon keeps its install-time look'); }
+};
+colours();
+// #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 16 px sprite (its title and label
+// the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
+const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
+const hash = t => [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+function rows(root) {
+  root.querySelectorAll('.rsg').forEach(g => { g.textContent = g.dataset.g; g.classList.remove('rsg'); ['title', 'role', 'aria-label', 'data-g'].forEach(a => g.removeAttribute(a)); });
+  const rs = TT && TT.row_sprites, sp = (g, act, word) => {
+    if (!g || !rs || !rs[act]) return;
+    Object.assign(g.dataset, { g: g.textContent });
+    g.classList.add('rsg');
+    g.title = word;
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', word);
+    g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`;
+  };
+  root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
+  const L = (TT && TT.looks) || [];
+  root.querySelectorAll('.av[data-act]').forEach(v => {
+    const a = v.querySelector('.asc'), px = v.querySelector('.px'), t = TT && TT.ascii && TT.ascii[v.dataset.act], n = v.closest('[data-agent]');
+    if (a.dataset.o == null) Object.assign(a.dataset, { o: a.innerHTML, c: px.getAttribute('style') });
+    a.innerHTML = t ? '<b></b>' : a.dataset.o;
+    if (t) a.firstChild.textContent = t;
+    a.classList.toggle('w', !!t);
+    px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
+  });
+}
+// #241: a Host group's load scene in miniature (its status: calm, busy or held): wind and clouds, or flame height.
+const MINI = {
+  weather: ['<circle cx=8 cy=8 r=4 fill="var(--a)"/>', '<path d="M3 12h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M1 4h5M2 7h3" stroke="var(--mute)"/>',
+    '<path d="M3 9h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M5 11l-1 4M8 11l-1 4M11 11l-1 4" stroke="var(--l)"/>'],
+  heat: [5, 9, 13].map((h, i) => `<path d="M8 ${15 - h}C12 ${15 - h / 2} 12 15 8 15C4 15 4 ${15 - h / 2} 8 ${15 - h}Z" fill="var(--${i > 1 ? 'r' : 'a'})"/>`),
+};
+function mini(g) {
+  const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
+  s.querySelector('.lsc')?.remove();
+  if (!ls || !MINI[ls.kind]) return;
+  const word = esc('load: ' + ((ls.levels || {})[l] || l));
+  s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
+}
+// #241: a moment (`ev` on /live with a `k`: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
+function moment(k) {
+  const m = TT && TT.moments && TT.moments[k];
+  if (!m || !m.sprite) return;
+  let o = $('#mo');
+  if (!o) B.append(o = Object.assign(document.createElement('i'), { id: 'mo' }));
+  o.className = 'mo-' + (m.anim || 'hop');
+  o.innerHTML = `<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hm-${k}"/></svg>`;
+  o.hidden = false;
+  clearTimeout(o.t);
+  o.t = setTimeout(() => { o.hidden = true; }, 2400);
+}
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -84,6 +255,7 @@ function frag(id, html) {
   nu.innerHTML = html;
   tidy(nu);
   morph(el, nu);
+  nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
   rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
@@ -93,24 +265,129 @@ function frag(id, html) {
   if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
-// #141: the Host groups. A group takes its worst row's status (grey rows don't count); problems go first (red, then
-// amber) and start open, the header summing up the rows at that status. A tap's open/closed holds for the session
-// until the group's status changes.
+// #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
+// (1 h / 6 h / 24 h from `frag?id=hist`; an export carries it as `data-x`). The value's line is red past the limit
+// (dashed), lanes a purple step line on a right axis, memory pressure a band along the floor. Inline SVG, no library.
+// Scales are fixed per metric (a multiple of the limit), so cards compare at a glance and the limit sits clear of zero.
+const K = { load: ['load/cpu', 2, 1.6, ''], swap: ['swap-out', 0, 2, ' pages/2s'], mem: ['free memory', 1, 4, ' GB'], disk: ['free disk', 0, 4, ' GB'], lanes: ['lanes', 0] };
+const fl = k => k === 'mem' || k === 'disk', OPEN = new Map(), DATA = new Map(), NSS = ' vector-effect=non-scaling-stroke';
+const nums = s => (s || '').split(',').map(x => x === '' ? null : +x);
+const hsvg = (w, h, body) => `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio=none>${body}</svg>`;
+// A series as polylines (a null breaks the line); `step` draws a stepped line.
+function segs(v, w, h, top, step) {
+  const out = [], dx = w / v.length;
+  let cur = [];
+  v.forEach((y, j) => {
+    if (y == null) { if (cur.length) out.push(cur); cur = []; return; }
+    const Y = h - Math.min(y, top) / top * h;
+    if (step) cur.push([j * dx, Y], [(j + 1) * dx, Y]); else cur.push([(j + .5) * dx, Y]);
+  });
+  if (cur.length) out.push(cur);
+  return out;
+}
+const pts = s => s.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(2)).join(' ');
+let uid = 0;
+// The value's area and line, its part past the limit red (clipped at the limit), the dashed limit, pressure bands,
+// lanes, a dotted line where there is no data. Sparkline and chart share it.
+function plot(v, k, l, w, h, press, lanes) {
+  const top = k === 'lanes' ? 10 : l * K[k][2], s = segs(v, w, h, top, k === 'lanes'), ly = l ? h - l / top * h : null;
+  let b = '';
+  (press || []).forEach((p, j) => {
+    if (!p || press[j - 1] === p) return;
+    let e = j;
+    while (press[e + 1] === p) e++;
+    const dx = w / press.length;
+    b += `<rect class=${p > 1 ? 'pc' : 'pw'} x=${(j * dx).toFixed(1)} y=${h * .92} width=${((e - j + 1) * dx).toFixed(1)} height=${h * .08} />`;
+  });
+  for (const p of s) {
+    if (k !== 'lanes') b += `<polygon class=ar points="${p[0][0]},${h} ${pts(p)} ${p[p.length - 1][0]},${h}"/>`;
+    b += `<polyline class=${k === 'lanes' ? 'st' : 'ln'}${NSS} points="${pts(p)}"/>`;
+  }
+  if (ly != null) {
+    const clip = fl(k) ? `<rect x=0 y=${ly} width=${w} height=${h - ly} />` : `<rect x=0 y=-10 width=${w} height=${ly + 10} />`;
+    b += `<clipPath id=hc${++uid}>${clip}</clipPath><g clip-path=url(#hc${uid})>${s.map(p => `<polyline class=ov${NSS} points="${pts(p)}"/>`).join('')}</g>`;
+    b += `<line class=lm${NSS} x1=0 x2=${w} y1=${ly} y2=${ly} />`;
+  }
+  if (lanes) b += segs(lanes, w, h, 10, true).map(p => `<polyline class=st${NSS} points="${pts(p)}"/>`).join('');
+  const gap = v.findLastIndex(x => x != null) + 1;
+  if (gap < v.length) b += `<line class=na${NSS} x1=${(gap * w / v.length).toFixed(1)} x2=${w} y1=${h - .5} y2=${h - .5} />`;
+  return b;
+}
+function sparks() {
+  $$('#host .hcd').forEach(c => c.querySelectorAll('.rw[data-k]').forEach(r => {
+    const k = r.dataset.k, sp = r.querySelector('.spk'), o = OPEN.get(c.dataset.h + k);
+    if (sp && !sp.childElementCount) sp.outerHTML = hsvg(120, 24, plot(nums(r.dataset.s), k, +r.dataset.l, 120, 24, nums(r.dataset.p), k === 'lanes' ? null : nums(c.dataset.n))).replace('<svg', '<svg class=spk aria-hidden=true');
+    if (r.open && o && !r.querySelector('.hch')) chart(r, o, null, true);
+  }));
+}
+const clock = t => new Date(t * 1000).toTimeString().slice(0, 5), X = q => `calc(5ch + (100% - 8ch) * ${(q / 100).toFixed(4)})`;
+async function chart(r, range, pin, fresh) {
+  const c = r.closest('.hcd'), k = r.dataset.k, l = +r.dataset.l || null, h = c.dataset.h, [name, p, , u] = K[k];
+  OPEN.set(h + k, range);
+  if (fresh || !DATA.has(h + k)) DATA.set(h + k, r.dataset.x || await part(`frag?id=hist&host=${encodeURIComponent(h)}&k=${k}`));
+  const d = DATA.get(h + k);
+  if (!d || !r.open) return;
+  const i = ['24h', '6h', '1h'].indexOf(range), [v, lanes, press, ago] = d.split('|').map(x => nums(x.split(';')[i]));
+  const secs = { '1h': 3600, '6h': 21600, '24h': 86400 }[range], n = v.length, top = k === 'lanes' ? 10 : l * K[k][2];
+  const now = +B.dataset.ts || Date.now() / 1000, W = 1000, H = 100, f = x => x.toFixed(p);
+  let body = plot(v, k, l, W, H, k === 'mem' ? press : null, k === 'lanes' ? null : lanes) + `<line class=cx${NSS} x1=0 x2=${W} y1=${H} y2=${H} />`, lab = '', rd = 'no data yet';
+  // The read-out: the window's worst point (or the finger's), the worst row's own minute, the lanes then.
+  const j = pin ?? v.reduce((b, x, q) => x != null && (b < 0 || (fl(k) ? x < v[b] : x > v[b])) ? q : b, -1);
+  if (j >= 0 && v[j] != null) {
+    const x = (j + .5) / n * 100, y = 100 - Math.min(v[j], top) / top * 100, over = l && (fl(k) ? v[j] < l : v[j] > l);
+    body += `<line class=cx${NSS} x1=${x * 10} x2=${x * 10} y1=0 y2=${H} />`;
+    lab += `<i class="dot${over ? ' r' : ''}" style="left:${X(x)};top:${y.toFixed(1)}%"></i>`;
+    if (k !== 'lanes' && lanes[j] != null) lab += `<i class="dot l" style="left:${X(x)};top:${100 - Math.min(lanes[j], 10) * 10}%"></i>`;
+    rd = `${clock(now - ago[j] * 60)} · <b class=${over ? 'r' : ''}>${over ? '▶ ' : ''}${f(v[j])}${u}</b>` + (k !== 'lanes' && lanes[j] != null ? ` · <span class=p>${lanes[j]} lanes</span>` : '');
+  }
+  (l ? [0, l, top] : [0, top / 2, top]).forEach(q => lab += `<i class="yl${q === l ? ' ylm' : ''}" style=top:${(100 - q / top * 100).toFixed(1)}%>${f(q)}</i>`);
+  if (k !== 'lanes') [0, 5, 10].forEach(q => lab += `<i class=yr style=top:${100 - q * 10}%>${q}</i>`);
+  const every = { '1h': 900, '6h': 3600, '24h': 21600 }[range];
+  for (let t = Math.ceil((now - secs) / every) * every; t < now; t += every) {
+    const q = (t - now + secs) / secs * 100;
+    if (q > 6 && q < 94) lab += `<i class=xl style="left:${X(q)}">${clock(t)}</i>`;
+  }
+  lab += `<i class=xl style="left:${X(100)}">now</i>`;
+  const lim = l ? `<span><i>┄</i> ${fl(k) ? 'floor' : 'limit'} ${l}${u}</span>` : '';
+  const rule = k === 'swap' ? `<span>new lanes wait while the average stays over ${l} and memory is under pressure</span>` : '';
+  const tabs = ['1h', '6h', '24h'].map(x => `<button type=button aria-pressed=${x === range} data-r=${x}><span>${x}</span></button>`).join('');
+  let ch = r.querySelector('.hch');
+  if (!ch) r.append(ch = Object.assign(document.createElement('div'), { className: 'hch' }));
+  ch.innerHTML = `<div class=htb>${tabs}<span class=hrd>${rd}</span></div><div class=hpl data-n=${n}>${hsvg(W, H, body)}${lab}</div>`
+    + `<p class=hlg><span><i>━</i> ${name}</span>${lim}${k !== 'lanes' ? '<span><i class=p>⌐</i> lanes (right)</span>' : ''}${k === 'mem' ? '<span><i class=a>▬</i> pressure warn</span>' : ''}${rule}</p>`;
+  ch.dataset.r = range;
+}
+// A tab picks the range; a touch on the plot moves the read-out to that point; closing a row forgets its chart.
+document.addEventListener('click', e => { const b = e.target.closest('.htb button'); if (b) chart(b.closest('.rw'), b.dataset.r); });
+document.addEventListener('pointermove', e => {
+  const p = e.target.closest('.hpl'), n = p && +p.dataset.n;
+  if (!p) return;
+  const box = p.querySelector('svg').getBoundingClientRect();
+  chart(p.closest('.rw'), p.closest('.hch').dataset.r, Math.max(0, Math.min(n - 1, Math.floor((e.clientX - box.left) / box.width * n))));
+});
+document.addEventListener('toggle', e => {
+  const r = e.target, k = r.matches('.hcd .rw[data-k]') && r.closest('.hcd').dataset.h + r.dataset.k;
+  if (k && r.open && !r.querySelector('.hch')) chart(r, OPEN.get(k) || '24h', null, true);
+  else if (k && !r.open) OPEN.delete(k);
+}, true);
+// #141: the Host groups, in the server's fixed order (#234: HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS). A group takes
+// its worst row's status (grey rows don't count); a red or amber one starts open, the header summing up the rows at
+// that status (a host card's rows by host). A tap's open/closed holds for the session until the group's status changes.
 const sget = k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } };
 const sput = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} };
 const txt = x => [...x.childNodes].filter(n => !n.matches?.('.fx,.bar')).map(n => n.textContent).join('').trim();
-const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children; return k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t')).map(txt).join(' '); };
+const sum = r => { const [k, ...c] = (r.matches('details') ? r.firstElementChild : r).children, h = r.closest('.hcd'); return (h ? h.dataset.h + ' ' : '') + k.textContent + ': ' + c.filter(x => !x.matches('.bar,.mt,.t,.sp')).map(txt).join(' '); };
 const gname = g => 'host:' + g.querySelector('.gn').textContent;
 function groups() {
-  const host = $('#host'), rank = t => ({ r: 0, a: 1 })[t] ?? 2;
-  [...host.querySelectorAll(':scope>.grp')].map(g => {
+  const rank = t => ({ r: 0, a: 1 })[t] ?? 2;
+  $$('#host>.grp').forEach(g => {
     const rows = [...g.querySelectorAll('[data-t]')], w = Math.min(2, ...rows.map(r => rank(r.dataset.t))), s = sget(gname(g));
-    const grey = g.matches('.h') && rows.every(r => r.dataset.t === 'm'); // #157: an offline or off host, ranked last
-    g.dataset.t = grey ? 'm' : 'rag'[w];
+    g.dataset.t = 'rag'[w];
     g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
     g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
-    return [grey ? 3 : w, g];
-  }).sort((a, b) => a[0] - b[0]).forEach(([, g]) => host.append(g));
+    mini(g);
+  });
+  sparks();
 }
 document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
 // #141: `[queue·N]`, N the needs-you cards above the tabs.
@@ -172,12 +449,17 @@ async function refresh() {
 function connect() {
   if (DEMO) return;
   if (es) es.close();
-  try { es = new EventSource('live'); } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
+  // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
+  // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
+  const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
   // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
-  es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
-  es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
+  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
+  es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
+  es.addEventListener('refresh', e => (at(e), refresh()));
+  es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
     es = null;
@@ -227,6 +509,7 @@ document.addEventListener('submit', async e => {
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
 <div class=hd><p><b></b></p></div><div class=top></div><div class=acts><button type=button data-op=stop>Stop</button><button type=button data-op=kill>Kill</button><button type=button data-op=clean>Clean</button><button type=button data-op=close>Close pane</button></div>
 <div class=cf hidden><p></p><button type=button class=yes>Kill</button><button type=button class=no>Cancel</button></div>
+<p class=fvr><button type=button class=fv aria-pressed=false>full conversation</button></p>
 <div class=chat><button type=button class=more hidden>Load more</button><div class=now></div></div>
 <p class=live hidden></p>
 <p class=pairf hidden><button type=button class=pairb>Pair this phone</button></p>
@@ -332,8 +615,11 @@ document.addEventListener('click', e => {
 });
 function tidy(root) {
   graph(root);
+  rows(root);
   evf(root);
+  hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
+  root.querySelectorAll('.lane .act').forEach(a => a.classList.toggle('doing', a.textContent.startsWith('now: '))); // #260 one line
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;
     const k = el('label', 'pk'), t = el('span', '');
@@ -354,6 +640,7 @@ function tidy(root) {
   }
 }
 tidy(document);
+nows();
 rf.innerHTML = '<i>↻</i>';
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
 // you (a typed prompt), the assistant (prose), a tool run (`⏺ Name(…)`/`•`/`$`/`┊` plus its `⎿`/indented output),
@@ -483,17 +770,45 @@ function blocks(lines, harness, busy) {
     return { key, k: 'run', html: `<details class="blk run">${sum(shell ? '$' : esc(name), `<span class=cmd>${esc(cmd)}</span>${tag}`)}${text.trim() ? output(g.lines, fail) : ''}</details>` };
   });
 }
+// #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
+// verdict, merged). From `said` (Claude's session transcript, `[{k: me | ai, text, at}]`) in time order, else the pane's
+// role runs: you, and the last assistant run before each prompt (the notices first: pane lines have no times).
+function matters(lines, said, notices, harness) {
+  const ns = (notices || []).map(n => ({ key: 'n:' + n.at + ':' + n.text, k: 'note', at: n.at * 1000, html: `<p class="qs note">${esc(n.text)}</p>` }));
+  if (!said) {
+    const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
+    return ns.concat(bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i)));
+  }
+  const say = s => {
+    const ls = s.text.split('\n'), who = s.k === 'me' ? 'you' : esc(harness || 'agent'), pv = esc(ls[0].replace(/^#+\s+/, ''));
+    return { key: s.k + ':' + s.at, k: s.k, open: true, at: Date.parse(s.at) || 0, html: `<details class="blk ${s.k}"><summary><span class=k>${who}</span><span class=pv>${pv}</span><i class=cv></i></summary><div class=md>${prose(ls)}</div></details>` };
+  };
+  return ns.concat(said.map(say)).sort((a, b) => a.at - b.at);
+}
 // The longest suffix of a that is a prefix of b (as text): two reads' overlap.
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
 const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200' + q);
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
-let hist = [], tail = [], nlive = 0, harness = '', spin = false;
+let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [];
+// #260 [full conversation]: every tool run and output (the pane view), else what matters; remembered per phone.
+let full = false;
+try { full = localStorage.getItem('chat:full') === '1'; } catch (e) {}
+const fv = $('.fv');
+fv.ariaPressed = String(full);
+fv.onclick = () => {
+  full = !full;
+  fv.ariaPressed = String(full);
+  try { localStorage.setItem('chat:full', full ? '1' : ''); } catch (e) {}
+  paint();
+  chat.scrollTop = chat.scrollHeight;
+};
 const store = () => { try { return JSON.parse(sessionStorage.getItem('chat:' + agent)) || {}; } catch (e) { return {}; } };
 function paint() {
   const seen = new Map([...now.children].map(n => [n.dataset.k, n])), keep = store(), end = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 8;
-  now.replaceChildren(...blocks(hist.concat(tail), harness, spin).map(b => {
+  const bs = full ? blocks(hist.concat(tail), harness, spin) : matters(hist.concat(tail), said, notes, harness);
+  now.replaceChildren(...bs.map(b => {
     const n = seen.get(b.key);
     if (n && n.dataset.h === b.html) return n;
     const t = document.createElement('template');
@@ -520,7 +835,7 @@ async function poll() {
     opane = j.pane;
     if (!hist.length) more.hidden = !j.more;
     hist = k || !hist.length || !done.length ? hist.concat(done.slice(k)) : done;
-    [tail, nlive, harness, spin] = [j.lines.slice(done.length), j.live, j.harness, !!j.status];
+    [tail, nlive, harness, spin, said, notes] = [j.lines.slice(done.length), j.live, j.harness, !!j.status, j.said, j.notices];
     $('.live').hidden = !j.status;
     if (j.status) $('.live').innerHTML = `<b>${esc([...j.status][0])}</b>${esc(j.status.slice([...j.status][0].length))}`;
     paint();
@@ -594,7 +909,7 @@ function open(e) {
   $('[data-op=close]').hidden = !other || nopair;
   $$('.pairf, .cf, .cmds').forEach(x => x.hidden = true);
   now.replaceChildren();
-  hist = []; tail = [];
+  hist = []; tail = []; said = null; notes = [];
   $('.live').hidden = true;
   say(rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other ? null : true);
   sh.className = 'sh';
@@ -602,6 +917,15 @@ function open(e) {
   poll();
   if (!other && !B.dataset.ro && !DEMO) cleanable();
   timer = setInterval(poll, 5000);
+}
+// #260: a Queue card's lane shows its Lanes row's `now:` line under it (that row's, as /live last drew it).
+function nows() {
+  $$('#queue .qls>.ql[data-agent]').forEach(q => {
+    const r = laneOf(q.dataset.agent), t = r ? r.querySelector('.act').textContent : '', n = q.nextElementSibling;
+    const x = n && n.matches('.qnow') ? n : null;
+    if (!t.startsWith('now: ')) return x && x.remove();
+    (x || q.insertAdjacentElement('afterend', el('span', 'qnow nw el m'))).textContent = t;
+  });
 }
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
 // first, then a sheet of its own; a gone lane shows its stored transcript, read-only. No transcript: a toast.

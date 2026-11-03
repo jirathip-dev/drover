@@ -48,6 +48,13 @@ fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
     Some(Lock(lock.into()))
 }
 
+/// #246: the last fast step: (started, secs) from `drive-fast.at`.
+pub fn fast_step(ctx: &Ctx) -> Option<(u64, Option<f64>)> {
+    let s = std::fs::read_to_string(ctx.state.with_file_name("drive-fast.at")).ok()?;
+    let mut w = s.split_whitespace();
+    Some((w.next()?.parse().ok()?, w.next().and_then(|x| x.parse().ok())))
+}
+
 /// `<state dir>/drive-<fleet>.last`: the time of the fleet's last pass (the board's `last pass`).
 pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
     std::fs::read_to_string(state_dir(ctx).join(format!("drive-{fleet}.last")))
@@ -208,12 +215,13 @@ pub fn drive(
     manual: bool,
     fast: bool,
 ) -> Result<()> {
+    let t0 = std::time::Instant::now();
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     let i = usize::from(fast);
     gh::FORCE.set(fast);
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
-    let _ = std::fs::write(stamp, ctx.now.to_string());
+    let _ = std::fs::write(&stamp, ctx.now.to_string());
     let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
     let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
         if manual {
@@ -225,6 +233,12 @@ pub fn drive(
             lock.display()
         )?);
     };
+    // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
+    if fast {
+        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
+            writeln!(out, "host history: {e:#}")?;
+        }
+    }
     // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
     if only.is_none() {
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
@@ -259,6 +273,11 @@ pub fn drive(
             Err(e) => fail(name, e),
         }
     }
+    // #246: the step's length beside its start (`drive-fast.at`: `<started> <secs>`), for the Host tab.
+    let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
+    if fast {
+        let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
+    }
     for name in fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
         if !fast {
@@ -272,7 +291,7 @@ pub fn drive(
             ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "actions": acts});
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res

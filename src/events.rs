@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
+    /// #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub seq: u64,
     pub ts: u64,
     pub fleet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -29,6 +32,7 @@ impl Event {
             _ => Map::new(),
         };
         Event {
+            seq: 0,
             ts,
             fleet: fleet.into(),
             issue,
@@ -45,24 +49,32 @@ impl Event {
     }
 }
 
-/// Append one line and fsync, terminating a torn tail (a writer died mid-line) first.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if hands a reference
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+/// Append one line numbered `seq` and fsync, under an exclusive lock, terminating a torn tail (a writer died
+/// mid-line) first.
 pub fn append(path: &Path, ev: &Event) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let f = OpenOptions::new().create(true).append(true).read(true).open(path);
     let mut f = f.with_context(|| format!("cannot open event log {}", path.display()))?;
-    let mut line = serde_json::to_string(ev)?;
+    f.lock()?;
+    let mut old = vec![];
+    f.read_to_end(&mut old)?;
+    let torn = old.last().is_some_and(|&b| b != b'\n');
+    let lines = String::from_utf8_lossy(&old).lines().count(); // as `read` numbers them
+    let ev = Event {
+        seq: lines as u64 + 1,
+        ..ev.clone()
+    };
+    let mut line = serde_json::to_string(&ev)?;
     line.push('\n');
-    let len = f.metadata()?.len();
-    if len > 0 {
-        use std::io::{Seek, SeekFrom};
-        let mut last = [0u8; 1];
-        f.seek(SeekFrom::Start(len - 1))?;
-        f.read_exact(&mut last)?;
-        if last[0] != b'\n' {
-            line.insert(0, '\n');
-        }
+    if torn {
+        line.insert(0, '\n');
     }
     f.write_all(line.as_bytes())?;
     f.sync_all()?;
@@ -79,7 +91,11 @@ pub fn read(path: &Path) -> Result<Vec<Event>> {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::with_capacity(lines.len());
     for (i, l) in lines.iter().enumerate() {
-        match serde_json::from_str(l) {
+        match serde_json::from_str::<Event>(l) {
+            Ok(ev) if ev.seq == 0 => out.push(Event {
+                seq: i as u64 + 1,
+                ..ev
+            }),
             Ok(ev) => out.push(ev),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
             Err(e) => eprintln!(
@@ -274,6 +290,7 @@ pub const PASSIVE: &[&str] = &[
     "heads-up",
     "lane-closed",
     "lane-kept",
+    "lane-kept-dirty",
     "lane-reaped",
     "lane-trimmed",
     "decision-redelivered",

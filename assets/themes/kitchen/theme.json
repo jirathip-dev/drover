@@ -1,6 +1,11 @@
 {
+  "scheme": "kitchen",
   "poses": { "working": "chef-working", "idle": "chef-idle", "done": "chef-done", "blocked": "chef-blocked" },
   "glyphs": { "working": "♨", "idle": "·", "unknown": "?", "parked": "·", "done": "✓", "blocked": "!", "dead": "✗" },
   "words": { "horse": "chef", "horses": "chefs", "herd": "kitchen line", "ranch": "kitchen", "barn": "kitchen" },
-  "scene": { "weather": false, "palette": { "--sky1": "#efe6d2", "--sky2": "#e9dcc3", "--pa": "linear-gradient(#6b5a4a,#4a3c32 40vh,#3a2f28)" } }
+  "scene": { "weather": false, "palette": { "--sky1": "#efe6d2", "--sky2": "#e9dcc3", "--pa": "linear-gradient(#6b5a4a,#4a3c32 40vh,#3a2f28)" } },
+  "load_scene": { "kind": "heat", "levels": { "calm": "simmer", "busy": "boil", "held": "flare-up" } },
+  "moments": { "merged": { "sprite": "chef-done", "anim": "hop" }, "fail": { "sprite": "chef-blocked", "anim": "shake" }, "needs-you": { "sprite": "chef-blocked", "anim": "pulse" } },
+  "ascii": { "impl": "» chop", "fix": "» re-fry", "rev": "» taste", "update": "» stir", "idle": "· wait", "done": "✓ plated", "blocked": "! 86'd" },
+  "modes": ["scene", "ascii"]
 }

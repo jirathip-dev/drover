@@ -1,0 +1,98 @@
+//! #246: one batched GraphQL read of every open PR per fleet per step; the gate, status and serve read it.
+mod common;
+use common::*;
+use herdsman::events::{append, read, Event};
+use serde_json::json;
+
+const HEAD: &str = "1111111111111111111111111111111111111111";
+const ALPHA: &str = "[fleet.alpha]\nrepo = \"jirathip-dev/alpha\"\nlocal = \"/tmp/does-not-matter/alpha\"\n\
+    integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[limits]";
+
+/// An impl lane of `fleet` #`n` logged at ts 10, on branch `issue-<n>`.
+fn lane(c: &herdsman::Ctx, fleet: &str, n: u64) {
+    let d = json!({"role": "impl", "agent": format!("{fleet}-impl-{n}"), "branch": format!("issue-{n}")});
+    append(&c.state, &Event::new(10, fleet, Some(n), "spawn", d)).unwrap();
+}
+
+/// `gh api graphql … --jq` output: one flattened open PR per line, CI green at `HEAD`.
+fn open_prs(ns: &[u64]) -> String {
+    let check = json!({"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"});
+    let line = |n: &u64| {
+        let pr = json!({"number": 100 + n, "state": "OPEN", "baseRefName": "staging", "headRefName": format!("issue-{n}"),
+            "headRefOid": HEAD, "mergeable": "MERGEABLE", "labels": [], "statusCheckRollup": [check]});
+        format!("{pr}\n")
+    };
+    ns.iter().map(line).collect()
+}
+
+fn calm() -> Fake {
+    Fake::default()
+        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+}
+
+#[test]
+fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
+    let c = ctx(&tmpdir("snap-one-call"), &CONFIG.replace("[limits]", ALPHA));
+    for n in [12, 13, 14, 15] {
+        lane(&c, "sendmeter", n);
+    }
+    lane(&c, "alpha", 5);
+    let r = calm().reply("gh api graphql", &open_prs(&[12, 13, 14, 15, 5]));
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.borrow();
+    let graphql: Vec<_> = calls.iter().filter(|l| l.starts_with("gh api graphql")).collect();
+    assert_eq!(graphql.len(), 2, "one per fleet: {graphql:?}");
+    assert!(graphql.iter().any(|l| l.contains("name=sendmeter")) && graphql.iter().any(|l| l.contains("name=alpha")));
+    assert!(graphql
+        .iter()
+        .all(|l| l.contains("--paginate") && l.contains("first:100")));
+    assert!(
+        !calls.iter().any(|l| l.starts_with("gh pr view")),
+        "no per-PR read: {calls:?}"
+    );
+    for n in [12, 13, 14, 15] {
+        assert_eq!(herdsman::gh::cached_pr(&c, "sendmeter", n)["number"], 100 + n);
+    }
+    // The step's length is stamped beside its start, for the Host tab's `fast step` row.
+    let (at, secs) = herdsman::drive::fast_step(&c).unwrap();
+    assert_eq!((at, secs.is_some()), (c.now, true));
+}
+
+#[test]
+fn the_merge_gate_reads_checks_from_the_snapshot() {
+    let c = ctx(&tmpdir("snap-merge"), CONFIG);
+    lane(&c, "sendmeter", 12);
+    let v = json!({"verdict": "PASS", "sha": HEAD});
+    append(&c.state, &Event::new(20, "sendmeter", Some(12), "verdict", v)).unwrap();
+    let r = Fake::default()
+        .reply("gh api graphql", &open_prs(&[12]))
+        .reply("gh pr merge 112", "")
+        .reply("gh pr view 112", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called(&format!(
+        "gh pr merge 112 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD}"
+    )));
+    assert!(!r.called("gh pr view issue-12"), "{:?}", r.calls.borrow());
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "merged"));
+}
+
+#[test]
+fn status_and_serve_make_no_gh_call() {
+    let c = ctx(&tmpdir("snap-read-only"), CONFIG);
+    lane(&c, "sendmeter", 12);
+    let r = calm().reply("gh api graphql", &open_prs(&[12]));
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let seen = r.calls.borrow().len();
+    let (code, out) = run(&c, &r, &["status"]);
+    assert_eq!(code, 0, "{out}");
+    herdsman::serve::Server::new(&c, &r, None).respond("GET / HTTP/1.1\r\n\r\n", c.now);
+    let after = &r.calls.borrow()[seen..];
+    assert!(!after.iter().any(|l| l.starts_with("gh ")), "{after:?}");
+}

@@ -106,7 +106,7 @@ fn pr_makes_one_gh_call_per_60s() {
     assert_eq!(r.count("gh"), 2, "expired after 60 s");
     // merge and check read the same cache.
     run(&c, &r, &["merge", "sendmeter", "12"]);
-    assert_eq!(r.count("gh pr view issue-12"), 2);
+    assert_eq!(r.count("gh api graphql"), 2, "#246: one batched read each");
     // No PR: exit 1.
     let d = tmpdir("pr-none");
     let c = ctx(&d, CONFIG);
@@ -129,21 +129,29 @@ fn wait_exit_codes() {
     let pending = pr_json("OPEN", run_ci("IN_PROGRESS", ""));
     // Pending, then green: polls through the cache with backoff, exits 0.
     let r = Fake::default()
-        .once("gh pr view", 0, &pending)
+        .once("gh pr view issue-12", 0, &pending)
         .reply("gh pr view issue-12", &pr_json("OPEN", run_ci("COMPLETED", "SUCCESS")));
     let (code, out) = wait(&r, "ci-green", "3600");
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("ci green"), "{out}");
-    assert_eq!(r.calls.borrow()[1..], ["sleep 30", "sleep 60", "gh pr view issue-12 -R jirathip-dev/sendmeter --json number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels"]);
+    let calls = r.calls.borrow();
+    assert_eq!(calls[1..3], ["sleep 30", "sleep 60"]);
+    assert!(
+        calls.len() == 4 && calls[3].starts_with("gh api graphql --paginate"),
+        "{calls:?}"
+    );
     // A failed check: 1, for ci-green and ci-done.
     let red = pr_json("OPEN", run_ci("COMPLETED", "FAILURE"));
     assert_eq!(
-        wait(&Fake::default().reply("gh pr view", &red), "ci-green", "3600").0,
+        wait(&Fake::default().reply("gh pr view issue-12", &red), "ci-green", "3600").0,
         1
     );
-    assert_eq!(wait(&Fake::default().reply("gh pr view", &red), "ci-done", "3600").0, 1);
+    assert_eq!(
+        wait(&Fake::default().reply("gh pr view issue-12", &red), "ci-done", "3600").0,
+        1
+    );
     // Never done: 124, backoff 30 → 5 min, never past the timeout.
-    let r = Fake::default().reply("gh pr view", &pending);
+    let r = Fake::default().reply("gh pr view issue-12", &pending);
     let (code, out) = wait(&r, "ci-done", "1000");
     assert_eq!(code, 124, "{out}");
     let sleeps: Vec<_> = r
@@ -164,11 +172,11 @@ fn wait_exit_codes() {
             "sleep 250"
         ]
     );
-    assert!(r.count("gh pr view") <= 7);
+    assert!(r.count("gh api graphql") <= 7);
     // merged / closed.
     assert_eq!(
         wait(
-            &Fake::default().reply("gh pr view", &pr_json("MERGED", json!([]))),
+            &Fake::default().reply("gh pr view issue-12", &pr_json("MERGED", json!([]))),
             "merged",
             "60"
         )
@@ -177,7 +185,7 @@ fn wait_exit_codes() {
     );
     assert_eq!(
         wait(
-            &Fake::default().reply("gh pr view", &pr_json("CLOSED", json!([]))),
+            &Fake::default().reply("gh pr view issue-12", &pr_json("CLOSED", json!([]))),
             "merged",
             "60"
         )

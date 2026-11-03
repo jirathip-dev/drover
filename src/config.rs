@@ -95,6 +95,8 @@ pub struct Accounts {
     pub cap_reset_minutes: u64,
     /// `[accounts.usage]`: account name -> the `CLAUDE_CONFIG_DIR` of its own `claude` login, read only for the usage meter.
     pub usage: BTreeMap<String, String>,
+    /// `headroom`: spawns take the uncapped account with the most 5h/7d headroom; `order` (default): as before.
+    pub pick: Option<String>,
     #[serde(flatten)]
     pub names: BTreeMap<String, String>,
 }
@@ -106,6 +108,7 @@ impl Default for Accounts {
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
+            pick: None,
             names: BTreeMap::new(),
         }
     }
@@ -172,6 +175,8 @@ pub struct Fleet {
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
+    /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
+    pub premerge: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -193,6 +198,8 @@ pub struct Role {
     /// #157: host tags this role's lanes need besides the fleet's.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
+    pub host: Option<String>,
 }
 
 impl Role {
@@ -233,6 +240,9 @@ pub struct Limits {
     pub ask_default_minutes: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
+    /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
+    pub done_close_minutes: u64,
+    pub transcript_days: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
     /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
@@ -280,6 +290,8 @@ impl Default for Limits {
             effort: None,
             ask_default_minutes: 30,
             idle_reap_minutes: 10,
+            done_close_minutes: 5,
+            transcript_days: 30,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
                 .ok()

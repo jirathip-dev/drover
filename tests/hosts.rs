@@ -48,6 +48,25 @@ fn fake(mini: f64, remote: f64) -> Fake {
         .reply(&format!("{SSH}'nproc'"), "4")
 }
 
+const HERDR_STATUS: &str = "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.5\n";
+
+/// #235: replies that make bazzite healthy: herdr same version in its login session, git over SSH, gh and Claude
+/// logged in inside a pane, and this herdsman's version.
+fn healthy(f: Fake) -> Fake {
+    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), HERDR_STATUS)
+        .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
+        .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(
+            "herdr --machine bazzite workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w5:p1"}}}"#,
+        )
+        .reply("herdr --machine bazzite pane read w5:p1", "gh:0\nclaude:0\nhs:done\n")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            &format!("herdsman {}\n", herdsman::VERSION),
+        )
+}
+
 fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
@@ -76,7 +95,7 @@ fn placed(c: &herdsman::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&st
 fn tags_are_detected_cached_and_refreshed_hourly() {
     let c = ctx(&tmpdir("hosts-tags"), &config(""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let r = fake(1.0, 1.0)
+    let r = healthy(fake(1.0, 1.0))
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\nxcode\n")
         .reply(
             &format!("{SSH}'sh' '-c' 'uname -s"),
@@ -171,10 +190,8 @@ fn admission_runs_per_host() {
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
-#[test]
-fn a_remote_lane_runs_every_command_on_its_host() {
-    let c = setup("hosts-spawn", "", true, 0);
-    // The impl role has an account: its token must never reach bazzite (Q3).
+/// The impl role gets account A (its token returned); its profiles synced.
+fn with_account(c: &herdsman::Ctx) -> &'static str {
     let token = concat!("sk", "-ant-oat01-AAAA-secret");
     let env = c.state.parent().unwrap().join("tokens.env");
     std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={token}\n")).unwrap();
@@ -187,14 +204,14 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         env.display()
     );
     std::fs::write(&c.config, toml).unwrap();
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    run(
-        &c,
-        &Fake::default(),
-        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
-    );
+    assert_eq!(run(c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    token
+}
+
+/// A fresh lane on bazzite: its clone, worktree, pane and agent start all answer.
+fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-    let r = fake(0.1, 0.1)
+    fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'gh' 'repo' 'clone' 'jirathip-dev/sendmeter'"), "")
         .reply(&format!("{SSH}'git' '-C'"), "")
@@ -206,7 +223,20 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         )
         .reply("herdr --machine bazzite pane run w9:p1 export", "{}")
         .reply("herdr --machine bazzite agent start sendmeter-impl-12", "{}")
-        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}")
+}
+
+#[test]
+fn a_remote_lane_runs_every_command_on_its_host() {
+    let c = setup("hosts-spawn", "", true, 0);
+    // The impl role has an account: its token must never reach bazzite (Q3).
+    let token = with_account(&c);
+    run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    let r = remote_fake();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let calls = r.calls.borrow();
@@ -312,14 +342,14 @@ fn an_offline_host_never_pages_and_shows_grey() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    let g = &page[page.find("<span class=gn>bazzite</span>").expect("a bazzite group")..];
-    let g = &g[..g.find("</details>").unwrap()];
-    assert!(g.contains("<b class=m>offline · last seen 33m</b>"), "{g}");
-    assert!(
-        g.split("data-t=").skip(1).all(|t| t.starts_with('m')),
-        "all grey, no gauges: {g}"
-    );
-    assert!(page.contains("<span class=gn>mini</span>"));
+    let g = &page[page
+        .find("<article class=hcd data-h=\"bazzite\"")
+        .expect("a bazzite card")..];
+    let g = &g[..g.find("</article>").unwrap()];
+    assert!(g.contains("<span class=\"hw m\">offline · last seen 33m</span>"), "{g}");
+    assert!(g.split("data-t=").skip(1).all(|t| t.starts_with('m')), "all grey: {g}");
+    let mini = page.find("data-h=\"mini\"").expect("a mini card");
+    assert!(mini < page.find("data-h=\"bazzite\"").unwrap(), "main first");
 }
 
 #[test]
@@ -343,7 +373,10 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    assert!(page.contains("<b class=m>off · draining 1 lane</b>"), "draining shown");
+    assert!(
+        page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
+        "draining shown"
+    );
     // Every host off: nothing new starts.
     let text = std::fs::read_to_string(&c.config)
         .unwrap()
@@ -379,7 +412,7 @@ fn cli_and_board_toggles_both_log() {
         || String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     let page = get();
     assert!(
-        page.contains("<b class=m>off · not used for lanes</b>")
+        page.contains("<span class=\"hw m\">off · not used for lanes</span>")
             && page.contains("name=to value=on><button>on</button>")
     );
     let i = page.find("name=mtime value=").unwrap() + 17;
@@ -423,4 +456,435 @@ fn lane_cards_and_the_herd_name_the_host() {
     let herd = String::from_utf8_lossy(&s.respond(&format!("GET /herd.json HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW))
         .into_owned();
     assert!(herd.contains("\"host\":\"bazzite\""), "{herd}");
+}
+
+/// #235: bazzite's health rows with every check passing but the one `bad` prefix, which fails.
+fn health_with(c: &herdsman::Ctx, bad: &str) -> Vec<String> {
+    let cfg = Config::load(&c.config).unwrap();
+    let r = healthy(fake(0.1, 0.1)).once(bad, 1, "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.0\n");
+    let on = herdsman::hosts::On::new(&r, Some("bazzite"));
+    herdsman::hosts::health(c, &cfg, &on, &["docker".into()], "/home/me")
+}
+
+#[test]
+fn each_health_check_says_what_failed_and_how_to_fix_it() {
+    let c = setup("hosts-health", "", true, 0);
+    assert!(health_with(&c, "nothing").is_empty(), "all ✓");
+    let cases = [
+        (format!("{SSH}'sh' '-c' 'PATH="), "✗ herdr — server none, client ? → herdr update on the host"),
+        (format!("{SSH}'sh' '-c' 'p=$(pgrep"), "✗ herdr session — the server runs outside the login session (keychain locked) → restart the herdr server from its launchd job: `launchctl kickstart -k gui/<uid>/<label>`"),
+        (format!("{SSH}'git' 'ls-remote'"), "✗ git sendmeter — ls-remote https://github.com/jirathip-dev/sendmeter.git → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
+        ("herdr --machine bazzite workspace create".into(), "✗ gh — not logged in inside a herdr pane → gh auth login"),
+        (format!("{SSH}'/opt/herdsman/bin/herdsman'"), "! herdsman — missing there, herdsman 0.1.0"),
+    ];
+    for (bad, want) in cases {
+        let rows = health_with(&c, &bad);
+        assert!(rows[0].starts_with(want), "{bad}: {rows:?}");
+    }
+    // A server older than its client (a herdr update without a restart).
+    let r = healthy(fake(0.1, 0.1)).once(
+        &format!("{SSH}'sh' '-c' 'PATH="),
+        0,
+        "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.0\n",
+    );
+    let cfg = Config::load(&c.config).unwrap();
+    let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
+    assert!(rows[0].starts_with("✗ herdr — server 0.9.0, client 0.9.5"), "{rows:?}");
+    // Logged out of Claude only (the pane's screen).
+    let r = healthy(fake(0.1, 0.1)).once("herdr --machine bazzite pane read", 0, "gh:0\nclaude:1\nhs:done\n");
+    let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("✗ claude — not logged in inside a herdr pane → claude auth login"));
+    assert!(
+        r.called("herdr --machine bazzite workspace close w5"),
+        "the throwaway workspace is closed"
+    );
+    // doctor lists each failure under the host, and exits 1 on a ✗.
+    let r = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .once(&format!("{SSH}'git' 'ls-remote'"), 128, "");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("\n✗ host bazzite git sendmeter — ls-remote"), "{out}");
+    let (_, out) = run(&c, &healthy(r), &["doctor"]);
+    assert!(
+        out.contains("\n✓ host bazzite — herdr, session, git, gh, claude, herdsman 0.1.0 ("),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
+    let c = setup("hosts-sick", "", true, 0);
+    let mut all = cached(&c);
+    all.get_mut("bazzite").unwrap().health = vec!["✗ gh — not logged in inside a herdr pane → gh auth login".into()];
+    std::fs::write(
+        c.state.with_file_name("hosts.json"),
+        serde_json::to_string(&all).unwrap(),
+    )
+    .unwrap();
+    let r = fake(2.0, 0.1);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("mini"),
+        "idle but unhealthy bazzite is skipped"
+    );
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "--needs", "docker"]);
+    let e = placed(&c, &r, 12, "impl", None).unwrap_err();
+    assert_eq!(
+        e,
+        "NO_HOST: bazzite: unhealthy: ✗ gh — not logged in inside a herdr pane → gh auth login"
+    );
+    let cfg = Config::load(&c.config).unwrap();
+    let s = &cached(&c)["bazzite"];
+    let (tone, words) = herdsman::hosts::shown(cfg.hosts["bazzite"].enabled, s, 0, NOW);
+    assert_eq!(
+        (tone, words.as_str()),
+        (
+            "r",
+            "unhealthy · gh — not logged in inside a herdr pane → gh auth login"
+        )
+    );
+}
+
+#[test]
+fn an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once() {
+    let extra =
+        "\n[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/herdsman\"\nintegration = \"staging\"\n";
+    let c = setup("hosts-update", "", true, 0);
+    std::fs::write(&c.config, config("") + extra).unwrap();
+    let old = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
+        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
+        .once(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            0,
+            "herdsman 0.1.0 (0ld)\n",
+        );
+    let (code, out) = run(&c, &old, &["hosts", "refresh"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("bazzite · up · herdsman — herdsman 0.1.0 (0ld) there"),
+        "amber, not red: {out}"
+    );
+    let sha = env!("HERDSMAN_SHA");
+    let script = format!(
+        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path . --locked --root '\\''/opt/herdsman'\\'' --force && '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync'"
+    );
+    assert!(old.called(&script), "{:#?}", old.calls.borrow());
+    let ev = read(&c.state).unwrap();
+    let up = ev.iter().find(|e| e.kind == "host-update").unwrap();
+    assert_eq!((up.str("host"), up.str("sha")), (Some("bazzite"), Some(sha)));
+    assert!(cached(&c)["bazzite"].health[0].starts_with("! herdsman"));
+    // Still old on the next probe: no second build of the same sha.
+    let again = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
+        .once(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            0,
+            "herdsman 0.1.0 (0ld)\n",
+        );
+    run(&c, &again, &["hosts", "refresh"]);
+    assert!(!again.called(&format!("{SSH}'sh' '-c' 'nohup")));
+    // The build landed: the version reads back the same and the warning clears.
+    run(
+        &c,
+        &healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n"),
+        &["hosts", "refresh"],
+    );
+    assert!(cached(&c)["bazzite"].health.is_empty());
+}
+
+/// #236: a dry run places the lane first and prints the argvs exactly as a real spawn sends them: bazzite's home in
+/// every path, `--machine`, and no account token.
+#[test]
+fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
+    let c = setup("hosts-dry", "", true, 0);
+    let token = with_account(&c);
+    let text = std::fs::read_to_string(&c.config).unwrap().replace(
+        "local = \"/tmp/does-not-matter/sendmeter\"",
+        "local = \"~/src/sendmeter\"\nenv = { TOOLS = \"~/bin\" }",
+    );
+    std::fs::write(&c.config, text).unwrap();
+    let r = remote_fake();
+    let cfg = Config::load(&c.config).unwrap();
+    herdsman::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
+    let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite", "--json"];
+    let (code, dry) = run(&c, &r, &[&args[..], &["--dry-run"]].concat());
+    assert_eq!(code, 0, "{dry}");
+    let pj: serde_json::Value = serde_json::from_str(&dry).unwrap();
+    let mine = herdsman::config::home().display().to_string();
+    let cmds: Vec<String> = pj["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let w: Vec<&str> = c.as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+            w.join(" ").replace("<pane>", "w9:p1")
+        })
+        .collect();
+    let all = cmds.join("\n");
+    assert!(!all.contains("OAUTH_TOKEN") && !all.contains(token), "{all}");
+    assert!(pj["account"].is_null() && pj["machine"] == "bazzite", "{pj}");
+    assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
+    assert!(all.contains("--cwd /home/me/src/sendmeter --branch issue-12"), "{all}");
+    assert!(
+        all.contains("TOOLS='/home/me/bin'") && all.contains(&format!("Read {WT}/.brief.md")),
+        "{all}"
+    );
+    assert!(
+        cmds[0].starts_with(&format!("{SSH}'git' '-C' '/home/me/src/sendmeter' 'fetch'")),
+        "{all}"
+    );
+    assert!(
+        cmds[1..].iter().all(|c| c.starts_with("herdr --machine bazzite ")),
+        "{all}"
+    );
+    // Golden: the real spawn sends exactly these argvs.
+    let n = r.calls.borrow().len();
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out}");
+    let sent = r.calls.borrow()[n..].to_vec();
+    for c in &cmds {
+        assert!(sent.contains(c), "planned but not sent: {c}\nsent: {sent:#?}");
+    }
+}
+
+/// #236: a design lane runs on the main host whatever the issue's history or the load says; another host is refused.
+/// A role pin (`host = "<name>"` or `"main"`) beats least-busy placement.
+#[test]
+fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
+    let c = setup("hosts-design", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let r = fake(1.0, 0.1);
+    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"), "history");
+    assert_eq!(placed(&c, &r, 12, "design", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 13, "design", Some("mini")).as_deref(), Ok("mini"));
+    let main_only = "REFUSED DESIGN_MAIN_ONLY: host bazzite: design lanes run on the main host only";
+    assert_eq!(placed(&c, &r, 13, "design", Some("bazzite")).unwrap_err(), main_only);
+    let text = std::fs::read_to_string(&c.config).unwrap().replace(
+        "profile = \"fleet-rev\"",
+        "profile = \"fleet-rev\"\nhost = \"bazzite\"\n\n[fleet.sendmeter.role.design]\nharness = \"claude\"\nhost = \"bazzite\"",
+    );
+    std::fs::write(&c.config, &text).unwrap();
+    assert_eq!(
+        placed(&c, &fake(0.1, 2.0), 13, "rev", None).as_deref(),
+        Ok("bazzite"),
+        "pinned"
+    );
+    assert_eq!(
+        placed(&c, &r, 13, "design", None).unwrap_err(),
+        main_only,
+        "a pin can't move design"
+    );
+    let (code, out) = run(
+        &c,
+        &r,
+        &["spawn", "sendmeter", "13", "design", "--host", "bazzite", "--dry-run"],
+    );
+    assert_eq!((code, out.trim()), (3, main_only));
+    let main = text.replace("host = \"bazzite\"", "host = \"main\"");
+    std::fs::write(&c.config, main).unwrap();
+    assert_eq!(placed(&c, &fake(2.0, 0.1), 13, "rev", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 13, "design", None).as_deref(), Ok("mini"));
+}
+
+/// #236: an agent that fails to start on another host leaves no half-made workspace there.
+#[test]
+fn a_failed_remote_start_closes_its_workspace() {
+    let c = setup("hosts-fail", "", true, 0);
+    with_account(&c);
+    let r = remote_fake()
+        .once_err("herdr --machine bazzite agent start", 1, r#"{"error":{"code":"boom"}}"#)
+        .reply("herdr --machine bazzite workspace close w9", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(r.called("herdr --machine bazzite workspace close w9"));
+    assert!(!r.called("herdr --machine bazzite pane close"));
+}
+
+/// #249: a review on the remote host: its verdict.md is read over ssh and recorded, its pane closed with `--machine`
+/// (one a worktree remove already closed counts), and the board names the host.
+#[test]
+fn a_remote_review_is_read_over_ssh_and_recorded() {
+    let c = setup("hosts-verdict", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let rev = "/home/me/.herdr/worktrees/sendmeter/rev-12-r1";
+    let head = "a".repeat(40);
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "harness": "claude", "pane": "w8:p1",
+                   "workspace": "w8", "worktree": rev, "branch": "rev-12-r1", "sha": head, "host": "bazzite",
+                   "machine": "bazzite"});
+    ev(&c, NOW - 600, 12, "spawn", d);
+    let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+                    "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]});
+    let r = fake(1.0, 1.0)
+        .reply("gh pr view issue-12", &pr.to_string())
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(
+            &format!("{SSH}'cat' '{rev}/verdict.md'"),
+            "FAIL\n- blocking [code] a.rs:1\n",
+        )
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{head} 20"))
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{rev}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C' '{rev}' 'status'"), "")
+        .reply("herdr --machine bazzite worktree remove --workspace w8", "{}")
+        .once_err(
+            "herdr --machine bazzite pane close w8:p1",
+            1,
+            r#"{"error":{"code":"pane_not_found"}}"#,
+        );
+    let cfg = Config::load(&c.config).unwrap();
+    let w = herdsman::waiting::scan(&c, &cfg, &r, &read(&c.state).unwrap(), &[], true);
+    let w = w.iter().find(|(s, _)| s.issue == 12).unwrap();
+    assert_eq!(w.1.what, "review done on bazzite · recording within 1 min");
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    let all = read(&c.state).unwrap();
+    let v = all.iter().find(|e| e.kind == "verdict").expect(&out);
+    assert_eq!((v.str("verdict"), v.str("sha")), (Some("FAIL"), Some(head.as_str())));
+    assert!(r.called("herdr --machine bazzite pane close w8:p1"));
+    assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
+}
+
+/// #275: a remote lane is told the main host (`HERDSMAN_MAIN`, its path never rehomed) and an answer to it lands
+/// with `--machine`: the prompt, then Enter, then the wait that confirms it.
+#[test]
+fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
+    let c = setup("hosts-answer", "", true, 0);
+    with_account(&c);
+    let r = remote_fake();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 0, "{out}");
+    let export = "herdr --machine bazzite pane run w9:p1 export";
+    let calls = r.calls.borrow().clone();
+    let lane = calls.iter().find(|c| c.starts_with(export)).unwrap();
+    assert!(
+        lane.contains(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
+        "{lane}"
+    );
+    let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
+    ev(&c, NOW, 12, "needs-decision", d);
+    let r = Fake::default()
+        .reply(
+            "herdr --machine bazzite agent prompt sendmeter-impl-12 DECISION q1: a",
+            "{}",
+        )
+        .reply("herdr --machine bazzite pane send-keys w9:p1 Enter", "{}")
+        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "sendmeter q1: a -> sendmeter-impl-12\n"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(r.calls.borrow().len(), 3, "{:?}", r.calls.borrow());
+}
+
+/// #275: `agent_name_not_found` on another host: one more start when no harness came up, none when one did (it is
+/// named instead); every call on that host, and no workspace closed.
+#[test]
+fn a_lost_agent_name_retries_once_without_a_double_start() {
+    let lost =
+        r#"{"error":{"code":"agent_name_not_found","message":"named agent no longer owns the target terminal"}}"#;
+    let start = "herdr --machine bazzite agent start";
+    for up in [false, true] {
+        let c = setup("hosts-lost", "", true, 0);
+        with_account(&c);
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": if up { "claude" } else { "" }}}});
+        let mut r = remote_fake()
+            .once_err(start, 1, lost)
+            .reply("herdr --machine bazzite agent rename w9:p1 sendmeter-impl-12", "{}");
+        if up {
+            r = r.reply("herdr --machine bazzite pane get w9:p1", &pane.to_string());
+        }
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        assert_eq!(r.count(start), if up { 1 } else { 2 });
+        assert_eq!(r.called("herdr --machine bazzite agent rename"), up);
+        assert!(!r.called("herdr --machine bazzite workspace close"));
+        let calls = r.calls.borrow();
+        assert!(calls
+            .iter()
+            .filter(|c| c.starts_with("herdr "))
+            .all(|c| c.starts_with("herdr --machine bazzite ")));
+    }
+}
+
+/// #275: asks a lane logged on its own host before forwarding are imported into the main log once, under a new id.
+#[test]
+fn asks_stranded_on_a_remote_host_are_imported_once() {
+    let c = setup("hosts-import", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let d = json!({"id": "q1", "question": "Old?", "options": [], "agent": "x"});
+    ev(&c, NOW - 800, 9, "needs-decision", d);
+    let stranded = json!({"ts": NOW - 600, "fleet": "sendmeter", "issue": 12, "type": "needs-decision",
+                          "id": "q59", "question": "Which way?", "options": ["a"], "agent": null});
+    let log = "/home/me/.local/state/herdsman/events.jsonl";
+    let r = fake(1.0, 1.0).reply(&format!("{SSH}'cat' '{log}'"), &format!("{stranded}\n"));
+    for _ in 0..2 {
+        assert_eq!(run(&c, &r, &["check"]).0, 0);
+    }
+    let all = read(&c.state).unwrap();
+    let asks: Vec<_> = all
+        .iter()
+        .filter(|e| e.kind == "needs-decision" && e.issue == Some(12))
+        .collect();
+    assert_eq!(asks.len(), 1, "imported once");
+    let a = asks[0];
+    assert_eq!(
+        (a.str("id"), a.str("from"), a.str("agent"), a.ts),
+        (Some("q2"), Some("bazzite:q59"), Some("sendmeter-impl-12"), NOW - 600)
+    );
+    let (_, out) = run(&c, &r, &["asks", "sendmeter"]);
+    assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
+}
+
+/// #275 (conductor): `agent_name_not_found` also hits the main host under load: the same retry or naming, and no
+/// pane closed.
+#[test]
+fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
+    let lost = r#"{"error":{"code":"agent_name_not_found"}}"#;
+    let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
+    for up in [false, true] {
+        let c = setup("hosts-lost-main", "", true, 0);
+        with_account(&c);
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude"}}});
+        let mut r = fake(0.1, 0.1)
+            .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+            .reply("git -C", "")
+            .reply("herdr worktree create", ws)
+            .reply(
+                "herdr pane list --workspace w9",
+                r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+            )
+            .reply("herdr pane run w9:p1 export", "{}")
+            .once_err("herdr agent start", 1, lost)
+            .reply("herdr agent start sendmeter-impl-12", "{}")
+            .reply("herdr agent wait sendmeter-impl-12", "{}")
+            .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+        if up {
+            r = r.reply("herdr pane get w9:p1", &pane.to_string());
+        }
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "mini"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        assert_eq!(r.count("herdr agent start"), if up { 1 } else { 2 });
+        assert_eq!(r.called("herdr agent rename"), up);
+        assert!(!r.called("herdr pane close") && !r.called("herdr --machine"));
+        let spawned = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.kind == "spawn")
+            .unwrap();
+        assert_eq!(
+            (spawned.str("host"), spawned.str("pane")),
+            (Some("mini"), Some("w9:p1"))
+        );
+    }
 }

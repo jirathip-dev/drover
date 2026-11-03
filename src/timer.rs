@@ -309,7 +309,11 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
 
 /// herdr's (client, server) versions, and whether the server is older (`herdr status`).
 pub fn herdr_versions(r: &dyn Runner) -> Option<(String, String, bool)> {
-    let status = herdr::status(r).ok()?;
+    versions(&herdr::status(r).ok()?)
+}
+
+/// `herdr status` text's (client, server) versions, and whether the server is older.
+pub fn versions(status: &str) -> Option<(String, String, bool)> {
     let version = |l: &str| l.trim().strip_prefix("version: ").map(String::from);
     let mut v = status.lines().filter_map(version);
     let (client, server) = (v.next()?, v.next()?);
@@ -352,22 +356,15 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = if board.is_some() { "g" } else { "r" };
     let d = board.unwrap_or(format!("down on {addr}"));
     let mut rows = vec![row("board", t, d, "herdsman setup")];
+    // #237: each own job against this build, folded into its step's row: red unless loaded.
+    let drift = drift(ctx, cfg, r);
+    let job = |i: usize, t, d: String| match drift[i].1 {
+        "loaded" => (t, d),
+        state => ("r", format!("{d} · job {state}")),
+    };
     let (t, d) = tick_row(ctx, &events);
+    let (t, d) = job(0, t, d);
     rows.push(row("tick", t, d, FIX));
-    // #237: the fast step's stamp, red after 3× its interval; then each own job against this build.
-    let fast = std::fs::read_to_string(ctx.state.with_file_name("drive-fast.at"));
-    let fast = fast.ok().and_then(|s| s.trim().parse::<u64>().ok());
-    let late = fast.is_none_or(|t| ctx.now.saturating_sub(t) > 3 * cfg.limits.fast_secs);
-    let (t, d) = (["g", "r"][usize::from(late)], format!("ran {}", ago(ctx.now, fast)));
-    rows.push(row("fast step", t, d, FIX));
-    for (label, state) in drift(ctx, cfg, r) {
-        rows.push(row(
-            label,
-            ["r", "g"][usize::from(state == "loaded")],
-            state.into(),
-            FIX,
-        ));
-    }
     for (name, f) in &cfg.fleet {
         let item = format!("drive {name}");
         let last = drive::last_pass(ctx, name);
@@ -380,6 +377,16 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
             row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
+    // #246: how long the last fast step took and when it ran.
+    let (at, secs) = drive::fast_step(ctx).unzip();
+    let took = secs
+        .flatten()
+        .map_or(String::new(), |s| format!("fast step {s:.1} s · "));
+    // #237: red after 3× its interval.
+    let late = at.is_none_or(|t| ctx.now.saturating_sub(t) > 3 * cfg.limits.fast_secs);
+    let t = if late { "r" } else { tone(ctx.now, at) };
+    let (t, d) = job(1, t, format!("{took}ran {}", ago(ctx.now, at)));
+    rows.push(row("fast step", t, d, FIX));
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

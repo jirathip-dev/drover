@@ -16,7 +16,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "herdsman",
-    version,
+    version = crate::VERSION,
     about = "State, gates and harness toggle over herdr",
     disable_help_subcommand = true
 )]
@@ -287,6 +287,12 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
+    /// Claude Code status line: records the lane account's 5h/7d limits (reads status JSON on stdin)
+    #[command(hide = true)]
+    Statusline,
+    /// #275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host
+    #[command(hide = true)]
+    LaneEvent { kind: String, data: String },
 }
 
 /// A read over one fleet or all: `[FLEET] [--json]`.
@@ -443,19 +449,37 @@ pub fn usage_doc() -> String {
 
 /// Entry point used by main and tests. Returns the process exit code.
 pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read) -> i32 {
-    let cli = match Cli::try_parse_from(args) {
+    let cli = match Cli::try_parse_from(&args) {
         Ok(c) => c,
         Err(e) => {
             let _ = e.print();
             return if e.use_stderr() { 2 } else { 0 };
         }
     };
-    if !matches!(cli.cmd, Cmd::Hook { .. } | Cmd::Migrate | Cmd::Help { .. }) {
+    if !matches!(
+        cli.cmd,
+        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate | Cmd::Help { .. }
+    ) {
         for h in &ctx.hints {
             eprintln!("{h}");
         }
     }
-    match dispatch(cli.cmd, ctx, r, out, stdin) {
+    let lane_write = matches!(cli.cmd, Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. });
+    let mut sent: Vec<String> = args.into_iter().skip(1).collect();
+    for i in 1..sent.len() {
+        if sent[i - 1] == "--file" {
+            sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
+        }
+    }
+    let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
+        Some(o) => o.map(|o| {
+            let _ = write!(out, "{}", o.stdout);
+            eprint!("{}", o.stderr);
+            o.code
+        }),
+        None => dispatch(cli.cmd, ctx, r, out, stdin),
+    };
+    match res {
         Ok(code) => code,
         Err(e) => {
             if let Some(rf) = e.downcast_ref::<gate::Refusal>() {
@@ -467,6 +491,20 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             }
         }
     }
+}
+
+/// #275: a lane on another host has `HERDSMAN_MAIN` (`<main host's ssh name>:<its herdsman>`): its `args` run on the
+/// main host over ssh, so the main log is the only one written and only the main host pushes.
+fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
+    let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
+    let main = std::env::var("HERDSMAN_MAIN").ok()?;
+    let (host, exe) = main.split_once(':')?;
+    if ctx.state.exists() {
+        let s = ctx.state.display();
+        eprintln!("herdsman: warning: {s} exists on a lane's host; only the main host's log counts");
+    }
+    let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
+    Some(crate::hosts::On::new(r, Some(host)).run("env", &a))
 }
 
 /// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
@@ -492,6 +530,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             role,
             git_pre_push: false,
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
+        Cmd::Statusline => {
+            let mut buf = String::new();
+            let _ = stdin.read_to_string(&mut buf);
+            let env = |k: &str| std::env::var(k).unwrap_or_default();
+            crate::usage::statusline(ctx, &env("HERDSMAN_ACCOUNT"), &env("HERDSMAN_LANE"), &buf, out);
+        }
+        Cmd::LaneEvent { kind, data } => lane_event(ctx, r, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
             let events = read(&ctx.state)?;
             let all = fold(&events);
@@ -922,7 +967,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
-            lane_event(ctx, "hook-denied", json!({"rule": reason}));
+            lane_event(ctx, r, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
     } else if let Some(dir) = hook::push_dir(&input) {
@@ -938,11 +983,14 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
         return;
     };
     eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
-    lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
+    lane_event(ctx, r, "coauthor-trailer", json!({"line": trailer}));
 }
 
 /// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
-fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
+fn lane_event(ctx: &Ctx, r: &dyn Runner, kind: &str, mut d: serde_json::Value) {
+    if forward(ctx, r, &runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
+        return;
+    }
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let mut it = lane.split(':');
     let (fleet, issue) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
@@ -1000,7 +1048,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let diff = runner::ok(r, "git", &args).unwrap_or_default();
         let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
-            lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
+            lane_event(ctx, r, "hook-denied", json!({"rule": d.reason()}));
             writeln!(out, "herdsman: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
             return Ok(1);
         }

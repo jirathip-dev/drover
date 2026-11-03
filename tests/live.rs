@@ -73,7 +73,7 @@ fn live_pushes_one_frag_per_changed_section() {
         "a frag within 1.5 s: {got}"
     );
     got += &drain(&mut s, 1_200);
-    let frags: Vec<&str> = got.lines().filter(|l| l.starts_with("data: ")).collect();
+    let frags: Vec<&str> = got.lines().filter(|l| l.starts_with("data: {\"html")).collect();
     assert_eq!(got.matches("event: frag").count(), 1, "{got}");
     let v: serde_json::Value = serde_json::from_str(&frags[0][6..]).unwrap();
     assert_eq!(v["id"], "events", "{v}");
@@ -528,6 +528,101 @@ fn live_board_fits_390px() {
         );
         assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
     }
+}
+
+/// #259: `/live` from `Last-Event-ID` / `?since=`: the events after it, once each, as `ev` with its seq.
+fn reconnect(addr: std::net::SocketAddr, since: &str) -> String {
+    let mut s = TcpStream::connect(addr).unwrap();
+    s.write_all(format!("GET /live{since} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+        .unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    drain(&mut s, 300)
+}
+
+#[test]
+fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
+    let (c, addr) = live_server("replay");
+    let mut s = subscribe(addr, &addr.to_string());
+    drain(&mut s, 1_500);
+    append(&c.state, &Event::new(T + 1, "sendmeter", Some(7), "merged", json!({}))).unwrap();
+    let got = drain(&mut s, 1_500);
+    assert!(
+        got.contains("id: 2\nevent: ev\ndata: {\"k\":\"merged\",\"seq\":2,\"ts\":1000001}\n\n"),
+        "{got}"
+    );
+    assert!(got.contains("id: 2\nevent: frag\n"), "a frag carries the seq: {got}");
+    // Gate 2: the phone drops at seq 2; three events land; it comes back with Last-Event-ID: 2.
+    drop(s);
+    for i in 0..3 {
+        append(
+            &c.state,
+            &Event::new(
+                T + 10 + i,
+                "sendmeter",
+                None,
+                "note",
+                json!({"reason": format!("missed-{i}")}),
+            ),
+        )
+        .unwrap();
+    }
+    let mut s = TcpStream::connect(addr).unwrap();
+    s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\nLast-Event-ID: 2\r\n\r\n").as_bytes())
+        .unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+    let back = drain(&mut s, 2_500);
+    let ids: Vec<&str> = back.lines().filter(|l| l.starts_with("data: {\"k\"")).collect();
+    assert_eq!(
+        ids.len(),
+        3,
+        "each missed event once, the live tick resends none: {back}"
+    );
+    for n in 3..=5 {
+        assert_eq!(back.matches(&format!("\"seq\":{n},")).count(), 1, "{back}");
+    }
+    assert_eq!(reconnect(addr, "?since=4").matches("event: ev").count(), 1);
+    assert!(!reconnect(addr, "?since=5").contains("event:"));
+    // Every missed Events row is on the tab once.
+    let tab = String::from_utf8_lossy(
+        &Server::new(&c, &Fake::default(), None)
+            .respond(&format!("GET /frag?id=events HTTP/1.1\r\nHost: {addr}\r\n\r\n"), T + 20),
+    )
+    .into_owned();
+    for i in 0..3 {
+        assert_eq!(tab.matches(&format!(">note · missed-{i}<")).count(), 1, "{tab}");
+    }
+    // Past the 500-event bound: one `refresh`, no replay.
+    for i in 0..501 {
+        append(&c.state, &Event::new(T + 30 + i, "sendmeter", None, "note", json!({}))).unwrap();
+    }
+    let far = reconnect(addr, "?since=5");
+    assert!(
+        far.contains("id: 506\nevent: refresh\ndata: 506\n\n") && !far.contains("event: ev"),
+        "{far}"
+    );
+    assert!(reconnect(addr, "?since=6").matches("event: ev").count() == 500);
+}
+
+/// #259: the board plays a moment once per seq, never for a replayed event older than 2 minutes.
+#[test]
+fn the_board_dedupes_by_seq_and_skips_stale_moments() {
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        return eprintln!("skipping: no node here");
+    }
+    let src = include_str!("../assets/serve.js");
+    let part = &src[src.find("  const at = e").unwrap()..src.find("  es.addEventListener('refresh'").unwrap()];
+    let js = format!(
+        "let seq = 0; const played = [], h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }};\n\
+         const moment = k => played.push(k);\n{part}\n\
+         const now = Math.floor(Date.now() / 1e3), ev = (s, ts, k) => h.ev({{ lastEventId: String(s), data: JSON.stringify({{ seq: s, ts, k }}) }});\n\
+         ev(1, now, 'merged'); ev(1, now, 'merged'); ev(2, now - 300, 'fail'); ev(3, now, null); ev(2, now, 'fail'); ev(4, now, 'needs-you');\n\
+         console.log(played.join(','), seq);"
+    );
+    let d = tmpdir("dedupe-js");
+    std::fs::write(d.join("t.js"), js).unwrap();
+    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "merged,needs-you 4");
 }
 
 /// Pane text (the question, its options, the tail) only reaches a paired device: GET /,

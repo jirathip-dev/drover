@@ -17,11 +17,12 @@
   };
   const canned = async (status, text, then) => { window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status })) : F(u, o); then(); await wait(); };
   const mid = what => early.push(...measure().outliers.map(o => `${what}: ${o}`));
-  // #141 gate 2: Host groups go red, amber, green down the tab (#157: then grey hosts, a group each past the 4); one tab
-  // is active, its label on the accent fill.
+  // #234 gate 2: the Host groups in their fixed order (HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS), main's card first;
+  // one tab is active, its label on the accent fill.
   const ranked = () => {
-    const t = [...$$('#host>.grp')].map(g => 'ragm'.indexOf(g.dataset.t));
-    if (t.length < 4 || t.length !== 4 + $$('#host>.grp.h').length || t.some((x, i) => x < 0 || (i && x < t[i - 1]))) early.push(`Host groups not ranked by status: ${t}`);
+    const t = [...$$('#host>.grp .gn')].map(g => g.textContent).join(' ');
+    if (!/^HOSTS FLEET DISK SERVICES (FLEETS )?ALERTS$/.test(t)) early.push(`Host groups not in order: ${t}`);
+    if (!$('#host .hcd .tag')?.closest('.hcd').matches(':first-child')) early.push('the main host is not the first card');
     const on = $$('nav a.on'), probe = B.appendChild(Object.assign(document.createElement('i'), { style: 'color:var(--l)' }));
     const accent = getComputedStyle(probe).color;
     probe.remove();
@@ -143,6 +144,15 @@
       mid('clean refused');
       await canned(502, LONG.send, () => $('.reply').requestSubmit());
     },
+    // #260: the same sheet with [full conversation] on (every tool run); `sheet` itself is the default view.
+    'sheet-full': async () => {
+      tab('lanes');
+      open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
+      await wait();
+      $('.fv').click();
+      await wait();
+      if ($('.fv').ariaPressed !== 'true' || !$('.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
+    },
     // #83: the demo's parked lane (no pane, its work on PR #15): the card's parked line, [clean] disabled with its
     // reason in p.st, [stop]/[kill] hidden, and nothing in the sheet in the red (danger) colour.
     'sheet-parked': async () => {
@@ -229,6 +239,16 @@
       // `--screenshot` captures the document's top: the shot drops the needs cards so Alerts is in it (the check keeps them).
       if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
     },
+    // #234 gate 2: the hosts fixture with mini's load/cpu chart open (24 h), read from the export's inline series.
+    'host-chart': async () => {
+      tab('host');
+      const r = $('#host .hcd .rw[data-k=load]');
+      r.closest('.grp').open = true;
+      r.open = true;
+      await chart(r, '24h', null, true);
+      if (!r.querySelector('.hpl polyline.ln') || !$$('#host .spk polyline').length) early.push('host chart: no sparkline or chart line drawn');
+      if (!DBG.get('check')) { $('#needs').hidden = true; r.closest('.hcd').scrollIntoView(); }
+    },
     // #141 gate 2: the busy and healthy fixtures (scripts/host-fixtures.sh), as the tab first shows them.
     'host-ranked': () => {
       tab('host');
@@ -277,6 +297,26 @@
       if (!imp.querySelector('.er .kg.t-r')) early.push('no red glyph under [important]');
       if ([...$$('#events .er')].some(r => /clean/.test(r.textContent) && /alert failed/.test(r.textContent))) early.push('a row holds clean and a failure');
       imp.querySelector('.er').open = true;
+    },
+    // #241: a pick applies in place: no reload, the favicon swaps, terminal strips every sprite, kitchen draws its own.
+    'theme-switch': async () => {
+      tab('queue');
+      window.kept = 1;
+      const pick = n => { thp.value = n; thp.dispatchEvent(new Event('change')); return new Promise(r => setTimeout(r, 800)); };
+      await pick('terminal');
+      if (window.kept !== 1 || document.documentElement.dataset.theme !== 'terminal' || get('theme') !== 'terminal') early.push('the switch to terminal reloaded the page or was not kept');
+      if (!$('link[rel=icon]').href.includes('themes/terminal/icon-')) early.push(`favicon ${$('link[rel=icon]').href}, not terminal's`);
+      if ($$('.rsp, .lsc').length || B.dataset.mode !== 'glyph') early.push('terminal kept sprites or a scene mode');
+      await pick('kitchen');
+      if (!$$('#queue .rsp').length || !$('#hr-impl .chef, #hr-impl [shape-rendering]')) early.push("kitchen: no row sprites, or not the chef's");
+    },
+    // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
+    'moment-still': () => {
+      tab('queue');
+      moment('merged');
+      const o = $('#mo');
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
+      if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
     },
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
@@ -330,7 +370,7 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -344,10 +384,30 @@
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
+    if (['queue', 'lanes', 'host', 'events'].includes(V)) res.outliers.push(...drawn());
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
     B.append(out);
+  }
+  // #241 gate 2: the phone's theme on the tab. Terminal is today's glyph board: no sprite, no load scene, no mode button,
+  // glyph avatars. Others draw a 16 px action sprite for each Queue/Events glyph (its title and label the plain word), a
+  // load scene on each Host group header, and offer [scene] [ascii].
+  function drawn() {
+    const t = document.documentElement.dataset.theme, tb = document.documentElement.dataset.tab, bad = [];
+    const on = s => [...$$(s)].filter(seen);
+    if (!TT) return [`theme ${t} never loaded`];
+    if (t === 'terminal') {
+      if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
+      if (B.dataset.mode !== 'glyph' || on('#mode').length || on('.av .px, .av .asc').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
+      return bad;
+    }
+    if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
+    if (tb === 'events' && !on('#events .kg.rsg>.rsp').length) bad.push('no Events row sprite');
+    if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
+    if (tb === 'lanes' && (!on('#mode').length || TM.join() !== 'scene,ascii')) bad.push(`Lanes modes ${TM}, button shown ${on('#mode').length}`);
+    for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
+    return bad;
   }
   function measure() {
     $$('[inert]').forEach(e => { e.inert = false; });
@@ -536,6 +596,7 @@
     },
   };
   const go = async () => {
+    await themed; // #241: the phone's theme drawn first
     await VIEWS[V]();
     setTimeout(() => {
       if (V === 'herd2') PG.scrollLeft = PG.clientWidth;

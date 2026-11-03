@@ -76,8 +76,20 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
+/// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
+pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
+    let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
+    let rss: std::collections::BTreeMap<&str, &str> = rss.lines().filter_map(|l| l.trim().split_once(' ')).collect();
+    let kb = |pid: &str| rss.get(pid)?.trim().parse::<u64>().ok();
+    let mb = |a: &&Value| {
+        let dir = Path::new(a["cwd"].as_str().unwrap_or("\0"));
+        inside(&ps, dir).iter().filter_map(|p| kb(&p.0)).sum::<u64>() / 1024
+    };
+    agents.iter().map(mb).collect()
+}
+
 /// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live
-/// agent's cwd, `VM (colima)` for a virtual machine, else `other`.
+/// agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
 pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
     let (ps, out) = (cwds(r), stdout(r, "top", &TOP).unwrap_or_default());
     let row = |l: &str| {
@@ -87,8 +99,10 @@ pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
         let lane = agents
             .iter()
             .find(|a| a["cwd"].as_str().is_some_and(|d| cwd.starts_with(d)));
-        let vm = ["other", "VM (colima)"][usize::from(l.contains("Virtua") || l.contains("qemu"))];
-        let owner = lane.map_or(vm.into(), |a| {
+        if l.contains("Virtua") || l.contains("qemu") {
+            return Some(format!("{mem} VM (colima)"));
+        }
+        let owner = lane.map_or("other".into(), |a| {
             format!("lane {}", a["name"].as_str().unwrap_or_default())
         });
         Some(format!("{mem} {} ({owner})", cmd.trim()))
@@ -108,6 +122,8 @@ pub struct Host {
     pub load_per_cpu: Option<f64>,
     /// #168: `vm_stat` free + inactive pages, in GB.
     pub free_mem_gb: Option<f64>,
+    /// #234: the memory size in GB.
+    pub mem_total_gb: Option<f64>,
 }
 
 fn stdout(r: &dyn Runner, prog: &str, args: &[&str]) -> Option<String> {
@@ -162,12 +178,16 @@ pub fn sample(r: &dyn Runner) -> Host {
     let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
     let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| l / n);
+    let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
+    let size = size.map(|b| b / 1_073_741_824.0);
+    let size = size.or_else(|| Some(word(linux("grep", &["MemTotal", "/proc/meminfo"]), 1)? / 1_048_576.0));
     Host {
         pressure,
         swapout,
         swap_median: None,
         load_per_cpu,
         free_mem_gb: mem_gb(&b).or_else(avail),
+        mem_total_gb: size,
     }
 }
 
@@ -189,8 +209,15 @@ pub fn window(state: &Path, h: &mut Host) {
 
 /// #103: free GB on `/` (`df -k`, when readable); a disk row is amber within 25 % of `min_free_gb`, red under it (#141).
 pub fn free_gb(r: &dyn Runner) -> Option<f64> {
+    df(r).map(|d| d.0)
+}
+
+/// #234: free and total GB on `/`.
+pub fn df(r: &dyn Runner) -> Option<(f64, f64)> {
     let s = stdout(r, "df", &["-k", "/"])?;
-    Some(s.lines().nth(1)?.split_whitespace().nth(3)?.parse::<f64>().ok()? / 1_048_576.0)
+    let w: Vec<&str> = s.lines().nth(1)?.split_whitespace().collect();
+    let gb = |i: usize| Some(w.get(i)?.parse::<f64>().ok()? / 1_048_576.0);
+    gb(3).zip(gb(1))
 }
 
 /// Err(reason) when any signal is over its limit.

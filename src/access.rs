@@ -43,7 +43,15 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         .iter()
         .filter(|n| capped_until(cfg, events, n, now).is_none())
         .collect();
-    if let Some(mut w) = free
+    // Headroom: the lowest live 5h/7d use first; an account never read goes last.
+    let used = |n: &String| {
+        let m = usage::reading(ctx, n, || usage::cached(ctx, n));
+        let live = m.map(|m| [m.session, m.week].into_iter().flatten().filter(|w| w.1 > now));
+        live.map_or(f64::INFINITY, |w| w.map(|w| w.0).fold(0.0, f64::max))
+    };
+    if cfg.accounts.pick.as_deref() == Some("headroom") {
+        names.sort_by(|a, b| used(a).total_cmp(&used(b)));
+    } else if let Some(mut w) = free
         .iter()
         .map(|n| week(n).map(|w| (w, (*n).clone())))
         .collect::<Option<Vec<_>>>()
@@ -177,13 +185,9 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
             lanes.len(),
             lanes.join(" ")
         )?;
-        if let Some(m) = usage::meter(ctx, cfg, r, name) {
-            writeln!(
-                out,
-                "{:<8} {}",
-                "",
-                usage::meter_line(r, &m, &cfg.accounts.usage[name], ctx.now)
-            )?;
+        if let Some(m) = usage::reading(ctx, name, || usage::meter(ctx, cfg, r, name)) {
+            let login = cfg.accounts.usage.get(name).map_or("", String::as_str);
+            writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, login, ctx.now))?;
         }
         writeln!(out, "{:<8} {}", "", usage::lane_hours(&events, name, ctx.now))?;
     }

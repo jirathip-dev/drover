@@ -24,13 +24,14 @@ queued → impl → review(n) → fix(n) → ready → merged; plus blocked, nee
 - WORKTREE_DIRTY: spawn: the worktree has unpushed or uncommitted work from no known lane; --supersede
 - MERGED: spawn/adopt: the issue is merged; a merged issue never reopens. NOT_NEEDS_HUMAN: extend/park: the issue is not needs-human (once per episode)
 - SERIAL_BUSY: spawn: a `--serial` impl waits while the fleet's `serial_max` (default 1) other serial issues have a live impl/fix lane or sit at review/ready
-- SERIAL_UNMARKED: merge: the PR touches the fleet's serial_paths but the issue was not queued `--serial`
+- SERIAL_UNMARKED: merge: the PR touches the fleet's serial_paths but the issue was not queued `--serial`. STAGING_WOULD_BREAK / STAGING_MOVED: merge: a `premerge` check fails on the PR merged with current integration (→ fix round, not counted) / integration moved during the checks twice; retried next pass
 - CAP / ALL_CAPPED: spawn: the fleet's optional max_impl / max_rev lane cap is reached (unset = no cap) / every account of the role is capped (names the first reset)
 - PAUSED: spawn: the fleet is paused (`herdsman resume <fleet>`); impl/rev lanes wait, live lanes are untouched
 - BAD_VALUE: set: a value is empty or has a quote/backslash/control char, or the model is not in `models`; ask: an empty question, over 4 options
 - NO_SUCH_ASK / ALREADY_ANSWERED / NO_RECOMMENDATION / OWNER_TOPIC: answer: the fleet has no such ask id, or it was answered already (a `by: default` decision can be changed once); ask: `--kind routine` without `--recommend`, or with an owner word or its plural/inflection (main, prod, secret, token, delete, spend, cost, $, dependency, scope)
 - STALE: serve: fleet.toml changed since the page was rendered; reload and retry
 - NO_SUCH_AGENT / IS_LANE / SECRET_IN_WIP / SNAPSHOT_FAILED / UNSAFE_CLEAN: stop/kill: no such live lane; close: a logged lane (use stop/kill/clean); kill: a secret-looking value in the wip diff, or the wip snapshot failed (index restored, nothing pushed, pane stays); clean --lane: not merged/closed, dirty, unpushed or live
+- DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
 - MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`)
 
 ## Exit codes

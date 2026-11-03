@@ -88,14 +88,13 @@ function scene() {
   return `<svg class=rs viewBox="0 0 390 320" preserveAspectRatio="xMidYMax slice" aria-hidden=true>${s}</svg>`;
 }
 
-// #172 themes (docs/serve.md): the active theme's files at `theme/` (`herdsman serve`; the demo takes `?theme=<built-in>`
-// and `?nopose=<pose>`), farm's next to this script: a pose, glyph or word the theme lacks is farm's.
-const A = document.currentScript.src.replace(/herd\.js$/, ''), TH = DEMO && DBG.get('theme') ? `${A}themes/${DBG.get('theme')}/` : R + 'theme/';
-const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
-let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '';
+// #172/#241 themes (docs/themes.md): the phone's theme (`html[data-theme]`, the `[◐]` picker; the demo also takes `?nopose=<pose>`)
+// from `themes/<name>/`, its theme.json resolved by the server (what it lacks is farm's); a sprite id not in its sprites.svg is farm's.
+let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '', PAL = {};
 const w = k => T.words[k] || k;
-// The theme's pose sprites (Corral's horses, #30's port, in farm) as <use> symbols hp1..hp4, shared with the Lanes
-// avatars: legs rotate by the inherited `--gait`, manes skew by `--mane` (storm), so instances need no per-leaf DOM.
+const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
+// The sprite symbols theme() builds (poses hp1..hp4 for the Herd, actions ha-*, row sprites hr-*, the rail, moments hm-*),
+// next to the scene's gradients.
 const defs = document.createElementNS(NS, 'svg');
 defs.setAttribute('class', 'hdefs');
 defs.innerHTML = '<defs><linearGradient id=hgr gradientUnits=userSpaceOnUse x1=0 y1=250 x2=0 y2=640><stop offset=0 stop-color="#bcc17b"/><stop offset=".5" stop-color="#8e9c58"/><stop offset=1 stop-color="#485e3b"/></linearGradient>' +
@@ -103,33 +102,57 @@ defs.innerHTML = '<defs><linearGradient id=hgr gradientUnits=userSpaceOnUse x1=0
   '<linearGradient id=hwd gradientUnits=userSpaceOnUse x1=0 y1=0 x2=195 y2=500><stop offset=0 stop-color="#ffeeab" stop-opacity=".03"/><stop offset=1 stop-color="#ffeeab" stop-opacity="0"/></linearGradient>' +
   '<linearGradient id=hwn gradientUnits=userSpaceOnUse x1=390 y1=0 x2=195 y2=500><stop offset=0 stop-color="#bbcfe4" stop-opacity=".03"/><stop offset=1 stop-color="#bbcfe4" stop-opacity="0"/></linearGradient>' +
   '<filter id=hmw x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation=6 /></filter></defs>';
-Promise.all([`${A}themes/farm/`, TH].flatMap(d => [got(d + 'sprites.svg'), got(d + 'theme.json', 1)]).concat(got(TH + 'scene.svg'))).then(([fs, fj, ts, tj, sc]) => {
-const svg = t => { const e = document.createElementNS(NS, 'svg'); e.innerHTML = t; return e; }, farm = svg(fs), own = svg(ts);
-if (DEMO && DBG.get('nopose')) delete (tj.poses || {})[DBG.get('nopose')];
-T = Object.fromEntries(Object.keys(T).map(k => [k, Object.assign({}, fj[k], tj[k])]));
-const sprite = (src, id) => id && src.querySelector('#' + CSS.escape(id));
-['working', 'idle', 'done', 'blocked'].forEach((pose, k) => {
-  const g = (sprite(own, (tj.poses || {})[pose]) || sprite(farm, fj.poses[pose])).cloneNode(true), s = document.createElementNS(NS, 'symbol');
-  s.id = 'hp' + (k + 1);
-  s.setAttribute('viewBox', '0 0 132 100');
-  g.removeAttribute('id');
-  s.append(g);
-  s.querySelectorAll('.leg').forEach(l => {
-    const a = l.style.getPropertyValue('--a') || '0deg', sign = /leg-(nf|fh)/.test(l.getAttribute('class')) ? 1 : -1;
-    l.setAttribute('style', `transform-box:fill-box;transform-origin:50% 0;transform:rotate(calc(${a} + ${sign} * var(--gait, 0deg)))`);
+function theme(name) {
+  const d = n => `${R}themes/${n}/`;
+  return Promise.all([got(d('farm') + 'sprites.svg'), got(d('farm') + 'theme.json', 1), got(d(name) + 'sprites.svg'), got(d(name) + 'theme.json', 1), got(d(name) + 'scene.svg')]).then(([fs, fj, ts, tj, sc]) => {
+    if (document.documentElement.dataset.theme !== name) return; // a later pick won
+    const svg = t => { const e = document.createElementNS(NS, 'svg'); e.innerHTML = t; return e; }, farm = svg(fs), own = svg(ts);
+    if (DEMO && DBG.get('nopose')) delete (tj.poses || {})[DBG.get('nopose')];
+    T = Object.assign({}, fj, tj);
+    const sprite = (src, id) => id && src.querySelector('#' + CSS.escape(id));
+    defs.querySelectorAll('symbol').forEach(s => s.remove());
+    // A symbol `id` of sprite `want` (else farm's `alt`): legs rotate by the inherited `--gait`, manes skew by `--mane`
+    // (storm), so instances need no per-leaf DOM.
+    const sym = (id, want, alt) => {
+      const g = (sprite(own, want) || sprite(farm, want) || sprite(farm, alt))?.cloneNode(true), s = document.createElementNS(NS, 'symbol');
+      if (!g) return;
+      s.id = id;
+      s.setAttribute('viewBox', '0 0 132 100');
+      g.removeAttribute('id');
+      s.append(g);
+      s.querySelectorAll('.leg').forEach(l => {
+        const a = l.style.getPropertyValue('--a') || '0deg', sign = /leg-(nf|fh)/.test(l.getAttribute('class')) ? 1 : -1;
+        l.setAttribute('style', `transform-box:fill-box;transform-origin:50% 0;transform:rotate(calc(${a} + ${sign} * var(--gait, 0deg)))`);
+      });
+      s.querySelectorAll('[fill="var(--m)"],[stroke="var(--m)"]').forEach(m => m.setAttribute('style', 'transform-box:fill-box;transform-origin:100% 100%;transform:skewX(var(--mane, 0deg))'));
+      defs.append(s);
+    };
+    ['working', 'idle', 'done', 'blocked'].forEach((p, k) => sym('hp' + (k + 1), (tj.poses || {})[p], fj.poses?.[p]));
+    Object.entries(T.actions || {}).forEach(([a, id]) => { sym('ha-' + a, id, fj.actions?.[a]); if (T.row_sprites) sym('hr-' + a, T.row_sprites[a], fj.actions?.[a]); });
+    sym('hrail', T.rail?.item, fj.rail?.item);
+    sym('hrail-n', T.rail?.needs, fj.rail?.needs);
+    Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
+    Object.keys(PAL).forEach(k => H.style.removeProperty(k));
+    PAL = T.scene.palette || {};
+    Object.entries(PAL).forEach(([k, v]) => H.style.setProperty(k, v));
+    $('#herd-on').setAttribute('aria-label', w('herd') + ' mode');
+    $('.hx').setAttribute('aria-label', `close ${w('herd')} mode`);
+    if (T.icons) $$('link[rel=icon],link[rel=apple-touch-icon]').forEach(l => { l.href = d(name) + T.icons[l.rel === 'icon' ? 'favicon' : '180']; });
+    // The pages are rebuilt with the theme's scene (or farm's ranch); the tabs take its sprites, modes and load scene.
+    SC = sc.replace(/<svg\b/, '<svg class=rs preserveAspectRatio="xMidYMax slice" aria-hidden=true');
+    pages.forEach(p => p.remove());
+    pages.clear();
+    placed = false;
+    draw();
+    ranch();
+    B.classList.add('hz');
+    TT = T;
+    TM = T.modes || ['scene', 'ascii'];
+    mode(B.dataset.mode);
+    rows(document);
+    groups();
   });
-  s.querySelectorAll('[fill="var(--m)"],[stroke="var(--m)"]').forEach(m => m.setAttribute('style', 'transform-box:fill-box;transform-origin:100% 100%;transform:skewX(var(--mane, 0deg))'));
-  defs.append(s);
-});
-Object.entries(T.scene.palette || {}).forEach(([k, v]) => H.style.setProperty(k, v));
-$('#herd-on').setAttribute('aria-label', w('herd') + ' mode');
-$('.hx').setAttribute('aria-label', `close ${w('herd')} mode`);
-// A theme's own scene or no weather: the pages are rebuilt with it (farm's stay as drawn).
-if (sc || T.scene.weather === false) { SC = sc.replace(/<svg\b/, '<svg class=rs preserveAspectRatio="xMidYMax slice" aria-hidden=true'); pages.forEach(p => p.remove()); pages.clear(); placed = false; }
-draw();
-ranch();
-B.classList.add('hz');
-}).catch(() => {});
+}
 
 B.insertAdjacentHTML('beforeend', `<div id=herd hidden><div class=hpages></div><div class=hrain></div><div class=hflash></div>
 <button type=button class=hlt></button><button type=button class=hx aria-label="close herd mode">×</button><p class=hcap></p><div class=hq hidden></div></div>`);
@@ -138,23 +161,24 @@ B.prepend(defs);
 // #58: the header's Herd button is our horse (the default coat), not an emoji.
 $('#herd-on').innerHTML = '<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hp2"/></svg>';
 const pages = new Map();
-const POSE = { working: 1, idle: 2, unknown: 2, parked: 2, done: 3, blocked: 4, dead: 4 };
+// #242: a horse acts by its role while it works (serve.rs `act`), else by its state.
+const ACT = l => ({ done: 'done', blocked: 'blocked', dead: 'blocked' })[l.state] || (l.state === 'working' ? ({ fix: 'fix', update: 'update', rev: 'rev', review: 'rev' })[l.role] || 'impl' : 'idle');
 const BANDS = [['working', ['working']], ['idle', ['idle', 'unknown', 'parked']], ['done', ['done']], ['blocked/dead', ['blocked', 'dead']]];
 let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
 function horse(l, k) {
-  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(l.coat)}"><use href="#hp${POSE[l.state] || 2}"/></svg>` +
+  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(l.coat)}"><use href="#ha-${ACT(l)}"/></svg>` +
     `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(l.shown)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
 }
-const queued = q => `<button type=button class=hqh data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hp2"/></svg>` +
+const queued = q => `<button type=button class=hqh data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hrail${q.needs ? '-n' : ''}"/></svg>` +
   `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
 // #130: a fleet's `needs` (its needs-human issues): their horses wear a red `!` in the blocked band, an issue
 // with no lane waits at the gate; a tap opens its needs-you card.
 function nh(f) {
   const n = f.needs || [], lanes = f.lanes.map(l => n.includes(l.issue) ? Object.assign({}, l, { needs: true, state: 'blocked', tone: 'r', shown: 'needs you' }) : l);
   const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
-  return [f.name, lanes, queue];
+  return [f.name, lanes, queue, f.color];
 }
 function card(n) {
   const c = here().querySelector(`.hn .ask[data-n="${n}"]`);
@@ -225,9 +249,10 @@ function draw() {
   const list = data.fleets.map(nh);
   if (data.others.length) list.push(['Others', data.others, []]);
   for (const [k, p] of pages) if (!list.some(x => x[0] === k)) { p.remove(); pages.delete(k); }
-  list.forEach(([key, lanes, queue], n) => {
+  list.forEach(([key, lanes, queue, c], n) => {
     const p = pages.get(key) || page(key);
     pages.set(key, p);
+    if (c) p.style.setProperty('--fk', `var(--${c})`); // #242: the halters and saddle cloths wear the fleet's colour (#162)
     // Never re-append a placed page: a detached scroller forgets its scrollTop (#65, the snap to the top).
     if (PG.children[n] !== p) PG.insertBefore(p, PG.children[n] || null);
     p.querySelector('.hs b').textContent = key;
@@ -386,3 +411,4 @@ H.addEventListener('click', e => {
   $$('.hwx button').forEach(b => b.classList.toggle('on', b === w));
 });
 herd(get('herd') === '1' || DBG.get('herd') === '1');
+const themed = theme(document.documentElement.dataset.theme).catch(() => {}); // ui-audit.js waits for it

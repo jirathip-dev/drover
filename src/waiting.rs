@@ -333,7 +333,8 @@ pub fn scan(
         }
         let pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
-            (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).unwrap_or_default(),
+            (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now)
+                .unwrap_or_else(|_| gh::cached_pr(ctx, &s.fleet, s.issue)),
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
         let sp = last_spawn(events, &lane);
@@ -389,6 +390,10 @@ pub fn scan(
         });
         let ev = ev.as_deref().unwrap_or(events);
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        // #249: a review on another host names it.
+        if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
+            w.what = w.what.replace("review done", &format!("review done on {h}"));
+        }
         // #214: a reviewer whose lane exited (no herdr agent) without a verdict gets a new review round.
         if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a["name"] == lane.as_str()) {
             let c = s.check.as_deref().unwrap_or("rev");
@@ -411,7 +416,7 @@ pub fn scan(
             w.what += &format!(" · checked {} ago", age(ctx.now - t));
         }
         // #83: a paused fleet's lane with no pane and a clean, pushed worktree is parked until `resume`.
-        let safe = || wt.is_some_and(|wt| crate::spawn::dirty(r, std::path::Path::new(wt)).is_none());
+        let safe = || wt.is_some_and(|wt| crate::spawn::dirty(&on, std::path::Path::new(wt)).is_none());
         if f.paused
             && !agents
                 .iter()
