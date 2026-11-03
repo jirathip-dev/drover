@@ -137,4 +137,4 @@ on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human"
 # [[setup]]
 # name = "claude B"
 # cmd = "claude /login"
-# env = { CLAUDE_CONFIG_DIR = "~/.claude-accounts/B" }
+# env = { CLAUDE_CONFIG_DIR = "~/accounts/B" }
