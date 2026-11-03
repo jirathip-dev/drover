@@ -273,6 +273,8 @@ fn services_rows_go_green_amber_and_red() {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);
     stamp("drive-sendmeter.last", 60);
+    // #246: the fast step stamps its start and length.
+    std::fs::write(c.state.with_file_name("drive-fast.at"), format!("{} 2.1", c.now - 40)).unwrap();
     let fleet_disk = |gb: u64| {
         std::fs::write(
             c.state.with_file_name("worktrees.du"),
@@ -298,6 +300,7 @@ fn services_rows_go_green_amber_and_red() {
             "board",
             "tick",
             "drive sendmeter",
+            "fast step",
             "phone alerts",
             "herdr",
             "disk",
@@ -309,9 +312,10 @@ fn services_rows_go_green_amber_and_red() {
         assert_eq!(*tone, want, "{item}: {detail}");
     }
     assert_eq!(all[1].2, "ran 60s ago");
-    assert_eq!(all[5].2, "200 GB free");
+    assert_eq!(all[3].2, "fast step 2.1 s · ran 40s ago");
+    assert_eq!(all[6].2, "200 GB free");
     assert_eq!(
-        all[6].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
+        all[7].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
         "#164: from the last walk, against the budget"
     );
 
@@ -319,8 +323,8 @@ fn services_rows_go_green_amber_and_red() {
     let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(12));
     let all = rows(&c, &amber);
     fleet_disk(21);
-    assert_eq!((all[1].1, all[5].1), ("a", "a"), "{all:?}");
-    assert_eq!(rows(&c, &amber)[6].1, "a", "over 80 % of the budget");
+    assert_eq!((all[1].1, all[6].1), ("a", "a"), "{all:?}");
+    assert_eq!(rows(&c, &amber)[7].1, "a", "over 80 % of the budget");
 
     append(
         &c.state,
@@ -334,15 +338,17 @@ fn services_rows_go_green_amber_and_red() {
     )
     .unwrap();
     stamp("drive-sendmeter.last", 1000);
+    stamp("drive-fast.at", 1000);
     fleet_disk(26);
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(tones, ["r", "r", "r", "a", "r", "r", "r"], "{all:?}");
-    assert_eq!(all[6].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
+    assert_eq!(tones, ["r", "r", "r", "r", "a", "r", "r", "r"], "{all:?}");
+    assert_eq!(all[3].2, "ran 16m ago", "an old stamp without its length");
+    assert_eq!(all[7].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
     assert_eq!(all[1].2, "failed: herdr: gone");
     assert_eq!(
-        (all[0].3.as_str(), all[5].3.as_str()),
+        (all[0].3.as_str(), all[6].3.as_str()),
         ("herdsman setup", "herdsman clean --yes")
     );
 
