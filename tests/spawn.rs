@@ -134,6 +134,26 @@ fn rev_role_flags_new_commit_trailers_only() {
     assert!(herdsman::spawn::role_prompt("impl").contains("never rewrite history or force-push"));
 }
 
+/// #320: a predicted conflict is information, not a hold; no generated prompt tells a lane to wait for a merge.
+#[test]
+fn conflict_predicted_is_not_a_hold() {
+    let d = tmpdir("help-320");
+    let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
+    let impl_ = herdsman::spawn::role_prompt("impl");
+    for t in [impl_, help.as_str()] {
+        assert!(t.contains("`conflict-predicted` note means another open PR touches the same files"));
+        assert!(t.contains("herdsman gives you an update round"));
+    }
+    assert!(impl_.contains("Don't wait for it.") && help.contains("don't wait for it"));
+    for t in ["impl", "rev", "design"]
+        .map(herdsman::spawn::role_prompt)
+        .into_iter()
+        .chain([help.as_str()])
+    {
+        assert!(!t.contains("to land") && !t.contains("lands."), "{t}");
+    }
+}
+
 /// #103: `[fleet.<n>] env` is exported into the lane's shell after HERDSMAN_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {

@@ -259,8 +259,11 @@ pub fn waiting_on(
             )
         }
         // #182: a head the PR handed off (`pushed`, logged by drive) is due too, whatever the worktree holds.
+        // #319: so is the FAILed head again after a fix round that changed nothing (`fix-no-change`).
         "impl" | "fix"
-            if !pushed.is_empty() && !s.reviewed(pushed) && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+            if !pushed.is_empty()
+                && (!s.reviewed(pushed) || s.last_event == "fix-no-change")
+                && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
         {
             let mut what = format!(
                 "pushed {}{}, waiting for drive to spawn review",

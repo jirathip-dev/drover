@@ -1756,3 +1756,89 @@ fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
         r.calls.borrow()
     );
 }
+
+// --- #319: a fix round that ends with no new commit still moves on ---
+
+/// #12 FAILed at `head` with `body` (`stage`), then its fix lane (spawned at 40) went idle without a new commit.
+fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+    let c = setup(name);
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "pushed", json!({"sha": head}));
+    let d = json!({"verdict": "FAIL", "sha": head, "body": body, "stage": stage, "loop": "rev"});
+    ev(&c, 30, "verdict", d);
+    let wt = lane(&c, 40, "impl", "sendmeter-impl-12", "issue-12");
+    assert_eq!(state(&c), "fix(1)");
+    let r = fake(&agents(&[(
+        "sendmeter-impl-12",
+        "idle",
+        &wt.to_string_lossy(),
+        "w9:p1",
+    )]))
+    .reply("gh pr view issue-12", &pr(&head, ci))
+    .reply("gh pr merge 100", "")
+    .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+    .reply("gh issue", "")
+    .reply("git -C", "");
+    (c, r, head)
+}
+
+fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+}
+
+#[test]
+fn a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review() {
+    for (stage, body) in [
+        ("gates", "FAIL\n\nCI is red at abc: ci."),
+        ("rev", "FAIL\n1. blocking [ci]: the runner ran out of disk"),
+    ] {
+        let (c, r, head) = no_change(&format!("drive-noop-ci-{stage}"), stage, body, "green");
+        let (out, steps) = drive(&c, &r);
+        assert_eq!(steps, ["merge"], "{out}");
+        assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
+        let e = &kinds(&c, "fix-no-change")[0];
+        assert_eq!((e.str("sha"), e.str("ci")), (Some(head.as_str()), Some("green")));
+        assert_eq!(state(&c), "merged");
+    }
+}
+
+#[test]
+fn a_code_fail_with_no_change_is_reviewed_again_at_the_same_head() {
+    let body = "FAIL\n1. blocking: src/x.rs:3 off by one";
+    let (c, r, head) = no_change("drive-noop-code", "rev", body, "green");
+    // Green CI alone does not answer a code finding: the lane must say why nothing changed.
+    idle(&c, &r);
+    let earlier = herdsman::Ctx {
+        now: c.now - 600,
+        ..c.clone()
+    };
+    let (code, out) = run(
+        &earlier,
+        &r,
+        &["done", "sendmeter", "12", "--no-change", "the finding is wrong"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
+    let e = &kinds(&c, "fix-no-change")[0];
+    assert_eq!(
+        (e.str("sha"), e.str("why")),
+        (Some(head.as_str()), Some("the finding is wrong"))
+    );
+    assert!(state(&c).starts_with("review"), "{}", state(&c));
+}
+
+#[test]
+fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
+    let (c, r, _) = no_change("drive-noop-red", "gates", "FAIL\n\nCI is red", "red");
+    idle(&c, &r);
+    assert!(kinds(&c, "fix-no-change").is_empty());
+    assert_eq!(state(&c), "fix(1)");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let s = &kinds(&c, "stall")[0];
+    let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
+    assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
+}
