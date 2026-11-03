@@ -1,5 +1,6 @@
 //! #254: cloud hosts with a fake recipe runner: on-demand start → address refresh → spawn, overflow after the local
-//! hosts were held `overflow_after_minutes`, idle stop with the wip save (aborted on a failed push), the budget
+//! hosts were held `overflow_after_minutes`, idle stop and `hosts destroy` with the wip save (aborted on a failed push
+//! or an unreachable host), the budget
 //! refusal and the 80 % warning, an idempotent ssh include, and the provider key never in argv or the log.
 mod common;
 use common::*;
@@ -184,7 +185,7 @@ fn running(name: &str) -> (herdsman::Ctx, Config) {
 fn lane_fake() -> Fake {
     let git = format!("{SSH}'git' '-C' '{WT}'");
     fake(0.1)
-        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'test' '-e'"), "")
         .reply(&format!("{git} 'rev-list'"), "1\n")
         .reply(&git, "")
 }
@@ -244,6 +245,38 @@ fn a_failed_wip_push_aborts_the_stop() {
     let events = read(&c.state).unwrap();
     assert!(events.iter().any(|e| e.kind == "cloud-abort"));
     assert_eq!(herdsman::cloud::state(&events, "cloud1"), "running");
+}
+
+#[test]
+fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
+    // ssh fails (255) probing the worktree: never "nothing to save", so neither stop nor destroy runs.
+    let (c, cfg) = running("cloud-unreachable");
+    let r = lane_fake().once_err(&format!("{SSH}'test' '-e'"), 255, "Connection timed out");
+    let (code, out) = run(&c, &r, &["hosts", "destroy", "cloud1"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(!r.called(&rc("destroy")), "{:?}", r.calls.borrow());
+    let abort = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "cloud-abort")
+        .unwrap();
+    assert!(abort.str("why").unwrap().starts_with("can't reach cloud1"), "{abort:?}");
+    let tick_r = lane_fake().once_err(&format!("{SSH}'test' '-e'"), 255, "Connection timed out");
+    assert!(tick(&c, &cfg, &tick_r, &idle())[0].contains("stop aborted"));
+    assert!(!tick_r.called(&rc("stop")), "{:?}", tick_r.calls.borrow());
+    let events = read(&c.state).unwrap();
+    assert_eq!(events.iter().filter(|e| e.kind == "cloud-abort").count(), 2);
+    assert_eq!(herdsman::cloud::state(&events, "cloud1"), "running");
+    // Reachable: the wip push, then `destroy`.
+    let r = lane_fake().reply(&rc("destroy"), "");
+    let (code, out) = run(&c, &r, &["hosts", "destroy", "cloud1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("cloud1: destroyed; wip wip/cloud1-sendmeter-impl-12"),
+        "{out}"
+    );
+    let push = format!("{SSH}'git' '-C' '{WT}' 'push' 'origin' 'HEAD:refs/heads/wip/cloud1-sendmeter-impl-12'");
+    assert!(r.index(&push).unwrap() < r.index(&rc("destroy")).unwrap());
 }
 
 #[test]

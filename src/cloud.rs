@@ -3,7 +3,7 @@ use crate::config::{expand, write_atomic, Config};
 use crate::events::{age, emit, read, Event};
 use crate::runner::{argv, Runner};
 use crate::Ctx;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -80,10 +80,8 @@ pub fn spend(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Result<(f
 
 /// Why host `name` may not run now: its month's budget (none set: 0) or today's `max_hours_day` used up.
 pub fn over(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Option<String> {
-    let (b, m) = (
-        cfg.hosts[name].budget_usd_month.unwrap_or(0.0),
-        cfg.hosts[name].max_hours_day,
-    );
+    let h = &cfg.hosts[name];
+    let (b, m) = (h.budget_usd_month.unwrap_or(0.0), h.max_hours_day);
     let month = |usd: f64| (usd >= b).then(|| format!("spent ${usd:.2} of ${b} this month"));
     let day = |hrs: f64| m.filter(|m| hrs >= *m).map(|m| format!("{hrs:.1} h today of {m}"));
     spend(ctx, cfg, events, name).map_or_else(|e| Some(format!("{e:#}")), |(u, h)| month(u).or_else(|| day(h)))
@@ -142,7 +140,7 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     log(ctx, cfg, "cloud-up", name, json!({"address": format!("{dest} {port}")}))
 }
 
-/// Save each lane's work on host `name` to `wip/<host>-<lane>` (a failure aborts: `cloud-abort`), then run `verb`.
+/// Save host `name`'s lane work to `wip/<host>-<lane>` (a failed push or unreachable host: `cloud-abort`), then `verb`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why: &str) -> Result<Vec<String>> {
     let (events, mut wip) = (read(&ctx.state)?, vec![]);
     let on = crate::hosts::On::new(r, cfg.hosts.get(name).context("no such host")?.machine.as_deref());
@@ -151,17 +149,19 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
     for e in events.iter().filter(mine) {
         lanes.extend(e.str("agent").zip(e.str("worktree")));
     }
-    let unsaved = |wt: &str| on.exists(wt.as_ref()) && crate::spawn::dirty(&on, wt.as_ref()).is_some();
-    for (lane, wt) in lanes.into_iter().filter(|l| unsaved(l.1)) {
+    for (lane, wt) in lanes {
         let w = format!("wip/{name}-{lane}");
-        match crate::check::save_wip(&on, wt, &w, &format!("wip: cloud host {verb}")) {
-            Ok(()) => wip.push(w),
-            Err(e) => {
-                let d = json!({"lane": lane, "why": format!("{e:#}")});
-                log(ctx, cfg, "cloud-abort", name, d)?;
-                return Err(e.context(format!("{name}: {verb} aborted, {lane}'s work not saved")));
-            }
+        let saved = match on.run("test", &argv(&["-e", wt])).map(|o| o.code) {
+            Ok(c) if c == 1 || c == 0 && crate::spawn::dirty(&on, wt.as_ref()).is_none() => continue,
+            Ok(0) => crate::check::save_wip(&on, wt, &w, &format!("wip: cloud host {verb}")),
+            o => o.and_then(|c| Err(anyhow!("can't reach {name} to check {wt} (exit {c})"))),
+        };
+        if let Err(e) = saved {
+            let d = json!({"lane": lane, "why": format!("{e:#}")});
+            log(ctx, cfg, "cloud-abort", name, d)?;
+            return Err(e.context(format!("{name}: {verb} aborted, {lane}'s work not saved")));
         }
+        wip.push(w);
     }
     cmd(ctx, cfg, r, name, verb)?;
     let d = json!({"verb": verb, "why": why, "wip": wip});
