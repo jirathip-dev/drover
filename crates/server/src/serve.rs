@@ -1968,6 +1968,7 @@ impl<'a> Server<'a> {
             o(&l.model),
             o(&l.effort),
             o(&l.account),
+            o(&l.resting),
             o(&l.port),
             a.clone(),
         ];
