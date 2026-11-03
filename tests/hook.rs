@@ -507,3 +507,20 @@ fn deny_commands_override_per_fleet_and_log_denials() {
     assert_eq!(run(add, "docker ps").0.as_deref(), Some(NO_CONTAINERS), "defaults kept");
     assert_eq!(run(add, "terraform plan").0, None);
 }
+
+/// #288: lanes run on the host too, so pairing is the owner's: `serve approve|unpair|devices --revoke` deny in a lane.
+#[test]
+fn serve_approve_is_owner_only() {
+    for cmd in [
+        "herdsman serve approve 123456",
+        "cd /tmp && ~/.local/bin/herdsman serve unpair x",
+        "herdsman serve devices --revoke x",
+    ] {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let out = hook_in(Some("x:1:impl"), "impl", input.clone());
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+    assert_eq!(bash("herdsman serve pending"), None);
+    assert_eq!(bash("herdsman serve devices"), None);
+}

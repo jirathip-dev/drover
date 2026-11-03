@@ -841,6 +841,8 @@ impl<'a> Server<'a> {
         let paired_op = form(body.trim())
             .get("op")
             .is_some_and(|o| PAIRED_OPS.contains(&o.as_str()));
+        let loopback =
+            header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
             ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some()).map_or_else(fail, |f| {
                 ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
@@ -858,7 +860,6 @@ impl<'a> Server<'a> {
                 |j| ("200 OK", JSON, j.into_bytes()),
             ),
             ("GET", "/herd.json") => {
-                let loopback = header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
                 let weather = form(query).get("weather").filter(|_| loopback).cloned();
                 self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, j.to_string().into_bytes()))
             }
@@ -889,14 +890,17 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
-            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out.
+            // #199: a re-tap replaces this browser's own open request, so repeated taps never lock it out. #288: opened on the
+            // host itself (a loopback peer naming localhost, no `tailscale serve` headers), the reply adds the approve line.
             ("POST", "/pair/request") => match devices::cancel(ctx, header(head, "cookie").unwrap_or_default())
                 .and_then(|()| devices::request(ctx, &kind(head), client(head)))
             {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
-                    ("200 OK", "text/plain", format!("{code}\n{}\n", hint.replace("{code}", &code)).into_bytes())
+                    let host = loopback && client(head).parse::<std::net::IpAddr>().is_ok_and(|p| p.is_loopback());
+                    let line = if host { format!("herdsman serve approve {code}\n") } else { String::new() };
+                    ("200 OK", "text/plain", format!("{code}\n{}\n{line}", hint.replace("{code}", &code)).into_bytes())
                 }
                 Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
                 Err(e) => fail(e),
