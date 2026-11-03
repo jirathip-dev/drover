@@ -372,7 +372,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     }
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
     let mut logins = vec![("gh", "gh auth status", gh.as_str())];
-    logins.extend(harness::NAMES.iter().filter_map(|h| harness::get(h).health_check()));
+    logins.extend(harness::all().filter_map(|h| h.1.health_check()));
     // #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
     let probe = |(t, c, _): &(&str, &str, &str)| format!("{c} >/dev/null 2>&1; echo \"{t}:$?\"; ");
     let pane = logins.iter().map(probe).collect::<String>() + "echo \"hs:\"done";

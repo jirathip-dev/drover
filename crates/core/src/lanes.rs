@@ -141,7 +141,7 @@ impl Lane {
 
 /// The newest session transcript any harness keeps for worktree `wt` under `home`.
 pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
-    harness::NAMES.iter().find_map(|h| harness::get(h).transcript(home, wt))
+    harness::all().find_map(|h| h.1.transcript(home, wt))
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -480,16 +480,14 @@ pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
 pub fn now(screen: &str) -> Option<String> {
     chat(screen).0.iter().rev().find_map(|l| {
         let t = strip(l);
-        let (tool, arg) = harness::NAMES
-            .iter()
-            .find_map(|h| harness::get(h).tool_line(t.trim()))?;
+        let (tool, arg) = harness::all().find_map(|h| h.1.tool_line(t.trim()))?;
         Some(doing(&tool, &arg))
     })
 }
 
 /// A blocked pane's pending prompt, as any harness reads it (`Harness::pending_menu`).
 pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
-    harness::NAMES.iter().find_map(|h| harness::get(h).pending_menu(screen))
+    harness::all().find_map(|h| h.1.pending_menu(screen))
 }
 
 /// #260: a file's last `n` bytes as text (a session transcript is tens of MB; a cut first line fails to parse, skipped).

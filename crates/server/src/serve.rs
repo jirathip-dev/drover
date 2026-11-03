@@ -2274,14 +2274,12 @@ impl<'a> Server<'a> {
                 // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
                 // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
                 let mut by: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
-                for a in &all {
-                    let Some(label) = a["agent"].as_str().filter(|l| !l.is_empty()) else {
-                        continue;
-                    };
-                    let h = crate::harness::NAMES
-                        .iter()
-                        .find(|h| crate::harness::get(h).process_names().contains(&label));
-                    by.entry(h.map_or(label, |h| h).into()).or_default().push(a);
+                for (a, label) in all
+                    .iter()
+                    .filter_map(|a| Some((a, a["agent"].as_str().filter(|l| !l.is_empty())?)))
+                {
+                    let h = crate::harness::all().find(|h| h.1.process_names().contains(&label));
+                    by.entry(h.map_or(label, |h| h.0).into()).or_default().push(a);
                 }
                 for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();

@@ -32,36 +32,36 @@ pub fn efforts(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// How a harness's lanes sign in.
+/// How a harness's lanes sign in: unknown, an `[accounts]` token (`access::pick`) exported as this env var, or the
+/// harness's own login on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credential {
-    /// Nothing herdsman knows of.
     None,
-    /// An `[accounts]` token (`access::pick`), exported as this env var.
     Token(&'static str),
-    /// The harness's own login on the host.
     Own,
 }
 
-/// A harness's hook protocol, as `herdsman hook` reads and answers it.
+/// A harness's hook protocol, as `herdsman hook` reads and answers it: whether it `sent` a call, the keys of a call's
+/// tool `input` (the first object wins), its `shell` and file-writing tools, its `hook_event_name` after a tool call
+/// and at a turn's end, and its `deny` answer.
 pub struct Dialect {
-    /// This harness sent the call.
     pub sent: fn(&Value) -> bool,
-    /// Keys of the call's tool input, the first object wins.
     pub input: &'static [&'static str],
-    /// Its shell tool and its file-writing tools.
     pub shell: &'static str,
     pub edits: &'static [&'static str],
-    /// `hook_event_name` after a tool call and at a turn's end.
     pub post: &'static str,
     pub stop: &'static str,
-    /// The deny answer.
     pub deny: fn(&str) -> Value,
+}
+
+/// Every harness by name, in `NAMES` order.
+pub fn all() -> impl Iterator<Item = (&'static str, &'static dyn Harness)> {
+    NAMES.into_iter().map(|n| (n, get(n)))
 }
 
 /// The hook dialects of every harness that has one, in `NAMES` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
-    NAMES.iter().filter_map(|n| get(n).hook_dialect())
+    all().filter_map(|h| h.1.hook_dialect())
 }
 
 /// (used %, reset epoch) of a usage window, either part unread.
@@ -131,10 +131,9 @@ pub trait Harness: Sync {
     fn usage_meter(&self) -> Option<&'static dyn UsageMeter> {
         None
     }
-    /// The pane shows a usage-limit banner: until when (generic: only a configured `cap_pattern`).
-    fn usage_limited(&self, cfg: &crate::config::Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
-        let pat = cfg.accounts.cap_pattern.as_deref()?;
-        crate::access::banner(pat, screen).then(|| crate::access::cap_until(cfg, r, screen, now))
+    /// The pane shows a usage-limit banner: until when.
+    fn usage_limited(&self, _cfg: &crate::config::Config, _r: &dyn Runner, _screen: &str, _now: u64) -> Option<u64> {
+        None
     }
     /// The pane shows a signed-out error (#302).
     fn signed_out(&self, _screen: &str) -> bool {
@@ -150,7 +149,7 @@ pub trait Harness: Sync {
     }
     /// A pane line's tool call as (tool, argument) for the `now:` line (generic: a `$ ` shell line).
     fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        shell_line(line)
+        Some(("$".into(), line.strip_prefix("$ ")?.trim_start().into()))
     }
     /// A blocked pane's question and numbered options (answered by `answer_keys`); None: a screen excerpt and reply box.
     fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
@@ -172,12 +171,6 @@ pub trait Harness: Sync {
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }
-}
-
-/// `$ cargo test` as (`$`, `cargo test`).
-fn shell_line(line: &str) -> Option<(String, String)> {
-    let cmd = line.strip_prefix("$ ")?.trim_start();
-    Some(("$".into(), cmd.into()))
 }
 
 struct Generic;

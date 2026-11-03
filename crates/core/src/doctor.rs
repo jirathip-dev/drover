@@ -172,9 +172,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             }),
         );
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
-        let h = crate::harness::NAMES
-            .iter()
-            .filter_map(|h| crate::harness::get(h).health_check());
+        let h = crate::harness::all().filter_map(|h| h.1.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let ok = format!(
             "✓ host {name} — herdr, session, git, gh, {logins}herdsman {}",

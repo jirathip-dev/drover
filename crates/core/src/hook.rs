@@ -1,6 +1,6 @@
 //! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::Deny;
-use crate::harness::{dialects, Dialect};
+use crate::harness::dialects;
 use serde_json::Value;
 
 pub struct Policy {
@@ -31,11 +31,6 @@ fn tool_input(input: &Value) -> &Value {
     let mut keys = dialects().flat_map(|d| d.input.iter());
     keys.find_map(|k| input.get(k).filter(|v| v.is_object()))
         .unwrap_or(&Value::Null)
-}
-
-/// The dialect that sent `input`, else the first harness's.
-fn dialect(input: &Value) -> Option<&'static Dialect> {
-    dialects().find(|d| (d.sent)(input)).or_else(|| dialects().next())
 }
 
 /// After the fact (a post-tool or turn-end call): nothing left to guard.
@@ -326,7 +321,8 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
-/// The deny answer in the caller's dialect (`Dialect::deny`).
+/// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).
 pub fn deny_json(input: &Value, reason: &str) -> Value {
-    dialect(input).map_or(Value::Null, |d| (d.deny)(&format!("herdsman: {reason}")))
+    let d = dialects().find(|d| (d.sent)(input)).or_else(|| dialects().next());
+    d.map_or(Value::Null, |d| (d.deny)(&format!("herdsman: {reason}")))
 }

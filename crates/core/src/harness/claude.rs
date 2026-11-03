@@ -1,5 +1,5 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
-use super::{hook_command, shell_line, Credential, Dialect, Harness, UsageMeter};
+use super::{hook_command, Credential, Dialect, Harness, UsageMeter};
 use crate::config::Config;
 use crate::herdr;
 use crate::lanes::{chat, mask, strip};
@@ -145,16 +145,11 @@ impl Harness for Claude {
     fn now_line(&self, line: &str) -> bool {
         line.starts_with('⏺')
     }
-    /// `⏺ Bash(cargo test)` (or `•`), else a `$ ` shell line.
+    /// `⏺ Bash(cargo test)` (or `•`).
     fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        if let Some((n, a)) = line
-            .strip_prefix(['⏺', '•'])
-            .and_then(|r| r.trim_start().split_once('('))
-        {
-            let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
-            return word.then(|| (n.into(), a.rsplit_once(')').map_or(a, |x| x.0).into()));
-        }
-        shell_line(line)
+        let (n, a) = line.strip_prefix(['⏺', '•'])?.trim_start().split_once('(')?;
+        let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
+        word.then(|| (n.into(), a.rsplit_once(')').map_or(a, |x| x.0).into()))
     }
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
         pending(screen)

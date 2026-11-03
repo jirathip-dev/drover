@@ -19,9 +19,7 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
         .iter()
         .map(|s| (s.name.clone(), s.env.iter().map(env).collect::<String>() + &s.cmd))
         .collect();
-    let logins = crate::harness::NAMES
-        .iter()
-        .filter_map(|h| Some((*h, crate::harness::get(h).login()?)));
+    let logins = crate::harness::all().filter_map(|(n, h)| Some((n, h.login()?)));
     for (n, c) in logins.chain([("gh", "gh auth login"), ("codex", "codex login")]) {
         if !v.iter().any(|x| x.0 == n) {
             v.push((n.into(), c.into()));

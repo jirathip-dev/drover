@@ -1,8 +1,8 @@
-//! What a lane may use: its `[accounts]` account (first uncapped of an ordered list; tokens never read out) and MCP
-//! servers.
+//! What a lane may use: its account (first uncapped of an ordered list; tokens never read out) and MCP servers.
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::gate::refused;
+use crate::harness::Credential;
 use crate::runner::Runner;
 use crate::usage;
 use crate::Ctx;
@@ -44,16 +44,14 @@ pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(R
 }
 
 /// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and the
-/// pane-shell assignment that exports its token as `token_var` straight from the env file.
-pub fn pick(
-    ctx: &Ctx,
-    cfg: &Config,
-    events: &[Event],
-    role: &Role,
-    token_var: &str,
-) -> Result<Option<(String, String)>> {
+/// pane-shell assignment that exports its token straight from the env file; None unless the role's harness runs on an
+/// `[accounts]` token (`Credential::Token`).
+pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<(String, String)>> {
     let now = ctx.now;
     let mut names = role.account_list();
+    let Credential::Token(token_var) = crate::harness::get(&role.harness).credential() else {
+        return Ok(None);
+    };
     if names.is_empty() {
         return Ok(None);
     }
