@@ -1699,7 +1699,12 @@ impl<'a> Server<'a> {
                     rank,
                     match titles(ctx, f, n) {
                         Some(t) => {
-                            row.replacen("</summary>", &format!("<span class=tl>{}</span></summary>", esc(&t)), 1)
+                            let t = esc(&t);
+                            row.replacen(
+                                "</summary>",
+                                &format!("<span class=tl title=\"{t}\">{t}</span></summary>"),
+                                1,
+                            )
                         }
                         None => row,
                     },
@@ -2869,7 +2874,7 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
     parts.join(" · ")
 }
 
-/// The queue row's dim line from the caches only: the issue title, then the PR's when it differs; one 390 px line.
+/// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let spec = gh::cached_title(ctx, fleet, issue);
     let pr = gh::cached_pr(ctx, fleet, issue);
@@ -2879,19 +2884,7 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
         .filter(|p| Some(p.1) != spec.as_deref())
         .map(|(n, p)| format!("PR #{n} · {p}"));
     let t = [spec, pr].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-    if t.is_empty() {
-        return None;
-    }
-    if t.chars().count() <= 50 {
-        return Some(t);
-    }
-    let cut: String = t.chars().take(51).collect();
-    Some(format!(
-        "{}…",
-        cut.rsplit_once(' ')
-            .map_or(cut.as_str(), |c| c.0)
-            .trim_end_matches([' ', '·'])
-    ))
+    (!t.is_empty()).then_some(t)
 }
 
 /// #162: a fleet's [config] sheet: GENERAL, LIMITS, ROLES (the `set` pickers when `rw`), ALERTS, HOSTS / NEEDS.

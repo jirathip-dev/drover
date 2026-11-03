@@ -675,7 +675,7 @@ fn page_fits_390px_without_horizontal_scroll() {
         "rows are details"
     );
     assert!(
-        html.contains("class=tl>Queue rows show issue and PR titles from the…"),
+        html.contains("class=tl title=\"Queue rows show issue and PR titles from the cached reads · PR #33 · src: titles in Queue\">"),
         "title line"
     );
     for t in ["queue", "lanes", "host", "events"] {
