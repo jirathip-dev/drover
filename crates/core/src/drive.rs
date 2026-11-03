@@ -192,23 +192,15 @@ thread_local! {
 }
 
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid.
+/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
+/// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
-    let a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
+    let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
     if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
         return None;
     }
-    let (exe, args, log) = (&ctx.exe, a.join(" "), state_dir(ctx).join("kick.log"));
-    let sh = format!(
-        "nohup '{exe}' {args} --now >> '{}' 2>&1 < /dev/null & echo $!",
-        log.display()
-    );
-    r.run("sh", &crate::runner::argv(&["-c", &sh]))
-        .ok()?
-        .stdout
-        .trim()
-        .parse()
-        .ok()
+    a.push("--now".into());
+    r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
 }
 
 /// #304: `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s
