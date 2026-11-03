@@ -97,10 +97,12 @@ starts it once more; it never closes the pane or workspace of a harness that cam
 
 `herdsman hosts off <name>` (or the `[off]` button on the host's card in the Host tab, paired devices only) sets
 `enabled = false` in fleet.toml and logs `host-off` with `by`. `hosts on` and `[on]` undo it, logging `host-on`.
+The buttons ask first (`turn air off? no new lanes; 2 running lanes finish`).
 
 An off host gets no new issues. It keeps being monitored, and its running lanes drain there: their reviews and fix
 rounds still go to it. The Host tab shows such a host grey, as `off · draining 2 lanes` while lanes remain, then
-`off · not used for lanes`. The main host can be turned off for lanes too; herdsman and the board keep running there.
+`off · not used for lanes`. The main host (no `machine`) runs herdsman, the board and the log: it has no `[off]`, and
+`hosts off` refuses it `MAIN_HOST`; set `enabled = false` in fleet.toml by hand if you mean it.
 
 ## Monitoring
 

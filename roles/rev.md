@@ -34,5 +34,5 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
 ## Output
 
 Write `verdict.md` in your worktree: first line `PASS`, `FAIL` or `FAIL (form-only)`, then the
-findings; tag each blocking one `blocking [<category>]`. Report the exact head sha you reviewed. A review that finds nothing is suspect; one that names its
+findings; tag each blocking one `blocking [<category>]`. It must carry a `Reviewed head: <40-hex>` line: the sha actually checked out (`git rev-parse HEAD`). A review that finds nothing is suspect; one that names its
 blind spots is trustworthy.

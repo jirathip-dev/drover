@@ -542,8 +542,10 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
 pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) -> Result<()> {
     let text = std::fs::read_to_string(&ctx.config)?;
     let cfg = Config::parse(&text)?;
-    if !cfg.hosts.contains_key(name) {
-        bail!("no [hosts.{name}] in fleet.toml");
+    match cfg.hosts.get(name) {
+        None => bail!("no [hosts.{name}] in fleet.toml"),
+        Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
+        _ => {}
     }
     let new = set_in(&text, &format!("[hosts.{name}]"), "enabled", &on.to_string())?;
     write_atomic(&ctx.config, &new)?;

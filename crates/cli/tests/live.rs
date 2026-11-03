@@ -273,8 +273,17 @@ fn shown_h(page: &str) -> String {
     page[i..].chars().take_while(char::is_ascii_digit).collect()
 }
 
+/// Paired at the real clock (#288: a pairing lasts a year after last use), as `serve_on` reads it.
 fn cookie(s: &Server, c: &herdsman::Ctx) -> String {
-    pair(s, c, "", T)
+    pair(
+        s,
+        c,
+        "",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
 }
 
 #[test]

@@ -116,7 +116,7 @@ pub fn verdict(
         s.stage_rounds.get(lp).copied().unwrap_or_default() + u32::from(new && !form)
     });
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
-        "stage": stage, "loop": lp, "form_only": form});
+        "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha"))});
     emit(
         &ctx.state,
         cfg,

@@ -421,9 +421,14 @@ fn cap_check_reads_the_limit_from_config() {
 
 /// #207: `n` in review, its reviewer spawned at `sha` and done (`PASS` in verdict.md, not recorded yet).
 fn reviewed(c: &herdsman::Ctx, n: u64, sha: &str) -> String {
+    reviewed_with(c, n, sha, "PASS\nall good\n")
+}
+
+/// #293: the same with verdict.md's `body` (a `Reviewed head:` line names the sha the reviewer checked out).
+fn reviewed_with(c: &herdsman::Ctx, n: u64, sha: &str, body: &str) -> String {
     let wt = c.worktrees.join(format!("rev-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
-    std::fs::write(wt.join("verdict.md"), "PASS\nall good\n").unwrap();
+    std::fs::write(wt.join("verdict.md"), body).unwrap();
     let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "p9", "worktree": wt, "sha": sha});
     append(&c.state, &Event::new(30, "sendmeter", Some(n), "spawn", d)).unwrap();
     wt.join("verdict.md").display().to_string()
@@ -546,4 +551,89 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     let want = format!("review was for {x:.7}, head moved to {m:.7} (not a clean merge): review again");
     assert!(out.contains(&want), "{out}");
+}
+
+/// #293: issue-3's head moved past the rev spawn head by a commit of its own; returns (spawn head, new head).
+fn moved(seed: &Path) -> (String, String) {
+    let a = head(seed, "issue-3");
+    git(seed, &["checkout", "-q", "issue-3"]);
+    let b = commit(seed, "d.txt", "d\n", "issue-3");
+    git(seed, &["checkout", "-q", "staging"]);
+    (a, b)
+}
+
+#[test]
+fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
+    let (_d, seed, c, _) = repos("named-head");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let label = "integration = \"staging\"\nmerge_label = \"merge-ready\"";
+    let cfg = cfg.replacen("integration = \"staging\"", label, 1);
+    std::fs::write(&c.config, cfg).unwrap();
+    lane(&c, &seed, 3, false);
+    let (a, b) = moved(&seed);
+    reviewed_with(&c, 3, &a, &format!("PASS\nReviewed head: {b} (PR #13)\nall good\n"));
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &green_pr(3, &b))
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
+            .reply("gh pr edit", "")
+            .reply("herdr", NO_AGENTS),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let v = ev
+        .iter()
+        .rfind(|e| e.is("verdict", "sendmeter", 3))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert_eq!((v.str("sha"), v.str("spawn_sha")), (Some(b.as_str()), Some(a.as_str())));
+    assert!(
+        r.0.called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn_head() {
+    for (i, body) in ["PASS\nReviewed head: {a}\n", "PASS\nall good\n"]
+        .into_iter()
+        .enumerate()
+    {
+        let (_d, seed, c, _) = repos(&format!("named-stale-{i}"));
+        lane(&c, &seed, 3, false);
+        let (a, b) = moved(&seed);
+        reviewed_with(&c, 3, &a, &body.replace("{a}", &a));
+        let r = Mixed(
+            Fake::default()
+                .reply("gh pr view issue-3 ", &pending_pr(3, &b))
+                .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
+                .reply("herdr", NO_AGENTS),
+        );
+        let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+        let want = format!("review was for {a:.7}, head moved to {b:.7} (not a clean merge): review again");
+        assert!(out.contains(&want), "{out}");
+        assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "verdict"));
+    }
+}
+
+#[test]
+fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
+    let (d, seed, c, _) = repos("named-carry");
+    lane(&c, &seed, 3, false);
+    let x = head(&seed, "issue-3");
+    reviewed_with(&c, 3, &x, &format!("PASS\nReviewed head: {x}\n"));
+    commit(&seed, "c.txt", "c\n", "staging");
+    merge_staging(&d, None);
+    let m = head(&seed, "issue-3");
+    let r = Mixed(
+        Fake::default()
+            .reply("gh pr view issue-3 ", &green_pr(3, &m))
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
+            .reply("herdr", NO_AGENTS),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
+    let last = st.verdicts.last().map(|v| v.0.as_str());
+    assert_eq!((st.state.as_str(), last), ("ready", Some(x.as_str())), "{out}");
 }

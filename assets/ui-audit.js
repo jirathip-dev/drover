@@ -56,6 +56,9 @@
   };
   const VIEWS = {
     queue: () => tab('queue'),
+    // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
+    'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
+    'events-rows': () => { tab('events'); $('#needs').hidden = true; },
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
     // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
@@ -130,6 +133,38 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
+    // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
+    // second one: one ellipsised line in each mode, nothing past the row.
+    'lanes-now': async () => {
+      tab('lanes');
+      const sp = (...p) => p.map((x, i) => `<span class=${i < 2 ? 'el' : 't'}>${esc(x)}</span>`).join('<i> · </i>');
+      const L = [
+        sp('now: running git fetch origin && git merge origin/staging 2>&1 | tail -5; just --list; cat ci/cap.toml'),
+        sp('✻ Simmering…', 'running git merge origin/staging +2 cd ~/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v x)', '4m'),
+        sp('✻ Herding…', 'editing src/a/very/long/path/to/some/deeply/nested/module/that/runs/past/the/edge.rs'),
+        sp('now: running cd ~/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v \'^docs/\'); cargo fmt --check $FILES')];
+      const redraw = n => {
+        const c = $('#lanes').cloneNode(true);
+        [...c.querySelectorAll('.lane .act')].slice(0, 5).forEach((a, i) => {
+          a.outerHTML = i === 4 ? '<span class=act></span>' : `<span class="act nw el now" title="full">${L[(i + n) % 4]}</span>`;
+        });
+        frag('lanes', c.innerHTML);
+      };
+      const one = what => $$('.lane .act.now').forEach(a => {
+        // Lines by box height (a Range's rects mix the span boxes and their text runs, whose tops differ on one line).
+        const r = a.getBoundingClientRect(), lines = Math.round(r.height / parseFloat(getComputedStyle(a).lineHeight));
+        const cut = [...a.querySelectorAll('.el')].some(e => getComputedStyle(e).textOverflow !== 'ellipsis' || e.getBoundingClientRect().right > r.right + 1);
+        if (lines !== 1 || cut || r.right > a.closest('.lane').getBoundingClientRect().right + 1) early.push(`${what}: now-line "${a.textContent.slice(0, 30)}…" ${lines} lines, right ${r.right}`);
+        const [w, x] = a.querySelectorAll('.el');
+        if (x && w.scrollWidth > w.clientWidth + 1 && x.clientWidth > 0) early.push(`${what}: the word "${w.textContent}" cut before the action`);
+      });
+      for (const n of [0, 1]) {
+        redraw(n);
+        for (const m of TM) { mode(m); await wait(); one(`after /live ${n + 1}, ${m}`); }
+      }
+      if ($$('.lane .act.now').length < 4) early.push('no long now-lines drawn');
+    },
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
       open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
@@ -396,13 +431,17 @@
   const label = e => (e.getAttribute('aria-label') || e.textContent).trim().replace(/\s+/g, ' ').slice(0, 24) || e.tagName.toLowerCase();
   function check() {
     let res;
+    // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them, above the fixed tab bar (one under it
+    // would take in the bar's text); ui-audit.sh checks their pixels are crisp.
+    const nav = $('nav').getBoundingClientRect().top;
+    const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
     if (innerWidth !== 390) res.outliers.push(`viewport ${innerWidth} px wide, not 390`); // #68: new-headless Chrome keeps windows ≥ 500 px
     // #114 app-like: no pinch or double-tap zoom.
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
-    if (['queue', 'lanes', 'host', 'events'].includes(V)) res.outliers.push(...drawn());
+    if (['queue', 'lanes', 'host', 'events', 'queue-rows', 'events-rows'].includes(V)) Object.assign(res, { sprites }).outliers.push(...drawn());
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
@@ -425,6 +464,17 @@
     if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
     if (tb === 'lanes' && (!on('#mode').length || TM.join() !== 'scene,ascii')) bad.push(`Lanes modes ${TM}, button shown ${on('#mode').length}`);
     for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
+    // #281: a row sprite is 24×24 in a fixed 28 px slot, and the row with it is at most 4 px taller than with its glyph (no wrap).
+    for (const g of on('.rsg')) {
+      const s = g.firstChild.getBoundingClientRect(), w = g.getBoundingClientRect().width, sum = g.closest('summary'), h = sum.offsetHeight, svg = g.firstChild;
+      if (Math.round(s.width) !== 24 || Math.round(s.height) !== 24 || Math.round(w) !== 28) bad.push(`row sprite ${s.width}×${s.height} in a ${w} px slot, not 24×24 in 28`);
+      g.classList.remove('rsg');
+      g.textContent = g.dataset.g;
+      const d = h - sum.offsetHeight;
+      g.replaceChildren(svg);
+      g.classList.add('rsg');
+      if (d > 4) bad.push(`a row ${d} px taller with its sprite than its glyph: ${label(sum)}`);
+    }
     return bad;
   }
   function measure() {
