@@ -297,3 +297,33 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
     );
     assert!(page.contains("703M python3.14 (other)"));
 }
+
+/// #248: the Host tab sums what the Claude lanes hold, working and done apart.
+#[test]
+fn host_tab_sums_claude_lane_memory_by_state() {
+    use herdsman::serve::Server;
+    let (_d, c, mine, sibling) = setup("claude-host");
+    let mut list: serde_json::Value = serde_json::from_str(&agents(&[
+        ("impl-12", "done", &mine, "wA:p1"),
+        ("impl-120", "working", &sibling, "wA:p2"),
+    ]))
+    .unwrap();
+    for a in list["result"]["agents"].as_array_mut().unwrap() {
+        a["agent"] = json!("claude");
+    }
+    let r = Fake::default()
+        .reply(
+            "lsof",
+            &format!("p201\nc2.1.311\nfcwd\nn{mine}\np202\nc2.1.311\nfcwd\nn{sibling}\n"),
+        )
+        .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n")
+        .reply("herdr agent list", &list.to_string());
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page =
+        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000)).into_owned();
+    assert!(page.contains("<span class=k>claude</span>"), "no claude row");
+    assert!(
+        page.contains("<b>3.0 GB</b> <span class=mt>(2 lanes: working 1 / done 1)</span>"),
+        "the sum by state"
+    );
+}

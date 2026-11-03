@@ -129,6 +129,10 @@ impl Plan {
                 .iter()
                 .flat_map(|a| [format!("HERDSMAN_ACCOUNT='{}'", a.0), a.1.clone()]),
         );
+        // #248: no updater, telemetry or other background traffic in a Claude lane (names as of Claude Code 2.1.311).
+        if self.harness == "claude" {
+            c.extend(["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"].map(String::from));
+        }
         c
     }
 
@@ -364,11 +368,11 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
 ];
 
-/// `git status --porcelain` lines that are not lane scratch.
+/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
-    st.lines()
-        .filter(|l| !OWN_FILES.iter().any(|f| l.trim_end() == format!("?? {f}")))
-        .count()
+    let made = ["ui-390/", "node_modules/"];
+    let own = |l: &&str| OWN_FILES.iter().chain(&made).any(|f| l.trim_end() == format!("?? {f}"));
+    st.lines().filter(|l| !own(l)).count()
 }
 
 /// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
