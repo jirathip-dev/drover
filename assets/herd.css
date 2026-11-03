@@ -27,8 +27,21 @@
 .hs{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-content:center;column-gap:var(--s2);height:calc(var(--ctl) + env(safe-area-inset-top));padding:env(safe-area-inset-top) calc(2 * var(--hit) + var(--s2)) 0 var(--s3);
   background:#1f2a38f0;line-height:var(--s4);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .hs p{margin:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hs .dots{letter-spacing:2px;color:#f4ecd8aa}
 .hs .sum{color:#f4ecd8bb;font-size:var(--fs-meta);line-height:var(--s3)}
+/* #291 switching without a touch screen: [‹] [›] at the scene's edges, mid-height (28 px, the 44 px ring), the repo dots
+   under it (a 28 px button each, 16 px apart, so every ring is its own 44 px); a mouse gets the hover and the pointer. */
+#herd .hnv{position:absolute;z-index:1;top:50%;left:var(--s2);translate:0 -50%;background:#1f2a38f0;color:#f4ecd8;cursor:pointer}
+#herd .hnx{left:auto;right:var(--s2)}
+#herd.one .hnv,#herd.one .hdt{display:none}
+.hdt{display:flex;justify-content:center;gap:var(--s4);margin:0;padding-top:var(--s2)}
+#herd .hdt button{padding:0;color:#f4ecd8;cursor:pointer}
+#herd .hdt button::before{content:"";position:static;padding:var(--s1);border-radius:50%;background:currentColor;opacity:.45}
+#herd .hdt button[aria-current]::before{opacity:1}
+/* A dot overrides the global [ ] brackets: ::before becomes the dot, drawn in flow (static); ::after keeps the global
+   inset (the 44 px hit area) but drops its "]". */
+#herd .hdt button::after{content:""}
+@media (hover:hover){#herd .hnv:hover,#herd .hdt button:hover{background:#f4ecd833}}
+#herd.drag{cursor:grabbing;user-select:none;-webkit-user-select:none}
 .hn{padding:0 var(--s2)}.hn .ask{background:#2a1416ee;color:var(--fg)}
 /* #292: the band is as tall as the scene at full width (`--ar`, herd.js tiles()) up to 22 % of the screen (#58); the tiles fill it. */
 .hr{position:relative;height:min(calc(100vw * var(--ar,.82)),max(120px,22vh));height:min(calc(100vw * var(--ar,.82)),max(120px,22svh));overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
