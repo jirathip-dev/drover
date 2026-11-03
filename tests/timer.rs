@@ -283,6 +283,8 @@ fn services_rows_go_green_amber_and_red() {
         .unwrap()
     };
     fleet_disk(3);
+    // #237: both own jobs written by this build and loaded.
+    assert_eq!(run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]).0, 0);
     let df = |gb: u64| {
         format!(
             "Filesystem 1K-blocks Used Available\n/dev/disk1 1 1 {}\n",
@@ -291,7 +293,9 @@ fn services_rows_go_green_amber_and_red() {
     };
     let green = host(Fake::default())
         .reply("lsof ", "herdsman 1 u LISTEN\n")
-        .reply("df -k /", &df(200));
+        .reply("df -k /", &df(200))
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "");
     let all = rows(&c, &green);
     let names: Vec<_> = all.iter().map(|r| r.0.as_str()).collect();
     assert_eq!(
@@ -320,7 +324,11 @@ fn services_rows_go_green_amber_and_red() {
     );
 
     stamp("check.at", 700);
-    let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(12));
+    let amber = host(Fake::default())
+        .reply("lsof ", "x")
+        .reply("df -k /", &df(12))
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "");
     let all = rows(&c, &amber);
     fleet_disk(21);
     assert_eq!((all[1].1, all[6].1), ("a", "a"), "{all:?}");
@@ -338,15 +346,15 @@ fn services_rows_go_green_amber_and_red() {
     )
     .unwrap();
     stamp("drive-sendmeter.last", 1000);
-    stamp("drive-fast.at", 1000);
     fleet_disk(26);
+    stamp("drive-fast.at", 181); // #237: over 3× fast_secs (60), no length; the jobs not loaded
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
     assert_eq!(tones, ["r", "r", "r", "r", "a", "r", "r", "r"], "{all:?}");
-    assert_eq!(all[3].2, "ran 16m ago", "an old stamp without its length");
+    assert_eq!(all[3].2, "ran 3m ago · job missing");
     assert_eq!(all[7].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
-    assert_eq!(all[1].2, "failed: herdr: gone");
+    assert_eq!(all[1].2, "failed: herdr: gone · job missing");
     assert_eq!(
         (all[0].3.as_str(), all[6].3.as_str()),
         ("herdsman setup", "herdsman clean --yes")
@@ -361,10 +369,13 @@ fn services_rows_go_green_amber_and_red() {
         page.contains("/ 25 GB</span> (104%) <span class=\"mt fx\">· 4m ago</span>"),
         "{page}"
     );
-    assert!(
-        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
-        "{page}"
-    );
+    for (k, d) in [
+        ("tick", "failed: herdr: gone · job missing"),
+        ("fast step", "ran 3m ago · job missing"),
+    ] {
+        let want = format!("<span class=k>{k}</span><span class=w><b class=r>{d}</b> <span class=\"mt fx\">→ herdsman");
+        assert!(page.contains(&want), "{want}\n{page}");
+    }
 }
 
 /// #160: a 10 s `du` never reaches a request: the page and the config fragment answer at once; `check` stores the total.
@@ -391,4 +402,100 @@ fn slow_du_never_blocks_the_board() {
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
     assert!(du.ends_with(&format!(" {}", c.now)), "{du}");
+}
+
+const PROBE: &str = if MAC {
+    "launchctl print"
+} else {
+    "systemctl --user is-active"
+};
+const LOAD: &str = if MAC {
+    "launchctl bootstrap"
+} else {
+    "systemctl --user enable"
+};
+
+/// #237: each own job against this build: missing (no file, or not loaded), outdated (args or interval), loaded.
+#[test]
+fn drift_is_missing_outdated_or_loaded() {
+    let c = ctx(&tmpdir("timer-drift"), CONFIG);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let up = host(Fake::default()).reply(PROBE, "");
+    let drift = |r: &Fake| herdsman::timer::drift(&c, &cfg, r);
+    let both = |a, b| vec![("dev.herdsman.tick", a), ("dev.herdsman.fast", b)];
+    assert_eq!(drift(&up), both("missing", "missing"));
+    assert_eq!(run(&c, &up, &["timer", "install", "--no-load"]).0, 0);
+    assert_eq!(drift(&up), both("loaded", "loaded"));
+    assert_eq!(drift(&host(Fake::default())), both("missing", "missing"), "not loaded");
+    // Another PATH is the host's own; another interval or args is outdated.
+    let edit = |label: &str, from: &str, to: &str| {
+        let p = match MAC || !from.starts_with("OnUnit") {
+            true => job(&c, label),
+            false => c.home.join(format!(".config/systemd/user/{label}.timer")),
+        };
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.contains(from), "{text}");
+        std::fs::write(&p, text.replace(from, to)).unwrap();
+    };
+    edit("dev.herdsman.tick", "/usr/sbin:/sbin", "/usr/sbin:/sbin:/opt/x");
+    assert_eq!(drift(&up), both("loaded", "loaded"));
+    let (from, to) = if MAC {
+        (">60<", ">120<")
+    } else {
+        ("OnUnitActiveSec=60", "OnUnitActiveSec=120")
+    };
+    edit("dev.herdsman.fast", from, to);
+    assert_eq!(drift(&up), both("loaded", "outdated (args or interval differ)"));
+    let (from, to) = if MAC {
+        (">tick<", ">check<")
+    } else {
+        (" tick\n", " check\n")
+    };
+    edit("dev.herdsman.tick", from, to);
+    assert_eq!(drift(&up)[0].1, "outdated (args or interval differ)");
+}
+
+/// #237: the tick reinstalls only the missing fast job, reads it back and logs `timer-repaired`; a failed repair
+/// alerts once an hour.
+#[test]
+fn tick_repairs_only_the_missing_job() {
+    let c = ctx(&tmpdir("timer-repair"), CONFIG);
+    let r = host(Fake::default())
+        .reply(PROBE, "")
+        .reply(LOAD, "")
+        .reply("git -C", "");
+    assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
+    std::fs::remove_file(job(&c, "dev.herdsman.fast")).unwrap();
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    let loads: Vec<_> = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|l| l.starts_with(LOAD))
+        .cloned()
+        .collect();
+    assert!(loads.len() == 1 && loads[0].contains("dev.herdsman.fast"), "{loads:?}");
+    assert!(job(&c, "dev.herdsman.fast").exists());
+    let events = read(&c.state).unwrap();
+    let fixed: Vec<_> = events.iter().filter(|e| e.kind == "timer-repaired").collect();
+    assert_eq!(fixed.len(), 1, "{events:?}");
+    assert_eq!(
+        (fixed[0].str("label"), fixed[0].str("was")),
+        (Some("dev.herdsman.fast"), Some("missing"))
+    );
+
+    // The load fails: one `timer-repair-failed` an hour, never `timer-repaired`.
+    std::fs::remove_file(job(&c, "dev.herdsman.fast")).unwrap();
+    let r = host(Fake::default()).reply(PROBE, "").reply("git -C", "");
+    for _ in 0..2 {
+        assert_eq!(run(&c, &r, &["tick"]).0, 0);
+    }
+    let events = read(&c.state).unwrap();
+    let count = |k: &str| events.iter().filter(|e| e.kind == k).count();
+    assert_eq!(
+        (count("timer-repaired"), count("timer-repair-failed")),
+        (1, 1),
+        "{events:?}"
+    );
 }

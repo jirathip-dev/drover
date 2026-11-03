@@ -259,6 +259,9 @@ pub struct Limits {
     pub form_rounds: u32,
     /// #254: every local host refused this long lets placement start a stopped cloud host.
     pub overflow_after_minutes: u64,
+    /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
+    pub import_max_age_hours: u64,
+    pub max_pushes_per_pass: usize,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -320,6 +323,8 @@ impl Default for Limits {
             .map(String::from)
             .into(),
             form_rounds: 3,
+            import_max_age_hours: 24,
+            max_pushes_per_pass: 3,
         }
     }
 }

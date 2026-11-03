@@ -1,7 +1,7 @@
 //! #157 multi-host lanes (docs/hosts.md): `[hosts.<name>]`, their detected tags, where a new lane goes, and a lane's host
 //! as a Runner: herdr gets `--machine`, every other tool runs over `ssh`. No `[hosts]` = this host only, as before.
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
-use crate::events::{age, emit, fold, last_spawn, read, Event};
+use crate::events::{age, append, closed, emit, fold, last_spawn, read, Event, IssueState};
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::runner::{argv, ok, Out, Runner};
@@ -195,17 +195,23 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
 }
 
 /// #275: the asks a lane on host `name` logged in that host's own log (before lanes forwarded them), each imported once
-/// under a new id with `from` naming the remote one; its agent is the issue's newest lane there.
+/// under a new id with `from`, agent its newest lane there; #283: only unanswered, recent, open, unmarked ones, no push.
 fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     let Some(text) = on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl")) else {
         return;
     };
     let events = read(&ctx.state).unwrap_or_default();
+    let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
     let mut n = events.iter().filter(|e| e.kind == "needs-decision").count();
-    let asks = text.lines().filter_map(|l| serde_json::from_str::<Event>(l).ok());
-    for e in asks.filter(|e| e.kind == "needs-decision") {
+    let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
+    let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
+    let remote: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let new = |e: &&Event| e.kind == "needs-decision" && Some(e.ts) > upto;
+    for e in remote.iter().filter(new) {
+        let skip = e.ts + max_age < ctx.now || closed(&remote, e).is_some(); // answered or merged there
+        let done = e.issue.and_then(|i| states.get(&(e.fleet.clone(), i)));
         let from = format!("{name}:{}", e.str("id").unwrap_or_default());
-        if events.iter().any(|m| m.str("from") == Some(&from)) {
+        if skip || done.is_some_and(IssueState::done) || events.iter().any(|m| m.str("from") == Some(&from)) {
             continue;
         }
         let lane = (events.iter().rev()).find(|s| s.kind == "spawn" && s.fleet == e.fleet && s.issue == e.issue);
@@ -217,11 +223,11 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
                 .filter(|s| s.str("host") == Some(name))
                 .and_then(|s| s.str("agent")));
         }
-        let _ = emit(
-            &ctx.state,
-            cfg,
-            Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d),
-        );
+        let _ = append(&ctx.state, &Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d));
+    }
+    if let Some(t) = remote.iter().filter(new).map(|e| e.ts).max() {
+        let d = json!({"host": name, "upto_ts": t});
+        let _ = append(&ctx.state, &Event::new(ctx.now, "herdsman", None, "asks-imported", d));
     }
 }
 

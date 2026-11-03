@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 pub const TICK: &str = "dev.herdsman.tick";
 /// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.herdsman.fast";
+/// #237: the build's own jobs (label, args); `install` derives each one's interval from its args.
+pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
 const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
@@ -58,9 +60,29 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
     ok(r, w.next().unwrap_or_default(), &w.collect::<Vec<_>>())
 }
 
-/// Is the tick job loaded (`herdsman doctor`)?
-pub fn loaded(ctx: &Ctx, r: &dyn Runner) -> bool {
-    exec(r, &ctl(ctx, TICK, true)[0]).is_ok()
+/// The job's files as `install` writes them, with `path` for PATH.
+fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
+    let every = args[0] != "serve";
+    let secs = [0, cfg.limits.slow_secs, cfg.limits.fast_secs][usize::from(every) + usize::from(args[0] == "drive")];
+    let cmd: Vec<&str> = std::iter::once(ctx.exe.as_str()).chain(args.iter().copied()).collect();
+    files(ctx, label, &cmd, path, secs, MAC)
+}
+
+/// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or
+/// interval differ)`; PATH is the host's, never compared.
+pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
+    let same = |(p, t): &(PathBuf, String)| {
+        let x = std::fs::read_to_string(p).unwrap_or_default();
+        t.split_once('\0')
+            .map_or(x == *t, |(a, b)| x.starts_with(a) && x.ends_with(b))
+    };
+    let state = |(label, args): (&'static str, &[&str])| {
+        let files = expect(ctx, cfg, label, args, "\0");
+        let up = files.iter().all(|f| f.0.exists()) && exec(r, &ctl(ctx, label, true)[0]).is_ok();
+        let i = usize::from(up) + usize::from(up && files.iter().all(same));
+        (label, ["missing", "outdated (args or interval differ)", "loaded"][i])
+    };
+    JOBS.map(state).to_vec()
 }
 
 /// The jobs' PATH: the dirs of the harness binaries, `gh`, `herdr` and herdsman, then the system dirs
@@ -81,10 +103,7 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
-    let (every, exe) = (args[0] != "serve", ctx.exe.as_str());
-    let secs = [0, cfg.limits.slow_secs, cfg.limits.fast_secs][usize::from(every) + usize::from(args[0] == "drive")];
-    let cmd: Vec<&str> = std::iter::once(exe).chain(args.iter().copied()).collect();
-    let files = files(ctx, label, &cmd, &path(ctx, cfg, r), secs, MAC);
+    let (every, files) = (args[0] != "serve", expect(ctx, cfg, label, args, &path(ctx, cfg, r)));
     let [probe, up, down] = ctl(ctx, label, every);
     let live = load && exec(r, &probe).is_ok();
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);
@@ -112,7 +131,7 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
 /// `herdsman timer install|remove|status`.
 pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: (&str, &str, bool)) -> Result<i32> {
     let (action, label, load) = cmd;
-    let both = [(label, &["tick"][..]), (FAST, &["drive", "--fast"])];
+    let both = [(label, JOBS[0].1), JOBS[1]];
     let line = match action {
         "install" => both.map(|(l, args)| install(ctx, cfg, r, l, args, load)).join("\n"),
         "remove" => both
@@ -182,11 +201,34 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
         Ok(()) => {}
     }
+    repair(ctx, &cfg, r, &events)?;
     for (item, _, detail, fix) in services(ctx, &cfg, r, None).into_iter().filter(|s| s.1 == "r") {
         let why = format!("{item}: {detail} → {fix}");
         alert(ctx, &cfg, &events, "service-red", &item, &why)?;
     }
     Ok(0)
+}
+
+/// #237: reinstall each own job `drift` finds missing or outdated, read it back, log `timer-repaired`; alert when
+/// that fails. Never the tick's own job: reloading it would end this run (its row stays red, alerted).
+fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
+    for ((label, state), (_, args)) in drift(ctx, cfg, r).into_iter().zip(JOBS) {
+        if label == TICK || state == "loaded" {
+            continue;
+        }
+        let line = install(ctx, cfg, r, label, args, true);
+        if line.starts_with('✓') && exec(r, &ctl(ctx, label, true)[0]).is_ok() {
+            let d = serde_json::json!({"label": label, "was": state});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, "herdsman", None, "timer-repaired", d),
+            )?;
+        } else {
+            alert(ctx, cfg, events, "timer-repair-failed", label, &line)?;
+        }
+    }
+    Ok(())
 }
 
 /// Every file under the config dir and the fleets' Hermes configs: did `profiles sync` change any?
@@ -314,7 +356,14 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = if board.is_some() { "g" } else { "r" };
     let d = board.unwrap_or(format!("down on {addr}"));
     let mut rows = vec![row("board", t, d, "herdsman setup")];
+    // #237: each own job against this build, folded into its step's row: red unless loaded.
+    let drift = drift(ctx, cfg, r);
+    let job = |i: usize, t, d: String| match drift[i].1 {
+        "loaded" => (t, d),
+        state => ("r", format!("{d} · job {state}")),
+    };
     let (t, d) = tick_row(ctx, &events);
+    let (t, d) = job(0, t, d);
     rows.push(row("tick", t, d, FIX));
     for (name, f) in &cfg.fleet {
         let item = format!("drive {name}");
@@ -333,12 +382,11 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let took = secs
         .flatten()
         .map_or(String::new(), |s| format!("fast step {s:.1} s · "));
-    rows.push(row(
-        "fast step",
-        tone(ctx.now, at),
-        format!("{took}ran {}", ago(ctx.now, at)),
-        FIX,
-    ));
+    // #237: red after 3× its interval.
+    let late = at.is_none_or(|t| ctx.now.saturating_sub(t) > 3 * cfg.limits.fast_secs);
+    let t = if late { "r" } else { tone(ctx.now, at) };
+    let (t, d) = job(1, t, format!("{took}ran {}", ago(ctx.now, at)));
+    rows.push(row("fast step", t, d, FIX));
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

@@ -144,8 +144,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — ran {age} → herdsman timer install");
         row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
     }
-    let line = format!("timer — {} loaded → herdsman timer install", crate::timer::TICK);
-    row(rows, crate::timer::loaded(ctx, r), '✗', &line);
+    for (label, state) in crate::timer::drift(ctx, cfg, r) {
+        let line = format!("timer — {label} {state} → herdsman timer install");
+        row(rows, state == "loaded", '✗', &line);
+    }
     // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
