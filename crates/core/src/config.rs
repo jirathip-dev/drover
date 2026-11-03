@@ -50,6 +50,35 @@ pub struct HostCfg {
     pub budget_usd_month: Option<f64>,
     pub max_hours_day: Option<f64>,
     pub idle_stop_minutes: Option<u64>,
+    /// #256: its lanes' command rules: `deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and
+    /// `allow_commands` drops entries (unset: a cloud host allows `CLOUD_ALLOW`, a Mac nothing).
+    pub deny_commands: Option<Vec<Deny>>,
+    #[serde(default)]
+    pub deny_commands_add: Vec<Deny>,
+    pub allow_commands: Option<Vec<String>>,
+}
+
+/// #256: a cloud host is a disposable machine: its lanes may start containers.
+pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
+
+impl HostCfg {
+    pub fn allow(&self) -> Vec<String> {
+        let def = || {
+            CLOUD_ALLOW
+                .iter()
+                .filter(|_| self.cloud.is_some())
+                .map(ToString::to_string)
+                .collect()
+        };
+        self.allow_commands.clone().unwrap_or_else(def)
+    }
+    /// #256: the lane hook's deny list on this host, from the fleet's (`fleet`).
+    pub fn deny(&self, fleet: Vec<Deny>) -> Vec<Deny> {
+        let (allow, mut d) = (self.allow(), self.deny_commands.clone().unwrap_or(fleet));
+        d.extend(self.deny_commands_add.iter().cloned());
+        d.retain(|x| !allow.iter().any(|a| a == x.cmd()));
+        d
+    }
 }
 
 fn yes() -> bool {

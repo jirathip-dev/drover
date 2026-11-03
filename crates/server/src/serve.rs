@@ -2531,6 +2531,7 @@ const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again wh
 DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
 ALL_CAPPED|a|waiting|{why} · {then}
 CAP|a|waiting|{why} · starts when a lane finishes
+NO_HOST|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
 ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`

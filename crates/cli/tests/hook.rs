@@ -508,6 +508,37 @@ fn deny_commands_override_per_fleet_and_log_denials() {
     assert_eq!(run(add, "terraform plan").0, None);
 }
 
+/// #256: per-host rules from `HERDSMAN_HOST`: a cloud host allows docker and `supabase start` by default, a Mac keeps
+/// the ban; a host's `allow_commands` and `deny_commands_add` override that.
+#[test]
+fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
+    let run = |hosts: &str, host: &str, cmd: &str| {
+        let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
+        let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
+        let vars = [
+            ("HERDSMAN_LANE", Some("sendmeter:7:impl")),
+            ("HERDSMAN_HOST", Some(host)),
+        ];
+        hook_cfg(&cfg, &vars, "impl", input).0
+    };
+    let denied = |o: String| o.contains("NO_CONTAINERS") || o.contains("NO_COMMAND");
+    for cmd in ["docker ps", "docker compose up -d db", "supabase start"] {
+        assert!(run("", "cloud1", cmd).is_empty(), "{cmd} allowed on the cloud host");
+        assert!(denied(run("", "mini", cmd)), "{cmd} denied on the Mac");
+        assert!(denied(run("", "", cmd)), "{cmd} denied with no host");
+    }
+    assert!(denied(run("", "cloud1", "podman run x")), "the rest of the ban stays");
+    assert!(
+        denied(run("allow_commands = []", "cloud1", "docker ps")),
+        "a cloud host can keep the ban"
+    );
+    let add = "deny_commands_add = [\"terraform apply\"]";
+    assert!(denied(run(add, "cloud1", "terraform apply")));
+    assert!(run(add, "cloud1", "docker ps").is_empty());
+    let mac = "\n[hosts.mini2]\nallow_commands = [\"docker\"]";
+    assert!(run(mac, "mini2", "docker ps").is_empty(), "a Mac may opt in");
+}
+
 /// #288: lanes run on the host too, so pairing is the owner's: `serve approve|unpair|devices --revoke` deny in a lane.
 #[test]
 fn serve_approve_is_owner_only() {

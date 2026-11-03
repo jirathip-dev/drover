@@ -324,6 +324,7 @@ pub struct Placed {
     pub local: PathBuf,
     pub home: Option<String>,
     pub refusal: Option<(&'static str, String)>,
+    pub why: Option<String>,
     rank: (bool, f64, f64),
 }
 
@@ -361,6 +362,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
             -hs.free_mem_gb.unwrap_or(0.0),
         ),
         refusal: refusal.map(|(c, w)| (c, format!("{name}: {w}"))),
+        why: None,
         home,
     }
 }
@@ -501,19 +503,35 @@ pub fn place(
         .filter(|h| h.1.enabled)
         .map(|(n, h)| at(ctx, cfg, f, r, (n, h.machine.as_deref())))
         .collect();
-    if on.is_empty() {
-        let (enabled, has) = (["enabled ", ""][usize::from(fits.is_empty())], needs.join(", "));
-        let has = if has.is_empty() { has } else { format!(" has {has}") };
-        return refused("NO_HOST", format!("no {enabled}host{has}"));
+    // #256: a cloud host over its budget is no host for a need only it covers.
+    if on
+        .iter()
+        .all(|p| p.refusal.as_ref().is_some_and(|r| r.0 == "CLOUD_BUDGET"))
+    {
+        let has = if needs.is_empty() {
+            "enabled host".into()
+        } else {
+            format!("host with {}", needs.join(", "))
+        };
+        let cloud =
+            ["", " (cloud host stopped or over budget)"][usize::from(cfg.hosts.values().any(|h| h.cloud.is_some()))];
+        return refused("NO_HOST", format!("no {has}{cloud}"));
     }
     on.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(Equal));
-    // #254: a stopped cloud host only when every local host has been refused `overflow_after_minutes`, or it alone fits.
+    // #254: a cloud host only when every local host has been refused `overflow_after_minutes`, or it alone fits.
     let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
     let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
     let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
-    let top = on[0].refusal.is_some() && !local(&on[0]);
-    let i = (!wake && top).then(|| on.iter().position(local)).flatten();
-    Ok(Some(on.remove(i.unwrap_or(0))))
+    let i = (!wake && !local(&on[0])).then(|| on.iter().position(local)).flatten();
+    let mut p = on.remove(i.unwrap_or(0));
+    // #256: why it went to the cloud, for the spawn event and `status`.
+    let why = match on.iter().any(local) {
+        true => format!("overflow: every local host busy {} min", held / 60),
+        false if needs.is_empty() => "no local host fits".into(),
+        false => format!("needs {}: no local host has it", needs.join(", ")),
+    };
+    p.why = (!local(&p)).then_some(why);
+    Ok(Some(p))
 }
 
 /// #254: how long every local host has been refused (`<state dir>/held-since`: `since last`, cleared once one admits;
@@ -539,7 +557,11 @@ pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Optio
     match p {
         Some(p) if !f.1 && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
             crate::cloud::start(ctx, cfg, r, &p.name)?;
-            Ok(Some(at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()))))
+            let why = p.why.clone();
+            Ok(Some(Placed {
+                why,
+                ..at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()))
+            }))
         }
         p => Ok(p),
     }

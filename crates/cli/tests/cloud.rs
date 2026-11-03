@@ -165,6 +165,9 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     assert_eq!(kinds, ["cloud-start", "cloud-up"]);
     let s = events.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(s.str("host"), Some("cloud1"));
+    // #256: why it went there, and the lane hook's host.
+    assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
+    assert!(r.calls.borrow().iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")));
 }
 
 #[test]
@@ -209,6 +212,39 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     )
     .unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
+}
+
+/// #256: a Mac goes first even while the cloud host runs idle; the cloud takes overflow only after the delay, or a need
+/// only it covers at once, and says why.
+#[test]
+fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
+    let c = setup("cloud-running-overflow");
+    ev(&c, NOW - 100, "cloud-start");
+    ev(&c, NOW - 90, "cloud-up");
+    let pick = |c: &herdsman::Ctx, r: &Fake| {
+        let cfg = Config::load(&c.config).unwrap();
+        let p = place(c, &cfg, r, &read(&c.state).unwrap(), ("sendmeter", 12, "impl"), None);
+        let p = p.unwrap().unwrap();
+        (p.name, p.refusal.map(|r| r.0), p.why)
+    };
+    // mini at load/cpu 2.0 admits: it wins over the idler cloud1 (0.1).
+    assert_eq!(pick(&c, &fake(2.0)), ("mini".into(), None, None));
+    // mini held: its refusal until it has been held 10 minutes, then cloud1.
+    assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
+    let later = herdsman::Ctx {
+        now: NOW + 601,
+        ..c.clone()
+    };
+    let why = Some("overflow: every local host busy 10 min".to_string());
+    assert_eq!(pick(&later, &fake(3.0)), ("cloud1".into(), None, why));
+    // A need only cloud1 covers goes there at once, mini idle or not.
+    run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    let why = Some("needs docker: no local host has it".to_string());
+    assert_eq!(pick(&c, &fake(0.1)), ("cloud1".into(), None, why));
 }
 
 /// cloud1 running since 3000 s ago with a lane whose worktree is 1 commit ahead.
@@ -352,6 +388,16 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     assert_eq!(
         placed(&c, &fake(0.1), Some("cloud1")).unwrap_err(),
         "CLOUD_BUDGET: cloud1: spent $11.00 of $10 this month"
+    );
+    // #256: a need only it covers waits, in plain words.
+    run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    assert_eq!(
+        placed(&c, &fake(0.1), None).unwrap_err(),
+        "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)"
     );
     // A running host at its limit is stopped (after the wip save).
     let cfg = Config::load(&c.config).unwrap();
