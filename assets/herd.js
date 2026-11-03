@@ -188,15 +188,14 @@ const queued = q => `<button type=button class="hqh${q.needs ? ' n' : ''}" data-
 // #130: a fleet's `needs` (its needs-human issues): their horses wear a red `!` in the blocked band, an issue
 // with no lane waits at the gate; a tap opens its needs-you card.
 // #292: lanes of merged or closed issues (`gone`) aren't drawn (the Lanes tab and `clean` have them); each lane takes the next look
-// not on the page yet whose hat differs from the previous lane's (from its name's hash).
+// not on the page yet (from its name's hash), the hats taken in turn (toque, bandana, cap).
 function nh(f) {
   const n = f.needs || [], L = T.looks || [], used = new Set(), hat = k => ['--ht', '--hb', '--hk'].map(x => L[k][x]).join();
-  let prev = null;
-  const lanes = f.lanes.filter(l => !l.gone).map(l => {
+  const hats = [...new Set(L.map((_, k) => hat(k)))];
+  const lanes = f.lanes.filter(l => !l.gone).map((l, i) => {
     let k = hash(l.name) % (L.length || 1);
-    for (let t = 0; L.length && t < L.length && (used.has(k) || hat(k) === prev); t++) k = (k + 1) % L.length;
+    for (let t = 0; L.length && t < L.length && (used.has(k) || hat(k) !== hats[i % hats.length]); t++) k = (k + 1) % L.length;
     used.add(k);
-    if (L.length) prev = hat(k);
     l = Object.assign({}, l, { look: L.length ? k : null });
     return n.includes(l.issue) ? Object.assign(l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l;
   });
@@ -251,6 +250,8 @@ function patch(hb, lanes, queue) {
     at = b;
   }
   drop.forEach(b => b.remove());
+  // #292: ≥ 900 px every card is as wide as the page's widest line (320–520 px), so the columns line up.
+  hb.style.setProperty('--cw', Math.min(520, Math.max(320, ...[...hb.querySelectorAll('.hl>*')].map(x => x.scrollWidth + 20))) + 'px');
   const e = hb.querySelector(':scope > .empty');
   if (at) { if (e) e.remove(); } else if (!e) hb.append(tpl(`<p class=empty>no ${w('horses')} here</p>`));
 }
@@ -258,12 +259,15 @@ function patch(hb, lanes, queue) {
 // #239/#292: the backdrop fills its band edge to edge at the band's height (`--ar`), top-anchored and never cropped: an odd
 // number of tiles (slice: only the outer tiles' spare sides go) centred on this page's own, all at one tint. A theme's
 // `scene.line` puts every fleet's station in turn; farm's ranch is mirrored every other tile so the edges meet (the moon
-// only in the middle). Rebuilt when the count changes.
+// only in the middle), its empty sky above the hills (y < Y0) left to the band's gradient and clouds, as the 390 mockup (#58's 22svh still fits).
+// Rebuilt when the count changes.
+const Y0 = 130;
 function tiles(p) {
   const r = p.querySelector('.hr'), v = RAW.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/), [vw, vh] = v ? [+v[1], +v[2]] : [390, 320];
-  r.style.setProperty('--ar', f1(vh / vw * 1000) / 1000);
+  const y0 = v ? 0 : Y0, h = vh - y0;
+  r.style.setProperty('--ar', f1(h / vw * 1000) / 1000);
   if (!r.clientWidth || !r.clientHeight) return;
-  const n = 2 * Math.ceil((r.clientWidth * vh / vw / r.clientHeight - 1) / 2) + 1, mid = (n - 1) / 2;
+  const n = 2 * Math.ceil((r.clientWidth * h / vw / r.clientHeight - 1) / 2) + 1, mid = (n - 1) / 2;
   if (p._n === n) return;
   p._n = n;
   const fs = data?.fleets || [], i = fs.findIndex(f => f.name === p._key), body = (v ? RAW : scene()).replace(/^[\s\S]*?<svg[^>]*>|<\/svg>\s*$/g, '');
@@ -274,7 +278,7 @@ function tiles(p) {
       (v || k % 2 === 0 ? body : `<g transform="matrix(-1 0 0 1 ${vw} 0)">${body}</g>`) + '</svg>';
   }
   r.querySelector('.rs')?.remove();
-  r.querySelector('.hc').insertAdjacentHTML('afterend', `<svg class=rs viewBox="${-mid * vw} 0 ${n * vw} ${vh}" preserveAspectRatio="xMidYMin slice"${v ? ' shape-rendering=crispEdges' : ''} aria-hidden=true>${s}</svg>`);
+  r.querySelector('.hc').insertAdjacentHTML('afterend', `<svg class=rs viewBox="${-mid * vw} ${y0} ${n * vw} ${h}" preserveAspectRatio="xMidYMin slice"${v ? ' shape-rendering=crispEdges' : ''} aria-hidden=true>${s}</svg>`);
   p._trees = [...r.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
   p._cel = [...r.querySelectorAll('.cel')];
   p._grass = [...r.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);

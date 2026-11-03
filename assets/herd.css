@@ -104,10 +104,10 @@
 .hqh.n use{animation:var(--flutter,none);transform-box:view-box;transform-origin:50% 0}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
 @media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n use{animation:none}}
-/* #292 wide screens: the cards are a grid of equal columns from the rail's left edge, wide enough for their reasons
-   (still ellipsised past it, the whole line in `title`); the bands sit closer. */
+/* #292 wide screens: the cards are a grid of equal columns from the rail's left edge, as wide as the page's widest line
+   (`--cw`, herd.js patch(); ellipsised past 520 px, the whole line in `title`); the bands sit closer. */
 @media (min-width:900px){
-  .field{display:grid;grid-template-columns:repeat(auto-fill,320px);justify-content:start;padding-left:calc(2 * var(--s1) + var(--s2))}
-  .hh{width:320px}.hl{align-self:stretch;max-width:none}
+  .field{display:grid;grid-template-columns:repeat(auto-fill,var(--cw,320px));justify-content:start;padding-left:calc(2 * var(--s1) + var(--s2))}
+  .hh{width:var(--cw,320px)}.hl{align-self:stretch;max-width:none}.hl>*{width:max-content;max-width:100%;align-self:center}
   .band h4{padding-top:var(--s2)}
 }
