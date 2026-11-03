@@ -757,3 +757,81 @@ fn lanes_and_sheet_fit_390px() {
         assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
     }
 }
+
+/// #315 gate 2: the chat sheet is screen-first. For a local Claude lane with a session transcript, one on another host
+/// (its pane read with `--machine`, no transcript) and a Hermes lane, the default view shows ≥ 1 message, the full view
+/// ≥ 1 block, [full conversation] changes what is drawn, and the page logs no error.
+#[test]
+fn chat_views_never_blank() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let (c, r) = fixture("never-blank");
+    let d = json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "machine": "air", "host": "air"});
+    append(&c.state, &Event::new(900_800, "synergy", Some(7), "spawn", d)).unwrap();
+    let screen = "⏺ Bash(cargo test)\n  ⎿ ok\n> fix the test\n⏺ Fixed: the test passes.\n";
+    let r = r.reply("herdr --machine air pane read", screen);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = paired(&s, &c);
+    let sheet = |agent: &str| {
+        let res = req(&s, "GET", &format!("/lane?agent={agent}"), "", &cookie, T);
+        serde_json::from_str::<serde_json::Value>(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+    };
+    let mut local = sheet("sendmeter-impl-12");
+    local["said"] = json!([{"k": "me", "text": "fix the test", "at": "2026-11-03T09:00:00Z"},
+        {"k": "ai", "text": "Fixed: **the test** passes.", "at": "2026-11-03T09:01:00Z"}]);
+    // A session whose last 2 MB holds no message (tool calls only) is no transcript either.
+    let mut empty = local.clone();
+    empty["said"] = json!([]);
+    let remote = sheet("synergy-impl-7");
+    assert!(r.called("herdr --machine air pane read w2:p1 --source recent --lines 200 --format ansi"));
+    assert_eq!(
+        (&remote["said"], remote["lines"].as_array().unwrap().len()),
+        (&json!(null), 4),
+        "{remote}"
+    );
+    let page = req(&s, "GET", "/", "", "", T);
+    let d = tmpdir("never-blank-png");
+    let file = d.join("page.html");
+    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
+    for (agent, lane) in [
+        ("sendmeter-impl-12", local),
+        ("sendmeter-impl-12", empty),
+        ("synergy-impl-7", remote),
+        ("sendmeter-rev-9-r1", sheet("sendmeter-rev-9-r1")),
+    ] {
+        let js = format!(
+            "window.errs = 0; window.onerror = () => {{ errs++; }}; addEventListener('unhandledrejection', () => errs++); \
+             console.error = () => errs++; window.fetch = async () => new Response({}, {{status: 200}}); \
+             if ($('.fv').ariaPressed === 'true') $('.fv').click(); open($('.lane[data-agent=\"{agent}\"]')); \
+             setTimeout(() => {{ const a = now.innerHTML, msgs = $$('.now .blk.me, .now .blk.ai').length; $('.fv').click(); \
+             window.late = [msgs, $$('.now .blk').length, now.innerHTML !== a ? 1 : 0, errs]; }}, 300)",
+            json!(lane.to_string())
+        );
+        let png = d.join(format!("{agent}.png"));
+        let o = swift()
+            .args([
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
+                file.to_str().unwrap(),
+                "390",
+                "lanes",
+                "horse",
+                png.to_str().unwrap(),
+                &js,
+            ])
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout);
+        let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+        assert!(
+            o.status.success() && m.len() == 4,
+            "{agent}: {out} {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert!(
+            m[0] >= 1.0 && m[1] >= 1.0 && m[2] == 1.0 && m[3] == 0.0,
+            "{agent}: default msgs, full blocks, toggled, errors: {m:?}"
+        );
+    }
+}

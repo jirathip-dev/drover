@@ -98,6 +98,14 @@ enum Cmd {
         #[arg(long)]
         no_spawn: bool,
     },
+    /// End a fix round with no new commit: drive reviews the same head again (a CI-only FAIL with green CI merges)
+    Done {
+        fleet: String,
+        issue: u64,
+        /// Why nothing changed (the finding adjudicated away, CI-infra red)
+        #[arg(long, value_name = "WHY")]
+        no_change: String,
+    },
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
@@ -416,8 +424,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`).
-pub const HELP_AGENT_MAX: usize = 218;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`).
+pub const HELP_AGENT_MAX: usize = 222;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -476,7 +484,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             eprintln!("{h}");
         }
     }
-    let lane_write = matches!(cli.cmd, Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. });
+    let lane_write = matches!(
+        cli.cmd,
+        Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. }
+    );
     let mut sent: Vec<String> = args.into_iter().skip(1).collect();
     for i in 1..sent.len() {
         if sent[i - 1] == "--file" {
@@ -868,6 +879,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     by,
                     no_spawn,
                 } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by))?,
+                Cmd::Done {
+                    fleet,
+                    issue,
+                    no_change,
+                } => {
+                    let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
+                    emit(&ctx.state, &cfg, e)?;
+                    writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
+                }
                 Cmd::Park { fleet, issue } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;
                 }

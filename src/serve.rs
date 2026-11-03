@@ -1861,7 +1861,7 @@ impl<'a> Server<'a> {
                     (a, _) => a,
                 };
                 json!({"name": l.name, "act": act, "issue": l.issue, "title": title, "role": l.role, "harness": l.harness,
-                       "model": l.model, "effort": l.effort, "account": l.account, "host": l.host, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name)})
+                       "model": l.model, "effort": l.effort, "account": l.account, "host": l.host, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name), "gone": matches!(is, "merged" | "closed")})
             }).collect()
         };
         let queued = |f: &String| -> Vec<_> {
