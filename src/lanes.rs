@@ -433,34 +433,27 @@ fn doing(tool: &str, arg: &str) -> String {
 /// `VAR=…`, redirections and piped parts dropped, `+N` for the rest of a chain, a heredoc as `python3 (script)`.
 pub fn short(cmd: &str) -> String {
     let (mut segs, mut seg, mut tok, mut q, mut d, mut piped) = (vec![], vec![], String::new(), None, 0, false);
-    let mut cs = cmd.chars().peekable();
+    let mut cs = cmd.chars().chain([';']).peekable();
     while let Some(c) = cs.next() {
         match (q, c) {
             (Some(x), _) if x == c => q = None,
             (None, '\'' | '"') => q = Some(c),
-            (None, '(') => d += 1,
-            (None, ')') => d -= 1,
+            (None, '(' | ')') => d += if c == '(' { 1 } else { -1 },
             (None, '&') if tok.ends_with('>') || cs.peek() == Some(&'>') => {}
-            (None, ';' | '\n' | '&' | '|') if d <= 0 => {
-                let pipe = c == '|' && cs.next_if_eq(&'|').is_none();
+            (None, ';' | '\n' | '&' | '|' | ' ' | '\t') if d <= 0 => {
                 seg.extend((!tok.is_empty()).then(|| std::mem::take(&mut tok)));
-                segs.push((std::mem::take(&mut seg), std::mem::replace(&mut piped, pipe)));
-                continue;
-            }
-            (None, ' ' | '\t') if d <= 0 => {
-                seg.extend((!tok.is_empty()).then(|| std::mem::take(&mut tok)));
+                if !" \t".contains(c) {
+                    let pipe = c == '|' && cs.next_if_eq(&'|').is_none();
+                    segs.push((std::mem::take(&mut seg), std::mem::replace(&mut piped, pipe)));
+                }
                 continue;
             }
             _ => {}
         }
         tok.push(c);
     }
-    seg.extend((!tok.is_empty()).then_some(tok));
-    segs.push((seg, piped));
-    let var = |w: &&String| {
-        w.split_once('=')
-            .is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
-    };
+    let id = |c: char| c == '_' || c.is_alphanumeric();
+    let var = |w: &&String| w.split_once('=').is_some_and(|(k, _)| k.chars().all(id));
     let real: Vec<Vec<&String>> = (segs.iter().filter(|s| !s.1))
         .map(|s| s.0.iter().skip_while(var).collect::<Vec<_>>())
         .filter(|s| s.first().is_some_and(|c| *c != "cd"))
@@ -469,27 +462,17 @@ pub fn short(cmd: &str) -> String {
         return cmd.trim().to_string();
     };
     let word = |w: &&&String| !w.starts_with('-') && w.chars().all(|c| c.is_alphanumeric() || "./~:@_+-".contains(c));
-    let (mut out, mut redir) = (s[0].clone(), false);
-    if s.iter().any(|w| w.starts_with("<<")) {
-        out += " (script)";
-    } else {
-        for w in s[1..]
-            .iter()
-            .filter(|w| !std::mem::replace(&mut redir, ["<", ">", ">>", "2>", "&>"].contains(&w.as_str())))
-        {
-            if word(&w) && out.split(' ').count() < 3 {
-                out = out + " " + w;
-                if w.contains(['/', '.']) {
-                    break;
-                }
-            }
-        }
-    }
-    out + &if real.len() > 1 {
-        format!(" +{}", real.len() - 1)
-    } else {
-        String::new()
-    }
+    let redir = |w: &&String| ["<", ">", ">>", "2>", "&>"].contains(&w.as_str());
+    let args = s.iter().zip(&s[1..]).filter(|(p, _)| !redir(p)).map(|x| x.1);
+    let args: Vec<_> = args.filter(word).take(2).collect();
+    let end = args
+        .iter()
+        .position(|w| w.contains(['/', '.']))
+        .map_or(args.len(), |i| i + 1);
+    let out = args[..end].iter().fold(s[0].clone(), |o, w| o + " " + w);
+    let (more, script) = (real.len() - 1, s.iter().any(|w| w.starts_with("<<")));
+    let tail = [(script, " (script)".to_string()), (more > 0, format!(" +{more}"))];
+    out + &tail.into_iter().filter(|t| t.0).map(|t| t.1).collect::<String>()
 }
 
 /// #276: Claude's live spinner as its word and, past a minute, its elapsed time: `✻ Herding… (4m 12s · ↓ 3k tokens)` is

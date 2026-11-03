@@ -1981,23 +1981,15 @@ impl<'a> Server<'a> {
             format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen)))
         } else {
             let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
-            let n = now.as_ref().map(|n| {
-                let s = (n.strip_prefix("now: running "))
-                    .map_or(n.clone(), |c| format!("now: running {}", lanes::short(c)));
-                s.strip_prefix("now: ")
-                    .filter(|_| w.is_some())
-                    .map_or(s.clone(), String::from)
+            let n = now.as_ref().map(|n| match n.strip_prefix("now: running ") {
+                Some(c) => format!("{}running {}", if w.is_some() { "" } else { "now: " }, lanes::short(c)),
+                None => n.strip_prefix("now: ").filter(|_| w.is_some()).unwrap_or(n).to_string(),
             });
-            let title = [&w, &now, &t]
-                .into_iter()
-                .flatten()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" · ");
-            let parts = [(w, "el"), (n, "el"), (t, "t")].into_iter();
-            let parts = parts.filter_map(|(x, c)| x.map(|x| format!("<span class={c}>{}</span>", esc(&x))));
-            let parts = parts.collect::<Vec<_>>().join("<i> · </i>");
-            format!("<span class=\"act nw el now\" title=\"{}\">{parts}</span>", esc(&title))
+            let title: Vec<_> = [&w, &now, &t].into_iter().flatten().cloned().collect();
+            let tag = |(x, c): (Option<String>, &str)| Some(format!("<span class={c}>{}</span>", esc(&x?)));
+            let parts: Vec<_> = [(w, "el"), (n, "el"), (t, "t")].into_iter().filter_map(tag).collect();
+            let (title, parts) = (esc(&title.join(" · ")), parts.join("<i> · </i>"));
+            format!("<span class=\"act nw el now\" title=\"{title}\">{parts}</span>")
         };
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
