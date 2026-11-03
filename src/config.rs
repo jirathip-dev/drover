@@ -235,9 +235,8 @@ pub struct Limits {
     pub ask_default_minutes: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
-    /// #248: a `done` lane whose handoff is logged this long closes its session (its worktree stays).
+    /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
     pub done_close_minutes: u64,
-    /// #248: the lane settings' `cleanupPeriodDays` (Claude's own transcript retention).
     pub transcript_days: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,

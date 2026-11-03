@@ -1059,15 +1059,12 @@ impl<'a> Server<'a> {
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &fold(&events))?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
-        // #218: a lane with no pane (herdr no longer lists it): its stored transcript, no live block; #248: Claude's
-        // saved session for its worktree first.
+        // #218: a lane with no pane: its stored transcript (#248: Claude's saved session first), no live block.
         let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
             let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
-            let saved = wt
-                .and_then(|wt| lanes::session(&ctx.home, wt))
-                .filter(|_| self.export.is_none());
+            let saved = wt.and_then(|wt| lanes::session(&ctx.home, wt));
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
-            let all: Vec<String> = saved.or_else(rolled)?;
+            let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
             let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
             return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
         };

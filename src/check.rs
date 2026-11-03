@@ -273,8 +273,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// #248: when lane `e`'s handoff was logged: its issue's latest `pushed`/`verdict` since it spawned, or a design
-/// lane's latest commit since then.
+/// #248: when lane `e` handed off: the latest `pushed`/`verdict` since it spawned (design: its latest commit since).
 fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
     if e.str("role") == Some("design") {
         let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"]).ok()?;
