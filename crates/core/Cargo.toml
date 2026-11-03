@@ -4,6 +4,7 @@ description = "herdsman's state, events, gates and commands; no dependency on th
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true

@@ -1,11 +1,13 @@
 //! #254 cloud hosts (docs/hosts.md): recipe commands start, stop and price a `[hosts.<n>] cloud` host; logs `cloud-*`.
 use crate::config::{expand, write_atomic, Config};
 use crate::events::{age, emit, read, Event};
-use crate::runner::{argv, Runner};
+use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::io::Write;
+use std::path::Path;
 
 /// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size.
 fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
@@ -102,7 +104,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     let up = cmd(ctx, cfg, r, name, "start").and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
-                return refresh(ctx, cfg, r, name);
+                return refresh(ctx, cfg, r, name).map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
             r.sleep(10);
         }
@@ -213,5 +215,131 @@ pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> 
     let text =
         format!("{rc} {size} · spent ${usd:.0} of ${b} · {hrs:.1} h today of {m} · address {a} · last start {s}");
     let tone = ["g", "a", "r"][at.min(2)].to_string();
-    Some([head, tone, format!("{text} · last stop {t}")])
+    let gh = crate::hosts::cached(ctx).remove(name).map(|s| s.github);
+    let gh = gh.filter(|g| !g.is_empty()).map(|g| format!(" · {g}"));
+    Some([head, tone, format!("{text} · last stop {t}{}", gh.unwrap_or_default())])
+}
+
+/// #255: host `on`'s gh token as its card says it (`github: token · 2 repos · expires in 80d`) and a health row from 14
+/// days before it expires, from one `gh api -i` there (the expiry header and the repos it reaches, never the token).
+pub fn github(on: &dyn Runner, now: u64) -> (String, Option<String>) {
+    let o = ok(on, "gh", &["api", "-i", "user/repos?per_page=100"]);
+    token(&o.unwrap_or_default(), now)
+}
+
+/// `gh api -i` text's card words, and its row: `!` within 14 days of the expiry, `✗` when gh can't use it (expired).
+pub fn token(text: &str, now: u64) -> (String, Option<String>) {
+    let repos = format!("github: token · {} repos", text.matches("\"full_name\"").count());
+    let exp = |l: &&str| l.to_lowercase().starts_with("github-authentication-token-expiration:");
+    let day = text.lines().find(exp).and_then(|l| l.get(39..)?.trim().get(..10));
+    let n: Vec<i64> = day.unwrap_or_default().split('-').flat_map(str::parse).collect();
+    let new = "→ a new fine-grained token, then hosts bootstrap";
+    let [y, m, d] = n[..] else {
+        let bad = format!("✗ github — gh there has no working token (expired?) {new}");
+        return [
+            (format!("{repos} · no expiry"), None),
+            ("github: unreadable".into(), Some(bad)),
+        ][usize::from(text.is_empty())]
+        .clone();
+    };
+    // The days since 1970 of that civil date (H. Hinnant's days_from_civil).
+    let (y, mp) = (y - i64::from(m <= 2), (m + 9) % 12);
+    let (era, yoe) = (y.div_euclid(400), y.rem_euclid(400));
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * mp + 2) / 5 + d - 1;
+    let left = era * 146_097 + doe - 719_468 - i64::try_from(now / 86_400).unwrap_or(0);
+    let row = format!("! github — token expires in {left}d {new}");
+    (format!("{repos} · expires in {left}d"), (left <= 14).then_some(row))
+}
+
+/// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
+pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
+/// Bootstrap's steps after herdr, `name⇥read-back check⇥install` each (Rust with a C linker for `cargo install`).
+const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh
+claude\tcommand -v claude\tcurl -fsSL https://claude.ai/install.sh | bash
+rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
+
+/// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
+/// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token, the
+/// `[fleet.*]` tables, the clones of the fleets it fits and `profiles sync`. Nothing is copied from this host's logins.
+pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
+    let h = cfg.hosts.get(name).context("no such host")?;
+    if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
+        start(ctx, cfg, r, name)?;
+    }
+    let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
+    let on = crate::hosts::On::new(r, Some(m));
+    let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}"))?;
+    let mine = crate::config::home().to_string_lossy().into_owned();
+    let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
+    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("HERDSMAN_SHA"));
+    let v = crate::timer::herdr_versions(r).context("no herdr server here")?.0;
+    let sh = |s: &str| on.run("sh", &argv(&["-c", &format!("{SH}{s}")]));
+    let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
+    let mut step = |line: &str| -> Result<()> {
+        let [what, check, install] =
+            <[&str; 3]>::try_from(line.splitn(3, '\t').collect::<Vec<_>>()).unwrap_or_default();
+        if pass(check) {
+            return Ok(writeln!(out, "✓ {what} — there")?);
+        }
+        // herdr's install is `herdr machine add` from here: this host's version there.
+        let add = || r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]));
+        let o = if install.is_empty() { add()? } else { sh(install)? };
+        let err = o.stderr.lines().last().unwrap_or_default().to_string();
+        ensure!(pass(check), "{name}: {what} installed, `{check}` fails: {err}");
+        Ok(writeln!(out, "✓ {what} — installed")?)
+    };
+    let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
+    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
+    let mut steps = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n{TOOLS}\n");
+    steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
+    steps.lines().try_for_each(&mut step)?;
+    let logins = [("claude", "claude"), ("gh", "gh-token")]
+        .into_iter()
+        .filter(|t| !pass(&format!("{} auth status", t.0)));
+    let panes = logins
+        .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))
+        .collect::<Result<Vec<_>>>()?;
+    let p = panes.join(" ");
+    ensure!(
+        p.is_empty(),
+        "{name}: log in in pane {p} there (herdr or the board), then bootstrap again"
+    );
+    step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
+    if !on.exists(Path::new(&conf)) {
+        // Only the `[fleet.*]` tables, without their notifiers (a notify command may hold a token).
+        let mut t: toml::Table = toml::from_str(&std::fs::read_to_string(&ctx.config)?)?;
+        t.retain(|k, _| k == "fleet");
+        for (_, f) in t
+            .iter_mut()
+            .filter_map(|f| f.1.as_table_mut())
+            .flat_map(|f| f.iter_mut())
+        {
+            f.as_table_mut().map(|f| f.remove("notify"));
+        }
+        on.write(Path::new(&conf), &t.to_string())?;
+    }
+    let tags = [h.tags.clone(), tags].concat();
+    for f in cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t))) {
+        let l = crate::hosts::under(&f.local, Some(&home));
+        step(&format!(
+            "clone {0}\ttest -d '{1}/.git'\tgit clone https://github.com/{0}.git '{1}'",
+            f.repo,
+            l.display()
+        ))?;
+    }
+    step(&format!("profiles sync\t'{exe}' profiles sync >/dev/null\ttrue"))?;
+    log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
+    crate::hosts::survey(ctx, cfg, r, true);
+    Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
+}
+
+/// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`.
+pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
+    crate::hosts::survey(ctx, cfg, r, true);
+    let s = crate::hosts::cached(ctx).remove(name).unwrap_or_default();
+    let bad: Vec<_> = s.health.iter().filter(|w| w.starts_with('✗')).cloned().collect();
+    ensure!(s.up && bad.is_empty(), "{name} is not healthy: {}", bad.join("; "));
+    cmd(ctx, cfg, r, name, "snapshot")?;
+    log(ctx, cfg, "cloud-snapshot", name, json!({}))
 }
