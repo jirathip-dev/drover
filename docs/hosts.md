@@ -117,6 +117,37 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
   min), so a peak is never hidden.
 - Each lane card, and each horse in the Herd, shows its host name.
 
+## Health (#235)
+
+`herdsman doctor` checks every enabled remote host, and `check` does the same once an hour (with the tag probe). A
+failure turns the host red on the Host tab (`unhealthy · <reason>`) and keeps new lanes off it: placement refuses it
+with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
+
+- **herdr**: the server's version equals the installed client's (`herdr status` on the host). An old server keeps
+  running after an update, and `herdr machine add` then fails with "remote server is not ready": update herdr on the
+  host and restart its server.
+- **herdr session**: on macOS the server must run under the user's launchd job (the login session). A server
+  restarted from an SSH shell runs outside it, with the keychain locked: `gh` says "token invalid", private clones
+  fail and Claude can't read its login. Fix: `launchctl kickstart -k gui/<uid>/<label>` (the label of the job that
+  starts `herdr server`).
+- **git**: `ssh <host> git ls-remote https://github.com/<repo>.git` works for each fleet whose needs the host fits.
+  herdsman's own git over SSH never has the keychain, so HTTPS fails with `could not read Username for
+  'https://github.com'`. Fix: add the host's SSH key to GitHub and run
+  `git config --global url.git@github.com:.insteadOf https://github.com/` there.
+- **gh** and **claude**: `gh auth status` and `claude auth status` succeed inside a herdr pane on the host (a
+  throwaway `herdsman-health` workspace, closed again). Fix: log in from a pane there.
+- **herdsman**: `herdsman --version` there prints the same version and git sha as on the main host. A mismatch is
+  a warning (amber), not a failure.
+
+## Auto-update
+
+When `check` sees an older herdsman on a remote host, and fleet.toml has the herdsman fleet, it rebuilds the main
+host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
+`cargo install --path . --locked --root <root> --force` in that fleet's checkout on the host, then
+`herdsman profiles sync`. Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
+logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
+A host still on the old version stays amber. A failed update never blocks the main host.
+
 ## When the main host is down
 
 Nothing new starts. Lanes on other hosts keep running in their own herdr servers. When the main host comes back,
