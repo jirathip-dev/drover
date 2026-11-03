@@ -106,9 +106,7 @@ fn default_theme_is_farm() {
     let page = get(&c, &r, "/");
     assert!(page.contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>"));
     // The picker: this phone's choice, else the board's default, set before the first paint.
-    assert!(
-        page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\"</script>")
-    );
+    assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
     assert!(page.contains(
         "<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme><option>farm</option><option>kitchen</option><option>terminal</option></select></label>"
     ));
@@ -117,14 +115,14 @@ fn default_theme_is_farm() {
 #[test]
 fn the_picker_default_is_serve_theme_and_lists_your_own() {
     let (c, r) = server(Some("kitchen"), &[]);
-    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"kitchen\"</script>"));
+    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"kitchen\";"));
     let (c, r) = server(Some("space"), &[("space", "theme.json", "{}")]);
     let page = get(&c, &r, "/");
-    assert!(page.contains("h.dataset.theme=m||\"space\"</script>"));
+    assert!(page.contains("h.dataset.theme=m||\"space\";"));
     assert!(page.contains("<option>kitchen</option><option>space</option><option>terminal</option>"));
     // A name that would close the script stays a string.
     let (c, r) = server(Some("</script>"), &[]);
-    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"\\u003c/script>\"</script>"));
+    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"\\u003c/script>\";"));
 }
 
 #[test]
@@ -314,7 +312,7 @@ fn terminal_has_no_sprites() {
         !page.contains("rsp") && !page.contains("#hr-") && !page.contains("class=lsc"),
         "{page}"
     );
-    assert!(page.contains("h.dataset.theme=m||\"terminal\"</script>"));
+    assert!(page.contains("h.dataset.theme=m||\"terminal\";"));
 }
 
 #[test]

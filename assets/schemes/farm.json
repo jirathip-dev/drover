@@ -1,0 +1,25 @@
+{
+  "label": "Farm (night pasture; #242 values)",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#0f1a13",
+    "--card": "#1d1a12",
+    "--edge": "#3b3a27",
+    "--line": "#26301f",
+    "--scrim": "#050b08aa",
+    "--fg": "#ece4cc",
+    "--mute": "#a3a68a",
+    "--l": "#ecdba6",
+    "--link": "#7cc4f0",
+    "--g": "#7fd06a",
+    "--a": "#f29b4b",
+    "--r": "#ff7d6e",
+    "--p": "#c7a4ff",
+    "--c": "#5fd0c4",
+    "--fk-l": "#7cc4f0",
+    "--fk-p": "#c7a4ff",
+    "--fk-c": "#5fd0c4",
+    "--fk-g": "#7fd06a",
+    "--fk-a": "#f29b4b"
+  }
+}

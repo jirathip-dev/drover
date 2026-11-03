@@ -180,6 +180,26 @@ fn css_uses_only_the_tokens() {
     );
 }
 
+/// #244: no raw colour in serve.css (`#rgb…`, `rgb(`, `hsl(`): every colour is a scheme token (assets/schemes/).
+/// herd.css is the Herd's theme art and keeps its own (docs/design/schemes).
+#[test]
+fn serve_css_has_no_raw_colour() {
+    let css = include_str!("../assets/serve.css");
+    let bad: Vec<String> = decls(css)
+        .into_iter()
+        .filter(|(_, _, _, v)| {
+            v.contains("rgb(") || v.contains("rgba(") || v.contains("hsl(") || {
+                v.match_indices('#').any(|(i, _)| {
+                    let h = v[i + 1..].chars().take_while(char::is_ascii_hexdigit).count();
+                    [3, 4, 6, 8].contains(&h)
+                })
+            }
+        })
+        .map(|(l, sel, p, v)| format!("assets/serve.css:{l} {sel} {{{p}:{v}}}"))
+        .collect();
+    assert!(bad.is_empty(), "raw colours outside the schemes:\n{}", bad.join("\n"));
+}
+
 #[test]
 fn rendered_page_has_no_inline_px() {
     let demo = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/demo"));
