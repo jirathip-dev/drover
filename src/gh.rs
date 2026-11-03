@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub const PR_FIELDS: &str =
-    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels";
+    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit";
 pub const PR_TTL: u64 = 60;
 const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
 
@@ -235,6 +235,25 @@ pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     if let Some(c) = load::<Value>(&p) {
         let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
     }
+}
+
+/// #285: a ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's
+/// rule is `strict`: its ruleset's, else its classic protection's (read once an hour). `r` None: the cached read only.
+pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -> bool {
+    let p = cache_path(ctx, "strict", fleet, 0);
+    let c = load::<Value>(&p).filter(|c| r.is_none() || ctx.now < c["ts"].as_u64().unwrap_or(0) + 3600);
+    let strict = || {
+        let read = |path: &str, jq: &str| ok(r?, "gh", &["api", &format!("repos/{}/{path}", f.repo), "--jq", jq]).ok();
+        let rule =
+            ".[] | select(.type == \"required_status_checks\") | .parameters.strict_required_status_checks_policy";
+        let b = &f.integration;
+        let s = (read(&format!("rules/branches/{b}"), rule).filter(|o| !o.trim().is_empty()))
+            .or_else(|| read(&format!("branches/{b}/protection"), ".required_status_checks.strict"))
+            .is_some_and(|o| o.trim() == "true");
+        r.and_then(|_| store(&p, &json!({"ts": ctx.now, "strict": s})).ok());
+        s
+    };
+    f.update_ready.as_deref() == Some("always") || c.map_or_else(strict, |c| c["strict"] == true)
 }
 
 /// The PR view carries label `name`.
