@@ -136,7 +136,8 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             for (c, f, fleet) in rx {
                 let msg = json!(s.write(&c, &f).unwrap_or_else(|e| shown(&e)));
                 s.kick.store(lock(&s.running).remove(&fleet), Relaxed);
-                lock(&s.clients).retain(|c| c.0.send(format!("event: toast\ndata: {msg}\n\n")).is_ok());
+                let id = lock(&s.watch).seen.unwrap_or(0);
+                lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
             }
         });
         for mut st in l.incoming().flatten() {
@@ -207,11 +208,11 @@ struct Watch {
     frags: BTreeMap<(bool, &'static str), u64>,
     /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
     driving: bool,
-    /// #241: the log's event count at the last look (none yet: nothing to play).
-    seen: Option<usize>,
+    /// #241, #259: the log's last seq at the last look (none yet: nothing to play).
+    seen: Option<u64>,
 }
 
-/// #241: the theme moment an event plays on the page (`moment` on `/live`): merged, fail or needs-you.
+/// #241: the theme moment an event plays on the page (an `ev`'s `k` on `/live`): merged, fail or needs-you.
 pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),
@@ -219,6 +220,15 @@ pub fn moment(e: &Event) -> Option<&'static str> {
         "needs-human" | "needs-decision" => Some("needs-you"),
         _ => None,
     }
+}
+
+/// #259: an event on `/live` (`ev`, also replayed after `Last-Event-ID` / `?since=`): its seq, time and moment.
+fn sse(e: &Event) -> String {
+    format!(
+        "id: {}\nevent: ev\ndata: {}\n\n",
+        e.seq,
+        json!({"seq": e.seq, "ts": e.ts, "k": moment(e)})
+    )
 }
 
 pub struct Server<'a> {
@@ -622,9 +632,11 @@ impl<'a> Server<'a> {
             ),
             1,
         );
+        let target = req.split_whitespace().nth(1).unwrap_or_default();
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
-        if req.starts_with("GET /live ") && self.allowed(self.ctx, &req) && clients.len() < 8 {
+        if req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8 {
             s.set_write_timeout(Some(Duration::from_secs(10)))?;
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
@@ -642,13 +654,35 @@ impl<'a> Server<'a> {
             let mut msg =
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\n"
                     .to_string();
-            // Each second: a frag, else a peek (the peer closed: free the slot), else a ping every 15 s.
+            // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
+            let q = form(query);
+            let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
+            let mut top = 0;
+            if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
+                let ev = read(&self.ctx.state).unwrap_or_default();
+                top = ev.last().map_or(n, |e| e.seq);
+                let after: Vec<_> = ev.iter().filter(|e| e.seq > n).collect();
+                msg += &match after.last() {
+                    Some(l) if after.len() > 500 => format!("id: {0}\nevent: refresh\ndata: {0}\n\n", l.seq),
+                    _ => after.into_iter().map(sse).collect(),
+                };
+            }
+            // Each second: a frag (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
+            // the slot), else a ping every 15 s.
             std::thread::spawn(move || {
                 while s.write_all(msg.as_bytes()).is_ok() {
                     let t = Instant::now();
                     msg = loop {
                         match rx.recv_timeout(Duration::from_secs(1)) {
-                            Ok(m) if !m.is_empty() => break m,
+                            Ok(m)
+                                if !m.is_empty()
+                                    && !m
+                                        .strip_prefix("id: ")
+                                        .and_then(|r| r.split_once("\nevent: ev\n"))
+                                        .is_some_and(|(id, _)| id.parse::<u64>().is_ok_and(|i| i <= top)) =>
+                            {
+                                break m
+                            }
                             Err(RecvTimeoutError::Disconnected) => return,
                             _ if s
                                 .peek(&mut [0])
@@ -684,11 +718,11 @@ impl<'a> Server<'a> {
         let driving = self.ctx.state.with_file_name("drive.lock").exists();
         if log != w.log {
             let ev = read(&self.ctx.state).unwrap_or_default();
-            let new = ev.get(w.seen.unwrap_or(ev.len())..).unwrap_or_default();
-            for m in new.iter().filter_map(moment).collect::<BTreeSet<_>>() {
-                lock(&self.clients).retain(|c| c.0.send(format!("event: moment\ndata: {m}\n\n")).is_ok());
+            let top = ev.last().map_or(0, |e| e.seq);
+            for e in ev.iter().filter(|e| e.seq > w.seen.unwrap_or(top)) {
+                lock(&self.clients).retain(|c| c.0.send(sse(e)).is_ok());
             }
-            w.seen = Some(ev.len());
+            w.seen = Some(top);
         }
         let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
         (w.log, w.driving) = (log, driving);
@@ -712,7 +746,8 @@ impl<'a> Server<'a> {
                 .map(|v| v.to_string())
                 .unwrap_or_default();
             if w.herd.0 > 0 && hash(&j) != w.herd.1 && !j.is_empty() {
-                lock(&self.clients).retain(|c| c.0.send(format!("event: herd\ndata: {j}\n\n")).is_ok());
+                let msg = format!("id: {}\nevent: herd\ndata: {j}\n\n", w.seen.unwrap_or(0));
+                lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
             }
             w.herd = (now, hash(&j));
         }
@@ -736,7 +771,8 @@ impl<'a> Server<'a> {
                     .insert((paired, id), hash(&html))
                     .is_some_and(|h| h != hash(&html))
                 {
-                    let msg = format!("event: frag\ndata: {}\n\n", serde_json::json!({"id": id, "html": html}));
+                    let (seq, j) = (w.seen.unwrap_or(0), json!({"id": id, "html": html}));
+                    let msg = format!("id: {seq}\nevent: frag\ndata: {j}\n\n");
                     lock(&self.clients).retain(|c| c.1.is_some() != paired || c.0.send(msg.clone()).is_ok());
                 }
             }
