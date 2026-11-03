@@ -1325,11 +1325,7 @@ impl<'a> Server<'a> {
         let name = active(ctx);
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
-        let opts: String = names.iter().map(|n| format!("<option>{}</option>", esc(n))).collect();
-        let pick = format!(
-            "<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme>{opts}</select></label>\
-             <label class=pk id=scp><span>▦</span><select id=scheme aria-label=colours></select></label>"
-        );
+        let pick = "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>";
         // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
         // scheme (serve.js keeps its block), else the board theme's built-in default.
         let def: BTreeMap<_, serde_json::Value> = names

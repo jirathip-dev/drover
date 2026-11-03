@@ -11,11 +11,13 @@ file by file.
 
 ## Picking one
 
-Each phone picks its own with the header's `[◐]` (kept in localStorage, applied before the first paint like the tab,
-so there is no flash; switching applies in place, no reload, and swaps the favicon). A phone that never picked gets
-`[serve] theme = "<name>"` (default `farm`). The Host tab's `theme` row shows the board's default: green, or amber
-with the first problem when its theme.json breaks the contract (then farm is used). iOS keeps the home-screen icon it
-saved at install; the first switch says so once.
+Each phone picks its own in the **look** sheet: the header's `[◐]`, on every tab, opens the board's own bottom sheet
+with two lists, THEME (each theme's row sprite, else its icon) and COLOURS (below), the current row of each ticked (#290).
+A tap, or Enter on a focused row (↑/↓ move), applies it in place, no reload, and the sheet stays open. The pick is kept
+in localStorage and applied before the first paint like the tab, so there is no flash; a switch swaps the favicon. A
+phone that never picked gets `[serve] theme = "<name>"` (default `farm`). The Host tab's `theme` row shows the board's
+default: green, or amber with the first problem when its theme.json breaks the contract (then farm is used). iOS keeps
+the home-screen icon it saved at install; the sheet's foot says so.
 
 ## The contract (`theme.json`)
 
@@ -92,8 +94,9 @@ and `--l` (the option buttons) ≥ 4.5:1 and `--r` ≥ 3:1 on the needs-you card
 from each of them, so a control never reads as a warning. A refused scheme is left out of the picker and named on the
 Host tab with its first reason; a phone that picked it gets its theme's default, then `github-dark`.
 
-**Picking one:** the header's `[▦]` (next to `[◐]`, off the Queue tab like it) lists every scheme that passes, per
-phone, kept in localStorage. A phone that never picked gets its theme's `scheme`: farm `farm`, kitchen `kitchen`,
-terminal `github-dark`. The page paints the phone's last scheme before the first paint (no flash; else the board
+**Picking one:** the look sheet's COLOURS list (`[◐]`) shows every scheme that passes, each with its bg, fg, green,
+amber and red swatches, per phone, kept in localStorage. A phone that never picked gets its theme's `scheme`, marked
+`(theme default)`: farm `farm`, kitchen `kitchen`, terminal `github-dark`; picking that row forgets the pick, so the
+colours follow the theme again. The page paints the phone's last scheme before the first paint (no flash; else the board
 theme's built-in default), and the iOS status bar takes its `--bg`. The Host tab's `theme` row names this phone's
 theme and colours. Debug: `?scheme=<name>` for one load.
