@@ -1,0 +1,68 @@
+/* #239 kitchen theme: proposed `themes/kitchen/theme.css` (#241 serves it with the theme's files; the farm has none, so
+   the farm stays pixel-identical). Existing tokens only; no px except literal 1 px lines and the sprite boxes the
+   farm already uses (132 × 100 lanes, 53 queued). Mockup and build share it. */
+
+/* Frames: a sprite's two-frame loop (f1/f2) is two inherited custom properties, so a <use> instance animates without
+   per-leaf DOM (the farm drives --gait the same way). Discrete: a pixel pose swaps, never tweens. */
+.f1{opacity:var(--o1,1)}.f2{opacity:var(--o2,0)}
+.steam{opacity:var(--steam,0)}
+.kx{animation:kfr .6s infinite}
+.kx.slow{animation-duration:.9s}
+@keyframes kfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+
+/* Heat (#241 load_scene kind "heat"): one class on the Herd page, `heat-calm|busy|held`, sets the flame colours for
+   the scene, the cook's burner and the Host miniature; the scene's layers show by level. */
+.heat-calm{--f1:#3d7fd9;--f2:#9cc8ff;--steam:0}
+.heat-busy{--f1:#ee7a22;--f2:#ffd15a;--steam:1}
+.heat-held{--f1:#e04a1e;--f2:#ffb03a;--steam:1}
+.kst .h-calm,.kst .h-busy,.kst .h-held{display:none}
+.heat-calm .kst .h-calm,.heat-busy .kst .h-busy,.heat-held .kst .h-held{display:inline}
+.kst .f1,.kst .f2{opacity:1}
+.kst .h-calm.f2,.kst .h-busy.f2,.kst .h-held.f2{visibility:var(--v2,hidden)}
+.kst .h-calm.f1,.kst .h-busy.f1,.kst .h-held.f1{visibility:var(--v1,visible)}
+.kst{animation:kfl 1.2s infinite}
+@keyframes kfl{0%,49.9%{--v1:visible;--v2:hidden}50%,100%{--v1:hidden;--v2:visible}}
+/* held: the kitchen "burns": a red glow over the whole page (static, low contrast: no flash), smoke under the ceiling. */
+.heat-held .hb{background:radial-gradient(120% 50% at 50% 100%,#ff5a2a33,#0000 70%)}
+.heat-held .glow{animation:kgl 4s ease-in-out infinite alternate}
+@keyframes kgl{from{opacity:.75}to{opacity:1}}
+
+/* The rail (#241 rail): the gate row becomes a steel rail across the top; tickets hang from it on their clips. */
+.krail{position:relative;display:flex;flex-wrap:wrap;align-items:start;padding:var(--s2) var(--s2) 0}
+.krail::before{content:"";position:absolute;left:0;right:0;top:var(--s1);height:var(--s1);background:linear-gradient(#c9ced2 0 50%,#8d9399 50%);pointer-events:none}
+.needs-t{--tp:#f6d9d3;--th:#b3261e;--tl:#d89a90;animation:kfl2 1.6s ease-in-out infinite alternate;transform-origin:50% 0}
+@keyframes kfl2{from{rotate:-3deg}to{rotate:3deg}}
+
+/* The pass (done band): a steel shelf behind the chefs at waist height, heat lamps glowing above it. */
+.b-done .field{background:linear-gradient(#0000 0 56%,#c9ced2 56% 58%,#8d9399 58% 62%,#0000 62%),
+  radial-gradient(40px 14px at 50% 0,#ffd15a55,#0000) 0 0/156px 100% repeat-x}
+/* Serving is good news: the done chef is not dimmed (the farm's done horse is). */
+.k .hh.done svg{opacity:1}
+/* The chefs keep their colours when blocked (the bell says it); the band and the label are red. */
+.k .hh.blocked svg,.k .hh.dead svg{filter:none}
+
+/* ASCII mode (#241 ascii): the farm's 48 × 40 cell and 10 px lines; the glyph over the action word, centred. */
+.kasc{display:grid;place-items:center;font:10px/1.2 ui-monospace,Menlo,monospace;white-space:pre;text-align:center;font-style:normal}
+
+/* Row sprites (#241 row_sprites): 16 px, in the cell the state glyph had; crisp. */
+.rs16{display:inline-block;width:var(--s4);height:var(--s4);vertical-align:-3px;image-rendering:pixelated}
+.hm{display:block;width:calc(3 * var(--s4));height:var(--s4);flex:none;border-radius:2px}
+
+@media (prefers-reduced-motion:reduce){
+  .kx,.kst,.needs-t,.heat-held .glow{animation:none!important}
+  .kst{--v1:visible;--v2:hidden}
+}
+
+/* The kitchen floor under the bands (theme.json scene.palette --pa): warm dark checker tiles. */
+.k,#herd.k{--pa:repeating-conic-gradient(#4a3f38 0 25%,#41372f 0 50%) 0 0/24px 24px}
+
+/* #244 Q2, the whole-board scheme (theme.json `board`): the tokens on :root (here on .kb, the mockup's frame), a
+   charcoal tile under everything, brass on the title and the card edges. serve.css has two literal colours left
+   (#30363d edges, #161b22 fills); #241 makes them tokens (--edge, --card), so a scheme is only variables. Until then: */
+.kb{background-color:var(--bg);background-image:linear-gradient(#ffffff06 1px,#0000 1px),linear-gradient(90deg,#ffffff06 1px,#0000 1px);background-size:24px 24px;color:var(--fg)}
+.kb header,.kb nav{background:var(--bg)}
+.kb header b{color:var(--brass)}
+.kb :is(.fc,.cd,.cmds,.nb,.tm pre){border-color:var(--edge)}
+.kb .fc{border-top-color:var(--fk)}
+.kb :is(.cd,.nb,.rw>pre,.ex pre,.blk,.tm pre){background:var(--card)}
+.kb .grp>summary .gn{color:var(--brass)}

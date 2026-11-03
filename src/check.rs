@@ -78,7 +78,10 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             } else {
                 format!("{}:{lane}", s.last_ts)
             };
-            if status.is_none() {
+            // #248: a lane herdsman closed once its handoff was logged is not gone.
+            let mine = |e: &Event| e.kind == "lane-closed" && e.str("agent") == Some(lane);
+            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e) && e.ts >= sp.ts));
+            if status.is_none() && !closed {
                 hits.push((
                     "lane-dead",
                     key.clone(),
@@ -158,6 +161,29 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     let open = open_asks(&events);
+    // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
+    for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
+        let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
+        let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
+            continue;
+        };
+        let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
+            continue;
+        };
+        let asking = open.iter().any(|q| q.str("agent") == Some(name));
+        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let Some(at) = due.filter(|_| !asking) else { continue };
+        if let Some(why) = dirty(r, Path::new(wt)) {
+            let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
+            fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+            continue;
+        }
+        let mb = host::held(r, &[a]).first().copied().unwrap_or_default();
+        if herdr::close(r, pane).is_ok() {
+            let d = json!({"key": format!("{name}:{at}"), "agent": name, "freed_mb": mb, "reason": "done"});
+            fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-closed", d)?;
+        }
+    }
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
     let due = |a: &&&Event| ctx.now.saturating_sub(a.ts) >= cfg.limits.ask_default_minutes * 60;
     for a in open.iter().filter(routine).filter(due) {
@@ -245,6 +271,17 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         format!("{} {}", du(&ctx.worktrees), ctx.now),
     );
     Ok(())
+}
+
+/// #248: when lane `e` handed off: the latest `pushed`/`verdict` since it spawned (design: its latest commit since).
+fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
+    if e.str("role") == Some("design") {
+        let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"]).ok()?;
+        let t = t.trim().parse().ok();
+        return t.filter(|t| *t > e.ts);
+    }
+    let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
+    events.iter().rev().find(by).map(|x| x.ts)
 }
 
 /// Log and print one alert unless one of its kind already carries `d`'s `key`.

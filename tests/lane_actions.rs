@@ -666,3 +666,50 @@ fn kill_saves_code_and_names_the_secret_line() {
     );
     assert!(!r.called(&format!("git -C {wt} push")));
 }
+
+/// #248: a lane herdsman closed reads back Claude's saved session for its worktree (the newest) over the rolling
+/// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
+#[test]
+fn a_closed_lane_reads_claudes_saved_session() {
+    let (c, wt) = lane("closed-session");
+    let ev = json!({"agent": LANE, "reason": "done", "freed_mb": 270});
+    append(&c.state, &Event::new(T - 10, "sendmeter", Some(12), "lane-closed", ev)).unwrap();
+    let dir = c
+        .home
+        .join(".claude/projects")
+        .join(wt.replace(|ch: char| !ch.is_ascii_alphanumeric(), "-"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let key = concat!("ghp_", "abcdefghijklmnop0123456789");
+    let rows = [
+        json!({"type": "user", "message": {"content": "Read the brief and execute it."}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": format!("Pushed.\ntoken {key}")}, {"type": "tool_use", "name": "Bash", "input": {"command": "cargo test\necho"}}]}}),
+        json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}),
+        json!({"type": "summary"}),
+    ];
+    let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
+    std::fs::write(dir.join("notes.txt"), "not a session").unwrap();
+    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, "  rolled\n").unwrap();
+    let r = Fake::default().reply("herdr agent list", &agents(&[]));
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "", T);
+    let res = String::from_utf8_lossy(&s.respond(
+        &format!("GET /lane?agent={LANE} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"),
+        T,
+    ))
+    .into_owned();
+    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    assert_eq!(
+        j["lines"],
+        json!([
+            "❯ Read the brief and execute it.",
+            "⏺ Pushed.",
+            "  token ghp_•••",
+            "⏺ Bash(cargo test)"
+        ]),
+        "{res}"
+    );
+    assert_eq!(j["live"], 0);
+}

@@ -90,8 +90,11 @@ function scene() {
 
 // #172/#241 themes (docs/themes.md): the phone's theme (`html[data-theme]`, the `[◐]` picker; the demo also takes `?nopose=<pose>`)
 // from `themes/<name>/`, its theme.json resolved by the server (what it lacks is farm's); a sprite id not in its sprites.svg is farm's.
-let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '', PAL = {};
+let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '', RAW = '', PAL = {};
 const w = k => T.words[k] || k;
+// #239: heat is indoors (no night, no [A]); a lane wears the theme's look by the same hash as the Lanes avatars (serve.js).
+const heat = () => T.load_scene?.kind === 'heat';
+const look = (n, coat) => { const L = T.looks || []; return L.length ? Object.entries(L[hash(n) % L.length]).map(e => e.join(':')).join(';') : coat; };
 const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
 // The sprite symbols theme() builds (poses hp1..hp4 for the Herd, actions ha-*, row sprites hr-*, the rail, moments hm-*),
 // next to the scene's gradients.
@@ -132,6 +135,7 @@ function theme(name) {
     sym('hrail', T.rail?.item, fj.rail?.item);
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
+    sym('hfan', T.load_scene?.fan); // #239: an idle lane's sprite while the heat is held
     Object.keys(PAL).forEach(k => H.style.removeProperty(k));
     PAL = T.scene.palette || {};
     Object.entries(PAL).forEach(([k, v]) => H.style.setProperty(k, v));
@@ -139,6 +143,7 @@ function theme(name) {
     $('.hx').setAttribute('aria-label', `close ${w('herd')} mode`);
     if (T.icons) $$('link[rel=icon],link[rel=apple-touch-icon]').forEach(l => { l.href = d(name) + T.icons[l.rel === 'icon' ? 'favicon' : '180']; });
     // The pages are rebuilt with the theme's scene (or farm's ranch); the tabs take its sprites, modes and load scene.
+    RAW = sc;
     SC = sc.replace(/<svg\b/, '<svg class=rs preserveAspectRatio="xMidYMax slice" aria-hidden=true');
     pages.forEach(p => p.remove());
     pages.clear();
@@ -167,16 +172,19 @@ const BANDS = [['working', ['working']], ['idle', ['idle', 'unknown', 'parked']]
 let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
+// #239: a working lane draws its role's action (cook, chop…) and says its word; an idle one fans while the heat is held.
 function horse(l, k) {
-  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(l.coat)}"><use href="#ha-${ACT(l)}"/></svg>` +
-    `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(l.shown)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
+  const a = l.state === 'working' && l.act || ACT(l), use = a === 'idle' && H.dataset.heat === 'held' && $('#hfan') ? 'hfan' : 'ha-' + a;
+  const said = l.state === 'working' && T.words[a] || l.shown;
+  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l.name, l.coat))}"><use href="#${use}"/></svg>` +
+    `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(said)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
 }
-const queued = q => `<button type=button class=hqh data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hrail${q.needs ? '-n' : ''}"/></svg>` +
+const queued = q => `<button type=button class="hqh${q.needs ? ' n' : ''}" data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hrail${q.needs ? '-n' : ''}"/></svg>` +
   `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
 // #130: a fleet's `needs` (its needs-human issues): their horses wear a red `!` in the blocked band, an issue
 // with no lane waits at the gate; a tap opens its needs-you card.
 function nh(f) {
-  const n = f.needs || [], lanes = f.lanes.map(l => n.includes(l.issue) ? Object.assign({}, l, { needs: true, state: 'blocked', tone: 'r', shown: 'needs you' }) : l);
+  const n = f.needs || [], lanes = f.lanes.map(l => n.includes(l.issue) ? Object.assign({}, l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l);
   const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
   return [f.name, lanes, queue, f.color];
 }
@@ -218,7 +226,7 @@ function patch(hb, lanes, queue) {
     let b = hb.querySelector(':scope > .b-' + cls);
     if (!items.length) { if (b) drop.push(b); continue; }
     if (!b) {
-      b = tpl(`<div class="band b-${cls}"><h4>${name} <span></span></h4><div class=${box}></div></div>`);
+      b = tpl(`<div class="band b-${cls}"><h4>${hx(w(name))} <span></span></h4><div class=${box}></div></div>`);
       if (at) at.after(b); else hb.prepend(b);
     }
     const c = b.querySelector('h4 span');
@@ -232,11 +240,20 @@ function patch(hb, lanes, queue) {
   if (at) { if (e) e.remove(); } else if (!e) hb.append(tpl(`<p class=empty>no ${w('horses')} here</p>`));
 }
 
+// #239 a theme's `scene.line`: every fleet's station side by side in its colour, this page's in the middle (the others
+// dimmed); 390 px shows only this one, a wider screen its neighbours too.
+function line(key) {
+  const fs = data?.fleets || [], i = fs.findIndex(f => f.name === key), v = RAW.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  if (!T.scene.line || i < 0 || !v) return '';
+  const [vw, vh] = [+v[1], +v[2]], body = RAW.replace(/^[\s\S]*?<svg[^>]*>|<\/svg>\s*$/g, '');
+  return `<svg class=rs viewBox="${i * vw} 0 ${vw} ${vh}" preserveAspectRatio="xMidYMax meet" shape-rendering=crispEdges aria-hidden=true>` +
+    fs.map((f, k) => `<g transform="translate(${k * vw})" style="--fk:var(--${hx(f.color)})"${k === i ? '' : ' opacity=".55"'}>${body}</g>`).join('') + '</svg>';
+}
 function page(key) {
   const p = document.createElement('section');
   p.className = 'hp';
   p.innerHTML = `<div class=hs><p><b></b> <span class=n></span> <span class=dots></span></p><p class=sum></p></div><div class=hn></div>
-<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${SC || scene()}<div class=fog></div></div><div class=hb></div>`;
+<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${line(key) || SC || scene()}<div class=fog></div></div><div class=hb></div>`;
   p._trees = [...p.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
   p._cel = p.querySelector('.cel');
   p._grass = [...p.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
@@ -311,6 +328,12 @@ function weather(h) {
   H.classList.toggle('fog2', wx && h.pressure === 'critical');
   H.classList.toggle('gust', wind >= 0.5);
   if (!storm || still.matches) H.style.setProperty('--mane', '0deg');
+  // #239 heat: calm < 0.5 ≤ busy; held = the spawn gate refusing (the farm's storm).
+  const lv = heat() ? (h.gate ? 'held' : wind >= 0.5 ? 'busy' : 'calm') : '', was = H.dataset.heat || '';
+  H.classList.toggle('heat', !!lv);
+  ['calm', 'busy', 'held'].forEach(k => H.classList.toggle('heat-' + k, k === lv));
+  H.dataset.heat = lv;
+  if ((lv === 'held') !== (was === 'held') && data) draw();
   cap.textContent = `load ${h.load == null ? '?' : h.load.toFixed(2)} · mem ${h.pressure || '?'} · swap ${h.swapouts == null ? '?' : Math.round(h.swapouts)}`;
 }
 
@@ -391,8 +414,9 @@ const LIGHTS = ['auto', 'day', 'night'], ICON = { auto: 'A', day: '☀', night: 
 const nightAt = (l, d) => l === 'night' || (l === 'auto' && (d.getHours() < 7 || d.getHours() >= 19));
 let light = [DBG.get('light'), get('herd-light')].find(l => LIGHTS.includes(l)) || 'auto';
 function ranch() {
-  const n = nightAt(light, new Date());
+  const n = !heat() && nightAt(light, new Date());
   H.classList.toggle('night', n);
+  lb.hidden = heat();
   lb.textContent = ICON[light];
   lb.setAttribute('aria-label', `${w('ranch')} light: ${light}${light === 'auto' ? ` (${n ? 'night' : 'day'} now)` : ''}`);
 }

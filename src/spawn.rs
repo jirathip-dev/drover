@@ -129,6 +129,10 @@ impl Plan {
                 .iter()
                 .flat_map(|a| [format!("HERDSMAN_ACCOUNT='{}'", a.0), a.1.clone()]),
         );
+        // #248: no updater, telemetry or other background traffic in a Claude lane (names as of Claude Code 2.1.311).
+        if self.harness == "claude" {
+            c.extend(["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"].map(String::from));
+        }
         c
     }
 
@@ -364,11 +368,11 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
 ];
 
-/// `git status --porcelain` lines that are not lane scratch.
+/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
-    st.lines()
-        .filter(|l| !OWN_FILES.iter().any(|f| l.trim_end() == format!("?? {f}")))
-        .count()
+    let made = ["ui-390/", "node_modules/"];
+    let own = |l: &&str| OWN_FILES.iter().chain(&made).any(|f| l.trim_end() == format!("?? {f}"));
+    st.lines().filter(|l| !own(l)).count()
 }
 
 /// #103: some lockfile exists, and each one reads the same in the local checkout and the new lane.
@@ -486,6 +490,11 @@ pub fn spawn(
         p.at(&pl.root, f.repo_name());
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
+
+            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh).
+            if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
+                p.env.insert("HERDSMAN_MAIN".into(), format!("{}:{}", main.0, ctx.exe));
+            }
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -672,6 +681,12 @@ pub fn spawn(
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
+    // #275: on any host (under load, or over `--machine`) the name can be lost while the harness came up: retry only
+    // when none did; one that did is named below.
+    let lost = |s: &crate::runner::Out| herdr::failed_with(s, "agent_name_not_found");
+    if lost(&start) && herdr::harness_in(r, &pane).is_none() {
+        start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
+    }
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
@@ -679,11 +694,11 @@ pub fn spawn(
         }
         // Under load herdr can time out while the harness still comes up: keep it as the lane.
         // #182: any other failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
-        let why = if !herdr::failed_with(&start, "timeout") {
+        let why = if !herdr::failed_with(&start, "timeout") && !lost(&start) {
             Some(format!("herdr agent start failed: {}", start.stderr.trim()))
         } else if herdr::harness_in(r, &pane).is_none() {
             Some(format!(
-                "herdr agent start timed out and no harness came up: {}",
+                "herdr agent start failed and no harness came up: {}",
                 start.stderr.trim()
             ))
         } else {
