@@ -120,6 +120,9 @@ impl Harness for Claude {
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
     }
+    fn install(&self) -> Option<&'static str> {
+        Some("curl -fsSL https://claude.ai/install.sh | bash")
+    }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }

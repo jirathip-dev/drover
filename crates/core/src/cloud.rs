@@ -254,10 +254,11 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-/// Bootstrap's steps after herdr, `name⇥read-back check⇥install` each (Rust with a C linker for `cargo install`).
-const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh
-claude\tcommand -v claude\tcurl -fsSL https://claude.ai/install.sh | bash
-rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
+/// Bootstrap's steps after herdr and each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
+/// for `cargo install`).
+const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
+const RUST: &str =
+    "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
 /// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
 /// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token, the
@@ -292,11 +293,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
     let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
     let mut steps = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n{TOOLS}\n");
+    for (n, i) in crate::harness::all().filter_map(|(n, h)| Some((n, h.install()?))) {
+        steps += &format!("{n}\tcommand -v {n}\t{i}\n");
+    }
+    steps += &format!("{RUST}\n");
     steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
-    let logins = [("claude", "claude"), ("gh", "gh-token")]
-        .into_iter()
-        .filter(|t| !pass(&format!("{} auth status", t.0)));
+    let harness = crate::harness::all().filter_map(|(n, h)| Some((h.health_check()?.1, n)));
+    let logins = harness.chain([("gh auth status", "gh-token")]).filter(|t| !pass(t.0));
     let panes = logins
         .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))
         .collect::<Result<Vec<_>>>()?;

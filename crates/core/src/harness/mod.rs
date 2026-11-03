@@ -123,6 +123,10 @@ pub trait Harness: Sync {
     fn login(&self) -> Option<&'static str> {
         None
     }
+    /// The shell line that installs it on a fresh host (`hosts bootstrap`; generic: none).
+    fn install(&self) -> Option<&'static str> {
+        None
+    }
     /// Its `herdsman hook` protocol (generic: none, no tool guard but git's pre-push).
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
