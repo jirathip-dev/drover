@@ -410,6 +410,12 @@ enum HostsCmd {
     /// Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`
     #[command(hide = true)]
     Destroy { name: String },
+    /// Owner only: install herdr, herdsman, git, gh, Claude Code there over SSH, open its logins, clone its fleets
+    #[command(hide = true)]
+    Bootstrap { name: String },
+    /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
+    #[command(hide = true)]
+    Snapshot { name: String },
 }
 
 #[derive(Subcommand)]
@@ -802,6 +808,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
                         writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
                     }
+                    Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
+                    Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
                 },
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
