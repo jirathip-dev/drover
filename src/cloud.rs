@@ -109,7 +109,8 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         bail!("{name} not running after 5 min")
     });
     if let Err(e) = &up {
-        let _ = cmd(ctx, cfg, r, name, "stop");
+        // Logged stopped only once `stop` worked: else it stays `starting`, its VM maybe still billing.
+        cmd(ctx, cfg, r, name, "stop").with_context(|| format!("start failed ({e:#}), then stop failed"))?;
         let d = json!({"why": format!("start failed: {e:#}")});
         log(ctx, cfg, "cloud-stop", name, d)?;
     }

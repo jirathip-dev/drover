@@ -482,13 +482,22 @@ pub fn place(
     Ok(Some(on.remove(i.unwrap_or(0))))
 }
 
-/// #254: how long every local host has been refused (`<state dir>/held-since`, cleared once one admits).
+/// #254: how long every local host has been refused (`<state dir>/held-since`: `since last`, cleared once one admits;
+/// a mark not seen again within 15 min, three drive passes, is stale and the clock starts over).
 fn held_for(ctx: &Ctx, held: bool) -> u64 {
     let p = ctx.state.with_file_name("held-since");
-    let since = std::fs::read_to_string(&p).ok().and_then(|s| s.trim().parse().ok());
-    let mark = || std::fs::write(&p, since.unwrap_or(ctx.now).to_string());
-    let _ = if held { mark() } else { std::fs::remove_file(&p) };
-    ctx.now.saturating_sub(since.filter(|_| held).unwrap_or(ctx.now))
+    let s = std::fs::read_to_string(&p).unwrap_or_default();
+    let mut n = s.split_whitespace().map(|w| w.parse::<u64>().ok());
+    let since = match (n.next().flatten(), n.next().flatten()) {
+        (Some(a), Some(b)) if ctx.now.saturating_sub(b) <= 900 => a,
+        _ => ctx.now,
+    };
+    let _ = if held {
+        std::fs::write(&p, format!("{since} {}", ctx.now))
+    } else {
+        std::fs::remove_file(&p)
+    };
+    [0, ctx.now.saturating_sub(since)][usize::from(held)]
 }
 
 /// #254: start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.

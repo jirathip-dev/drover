@@ -166,7 +166,26 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     // mini admits again: the clock resets.
     assert_eq!(placed(&later, &fake(0.1), None).as_deref(), Ok("mini"));
     assert!(!c.state.with_file_name("held-since").exists());
-    let e = placed(&herdsman::Ctx { now: NOW + 700, ..c }, &fake(3.0), None).unwrap_err();
+    let e = placed(
+        &herdsman::Ctx {
+            now: NOW + 700,
+            ..c.clone()
+        },
+        &fake(3.0),
+        None,
+    )
+    .unwrap_err();
+    assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
+    // A mark left hours ago with no placement since is stale: the first busy moment after it starts the clock over.
+    let e = placed(
+        &herdsman::Ctx {
+            now: NOW + 5 * 3600,
+            ..c
+        },
+        &fake(3.0),
+        None,
+    )
+    .unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
 }
 
