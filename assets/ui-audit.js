@@ -130,6 +130,38 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
+    // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
+    // second one: one ellipsised line in each mode, nothing past the row.
+    'lanes-now': async () => {
+      tab('lanes');
+      const sp = (...p) => p.map((x, i) => `<span class=${i < 2 ? 'el' : 't'}>${esc(x)}</span>`).join('<i> · </i>');
+      const L = [
+        sp('now: running git fetch origin && git merge origin/staging 2>&1 | tail -5; just --list; cat ci/cap.toml'),
+        sp('✻ Simmering…', 'running git merge origin/staging +2 cd ~/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v x)', '4m'),
+        sp('✻ Herding…', 'editing src/a/very/long/path/to/some/deeply/nested/module/that/runs/past/the/edge.rs'),
+        sp('now: running cd ~/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v \'^docs/\'); cargo fmt --check $FILES')];
+      const redraw = n => {
+        const c = $('#lanes').cloneNode(true);
+        [...c.querySelectorAll('.lane .act')].slice(0, 5).forEach((a, i) => {
+          a.outerHTML = i === 4 ? '<span class=act></span>' : `<span class="act nw el now" title="full">${L[(i + n) % 4]}</span>`;
+        });
+        frag('lanes', c.innerHTML);
+      };
+      const one = what => $$('.lane .act.now').forEach(a => {
+        // Lines by box height (a Range's rects mix the span boxes and their text runs, whose tops differ on one line).
+        const r = a.getBoundingClientRect(), lines = Math.round(r.height / parseFloat(getComputedStyle(a).lineHeight));
+        const cut = [...a.querySelectorAll('.el')].some(e => getComputedStyle(e).textOverflow !== 'ellipsis' || e.getBoundingClientRect().right > r.right + 1);
+        if (lines !== 1 || cut || r.right > a.closest('.lane').getBoundingClientRect().right + 1) early.push(`${what}: now-line "${a.textContent.slice(0, 30)}…" ${lines} lines, right ${r.right}`);
+        const [w, x] = a.querySelectorAll('.el');
+        if (x && w.scrollWidth > w.clientWidth + 1 && x.clientWidth > 0) early.push(`${what}: the word "${w.textContent}" cut before the action`);
+      });
+      for (const n of [0, 1]) {
+        redraw(n);
+        for (const m of TM) { mode(m); await wait(); one(`after /live ${n + 1}, ${m}`); }
+      }
+      if ($$('.lane .act.now').length < 4) early.push('no long now-lines drawn');
+    },
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
       open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
