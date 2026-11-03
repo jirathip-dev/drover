@@ -390,7 +390,7 @@
     },
     'herd-scroll': () => herd(true),
     // #291 gate 2: 3 repos; [›], a dot, →, a horizontal wheel (one gesture of three events), shift+wheel and a mouse drag
-    // across a horse each move exactly one repo; a vertical wheel none; the drag's click opens nothing, a plain click does.
+    // across a horse each move exactly one repo; a vertical wheel and a drag in a text field none; the drag's click opens nothing, a plain click does.
     'herd-nav': async () => {
       herd(true); light = 'day'; ranch();
       await new Promise(r => setTimeout(r, 500));
@@ -403,6 +403,7 @@
         ['→', 1, () => B.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))],
         ['a horizontal wheel', 1, () => [50, 50, 50].forEach(x => wh({ deltaX: x }))], ['a vertical wheel', 0, () => wh({ deltaY: 120 })],
         ['shift+wheel', 1, () => wh({ deltaY: 100, shiftKey: true })],
+        ['a drag in a text field', 0, () => { const i = hp(0).appendChild(document.createElement('input')); pe('pointerdown', i, 300); [280, 240, 200].forEach(x => pe('pointermove', i, x)); pe('pointerup', i, 200); i.remove(); }],
         ['a mouse drag', 1, () => { const h = H.querySelector('.hh'); pe('pointerdown', h, 300); [280, 240, 200].forEach(x => pe('pointermove', h, x)); pe('pointerup', h, 200); h.click(); }]];
       // Reduced motion (the gate run): each switch lands at once; else after the smooth scroll. A step waits out a wheel gesture.
       for (const [what, want, run] of steps) {

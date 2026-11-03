@@ -364,6 +364,7 @@ function go(i) {
   const n = PG.children.length;
   if (n) PG.scrollTo({ left: ((i % n + n) % n) * PG.clientWidth, behavior: still.matches ? 'instant' : 'smooth' });
 }
+const TEXT = 'input, textarea, select, [contenteditable]';
 let swipe = null, swiped = false, wheelAt = 0, wheelX = 0, wheelDone = false;
 H.addEventListener('click', e => {
   if (swiped) { swiped = false; e.stopPropagation(); return; } // the click that ends a swipe opens nothing
@@ -371,7 +372,7 @@ H.addEventListener('click', e => {
   if (b) go(b.matches('.hnv') ? pageAt() + (b.matches('.hnx') ? 1 : -1) : [...b.parentNode.children].indexOf(b));
 }, true);
 document.addEventListener('keydown', e => {
-  if (H.hidden || shown() || e.altKey || e.ctrlKey || e.metaKey || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (H.hidden || shown() || e.altKey || e.ctrlKey || e.metaKey || e.target.closest(TEXT)) return;
   const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
   if (k) { e.preventDefault(); go(pageAt() + k); }
 });
@@ -385,10 +386,14 @@ PG.addEventListener('wheel', e => {
   if (!wheelDone && Math.abs(wheelX) > 40) { wheelDone = true; go(pageAt() + Math.sign(wheelX)); }
 }, { passive: false });
 // A touch swipe scrolls natively (the browser cancels the pointer); a mouse drag past 40 px switches like one.
-PG.addEventListener('pointerdown', e => { swipe = e.button === 0 ? { x: e.clientX, id: e.pointerId } : null; swiped = false; });
+// A press in a text field (a needs-you answer) is its own text selection, never a drag. The pointer is captured
+// only past 40 px, so a click with a little jitter still lands on the horse.
+PG.addEventListener('pointerdown', e => { swipe = e.button === 0 && !e.target.closest(TEXT) ? { x: e.clientX, id: e.pointerId } : null; swiped = false; });
 PG.addEventListener('pointermove', e => {
-  if (!swipe || e.pointerId !== swipe.id || Math.abs(e.clientX - swipe.x) < 8) return;
-  if (!H.classList.contains('drag')) { H.classList.add('drag'); getSelection().removeAllRanges(); try { PG.setPointerCapture(e.pointerId); } catch (_) {} }
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const dx = Math.abs(e.clientX - swipe.x);
+  if (dx >= 8 && !H.classList.contains('drag')) { H.classList.add('drag'); getSelection().removeAllRanges(); }
+  if (dx > 40 && !PG.hasPointerCapture(e.pointerId)) try { PG.setPointerCapture(e.pointerId); } catch (_) {}
 });
 PG.addEventListener('pointerup', e => {
   const dx = swipe && e.pointerId === swipe.id ? e.clientX - swipe.x : 0;

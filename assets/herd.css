@@ -37,6 +37,8 @@
 #herd .hdt button{padding:0;color:#f4ecd8;cursor:pointer}
 #herd .hdt button::before{content:"";position:static;padding:var(--s1);border-radius:50%;background:currentColor;opacity:.45}
 #herd .hdt button[aria-current]::before{opacity:1}
+/* A dot overrides the global [ ] brackets: ::before becomes the dot, drawn in flow (static); ::after keeps the global
+   inset (the 44 px hit area) but drops its "]". */
 #herd .hdt button::after{content:""}
 @media (hover:hover){#herd .hnv:hover,#herd .hdt button:hover{background:#f4ecd833}}
 #herd.drag{cursor:grabbing;user-select:none;-webkit-user-select:none}
