@@ -585,7 +585,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(f, &events, fleet, issue, role)?;
+    lane_admit(ctx, f, &events, fleet, issue, role)?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -616,12 +616,15 @@ pub fn spawn(
         None => {}
     }
     if o.supersede && !dup.is_empty() {
-        for a in &live {
+        let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
+        let old = crate::hosts::On::of(base, was);
+        let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
+        for a in host::live_in(&host::agents(&old).unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
-                herdr::close(r, pane)?;
+                herdr::close(&old, pane)?;
             }
         }
-        crate::check::reap(ctx, cfg, r, (fleet, Some(issue)), &wt)?; // #186: before the new lane starts
+        crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
         event(
             "supersede",
@@ -676,22 +679,32 @@ pub fn spawn(
             brief(f, issue, &p, title, &decided.fold(body.to_string(), |b, d| b + &d), fix),
         )
     };
-    let ws = created["result"]["workspace"]["workspace_id"]
-        .as_str()
-        .context("herdr: no workspace_id")?;
-    herdr::workspace_rename(r, ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
+    let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);
+    let mut ws = wsid(created).context("herdr: no workspace_id")?;
+    herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
-    let mut pane = herdr::free_pane(r, ws, &p.worktree, None)?;
+    // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
+    let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
+        Err(e) if format!("{e:#}").contains("workspace_not_found") => {
+            *ws = wsid(herdr::json(r, &create_argv(&local, &p, true))?).context("herdr: no workspace_id")?;
+            herdr::free_pane(r, ws, &p.worktree, None)
+        }
+        x => x,
+    };
+    let mut pane = pick(&mut ws, None)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
     herdr::ok(r, &home(p.lane_cmd(&pane)))?;
     let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
     if herdr::failed_with(&start, "agent_pane_busy") {
-        let lane = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane));
+        // #327: pane ids are per host: only a lane spawned on this one left this pane.
+        let lane = events
+            .iter()
+            .any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane) && e.str("machine") == on.machine);
         let closed = lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
         event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
-        pane = herdr::free_pane(r, ws, &p.worktree, Some(&pane))?;
+        pane = pick(&mut ws, Some(&pane))?;
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
@@ -738,7 +751,7 @@ pub fn spawn(
             }
             // #236: on another host the half-made workspace goes too (nobody there would close it).
             if on.machine.is_some() {
-                let _ = herdr::workspace_close(r, ws);
+                let _ = herdr::workspace_close(r, &ws);
                 bail!("{why}; closed workspace {ws}");
             }
             let _ = herdr::close(r, &pane);
@@ -759,7 +772,7 @@ pub fn spawn(
         let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
         let res = (|| -> Result<bool> {
             let kicked = h.kick(r, &p, &pane);
-            let mut d = lane_data(&p, &pane, ws);
+            let mut d = lane_data(&p, &pane, &ws);
             d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
@@ -807,24 +820,19 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
     (!logged).then(|| pane.into())
 }
 
-/// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).
-fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+/// `SERIAL_BUSY` (a group of the issue's is full, unless it holds a slot there) and CAP (`max_impl` / `max_rev`).
+pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
-    if role == "impl" && crate::queue::serial(events, fleet).contains(&issue) {
-        let in_flight = crate::queue::serial_in_flight(events, &st, fleet);
-        // #232: an issue already in flight holds its slot; only one entering the serial set needs a free one.
-        let holds = in_flight.iter().any(|s| s.issue == issue);
-        let busy: Vec<_> = in_flight
-            .into_iter()
-            .map(|s| format!("#{} is unmerged ({})", s.issue, s.state))
-            .collect();
-        if !holds && busy.len() >= f.serial_max.unwrap_or(1) {
-            return refused(
-                "SERIAL_BUSY",
-                format!("serial {}; retry after they merge", busy.join(", ")),
-            );
+    // #294: each of its groups (name order) needs a free slot, unless it holds one there already (#232).
+    let gs = crate::queue::groups(&crate::queue::replay(events, fleet), events, f, fleet, issue);
+    for g in gs.into_iter().filter(|_| role == "impl") {
+        let h = crate::queue::holders(events, &st, f, fleet, &g.name);
+        if !h.iter().any(|s| s.issue == issue) && h.len() >= g.max {
+            let why = format!("{}; retry after they merge", crate::queue::holds(g, &h));
+            return refused("SERIAL_BUSY", why);
         }
     }
     let fam = f.family(role);

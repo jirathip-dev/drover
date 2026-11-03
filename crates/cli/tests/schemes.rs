@@ -183,7 +183,10 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
         json!({"farm": "farm", "kitchen": "kitchen", "terminal": "github-dark"})
     );
     assert!(p.contains("<style id=sch>:root{--a:#f29b4b;"), "farm's block first");
-    assert!(p.contains("<label class=pk id=scp><span>▦</span><select id=scheme aria-label=colours></select></label>"));
+    assert!(
+        p.contains("<button id=look type=button"),
+        "#290: one [◐] for theme and colours"
+    );
     // The phone's last block wins before the first paint (serve.js keeps it).
     assert!(p.contains("try{sb=localStorage.sb}catch(e){}if(sb)document.getElementById('sch').textContent=sb"));
     let p = page(Some("terminal"), &[]);

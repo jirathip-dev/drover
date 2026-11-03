@@ -491,7 +491,8 @@ fn a_manual_answer_before_30_min_prevents_the_default() {
     assert_eq!(r.count("herdr agent prompt"), 1);
 }
 
-/// #143: an answer is delivered once the agent leaves idle; else one retry, then a pushed `decision-undelivered`.
+/// #143: an answer is delivered once the agent leaves idle; else one retry, then a pushed `answer-undelivered`
+/// (#325) that drive's fast step types again.
 #[test]
 fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     let d = tmpdir("ask-landed");
@@ -511,7 +512,8 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
         )
     };
     assert_eq!(n(&r), (1, 1, 1), "working at once: nothing more");
-    assert!(kinds(&c, "decision-undelivered").is_empty());
+    assert!(kinds(&c, "answer-undelivered").is_empty());
+    assert_eq!(kinds(&c, "answer-delivered")[0].str("agent"), Some(LANE));
 
     let d = tmpdir("ask-undelivered");
     let c = ctx(&d, CONFIG);
@@ -523,20 +525,13 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
         .reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
     assert_eq!(run(&c, &idle, &["answer", "sendmeter", "q1", "2"]).0, 0);
     assert_eq!(n(&idle), (2, 2, 2), "one retry");
-    let u = kinds(&c, "decision-undelivered");
+    let u = kinds(&c, "answer-undelivered");
     assert_eq!(
-        (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("reason")),
+        (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("text")),
         (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
-    assert!(herdsman::config::WEBPUSH_ON.contains(&"decision-undelivered"), "pushed");
-
-    // `check` types it once more while the agent sits idle, then never again.
-    let out = check(&c, &idle);
-    assert!(out.contains("decision-redelivered: DECISION q1: no, trim"), "{out}");
-    assert!(check(&c, &idle).is_empty());
-    assert_eq!(n(&idle).0, 3);
-    assert!(idle.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"));
-    assert_eq!(kinds(&c, "decision-redelivered").len(), 1);
+    assert!(herdsman::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
+    assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
 /// #283: 10 due `ask-waiting` alerts push 3 and one summary; an imported ask never pushes.

@@ -38,8 +38,8 @@ a repeat visit downloads the page HTML only, the assets come from the service wo
 
 Queue tab (#115): each fleet's rows are a `git log --graph` tree in queue order. A row blocked by another row in
 view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and an `on #b` tag), a blocker out of view is a red
-`! #b` tag. A dot per row: `●` a lane works on it, `○` waiting, `✓` ready, `!` needs you. A `--serial` issue shows
-`🔒<serial_label>` (default `serial`). `[?]` opens the legend sheet: every state word in plain words (the same line is
+`! #b` tag. A dot per row: `●` a lane works on it, `○` waiting, `✓` ready, `!` needs you. An issue in a serial group shows
+`🔒<name>` per group (docs/config.md). `[?]` opens the legend sheet: every state word in plain words (the same line is
 each state word's title on Queue, Lanes and Herd), the dots, and each fleet's serial paths. ▲/▼ move a row among its
 siblings.
 
@@ -205,9 +205,9 @@ clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog 
 ### Themes and colour schemes (#172, #241, #244)
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
-rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` picker, `[serve] theme` (its
+rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` look sheet, `[serve] theme` (its
 default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
-writes them to `themes/`. Colours are a separate per-phone pick, `[▦]`: 8 built-in schemes plus your own
+writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
 ## Alerts (web push)
@@ -223,7 +223,7 @@ tailnet-only.
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, decision-undelivered, state-write-failed
+# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
 ```
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to the Telegram notifier, which is
