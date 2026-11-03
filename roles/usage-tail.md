@@ -31,6 +31,7 @@ queued → impl → review(n) → fix(n) → ready → merged; plus blocked, nee
 - NO_SUCH_ASK / ALREADY_ANSWERED / NO_RECOMMENDATION / OWNER_TOPIC: answer: the fleet has no such ask id, or it was answered already (a `by: default` decision can be changed once); ask: `--kind routine` without `--recommend`, or with an owner word or its plural/inflection (main, prod, secret, token, delete, spend, cost, $, dependency, scope)
 - STALE: serve: fleet.toml changed since the page was rendered; reload and retry
 - NO_SUCH_AGENT / IS_LANE / SECRET_IN_WIP / SNAPSHOT_FAILED / UNSAFE_CLEAN: stop/kill: no such live lane; close: a logged lane (use stop/kill/clean); kill: a secret-looking value in the wip diff, or the wip snapshot failed (index restored, nothing pushed, pane stays); clean --lane: not merged/closed, dirty, unpushed or live
+- DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
 - MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`)
 
 ## Exit codes
