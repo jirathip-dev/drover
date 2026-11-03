@@ -131,6 +131,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
     }
     std::fs::create_dir_all(state_dir(ctx))?;
     let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
+    let mut pending = (why == "drive").then(|| Lock(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))));
     let Some(_k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
         return Ok(std::fs::write(&again, why)?);
     };
@@ -139,6 +140,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         KICK.set(Some(n));
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
         KICK.set(None);
+        drop(pending.take()); // #318: a launched kick's marker goes after its first run
         let text = String::from_utf8_lossy(&buf).into_owned();
         out.write_all(&buf)?;
         if text.starts_with("drive: ") {
@@ -154,6 +156,29 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         }
     }
     Ok(())
+}
+
+/// #318: a pass's spawn as its own detached kick, at most `max_parallel_spawns` at once, admitted counting those starting.
+fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
+    let live = pending(ctx);
+    if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    }
+    crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
+    let d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
+    let e = serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d))?;
+    std::fs::write(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending")), e)?;
+    kick(ctx, r, fleet, n, "drive");
+    Ok(0)
+}
+
+/// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
+pub(crate) fn pending(ctx: &Ctx) -> Vec<Event> {
+    let young = |p: &Path| Some(p.metadata().ok()?.modified().ok()?.elapsed().ok()?.as_secs() < STALE_LOCK_SECS);
+    let live = |p: &std::path::PathBuf| p.extension() == Some("pending".as_ref()) && young(p) == Some(true);
+    let spawn = |p: std::path::PathBuf| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok();
+    let each = std::fs::read_dir(state_dir(ctx)).into_iter().flatten().flatten();
+    each.map(|e| e.path()).filter(live).filter_map(spawn).collect()
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -274,7 +299,8 @@ pub fn drive(
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
     let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
-    let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
+    let mine = || take(r, &lock, only.unwrap_or_default()).map(Some); // #318: a kick's lock is `kick-<fleet>-<n>.lock`
+    let Some(_held) = KICK.get().map_or_else(mine, |_| Some(None)) else {
         if manual {
             return wait(ctx, r, out, &lock, only);
         }
@@ -342,7 +368,8 @@ pub fn drive(
             ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "actions": acts});
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
+            "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res
@@ -887,8 +914,12 @@ type Code = Option<&'static str>;
 fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], at: At, c: &[&str]) -> Result<Code> {
     let (fleet, issue, step) = at;
     let mut buf = vec![];
-    IN_ACT.set(true);
-    let res = crate::cli::run(c, ctx, r, &mut buf);
+    let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
+    IN_ACT.set(!kicks);
+    let res = match issue.filter(|_| kicks) {
+        Some(n) => launch(ctx, cfg, r, ev, fleet, n, c[3]),
+        None => crate::cli::run(c, ctx, r, &mut buf),
+    };
     IN_ACT.set(false);
     let text = String::from_utf8_lossy(&buf);
     let (result, code) = match res {
@@ -915,7 +946,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into())
             .or_default()
-            .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w}));
+            .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "kick": kicks}));
     });
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;

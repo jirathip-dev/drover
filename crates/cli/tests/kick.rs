@@ -1,4 +1,4 @@
-//! #304 `herdsman kick`: one issue's due steps at once, debounced, under the drive lock; lane hooks and the board kick.
+//! #304 `herdsman kick`: one issue's due steps at once, debounced, beside the pass (#318); lane hooks and the board kick.
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
@@ -90,17 +90,19 @@ fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
     assert!(!dir.join("kick-sendmeter-2.again").exists() && !dir.join("kick-sendmeter-2.lock").exists());
 }
 
+/// #318: a kick holds its issue's locks only, so a pass holding `drive.lock` never delays it.
 #[test]
-fn a_busy_drive_lock_gets_one_follow_up_not_a_double_run() {
+fn a_held_drive_lock_does_not_delay_a_kick() {
     let c = fan("kick-busy");
     let dir = c.state.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("drive.lock"), "4242").unwrap();
     let r = fake(1);
     kick(&c, &r, "2");
-    assert_eq!(kicks(&c).len(), 1, "the busy try logs no run");
+    assert_eq!(kicks(&c).len(), 1);
     assert_eq!(r.count("herdr agent start"), 1);
-    assert_eq!(r.count("sleep 10"), 2);
+    assert_eq!(r.count("sleep 10"), 1, "no follow-up");
+    assert!(dir.join("drive.lock").exists(), "the pass's lock is left alone");
 }
 
 #[test]
