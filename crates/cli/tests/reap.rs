@@ -126,8 +126,8 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
         .reply("ps -o rss= -p 101,102", "  204800\n  102400\n")
         .reply("kill", "");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).into_owned();
+    let page = String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
+        .into_owned();
     assert!(page.contains("<span class=k>leftovers</span>"), "no leftovers row");
     assert!(
         page.contains("<b class=a>2</b> processes left in closed lanes <span class=mt>· 300 MB"),
@@ -287,8 +287,8 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
         .reply("herdr agent list", &agents(&[("impl-12", "done", &mine, "wA:p1")]))
         .reply("top -l 1 -o mem", top);
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page =
-        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000)).into_owned();
+    let page = String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000))
+        .into_owned();
     assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
     assert!(page.contains("16G VM (colima) · "), "the VM is classified");
     assert!(
@@ -319,8 +319,8 @@ fn host_tab_sums_claude_lane_memory_by_state() {
         .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n")
         .reply("herdr agent list", &list.to_string());
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page =
-        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000)).into_owned();
+    let page = String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000))
+        .into_owned();
     assert!(page.contains("<span class=k>claude</span>"), "no claude row");
     assert!(
         page.contains("<b>3.0 GB</b> <span class=mt>(2 lanes: working 1 / done 1)</span>"),

@@ -8,12 +8,14 @@
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
 // #206: `HERDSMAN_TAB` is the stored tab (a private localStorage) before the page loads; tab `-`: no tab()/mode() and no
 // <details> opened, the page as it loaded (with its scripts cut, as it first paints).
-// swift webview.swift <page.html> <width> <tab> <mode> [out.png] [js] [close]
+// swift webview.swift <page.html | http URL> <width> <tab> <mode> [out.png] [js] [close]
 import AppKit
 import WebKit
 
 let a = CommandLine.arguments
-let html = try! String(contentsOfFile: a[1], encoding: .utf8)
+// #337: an http URL loads as a real navigation (its paint timing kept; `HERDSMAN_WARM`: twice), else the file's HTML.
+let url = a[1].hasPrefix("http") ? URL(string: a[1]) : nil
+let html = url == nil ? try! String(contentsOfFile: a[1], encoding: .utf8) : ""
 let width = CGFloat(Double(a[2])!)
 let (tab, mode, png, extra) = (a[3], a[4], a.count > 5 ? a[5] : nil, a.count > 6 ? a[6] : "")
 let close = a.count > 7 ? a[7] : nil
@@ -91,7 +93,10 @@ func gate(_ w: WKWebView, _ close: String) {
 }
 
 final class Nav: NSObject, WKNavigationDelegate {
+    var warm = ProcessInfo.processInfo.environment["HERDSMAN_WARM"] != nil
     func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
+        // #337 `HERDSMAN_WARM`: load the URL a second time in the same WebKit (its caches and service worker warm).
+        if warm, let url { warm = false; return DispatchQueue.main.asyncAfter(deadline: .now() + 1) { w.load(URLRequest(url: url)) } }
         if let close { return gate(w, close) }
         let js = tab == "-" ? "\(extra); [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]" : """
         tab('\(tab)'); mode('\(mode)'); \(extra);
@@ -119,6 +124,6 @@ final class Nav: NSObject, WKNavigationDelegate {
 }
 let nav = Nav()
 web.navigationDelegate = nav
-web.loadHTMLString(html, baseURL: ProcessInfo.processInfo.environment["HERDSMAN_BASE"].flatMap(URL.init(string:)))
+if let url { win.orderFrontRegardless(); web.load(URLRequest(url: url)) } else { web.loadHTMLString(html, baseURL: ProcessInfo.processInfo.environment["HERDSMAN_BASE"].flatMap(URL.init(string:))) }
 DispatchQueue.main.asyncAfter(deadline: .now() + 30) { print("timeout"); exit(3) }
 app.run()

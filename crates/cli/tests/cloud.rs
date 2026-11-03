@@ -12,7 +12,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 const NOW: u64 = 1_000_000;
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 cloud1 -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m cloud1 -- ";
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 const KEY: &str = "sekrit-key-123";
 const RECIPE: &str = r#"key_env = "FAKE_CLOUD_KEY"

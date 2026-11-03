@@ -149,7 +149,7 @@ fn default_theme_is_farm() {
         get(&c, &r, "/themes/farm/scene.svg").starts_with("HTTP/1.1 404 "),
         "farm draws its scene in herd.js"
     );
-    let page = get(&c, &r, "/");
+    let page = get(&c, &r, "/?all=1");
     assert!(page.contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>"));
     // The picker: this phone's choice, else the board's default, set before the first paint.
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
@@ -163,15 +163,15 @@ fn default_theme_is_farm() {
 #[test]
 fn the_picker_default_is_serve_theme_and_lists_your_own() {
     let (c, r) = server(Some("kitchen"), &[]);
-    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"kitchen\";"));
+    assert!(get(&c, &r, "/?all=1").contains("h.dataset.theme=m||\"kitchen\";"));
     let (c, r) = server(Some("space"), &[("space", "theme.json", "{}")]);
-    let page = get(&c, &r, "/");
+    let page = get(&c, &r, "/?all=1");
     assert!(page.contains("h.dataset.theme=m||\"space\";"));
     // The look sheet lists SD.t's keys: the built-ins and your own.
     assert!(page.contains("\"kitchen\":\"kitchen\",\"space\":") && page.contains(",\"terminal\":\"github-dark\"}"));
     // A name that would close the script stays a string.
     let (c, r) = server(Some("</script>"), &[]);
-    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"\\u003c/script>\";"));
+    assert!(get(&c, &r, "/?all=1").contains("h.dataset.theme=m||\"\\u003c/script>\";"));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn lookup_is_user_then_built_in_then_farm() {
     let k: Value = serde_json::from_str(KITCHEN).unwrap();
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json"), resolve(&k, &farm()));
     assert_eq!(body(&get(&c, &r, "/themes/kitchen/scene.svg")), KITCHEN_SCENE);
-    assert!(get(&c, &r, "/")
+    assert!(get(&c, &r, "/?all=1")
         .contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>"));
     // Any phone may pick another theme than the board's.
     assert_eq!(json(&c, &r, "/themes/farm/theme.json"), resolve(&farm(), &farm()));
@@ -338,7 +338,7 @@ fn invalid_theme_json_falls_back_to_farm_with_a_host_warning() {
             FARM_SPRITES,
             "{name}"
         );
-        let page = get(&c, &r, "/");
+        let page = get(&c, &r, "/?all=1");
         let warn = format!(
             "<p class=gr data-t=a><span class=k>theme</span><span class=w><b class=a>farm</b> <span class=mt>`{name}`: {}</span></span></p>",
             why.replace('"', "&quot;")

@@ -137,8 +137,8 @@ function theme(name) {
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
     sym('hfan', T.load_scene?.fan); // #239: an idle lane's sprite while the heat is held
-    sym('hload', T.loading); // #305: [↻] while busy; none (terminal): the spinning glyph
-    $('#rf').classList.toggle('ld', !!defs.querySelector('#hload'));
+    sym('hload', T.loading); // #337: the loading overlay's sprite; none (terminal): a spinning glyph
+    $('#ld').classList.toggle('ld', !!defs.querySelector('#hload'));
     Object.keys(PAL).forEach(k => H.style.removeProperty(k));
     PAL = T.scene.palette || {};
     Object.entries(PAL).forEach(([k, v]) => H.style.setProperty(k, v));
@@ -338,8 +338,11 @@ function draw() {
 function herdData(j) { if (!DBG.get('weather')) { data = j; draw(); } }
 async function herdPull() {
   if (H.hidden) return;
-  const w = DBG.get('weather'), t = await part('herd.json' + (w ? '?weather=' + encodeURIComponent(w) : ''));
-  try { if (t) { data = JSON.parse(t); draw(); } } catch (e) {}
+  // #337: the last scene this tab session drew paints at once; the fresh data replaces it.
+  const w = DBG.get('weather'), c = !data && !w && sget('c:herd');
+  try { if (c) { data = JSON.parse(c); draw(); } } catch (e) {}
+  const t = await wait(part('herd.json' + (w ? '?weather=' + encodeURIComponent(w) : '')));
+  try { if (t) { data = JSON.parse(t); draw(); if (!w) sput('c:herd', t); } } catch (e) {}
 }
 
 // #40/#42: each page carries its fleet's needs-you cards (the same per-audience HTML as the tabs).
@@ -505,7 +508,7 @@ function ranch() {
 }
 lb.onclick = () => { light = LIGHTS[(LIGHTS.indexOf(light) + 1) % 3]; put('herd-light', light); ranch(); };
 ranch();
-setInterval(ranch, 60000);
+setInterval(() => document.hidden || ranch(), 60000);
 document.addEventListener('visibilitychange', () => { anim(); ranch(); });
 // #39 demo: a weather switcher sets the host values client-side, as `/herd.json?weather=` does on loopback.
 const WX = { calm: [0.1, 'normal'], gusty: [0.7, 'normal'], storm: [1.3, 'normal'], fog: [0.3, 'warn'] };

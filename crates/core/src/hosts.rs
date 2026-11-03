@@ -15,6 +15,21 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// `prog args` as one shell line, each word single-quoted.
+pub fn quote(prog: &str, args: &[String]) -> String {
+    let q = |a: &str| format!("'{}'", a.replace('\'', "'\\''"));
+    std::iter::once(q(prog))
+        .chain(args.iter().map(|a| q(a)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+const CM: [&str; 3] = [
+    "-oControlMaster=auto",
+    "-oControlPath=/tmp/herdsman-ssh-%C",
+    "-oControlPersist=10m",
+];
+
 /// A lane's host; `machine` None is this one (every call and file exactly as before).
 pub struct On<'a> {
     pub r: &'a dyn Runner,
@@ -37,11 +52,18 @@ impl<'a> On<'a> {
         if prog == crate::herdr::BIN {
             return (prog.into(), [argv(&["--machine", m]), args.to_vec()].concat());
         }
-        let mut line = format!("'{prog}'");
-        for a in args {
-            line += &format!(" '{}'", a.replace('\'', "'\\''"));
-        }
-        let ssh = argv(&["-oBatchMode=yes", "-oConnectTimeout=10", m, "--", &line]);
+        let line = quote(prog, args);
+        // #337: one connection per host, kept 10 min, whatever the user's ssh config says.
+        let ssh = argv(&[
+            "-oBatchMode=yes",
+            "-oConnectTimeout=10",
+            CM[0],
+            CM[1],
+            CM[2],
+            m,
+            "--",
+            &line,
+        ]);
         ("ssh".into(), ssh)
     }
     fn sh(&self, script: &str, p: &Path, input: &str) -> Result<Out> {
@@ -574,7 +596,10 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
     if cfg.hosts.is_empty() {
         return Ok(writeln!(out, "no [hosts] in fleet.toml: every lane runs on this host")?);
     }
-    survey(ctx, cfg, r, refresh);
+    // #337: the last look (the tick's, every 5 min) unless asked to refresh or none is saved.
+    if refresh || cfg.hosts.keys().any(|h| !cached(ctx).contains_key(h)) {
+        survey(ctx, cfg, r, refresh);
+    }
     let (seen, events) = (cached(ctx), read(&ctx.state)?);
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
@@ -587,7 +612,8 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
         writeln!(
             out,
-            "{name} · {words} · tags {t} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls}"
+            "{name} · {words} · tags {t} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
+            age(ctx.now.saturating_sub(s.seen))
         )?;
     }
     Ok(())

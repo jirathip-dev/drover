@@ -59,7 +59,7 @@ fn lane<'a>(page: &'a str, agent: &str) -> &'a str {
 fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     let (c, r) = fixture("parked-sheet", true);
     let s = Server::new(&c, &r, None);
-    let page = get(&s, "/");
+    let page = get(&s, "/?all=1");
     let safe = lane(&page, SAFE);
     assert!(
         safe.contains("data-role=impl data-gone>"),
@@ -169,7 +169,7 @@ fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     };
     let ev = check(&c);
     assert!(hits(&ev, 14), "a vanished lane with no clean is dead");
-    let page = get(&Server::new(&c, &r, None), "/");
+    let page = get(&Server::new(&c, &r, None), "/?all=1");
     assert!(lane(&page, RISKY).contains("dead"), "{page}");
 
     let c = fixture("closed-cleaned", false).0;
@@ -178,7 +178,7 @@ fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     let st = herdsman::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 14)].state, "closed");
     assert!(!hits(&check(&c), 14), "no stall or lane-dead for a closed issue");
-    let page = get(&Server::new(&c, &r, None), "/");
+    let page = get(&Server::new(&c, &r, None), "/?all=1");
     assert!(
         !page.contains(&format!("data-agent=\"{RISKY}\"")),
         "no Dead row: {page}"

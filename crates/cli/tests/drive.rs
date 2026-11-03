@@ -962,13 +962,15 @@ fn disk_low_stops_the_pass() {
             gb << 20
         )
     };
+    // #337: the step's look reads the disk first and, the pass having logged, last (the Host tab's row).
     let r = fan_fake(NO_AGENTS)
+        .once("df -k /", 0, &df(50))
         .once("df -k /", 0, &df(50))
         .once("df -k /", 0, &df(5));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start", "start"], "{out}");
     assert!(out.contains("sendmeter #2 start: REFUSED DISK_LOW"), "{out}");
-    assert_eq!(r.count("df -k /"), 2, "#3 not tried");
+    assert_eq!(r.count("df -k /"), 4, "#3 not tried");
     assert_eq!(state_of(&c, 3), "queued");
 }
 

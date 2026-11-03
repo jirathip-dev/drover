@@ -93,8 +93,8 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
         (j["closed"].as_bool(), j["lines"][3].as_str()),
         (Some(false), Some("Paste code here >"))
     );
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), T)).into_owned();
+    let page = String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), T))
+        .into_owned();
     assert!(page.contains("data-su=\"claude B\" data-host=\"bazzite\"") && page.contains("data-su=\"codex\""));
 }
 

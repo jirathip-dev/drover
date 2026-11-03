@@ -18,7 +18,7 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-      - name: test
+      - name: test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)
         run: cargo test --locked
       - name: demo export (#39, synthetic data in demo/)
         run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
@@ -67,7 +67,7 @@ jobs:
           c=$(npx -y @puppeteer/browsers@2.6.1 install chrome-headless-shell@156.0.8078.80 --path "$RUNNER_TEMP/chs" | tail -1 | cut -d' ' -f2-)
           test -x "$c" || { echo "::error::chrome-headless-shell install gave no binary: '$c'"; exit 1; }
           echo "CHROME=$c" >> "$GITHUB_ENV"
-      - name: ui audit at 390 px (31 views) and the sheet close screencast (#166)
+      - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
       - uses: actions/upload-artifact@v4
         if: always()
@@ -84,6 +84,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+      - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
+        run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: sheet close in WebKit (chat, config, legend)
         run: |
           mkdir -p ui-webkit

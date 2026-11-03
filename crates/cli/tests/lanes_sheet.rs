@@ -65,7 +65,7 @@ fn section<'a>(page: &'a str, id: &str) -> &'a str {
 #[test]
 fn lanes_group_by_state_then_repo_with_counts() {
     let (c, r) = fixture("group");
-    let page = req(&Server::new(&c, &r, None), "GET", "/", "", "", T);
+    let page = req(&Server::new(&c, &r, None), "GET", "/?all=1", "", "", T);
     let lanes = section(&page, "lanes");
     let mut got = vec![];
     for part in lanes.split("<h").skip(1) {
@@ -122,7 +122,7 @@ fn lane_card_shows_its_port() {
     let (c, r) = fixture("port");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "port": 41234});
     append(&c.state, &Event::new(900_800, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let page = req(&Server::new(&c, &r, None), "GET", "/", "", "", T);
+    let page = req(&Server::new(&c, &r, None), "GET", "/?all=1", "", "", T);
     assert!(section(&page, "lanes").contains(" · :41234 · "), "{page}");
 }
 
@@ -239,7 +239,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         (0, "now: open the page, tap Pair, then run serve approve <code>\n")
     );
     // An unpaired page has the Pair button; a request sets a short-lived HttpOnly cookie and shows a 6-digit code.
-    let page = req(&s, "GET", "/", "", "", T);
+    let page = req(&s, "GET", "/?all=1", "", "", T);
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
     assert!(
         page.contains("`herdsman serve approve &lt;code&gt;` here") && !page.contains("<code>"),
@@ -301,7 +301,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{res}"
     );
     assert!(
-        !req(&s, "GET", "/", "", &mine, T + 61).contains("class=pairb"),
+        !req(&s, "GET", "/?all=1", "", &mine, T + 61).contains("class=pairb"),
         "paired: no Pair button"
     );
     // Single use: the same code again is NO_SUCH_CODE.
@@ -391,17 +391,17 @@ fn pairing_behind_a_proxy_and_retaps() {
     }
     let left = herdsman::devices::pending(&c3);
     assert_eq!(left.len(), 1, "{left:?}");
-    let page = req(&s3, "GET", "/", "", "", T);
+    let page = req(&s3, "GET", "/?all=1", "", "", T);
     assert!(!page.contains("pair separately"), "no device paired yet");
     herdsman::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
     assert!(req(&s3, "POST", "/pair/claim", "", &cookie, T + 1).starts_with("HTTP/1.1 200 OK"));
     // A paired device exists: an unpaired page (the other iOS app) says why it shows Pair.
-    let page = req(&s3, "GET", "/", "", "", T + 1);
+    let page = req(&s3, "GET", "/?all=1", "", "", T + 1);
     assert!(
         page.contains("<p class=m>Safari and the home-screen app pair separately</p>"),
         "{page}"
     );
-    assert!(!req(&s3, "GET", "/", "", &cookie, T + 1).contains("pair separately"));
+    assert!(!req(&s3, "GET", "/?all=1", "", &cookie, T + 1).contains("pair separately"));
     // [cancel] drops the browser's open request; a paired device's cookie cancels nothing.
     let (_, _, mine) = ask_pair(&s3, "10.0.0.3", T + 2);
     assert_eq!(herdsman::devices::pending(&c3).len(), 1);
@@ -477,7 +477,7 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
     assert!(r.called("herdr agent prompt sendmeter-impl-12 --wait\nline two"));
     // The Host tab lists the device; Remove unpairs it and its next send is 401.
-    let page = req(&s, "GET", "/", "", "", T);
+    let page = req(&s, "GET", "/?all=1", "", "", T);
     let host = section(&page, "host");
     assert!(
         host.contains(&format!("<span>{label} <span class=m>paired ")) && host.contains("<button>Remove</button>"),
@@ -540,7 +540,7 @@ fn reply_refusals_rate_limit_and_read_only() {
 fn page_has_no_dash_placeholders() {
     let (c, r) = fixture("dash");
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "12"]);
-    let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/", "", "", T);
+    let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/?all=1", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
     // #60: and the parts the page loads on demand ([config] sheet, Events).
@@ -647,7 +647,7 @@ fn lanes_and_sheet_fit_390px() {
     )
     .unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = req(&s, "GET", "/", "", "", T);
+    let page = req(&s, "GET", "/?all=1", "", "", T);
     let body = |res: String| res[res.find("\r\n\r\n").unwrap() + 4..].to_string();
     let cookie = paired(&s, &c);
     let lane = body(req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T));
@@ -794,7 +794,7 @@ fn chat_views_never_blank() {
         (&json!(null), 4),
         "{remote}"
     );
-    let page = req(&s, "GET", "/", "", "", T);
+    let page = req(&s, "GET", "/?all=1", "", "", T);
     let d = tmpdir("never-blank-png");
     let file = d.join("page.html");
     std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();

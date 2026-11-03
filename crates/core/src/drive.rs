@@ -343,10 +343,18 @@ pub fn drive(
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
         res = Err(e);
     };
+    // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
+    let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
+    let seen = if fleets.is_empty() {
+        crate::snapshot::Snap::read(ctx, r) // every fleet paused: nothing to look at
+    } else {
+        crate::snapshot::take(ctx, cfg, r)
+    };
+    let grew = log();
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
     for name in &fleets {
-        match pass(ctx, cfg, r, out, name, fast) {
+        match pass(ctx, cfg, (r, &seen), out, name, fast) {
             Ok(go) => {
                 start &= go;
                 due.push(*name);
@@ -359,6 +367,10 @@ pub fn drive(
             Ok(go) => start = go,
             Err(e) => fail(name, e),
         }
+    }
+    // #337: a step that logged something is looked at again, so the board shows what it did.
+    if log() != grew {
+        crate::snapshot::take(ctx, cfg, r);
     }
     // #246: the step's length beside its start (`drive-fast.at`: `<started> <secs>`), for the Host tab.
     let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
@@ -387,16 +399,23 @@ pub fn drive(
 
 /// One fleet: each item's due step, reviews first. Each spawn samples the host afresh; false when a spawn met a
 /// busy host or full disk, so no fleet starts new work this pass. `fast`: verdicts and merges only (#212).
-fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, fast: bool) -> Result<bool> {
+fn pass(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    fleet: &str,
+    fast: bool,
+) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
-    let agents = crate::hosts::all_agents(cfg, r)?;
+    let agents = crate::hosts::all_agents(cfg, seen)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
-    let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
+    let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
-        waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
+        waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.

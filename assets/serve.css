@@ -78,10 +78,13 @@ nav a.on .n{color:inherit}
 @keyframes p{50%{transform:scale(1.9)}}
 /* #290: the four header controls are one width, so each bracket sits as far from its glyph */header>button:not(.pairb){width:calc(var(--ctl) + var(--s1));padding:0}header>button:not(.pairb)+button{margin-left:var(--s2)} /* 16 px apart: no tap ring over its neighbour */#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
-/* #305: a theme's `loading` sprite runs in [↻]'s place while busy, 24 px over the glyph (hidden, so the box never moves):
-   8 fps through steps(), the trot by --gait, the kf1/kf2 frames (with the flame) by --o1/--o2; reduced motion: one still frame. */
-.lds{width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2));image-rendering:pixelated;shape-rendering:crispEdges}
-#rf{position:relative}#rf .lds{position:absolute;inset:0;margin:auto;visibility:hidden}#rf.ld.spin i{visibility:hidden}#rf.ld.spin .lds{visibility:visible;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+/* #337: a wait over 300 ms: the theme's `loading` sprite, 96 px, centred near the top of the content over a light scrim
+   (below the header, never catching a tap); terminal (no sprite): a spinning glyph. 8 fps through steps(), the trot by
+   --gait, the kf1/kf2 frames (with the flame) by --o1/--o2; reduced motion: one still frame. */
+#ld{position:fixed;inset:calc(var(--hit) + var(--s1)) 0 0;z-index:2;pointer-events:none;display:flex;justify-content:center;align-items:flex-start;padding-top:calc(var(--s4) * 3);background:color-mix(in srgb,var(--bg) 45%,transparent)}
+#ld[hidden]{display:none}#ld .lds{width:calc(var(--s4) * 6);height:calc(var(--s4) * 6);image-rendering:pixelated;shape-rendering:crispEdges;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+#ld i{font-style:normal;font-size:var(--fs-code);line-height:var(--fs-code);margin-top:calc(var(--s4) * 2);scale:1.5;color:var(--mute);animation:s 1s linear infinite}#ld i::before{content:"↻"}#ld.ld i,#ld:not(.ld) .lds{display:none}
+html.bg *{animation-play-state:paused!important} /* #337: no motion while the app is in the background */
 @keyframes ldg{0%{--gait:-16deg}50%{--gait:16deg}100%{--gait:-16deg}}
 @keyframes ldk{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
@@ -98,7 +101,7 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 .ask .reason{margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ask .command{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}.ask .command.open{display:block}
 .ask .title,.ask .cd{margin:0;font-size:var(--fs-meta)}.ask .cd{color:var(--r)}.ask :is(.title,.reason,.command):empty{display:none}
-@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#rf.ld.spin .lds,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
+@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#ld .lds,#ld i,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
 .av{display:flex;align-items:center;justify-content:center;width:48px;height:40px;overflow:hidden}
 .av>*{display:none}
 /* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
