@@ -527,9 +527,10 @@ fn lanes_group_by_fleet_with_others() {
     );
     // Rendered: state sections, fleet subgroups (Others last), the mismatch flagged.
     let list = json!({"result": {"agents": agents}}).to_string();
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read w1:p2", "⏺ Bash(cargo test)\n> \n");
+    let r = Fake::default().reply("herdr agent list", &list).reply(
+        "herdr pane read w1:p2",
+        "⏺ Bash(cd ~/w; cargo test 2>&1 | tail -5)\n\n✻ Herding… (4m 2s · ↓ 1k tokens)\n────────────────────\n> \n────────────────────\n",
+    );
     let page = get(&Server::new(&c, &r, None), "/");
     let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
     let working = &page[at("<h2><span class=g>working (2)</span></h2><h3>sendmeter (1)</h3>")..];
@@ -538,7 +539,13 @@ fn lanes_group_by_fleet_with_others() {
         rest.find("<h3>synergy (1)</h3>") < rest.find("<h2>"),
         "synergy subgroup inside working"
     );
-    assert!(page.contains("⚠ log/pane mismatch") && page.contains("<span class=act>now: running cargo test</span>"));
+    assert!(
+        page.contains("⚠ log/pane mismatch")
+            && page.contains(concat!(
+                "<span class=\"act nw el now\" title=\"✻ Herding… · now: running cd ~/w; cargo test 2&gt;&amp;1 | tail -5 · 4m\">",
+                "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
+            ))
+    );
     // One herdr agent list per 10 s, one pane read per 30 s.
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
