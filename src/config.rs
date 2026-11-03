@@ -23,6 +23,16 @@ pub struct Config {
     pub providers: Providers,
     /// #157: `[hosts.<name>]` lanes may run on (docs/hosts.md); none = this host only, as before.
     pub hosts: BTreeMap<String, HostCfg>,
+    /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
+    pub setup: Vec<SetupCfg>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetupCfg {
+    pub name: String,
+    pub cmd: String,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// #157: one host: its herdr machine label (unset = this host), hand tags, worktree root, and whether new lanes go there.
