@@ -2,6 +2,7 @@
 //! read-only, pause, the Lanes join/grouping, masking, PWA assets, 390 px layout.
 mod common;
 use common::*;
+use herdsman::devices;
 use herdsman::events::{append, read, Event};
 use herdsman::serve::Server;
 use serde_json::json;
@@ -1013,4 +1014,47 @@ fn pair_request_carries_the_optional_approve_hint() {
         format!("{code}\nor send 'pair {code}' to <b>ops</b>\n"),
         "text/plain; the page sets it as text"
     );
+}
+
+/// #288: opened on the host itself (loopback peer naming localhost, no `tailscale serve` headers) the pairing card
+/// carries the exact approve line with `[copy]`; the page polls claim, and pairing lasts a year after last use.
+#[test]
+fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
+    let js = include_str!("../assets/serve.js");
+    assert!(
+        js.contains("el('button', 'pairc', 'copy')") && js.contains("paste in Terminal"),
+        "the copy button"
+    );
+    assert!(
+        js.contains("setInterval(claim, 2000)"),
+        "the page pairs itself once approved"
+    );
+    let c = ctx(&tmpdir("pair-host"), &config());
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let request = |extra: &str| {
+        let req = format!("POST /pair/request HTTP/1.1\r\n{extra}Content-Length: 0\r\n\r\n");
+        let res = String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned();
+        assert!(res.starts_with("HTTP/1.1 200 "), "{res}");
+        devices::cancel(&c, res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap()).unwrap();
+        res.rsplit("\r\n\r\n").next().unwrap().to_string()
+    };
+    let body = request("X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\n");
+    assert_eq!(body, format!("{0}\n\nherdsman serve approve {0}\n", &body[..6]));
+    for extra in [
+        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nX-Forwarded-For: 100.64.0.2\r\n",
+        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nTailscale-User-Login: a@b\r\n",
+        "X-Peer: 10.0.0.1\r\nHost: 127.0.0.1:7777\r\n",
+        "X-Peer: 127.0.0.1\r\nHost: mac.tail1.ts.net\r\n",
+    ] {
+        assert_eq!(request(extra).len(), 8, "not on the host: code only: {extra:?}");
+    }
+    let cookie = common::pair(&s, &c, "Mac Safari", 1_000_000);
+    let devs = |now| run(&herdsman::Ctx { now, ..c.clone() }, &r, &["serve", "devices"]).1;
+    assert!(devs(1_000_000).ends_with(" expires in 365d\n"), "{}", devs(1_000_000));
+    let paired = |now| devices::find(&herdsman::Ctx { now, ..c.clone() }, &cookie[8..]).is_some();
+    assert!(paired(1_000_000 + 300 * 86_400), "used: renewed for a year from now");
+    assert!(paired(1_000_000 + 600 * 86_400), "still within a year of that use");
+    assert!(!paired(1_000_000 + 966 * 86_400), "a year unused: unpaired");
+    assert_eq!(devs(1_000_000 + 966 * 86_400), "");
 }
