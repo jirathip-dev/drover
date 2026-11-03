@@ -1,8 +1,8 @@
 //! What accounts and providers have used (docs/providers.md): herdsman lane-hours from the log, each account's
-//! Anthropic usage meter read through its own `claude` login, and the `DeepSeek` balance. Secrets reach `curl` and
-//! `security` on stdin only: never argv, the log, a cache or the page.
+//! usage meter (`Harness::usage_meter`, read through the account's own login), and the `DeepSeek` balance. Secrets
+//! reach `curl` on stdin only: never argv, the log, a cache or the page.
 use crate::config::{expand, Config};
-use crate::devices::{save, sha256};
+use crate::devices::save;
 use crate::events::{age, Event};
 use crate::runner::{argv, Runner};
 use crate::Ctx;
@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Claude Code's OAuth client id (its token endpoint wants it on a refresh).
-const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+/// The usage meter's Keychain service and reply parser, at their old paths (#316 moved them to its harness).
+pub use crate::harness::{keychain_service, parse_usage};
 /// Poll and cache period of the meter and the balance.
 const POLL: u64 = 600;
 
@@ -67,12 +67,12 @@ pub(crate) fn load<T: DeserializeOwned>(p: &Path) -> Option<T> {
 }
 
 /// A string inside a double-quoted curl config value.
-fn q(s: &str) -> String {
+pub(crate) fn q(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// `curl` with its config (headers, body) on stdin: (status, lowercased headers, body).
-fn curl(r: &dyn Runner, url: &str, conf: &str) -> Option<(u32, String, String)> {
+pub(crate) fn curl(r: &dyn Runner, url: &str, conf: &str) -> Option<(u32, String, String)> {
     let o = r
         .run_in("curl", &argv(&["-sS", "-m", "15", "-D", "-", "-K", "-", url]), conf)
         .ok()
@@ -175,9 +175,11 @@ pub fn cached(ctx: &Ctx, name: &str) -> Option<Meter> {
 }
 
 /// The account's meter, polled at most every 10 min and one poll at a time; a 429 backs off (at least its
-/// `retry-after`). None when `[accounts.usage]` names no login for it.
+/// `retry-after`). None when `[accounts.usage]` names no login for it, or its harness has no meter.
 pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Meter> {
     let login = cfg.accounts.usage.get(name)?;
+    let h = crate::harness::accounts()?;
+    let how = h.usage_meter()?;
     let mut m = cached(ctx, name).unwrap_or_default();
     if ctx.now < m.checked + POLL || ctx.now < m.retry_at {
         return Some(m);
@@ -200,7 +202,7 @@ pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Mete
         return Some(m);
     }
     m.checked = ctx.now;
-    match poll(r, &expand(login), ctx.now) {
+    match how.poll(r, &expand(login), ctx.now) {
         Poll::Got(session, week) => {
             m = Meter {
                 checked: ctx.now,
@@ -213,7 +215,10 @@ pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Mete
         Poll::Login => m.login_needed = true,
         Poll::Lost => {
             m.login_needed = true;
-            let why = format!("account {name}: the refreshed usage login could not be stored in the Keychain; run claude /login in {login}");
+            let why = format!(
+                "account {name}: the refreshed usage login could not be stored in the Keychain; run {} in {login}",
+                h.login().unwrap_or("its login")
+            );
             let _ = crate::events::emit(
                 &ctx.state,
                 cfg,
@@ -237,136 +242,14 @@ pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Mete
     Some(m)
 }
 
-enum Poll {
+/// One meter read (`UsageMeter::poll`).
+pub enum Poll {
     Got(Window, Window),
     Login,
     /// A refresh rotated the login but storing it back failed: it must be logged in again.
     Lost,
     Busy(u64),
     Failed,
-}
-
-/// The macOS Keychain service of a `CLAUDE_CONFIG_DIR=<dir>` login, as derived from Claude Code 2.1.308 (unverified):
-/// `Claude Code-credentials-<first 8 hex of sha256(dir)>`. Never the default login's plain `Claude Code-credentials`.
-pub fn keychain_service(dir: &Path) -> String {
-    format!(
-        "Claude Code-credentials-{}",
-        &sha256(dir.to_string_lossy().as_bytes())[..8]
-    )
-}
-
-/// The item's account attribute (`"acct"<blob>="…"`), so a write-back goes to the item that was read.
-fn keychain_account(r: &dyn Runner, svc: &str) -> Option<String> {
-    let o = r
-        .run("security", &argv(&["find-generic-password", "-s", svc]))
-        .ok()
-        .filter(|o| o.code == 0)?;
-    o.stdout.lines().find_map(|l| {
-        Some(
-            l.trim()
-                .strip_prefix("\"acct\"<blob>=\"")?
-                .strip_suffix('"')?
-                .to_string(),
-        )
-    })
-}
-
-/// The login JSON stored in the item.
-fn keychain_read(r: &dyn Runner, svc: &str, acct: &str) -> Option<Value> {
-    let o = r
-        .run(
-            "security",
-            &argv(&["find-generic-password", "-w", "-a", acct, "-s", svc]),
-        )
-        .ok()
-        .filter(|o| o.code == 0)?;
-    serde_json::from_str(o.stdout.trim()).ok()
-}
-
-/// Read the login's token from the Keychain (refreshing an expired one), then `/api/oauth/usage`.
-fn poll(r: &dyn Runner, dir: &Path, now: u64) -> Poll {
-    let svc = keychain_service(dir);
-    let Some(acct) = keychain_account(r, &svc) else {
-        return Poll::Login;
-    };
-    let Some(mut creds) = keychain_read(r, &svc, &acct) else {
-        return Poll::Login;
-    };
-    let oa = &creds["claudeAiOauth"];
-    let token = if oa["expiresAt"].as_u64().unwrap_or(0) / 1000 > now + 60 {
-        oa["accessToken"].as_str().map(String::from).ok_or(Poll::Login)
-    } else {
-        refresh(r, &mut creds, (&svc, &acct), now)
-    };
-    let token = match token {
-        Ok(t) => t,
-        Err(p) => return p,
-    };
-    let conf = format!(
-        "header = \"Authorization: Bearer {}\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\n",
-        q(&token)
-    );
-    match curl(r, "https://api.anthropic.com/api/oauth/usage", &conf) {
-        Some((200, _, body)) => parse_usage(&body).map_or(Poll::Failed, |(s, w)| Poll::Got(s, w)),
-        Some((401 | 403, ..)) => Poll::Login,
-        Some((429, head, _)) => {
-            let after = head
-                .lines()
-                .find_map(|l| l.strip_prefix("retry-after:"))
-                .and_then(|v| v.trim().parse().ok());
-            Poll::Busy(after.unwrap_or(0))
-        }
-        _ => Poll::Failed,
-    }
-}
-
-/// Trade the refresh token for a new access token and store the rotated login back in the same item, verified by a
-/// re-read. Err(Login) leaves the old login intact; Err(Lost) means it was rotated but not stored.
-fn refresh(r: &dyn Runner, creds: &mut Value, (svc, acct): (&str, &str), now: u64) -> Result<String, Poll> {
-    // The `security -i` script quotes both: refuse anything a quote or escape could break out of, before rotating.
-    let safe = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || " ._@+-".contains(c));
-    let oa = creds
-        .get_mut("claudeAiOauth")
-        .filter(|_| safe(svc) && safe(acct))
-        .ok_or(Poll::Login)?;
-    let body = json!({"grant_type": "refresh_token", "refresh_token": oa["refreshToken"].as_str().ok_or(Poll::Login)?, "client_id": CLIENT_ID});
-    let conf = format!(
-        "header = \"Content-Type: application/json\"\ndata = \"{}\"\n",
-        q(&body.to_string())
-    );
-    let (status, _, out) = curl(r, "https://platform.claude.com/v1/oauth/token", &conf).ok_or(Poll::Login)?;
-    let v: Value = serde_json::from_str(&out)
-        .ok()
-        .filter(|_| status == 200)
-        .ok_or(Poll::Login)?;
-    let token = v["access_token"].as_str().ok_or(Poll::Login)?.to_string();
-    oa["accessToken"] = json!(token);
-    if let Some(rt) = v["refresh_token"].as_str() {
-        oa["refreshToken"] = json!(rt);
-    }
-    oa["expiresAt"] = json!((now + v["expires_in"].as_u64().unwrap_or(3600)) * 1000);
-    let hex: String = creds.to_string().bytes().map(|b| format!("{b:02x}")).collect();
-    let stored = r.run_in(
-        "security",
-        &argv(&["-i"]),
-        &format!("add-generic-password -U -a \"{acct}\" -s \"{svc}\" -X \"{hex}\"\n"),
-    );
-    let back = stored
-        .is_ok_and(|o| o.code == 0)
-        .then(|| keychain_read(r, svc, acct))
-        .flatten();
-    if back.is_some_and(|b| b["claudeAiOauth"]["accessToken"] == json!(token)) {
-        Ok(token)
-    } else {
-        Err(Poll::Lost)
-    }
-}
-
-/// `five_hour` and `seven_day` of `/api/oauth/usage`: (utilization %, reset epoch).
-pub fn parse_usage(body: &str) -> Option<(Window, Window)> {
-    let v: Value = serde_json::from_str(body).ok()?;
-    let w = |k: &str| Some((v[k]["utilization"].as_f64()?, epoch(v[k]["resets_at"].as_str()?)?));
-    Some((w("five_hour"), w("seven_day")))
 }
 
 /// RFC 3339 (`2026-10-31T12:59:59.5+07:00`, or `Z`) as epoch seconds.
@@ -401,7 +284,10 @@ pub type Shown = (Vec<(String, f64)>, Option<String>);
 /// The meter's (text, percent) parts and the pace warning, or Err(the login hint).
 pub fn shown(r: &dyn Runner, m: &Meter, login: &str, now: u64) -> Result<Shown, String> {
     if m.login_needed {
-        return Err(format!("usage: login needed (claude /login in {login})"));
+        let how = crate::harness::accounts()
+            .and_then(crate::harness::Harness::login)
+            .unwrap_or("its login");
+        return Err(format!("usage: login needed ({how} in {login})"));
     }
     let mut parts = vec![];
     if let Some((p, t)) = m.session {
@@ -487,16 +373,12 @@ pub fn reading(ctx: &Ctx, name: &str, login: impl FnOnce() -> Option<Meter>) -> 
     }
 }
 
-/// `herdsman statusline`: Claude Code's status-line JSON on stdin; appends at most one row per account per minute
-/// and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
+/// `herdsman statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one
+/// row per account per minute and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
 pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut dyn Write) {
     let v: Value = serde_json::from_str(input).unwrap_or_default();
-    let w = |k: &str| {
-        let x = &v["rate_limits"][k];
-        let reset = x["resets_at"].as_u64().or_else(|| epoch(x["resets_at"].as_str()?));
-        (x["used_percentage"].as_f64(), reset)
-    };
-    let ((fp, fr), (sp, sr)) = (w("five_hour"), w("seven_day"));
+    let how = crate::harness::accounts().and_then(crate::harness::Harness::usage_meter);
+    let ((fp, fr), (sp, sr)) = how.map(|m| m.status(&v)).unwrap_or_default();
     let fresh = |r: &Row| ctx.now < r.ts + 60;
     let mut all = rows(ctx);
     if !account.is_empty() && (fp.is_some() || sp.is_some()) && !all.get(account).is_some_and(fresh) {

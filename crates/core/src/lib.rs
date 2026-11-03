@@ -89,9 +89,6 @@ impl Ctx {
             hints,
         }
     }
-    pub fn claude_dir(&self) -> PathBuf {
-        self.config.parent().unwrap_or(&self.config).join("claude")
-    }
 }
 
 /// A path variable, with set-but-empty treated as unset (an empty path would mean the cwd).

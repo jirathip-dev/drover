@@ -3,6 +3,7 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, closed, emit, fold, last_spawn, read, Event, IssueState};
 use crate::gate::refused;
+use crate::harness;
 use crate::host::{self, Host};
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
@@ -353,12 +354,10 @@ pub fn under(p: &str, home: Option<&str>) -> PathBuf {
 /// #235: is the herdr server in the login session (macOS: a `gui/<uid>` launchd job), where the keychain is open?
 const LOGIN: &str = "p=$(pgrep -f 'herdr server$' | head -1); [ -n \"$p\" ] || exit 1; \
 command -v launchctl >/dev/null || exit 0; launchctl print gui/$(id -u) | awk -v p=\"$p\" '$1 == p { f = 1 } END { exit !f }'";
-/// #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
-const PANE: &str = "gh auth status >/dev/null 2>&1; echo \"gh:$?\"; claude auth status >/dev/null 2>&1; echo \"claude:$?\"; echo \"hs:\"done";
 
 /// #235: what is wrong with a reachable remote host, a `✗|! <check> — <detail> → <fix>` row each (none: healthy):
-/// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and Claude logins in a
-/// herdr pane, and its herdsman's version against this one's.
+/// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and each harness's login
+/// (`Harness::health_check`) in a herdr pane, and its herdsman's version against this one's.
 pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
@@ -378,9 +377,14 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         let line = format!("✗ git {name} — can't reach {}: {first} → {fix}", f.repo);
         fail(o.is_some_and(|o| o.code == 0), line);
     }
-    let text = crate::herdr::in_pane(on, home, PANE, "hs:done").unwrap_or_default();
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
-    for (tool, fix) in [("gh", gh.as_str()), ("claude", "claude auth login in a pane there")] {
+    let mut logins = vec![("gh", "gh auth status", gh.as_str())];
+    logins.extend(harness::all().filter_map(|h| h.1.health_check()));
+    // #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
+    let probe = |(t, c, _): &(&str, &str, &str)| format!("{c} >/dev/null 2>&1; echo \"{t}:$?\"; ");
+    let pane = logins.iter().map(probe).collect::<String>() + "echo \"hs:\"done";
+    let text = crate::herdr::in_pane(on, home, &pane, "hs:done").unwrap_or_default();
+    for (tool, _, fix) in logins {
         let line = format!("✗ {tool} — logged out in a herdr pane → {fix} (else: herdr session)");
         fail(text.lines().any(|l| l.trim() == format!("{tool}:0")), line);
     }

@@ -1025,7 +1025,7 @@ impl<'a> Server<'a> {
         Ok((l, fleet, pane))
     }
 
-    /// A blocked Claude menu's option: its digit via `pane send-keys`, then a re-read ("sent" or
+    /// A blocked lane's menu option (`Harness::pending_menu`): its keys (`answer_keys`) via `pane send-keys`, then a re-read ("sent" or
     /// "still waiting"); logs an `answer` event without the question. No menu parsed, or not the
     /// menu the tapped card showed (`h`, read afresh): no key.
     fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &BTreeMap<String, String>) -> Result<String> {
@@ -1036,7 +1036,9 @@ impl<'a> Server<'a> {
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let on = l.on(self.r);
         let screen = || herdr::read(&on, &pane);
-        let Some((q, opts)) = lanes::pending(&screen()?).filter(|p| l.harness == "claude" && !p.1.is_empty()) else {
+        let h = crate::harness::get(&l.harness);
+        let menu = h.pending_menu(&screen()?);
+        let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
             return refused(
                 "BAD_VALUE",
                 format!("no menu on {agent}'s pane: menu changed — refreshed; answer with the reply box"),
@@ -1055,11 +1057,11 @@ impl<'a> Server<'a> {
         if f.get("h") != Some(&seen(&q, &opts).to_string()) {
             return refused("STALE", "menu changed — refreshed");
         }
-        herdr::keys(&on, &pane, choice)?;
+        herdr::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         self.r.sleep(1);
-        Ok(if lanes::pending(&screen()?) == Some((q, opts)) {
+        Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
             format!("still waiting: {agent}")
         } else {
             format!("sent to {agent}")
@@ -1459,7 +1461,7 @@ impl<'a> Server<'a> {
         st.values().map(pend).collect()
     }
 
-    /// A blocked lane's card: a Claude menu's options as buttons (`/answer`) under its title, reason, command
+    /// A blocked lane's card: a harness menu's options as buttons (`/answer`) under its title, reason, command
     /// and countdown (#127: `data-push=0` while that runs; none once the pane works again), else the question
     /// (or the last 6 masked lines) and a Reply button that opens the lane's sheet. Unpaired: no
     /// pane text, only the 1-line activity and a pairing hint.
@@ -1470,9 +1472,10 @@ impl<'a> Server<'a> {
             .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
+        let h = crate::harness::get(&l.harness);
         let c = lanes::prompt(&screen).unwrap_or_default();
-        let body = match lanes::pending(&screen).filter(|_| l.harness == "claude") {
-            None if l.harness == "claude" && lanes::chat(&screen).1.is_some() => return String::new(),
+        let body = match h.pending_menu(&screen) {
+            None if h.status_word(&screen).is_some() => return String::new(),
             _ if !paired => format!(
                 "<p class=m>{}</p><p class=m>pair this phone to answer{}</p>",
                 esc(&lanes::activity(&l.harness, &screen)),
@@ -2253,7 +2256,7 @@ impl<'a> Server<'a> {
         let mut out = String::new();
         for (name, h) in crate::hosts::cards(cfg, r) {
             let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
-            let mut claude = None;
+            let mut mem = vec![];
             let mut s = seen.get(&name).cloned().unwrap_or_default();
             let word = |p: Option<u8>| p.and_then(|p| ["normal", "warn", "critical"].get(usize::from(p)).copied());
             let mut gate = Host {
@@ -2269,14 +2272,24 @@ impl<'a> Server<'a> {
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
                 let all = herdr::agents(r).unwrap_or_default();
                 s.top = host::top(r, &all);
-                // #248: what the Claude lanes hold, working and done apart, so done-lane memory shows.
-                let ours: Vec<&serde_json::Value> = all.iter().filter(|a| a["agent"] == "claude").collect();
-                let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
-                let mb: u64 = host::held(r, &ours).iter().sum();
-                let gb = format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024);
-                let (w, d) = (n("working"), n("done"));
-                let ls = format!("({} lanes: working {w} / done {d})", ours.len());
-                claude = (!ours.is_empty()).then(|| format!("<b>{gb} GB</b> <span class=mt>{ls}</span>"));
+                // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
+                // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
+                let mut by: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
+                for (a, label) in all
+                    .iter()
+                    .filter_map(|a| Some((a, a["agent"].as_str().filter(|l| !l.is_empty())?)))
+                {
+                    let h = crate::harness::all().find(|h| h.1.process_names().contains(&label));
+                    by.entry(h.map_or(label, |h| h.0).into()).or_default().push(a);
+                }
+                for (h, ours) in by {
+                    let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
+                    let mb: u64 = host::held(r, &ours).iter().sum();
+                    let gb = format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024);
+                    let (w, d) = (n("working"), n("done"));
+                    let ls = format!("({} lanes: working {w} / done {d})", ours.len());
+                    mem.push((h, format!("<b>{gb} GB</b> <span class=mt>{ls}</span>")));
+                }
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
@@ -2352,7 +2365,7 @@ impl<'a> Server<'a> {
             let mut rows = row("load/cpu", "load", grey(lt), &lv, &dl(lim.load_per_cpu));
             rows += &row("swap-out", "swap", grey(st), &sv, &dl(lim.swapout_rate));
             rows += &row("memory", "mem", grey(mt), &mv, &dl(lim.min_free_mem_gb));
-            rows += &claude.map_or(String::new(), |c| kv("claude", grey("g"), &c));
+            rows += &mem.iter().map(|(h, c)| kv(h, grey("g"), c)).collect::<String>();
             rows += &row("disk", "disk", grey(dt), &dv, &dl(lim.min_free_gb));
             // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
             if !s.top.is_empty() {

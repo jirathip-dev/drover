@@ -106,10 +106,10 @@ impl Serve {
 pub struct Accounts {
     /// Env file (`VAR=value` lines) the tokens are read from.
     pub accounts_env: Option<String>,
-    /// Usage-limit banner, `|`-separated substrings (default `access::CAP_PATTERN`).
+    /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
-    /// `[accounts.usage]`: account name -> the `CLAUDE_CONFIG_DIR` of its own `claude` login, read only for the usage meter.
+    /// `[accounts.usage]`: account name -> the config dir of its own harness login (`Harness::usage_meter`), read only for the usage meter.
     pub usage: BTreeMap<String, String>,
     /// `headroom`: spawns take the uncapped account with the most 5h/7d headroom; `order` (default): as before.
     pub pick: Option<String>,
