@@ -585,7 +585,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(f, &events, fleet, issue, role)?;
+    lane_admit(ctx, f, &events, fleet, issue, role)?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -808,7 +808,8 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
 }
 
 /// `SERIAL_BUSY` (`serial_max` other `--serial` issues in flight, unless this one is too) and CAP (`max_impl` / `max_rev`).
-fn lane_admit(f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
+    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");

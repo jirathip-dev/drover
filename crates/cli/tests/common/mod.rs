@@ -23,6 +23,7 @@ profile = "fleet-rev"
 [limits]
 review_rounds = 3
 stall_minutes = 30
+max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
 "#;
 
 /// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).
