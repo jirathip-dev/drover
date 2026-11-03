@@ -246,8 +246,11 @@ pub fn waiting_on(
             )
         }
         // #182: a head the PR handed off (`pushed`, logged by drive) is due too, whatever the worktree holds.
+        // #319: so is the FAILed head again after a fix round that changed nothing (`fix-no-change`).
         "impl" | "fix"
-            if !pushed.is_empty() && !s.reviewed(pushed) && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
+            if !pushed.is_empty()
+                && (!s.reviewed(pushed) || s.last_event == "fix-no-change")
+                && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
         {
             let mut what = format!(
                 "pushed {}{}, waiting for drive to spawn review",
@@ -393,6 +396,13 @@ pub fn scan(
         });
         let ev = ev.as_deref().unwrap_or(events);
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
+        if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
+            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "green";
+            let merge = format!("herdsman merge {} {}", s.fleet, s.issue);
+            (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
+            w.what = format!("PASS · behind {} (not required) · merging when CI green", f.integration);
+        }
         // #249: a review on another host names it.
         if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));

@@ -42,6 +42,17 @@ fn pr(head: &str, ci: &str) -> String {
 }
 
 /// A Fake on which spawns succeed and the host is calm; `agents` = the herdr agent list.
+/// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
+fn strict(c: &herdsman::Ctx) {
+    let cache = c.state.with_file_name("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("strict-sendmeter-0.json"),
+        json!({"ts": c.now, "strict": true}).to_string(),
+    )
+    .unwrap();
+}
+
 fn fake(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -405,6 +416,92 @@ fn clean_reclaims_merged_lanes() {
     idle(&c, &r);
 }
 
+/// #285: PR #100 of #12 as GitHub shows it after it left the open set (`MERGED` / `CLOSED`).
+fn gone_pr(state: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&pr(&sha("a1"), "green")).unwrap();
+    v["state"] = json!(state);
+    if state == "MERGED" {
+        (v["mergeCommit"], v["mergedAt"]) = (json!({"oid": "3c05c00a"}), json!("2026-11-03T06:37:00Z"));
+    }
+    v.to_string()
+}
+
+#[test]
+fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
+    let c = setup("drive-external-merge");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    assert_eq!(state(&c), "ready");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &gone_pr("MERGED"))
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 merged outside herdsman (PR #100)"), "{out}");
+    let ev = read(&c.state).unwrap();
+    let m = ev.iter().find(|e| e.is("merged", "sendmeter", 12)).expect("merged");
+    assert_eq!(
+        (m.str("by"), m.str("merge_sha"), m.str("pr"), m.str("into")),
+        (Some("external"), Some("3c05c00a"), Some("100"), Some("staging"))
+    );
+    assert_eq!(m.str("merged_at"), Some("2026-11-03T06:37:00Z"));
+    assert_eq!(state(&c), "merged");
+    assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
+    // Its lanes go the normal clean way in the same slow pass; the card is gone.
+    assert_eq!(steps, ["clean"], "{out}");
+    assert!(r.called("herdr worktree remove --workspace w9"));
+    std::fs::remove_dir_all(&wt).unwrap(); // herdr removed it
+    assert!(!run(&c, &r, &["waiting", "sendmeter"]).1.contains("#12"));
+    // The repair is once: a later pass logs nothing more.
+    idle(&c, &r);
+    assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "merged").count(), 1);
+}
+
+#[test]
+fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
+    for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
+        let c = setup(&format!("drive-external-{want}"));
+        lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+        ev(
+            &c,
+            20,
+            "verdict",
+            json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+        );
+        let r = fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &gone_pr("CLOSED"))
+            .reply("gh issue list", issues)
+            .reply("git -C", "");
+        let (out, _) = drive(&c, &r);
+        assert!(
+            out.contains(&format!("sendmeter #12 {want} outside herdsman (PR #100)")),
+            "{out}"
+        );
+        assert_eq!(state(&c), want);
+        let e = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.is(want, "sendmeter", 12))
+            .unwrap();
+        if want == "blocked" {
+            assert_eq!(
+                (e.str("code"), e.str("reason")),
+                (Some("PR_CLOSED"), Some("PR closed outside herdsman"))
+            );
+        } else {
+            assert_eq!(e.str("by"), Some("external"));
+        }
+        drive(&c, &r);
+        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == want).count(), 1);
+        assert!(!r.called("gh issue comment"));
+    }
+}
+
 #[test]
 fn paused_fleets_and_host_busy_are_no_ops() {
     let c = setup("drive-paused");
@@ -691,6 +788,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
 #[test]
 fn a_behind_pr_after_pass_is_updated_the_same_way() {
     let c = setup("drive-behind");
+    strict(&c);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
         &c,
@@ -1453,6 +1551,7 @@ fn a_merge_that_fails_on_a_conflict_gets_the_update_lane() {
 #[test]
 fn auto_update_runs_in_a_pass_with_no_merge() {
     let c = setup("drive-catch-up");
+    strict(&c);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("a1");
     ev(
@@ -1653,4 +1752,90 @@ fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
         "{:?}",
         r.calls.borrow()
     );
+}
+
+// --- #319: a fix round that ends with no new commit still moves on ---
+
+/// #12 FAILed at `head` with `body` (`stage`), then its fix lane (spawned at 40) went idle without a new commit.
+fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+    let c = setup(name);
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "pushed", json!({"sha": head}));
+    let d = json!({"verdict": "FAIL", "sha": head, "body": body, "stage": stage, "loop": "rev"});
+    ev(&c, 30, "verdict", d);
+    let wt = lane(&c, 40, "impl", "sendmeter-impl-12", "issue-12");
+    assert_eq!(state(&c), "fix(1)");
+    let r = fake(&agents(&[(
+        "sendmeter-impl-12",
+        "idle",
+        &wt.to_string_lossy(),
+        "w9:p1",
+    )]))
+    .reply("gh pr view issue-12", &pr(&head, ci))
+    .reply("gh pr merge 100", "")
+    .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+    .reply("gh issue", "")
+    .reply("git -C", "");
+    (c, r, head)
+}
+
+fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+}
+
+#[test]
+fn a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review() {
+    for (stage, body) in [
+        ("gates", "FAIL\n\nCI is red at abc: ci."),
+        ("rev", "FAIL\n1. blocking [ci]: the runner ran out of disk"),
+    ] {
+        let (c, r, head) = no_change(&format!("drive-noop-ci-{stage}"), stage, body, "green");
+        let (out, steps) = drive(&c, &r);
+        assert_eq!(steps, ["merge"], "{out}");
+        assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
+        let e = &kinds(&c, "fix-no-change")[0];
+        assert_eq!((e.str("sha"), e.str("ci")), (Some(head.as_str()), Some("green")));
+        assert_eq!(state(&c), "merged");
+    }
+}
+
+#[test]
+fn a_code_fail_with_no_change_is_reviewed_again_at_the_same_head() {
+    let body = "FAIL\n1. blocking: src/x.rs:3 off by one";
+    let (c, r, head) = no_change("drive-noop-code", "rev", body, "green");
+    // Green CI alone does not answer a code finding: the lane must say why nothing changed.
+    idle(&c, &r);
+    let earlier = herdsman::Ctx {
+        now: c.now - 600,
+        ..c.clone()
+    };
+    let (code, out) = run(
+        &earlier,
+        &r,
+        &["done", "sendmeter", "12", "--no-change", "the finding is wrong"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
+    let e = &kinds(&c, "fix-no-change")[0];
+    assert_eq!(
+        (e.str("sha"), e.str("why")),
+        (Some(head.as_str()), Some("the finding is wrong"))
+    );
+    assert!(state(&c).starts_with("review"), "{}", state(&c));
+}
+
+#[test]
+fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
+    let (c, r, _) = no_change("drive-noop-red", "gates", "FAIL\n\nCI is red", "red");
+    idle(&c, &r);
+    assert!(kinds(&c, "fix-no-change").is_empty());
+    assert_eq!(state(&c), "fix(1)");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let s = &kinds(&c, "stall")[0];
+    let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
+    assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
 }

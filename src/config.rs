@@ -142,6 +142,8 @@ pub struct Fleet {
     /// #150: a label the PR needs for its full CI (e.g. `merge-ready`), kept on it exactly while a PASS stands at its
     /// head; unset = none.
     pub merge_label: Option<String>,
+    /// #285: `always` catches every behind ready PR up with integration; unset/`needed`: only on a conflict or a strict rule.
+    pub update_ready: Option<String>,
     /// Optional caps on concurrent impl/fix and review lanes (CAP); unset = no cap.
     pub max_impl: Option<usize>,
     pub max_rev: Option<usize>,

@@ -304,6 +304,7 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     let events = read(&ctx.state)?;
     let agents = crate::hosts::all_agents(cfg, r)?;
     let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
+    external(ctx, cfg, r, out, fleet)?;
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
     }
@@ -483,9 +484,16 @@ fn handoff(
             .iter()
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
-        let done = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) != "pending";
+        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         let idle = w.who == "none" && ctx.now >= w.since + 120;
-        if !(idle && building && done && pr["state"] == "OPEN") || head.is_empty() || handed || s.reviewed(head) {
+        if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
+            continue;
+        }
+        if s.reviewed(head) {
+            any |= no_change(ctx, cfg, out, (fleet, s.issue), ev, head, ci)?;
+            continue;
+        }
+        if handed {
             continue;
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
@@ -494,6 +502,82 @@ fn handoff(
         any = true;
     }
     Ok(any)
+}
+
+/// #319: a settled fix lane left the head of the FAIL as it was. A CI-only FAIL (a gate's CI red, or every blocker tagged
+/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `herdsman done
+/// --no-change` is reviewed again at the same head (`waiting`). True if `fix-no-change` was logged.
+fn no_change(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    ev: &[Event],
+    head: &str,
+    ci: &str,
+) -> Result<bool> {
+    let Some(i) = ev.iter().rposition(|e| e.is("verdict", fleet, n)) else {
+        return Ok(false);
+    };
+    let (v, since) = (&ev[i], &ev[i + 1..]);
+    let at = v.str("sha").is_some_and(|x| x.eq_ignore_ascii_case(head));
+    if v.str("verdict") != Some("FAIL") || !at || since.iter().any(|e| e.is("fix-no-change", fleet, n)) {
+        return Ok(false);
+    }
+    let gate = cfg
+        .fleet(fleet)?
+        .flow()
+        .get(v.str("stage").unwrap_or_default())
+        .is_some_and(|g| g.kind == "gate");
+    let pass = ci == "green" && (gate || crate::gate::form_only(v.str("body").unwrap_or_default(), &["ci".into()]));
+    let done = since
+        .iter()
+        .rfind(|e| e.is("fix-done", fleet, n))
+        .and_then(|e| e.str("why"));
+    let Some(why) = done.or(pass.then_some("CI-only FAIL, CI green at the same head")) else {
+        return Ok(false);
+    };
+    writeln!(out, "{fleet} #{n} fix-no-change at {head:.7}: {why} (CI {ci})")?;
+    let d = json!({"sha": head, "why": why, "ci": ci});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "fix-no-change", d))?;
+    if pass {
+        let body = format!("PASS\n\nNo new commit: the CI-only FAIL at {head} is resolved, CI is green there now.\n");
+        let d = json!({"verdict": "PASS", "sha": head, "stage": v.str("stage"), "loop": v.str("loop"), "body": body,
+            "by": "drive"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "verdict", d))?;
+    }
+    Ok(true)
+}
+
+/// #285: a tracked issue whose PR (as last read) was merged or closed outside herdsman is logged once, no comment:
+/// `merged`/`closed` `by: external`, or `blocked` while its issue is open; `clean` takes its lanes.
+fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    for s in fold(&events)
+        .into_values()
+        .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked")
+    {
+        let pr = gh::cached_pr(ctx, fleet, s.issue);
+        let num = pr["number"].to_string();
+        let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
+        let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
+        let (kind, mut d) = match pr["state"].as_str() {
+            Some("MERGED") => {
+                let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
+                ("merged", m)
+            }
+            Some("CLOSED") if closed()? => ("closed", json!({})),
+            Some("CLOSED") if !events.iter().any(seen) => (
+                "blocked",
+                json!({"code": "PR_CLOSED", "reason": "PR closed outside herdsman"}),
+            ),
+            _ => continue,
+        };
+        (d["pr"], d["by"]) = (json!(num), json!("external"));
+        writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
+    }
+    Ok(())
 }
 
 /// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
@@ -518,7 +602,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     let st = fold(&events);
     let merged = |e: &&Event| {
         e.issue
-            .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(|s| s.state == "merged"))
+            .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
     };
     let left = |e: &&Event| {
         e.str("worktree")
@@ -544,7 +628,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
 }
 
 /// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in
-/// a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`); a ready PR's conflict gets an `--update` lane.
+/// a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`)
+/// only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
@@ -579,8 +664,9 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
         let res = if !clean {
             update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if clean && to != from {
+        } else if to != from && gh::update_ready(ctx, Some(r), f, fleet) {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
+                let mut pr = gh::cached_pr(ctx, fleet, s.issue);
                 gh::forget_pr(ctx, fleet, s.issue);
                 writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
                 let d = json!({"from": from, "to": to});
@@ -588,7 +674,10 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
                     &ctx.state,
                     cfg,
                     Event::new(ctx.now, fleet, Some(s.issue), "auto-updated", d),
-                )
+                )?;
+                // #285: the PASS carries to the new head: its merge label goes back on now, so the full run starts.
+                pr["headRefOid"] = json!(to);
+                crate::gate::sync_label(ctx, cfg, r, out, &s, &pr)
             })
         } else {
             Ok(())

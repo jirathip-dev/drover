@@ -122,7 +122,7 @@ pub fn verdict(
         cfg,
         Event::new(ctx.now, fleet, Some(issue), "verdict", data),
     )?;
-    let limit = rounds(f, lp) + st.as_ref().map_or(0, |s| s.extra);
+    let (limit, of_limit) = limit(f, lp, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
     } else {
@@ -130,14 +130,14 @@ pub fn verdict(
     };
     writeln!(
         out,
-        "recorded {v} for {fleet}#{issue} @ {head} (round {round}/{limit}{note})"
+        "recorded {v} for {fleet}#{issue} @ {head} (round {round}{of_limit}{note})"
     )?;
     if !pass && !form && round >= limit {
         let of = match used {
             0 => String::new(),
             n => format!(", {n} form-only not counted"),
         };
-        let d = json!({"reason": format!("review rounds ran out ({round}/{limit}{of})"), "findings": body});
+        let d = json!({"reason": format!("review rounds ran out ({round}{of_limit}{of})"), "findings": body});
         emit(
             &ctx.state,
             cfg,
@@ -233,7 +233,12 @@ pub fn sync_label(
     if s.done() || pr["state"] != "OPEN" || head.is_empty() {
         return Ok(());
     }
-    let (flag, kind) = match (passed(&read(&ctx.state)?, s, head), gh::has_label(pr, label)) {
+    // #285: a pure merge of the PASS head with integration (#207's carry) keeps the PASS, so the label stays.
+    let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
+    let (flag, kind) = match (
+        passed(&read(&ctx.state)?, s, head) || carried(),
+        gh::has_label(pr, label),
+    ) {
         (true, false) => ("--add-label", "labelled"),
         (false, true) => ("--remove-label", "unlabelled"),
         _ => return Ok(()),
@@ -272,9 +277,13 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
     !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
 }
 
-/// A check stage's review rounds (`[limits] review_rounds` in the built-in pipeline); unset: no limit.
-fn rounds(f: &Fleet, stage: &str) -> u32 {
-    f.flow().get(stage).and_then(|s| s.rounds).unwrap_or(u32::MAX)
+/// #309: a check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
+pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
+    let base = f.flow().get(stage).and_then(|s| s.rounds).unwrap_or(u32::MAX);
+    match st.map_or((0, base), |s| (s.extra, base.saturating_add(s.extra).max(s.granted))) {
+        (0, l) => (l, format!("/{l}")),
+        (_, l) => (l, format!(" of {base}+{} (owner extended)", l - base)),
+    }
 }
 
 /// Pure merge gate: every check stage's PASS at the head, within its rounds (`over`: past them). Returns the head sha
@@ -320,12 +329,10 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
             Some(v) => return Err(refuse("VERDICT_FAIL", format!("{} verdict for {head} is {v}", c.name))),
             None => return Err(refuse("STALE_VERDICT", format!("no {} PASS for head {head}", c.name))),
         }
-        let (n, extra) = st.map_or((0, 0), |s| {
-            (s.stage_rounds.get(&c.name).copied().unwrap_or_default(), s.extra)
-        });
-        let limit = rounds(f, &c.name).saturating_add(extra);
+        let n = st.map_or(0, |s| s.stage_rounds.get(&c.name).copied().unwrap_or_default());
+        let (limit, of) = limit(f, &c.name, st);
         if n > limit && !over {
-            return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}/{limit})")));
+            return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}{of})")));
         }
     }
     ci_green(&pr["statusCheckRollup"], &f.required_checks)
