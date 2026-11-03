@@ -26,7 +26,7 @@ function clouds() {
     const x = i * 130 + 45 + copy, y = 36 + noise(i, 30) * 86;
     for (let j = 0; j < 5; j++) s += ell(x + j * 12, y - noise(j, i) * 9, 18, 5 + noise(j, 2) * 5, 'var(--cl)');
   }
-  return `<svg viewBox="0 0 1560 320" aria-hidden=true>${s}</svg>`;
+  return `<svg viewBox="0 0 1560 320" preserveAspectRatio=none aria-hidden=true>${s}</svg>`;
 }
 // #71 night sky (RanchPainter.sky, night): the Milky Way and the seeded stars ride one slow drift (RanchSky.celestialSpeed,
 // `.cel`, a 390 tile with its neighbours: a star keeps its identity, only moves), under the hills; the moon stays put.
@@ -40,7 +40,7 @@ function night() {
     const r = 0.35 + noise(i, 7) * 0.7;
     s += ell(k + i * 3 + noise(i, 8) * 3, noise(i, 3) * 225, r, r, '#e7e5f4', f1((0.3 + 0.45 * noise(i, 9) + 0.08 * Math.sin(i)) * 100) / 100);
   }
-  return `<g class=sky-night><g class=cel>${s}</g>${ell(306, 56, 16, 16, '#d3dfeb', 0.84)}${ell(301, 51, 15, 15, '#1d2841')}</g>`;
+  return `<g class=sky-night><g class=cel>${s}</g><g class=moon>${ell(306, 56, 16, 16, '#d3dfeb', 0.84)}${ell(301, 51, 15, 15, '#1d2841')}</g></g>`;
 }
 function scene() {
   let s = night();
@@ -90,11 +90,12 @@ function scene() {
 
 // #172/#241 themes (docs/themes.md): the phone's theme (`html[data-theme]`, the `[◐]` picker; the demo also takes `?nopose=<pose>`)
 // from `themes/<name>/`, its theme.json resolved by the server (what it lacks is farm's); a sprite id not in its sprites.svg is farm's.
-let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, SC = '', RAW = '', PAL = {};
+let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, RAW = '', PAL = {};
 const w = k => T.words[k] || k;
 // #239: heat is indoors (no night, no [A]); a lane wears the theme's look by the same hash as the Lanes avatars (serve.js).
 const heat = () => T.load_scene?.kind === 'heat';
-const look = (n, coat) => { const L = T.looks || []; return L.length ? Object.entries(L[hash(n) % L.length]).map(e => e.join(':')).join(';') : coat; };
+// #292: nh() spreads a page's lanes over the looks (`l.look`), so neighbours don't wear the same hat.
+const look = l => { const L = T.looks || []; return L.length ? Object.entries(L[l.look ?? hash(l.name) % L.length]).map(e => e.join(':')).join(';') : l.coat; };
 const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
 // The sprite symbols theme() builds (poses hp1..hp4 for the Herd, actions ha-*, row sprites hr-*, the rail, moments hm-*),
 // next to the scene's gradients.
@@ -144,7 +145,6 @@ function theme(name) {
     if (T.icons) $$('link[rel=icon],link[rel=apple-touch-icon]').forEach(l => { l.href = d(name) + T.icons[l.rel === 'icon' ? 'favicon' : '180']; });
     // The pages are rebuilt with the theme's scene (or farm's ranch); the tabs take its sprites, modes and load scene.
     RAW = sc;
-    SC = sc.replace(/<svg\b/, '<svg class=rs preserveAspectRatio="xMidYMax slice" aria-hidden=true');
     pages.forEach(p => p.remove());
     pages.clear();
     placed = false;
@@ -173,18 +173,33 @@ let data = null, wind = 0, storm = false, saved = get('herdp'), placed = false;
 
 // #65: Corral's label card, 2 lines: the name, then state mark + word + age (the issue title is the tooltip; #115: the word's hint).
 // #239: a working lane draws its role's action (cook, chop…) and says its word; an idle one fans while the heat is held.
+// #292: a done lane whose review FAILed waits for its fix round: the theme's sent-back moment and `!`, never `✓`; a `·` glyph
+// is an empty field, dropped (#162's join); the whole line is its `title` (ellipsised on a phone).
 function horse(l, k) {
-  const a = l.state === 'working' && l.act || ACT(l), use = a === 'idle' && H.dataset.heat === 'held' && $('#hfan') ? 'hfan' : 'ha-' + a;
-  const said = l.state === 'working' && T.words[a] || l.shown;
-  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l.name, l.coat))}"><use href="#${use}"/></svg>` +
-    `<span class=hl><b>${hx(l.name)}</b><span><i class=${hx(l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${T.glyphs[l.state] || '?'} ${hx(said)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
+  const fail = l.state === 'done' && /\bFAIL\b/.test(l.shown || ''), a = l.state === 'working' && l.act || ACT(l);
+  const use = fail && $('#hm-fail') ? 'hm-fail' : a === 'idle' && H.dataset.heat === 'held' && $('#hfan') ? 'hfan' : 'ha-' + a;
+  const said = l.state === 'working' && T.words[a] || l.shown, g = fail ? T.glyphs.blocked || '!' : T.glyphs[l.state] || '?';
+  const mark = [g === '·' ? '' : g, said].filter(Boolean).join(' '), full = [mark, l.age, l.host].filter(Boolean).join(' · ');
+  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l))}"><use href="#${use}"/></svg>` +
+    `<span class=hl><b>${hx(l.name)}</b><span title="${hx(full)}"><i class=${hx(fail ? 'r' : l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${hx(mark)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
 }
 const queued = q => `<button type=button class="hqh${q.needs ? ' n' : ''}" data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hrail${q.needs ? '-n' : ''}"/></svg>` +
   `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
 // #130: a fleet's `needs` (its needs-human issues): their horses wear a red `!` in the blocked band, an issue
 // with no lane waits at the gate; a tap opens its needs-you card.
+// #292: lanes of merged or closed issues (`gone`) aren't drawn (the Lanes tab and `clean` have them); each lane takes the next look
+// not on the page yet whose hat differs from the previous lane's (from its name's hash).
 function nh(f) {
-  const n = f.needs || [], lanes = f.lanes.map(l => n.includes(l.issue) ? Object.assign({}, l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l);
+  const n = f.needs || [], L = T.looks || [], used = new Set(), hat = k => ['--ht', '--hb', '--hk'].map(x => L[k][x]).join();
+  let prev = null;
+  const lanes = f.lanes.filter(l => !l.gone).map(l => {
+    let k = hash(l.name) % (L.length || 1);
+    for (let t = 0; L.length && t < L.length && (used.has(k) || hat(k) === prev); t++) k = (k + 1) % L.length;
+    used.add(k);
+    if (L.length) prev = hat(k);
+    l = Object.assign({}, l, { look: L.length ? k : null });
+    return n.includes(l.issue) ? Object.assign(l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l;
+  });
   const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
   return [f.name, lanes, queue, f.color];
 }
@@ -240,23 +255,36 @@ function patch(hb, lanes, queue) {
   if (at) { if (e) e.remove(); } else if (!e) hb.append(tpl(`<p class=empty>no ${w('horses')} here</p>`));
 }
 
-// #239 a theme's `scene.line`: every fleet's station side by side in its colour, this page's in the middle (the others
-// dimmed); 390 px shows only this one, a wider screen its neighbours too.
-function line(key) {
-  const fs = data?.fleets || [], i = fs.findIndex(f => f.name === key), v = RAW.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-  if (!T.scene.line || i < 0 || !v) return '';
-  const [vw, vh] = [+v[1], +v[2]], body = RAW.replace(/^[\s\S]*?<svg[^>]*>|<\/svg>\s*$/g, '');
-  return `<svg class=rs viewBox="${i * vw} 0 ${vw} ${vh}" preserveAspectRatio="xMidYMax meet" shape-rendering=crispEdges aria-hidden=true>` +
-    fs.map((f, k) => `<g transform="translate(${k * vw})" style="--fk:var(--${hx(f.color)})"${k === i ? '' : ' opacity=".55"'}>${body}</g>`).join('') + '</svg>';
+// #239/#292: the backdrop fills its band edge to edge at the band's height (`--ar`), top-anchored and never cropped: an odd
+// number of tiles (slice: only the outer tiles' spare sides go) centred on this page's own, all at one tint. A theme's
+// `scene.line` puts every fleet's station in turn; farm's ranch is mirrored every other tile so the edges meet (the moon
+// only in the middle). Rebuilt when the count changes.
+function tiles(p) {
+  const r = p.querySelector('.hr'), v = RAW.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/), [vw, vh] = v ? [+v[1], +v[2]] : [390, 320];
+  r.style.setProperty('--ar', f1(vh / vw * 1000) / 1000);
+  if (!r.clientWidth || !r.clientHeight) return;
+  const n = 2 * Math.ceil((r.clientWidth * vh / vw / r.clientHeight - 1) / 2) + 1, mid = (n - 1) / 2;
+  if (p._n === n) return;
+  p._n = n;
+  const fs = data?.fleets || [], i = fs.findIndex(f => f.name === p._key), body = (v ? RAW : scene()).replace(/^[\s\S]*?<svg[^>]*>|<\/svg>\s*$/g, '');
+  let s = '';
+  for (let k = -mid; k <= mid; k++) {
+    const f = T.scene.line && i >= 0 && fs[((i + k) % fs.length + fs.length) % fs.length];
+    s += `<svg x="${k * vw}" width="${vw}" height="${vh}" viewBox="0 0 ${vw} ${vh}"${k ? '' : ' class=t0'}${f ? ` style="--fk:var(--${hx(f.color)})"` : ''}>` +
+      (v || k % 2 === 0 ? body : `<g transform="matrix(-1 0 0 1 ${vw} 0)">${body}</g>`) + '</svg>';
+  }
+  r.querySelector('.rs')?.remove();
+  r.querySelector('.hc').insertAdjacentHTML('afterend', `<svg class=rs viewBox="${-mid * vw} 0 ${n * vw} ${vh}" preserveAspectRatio="xMidYMin slice"${v ? ' shape-rendering=crispEdges' : ''} aria-hidden=true>${s}</svg>`);
+  p._trees = [...r.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
+  p._cel = [...r.querySelectorAll('.cel')];
+  p._grass = [...r.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
 }
 function page(key) {
   const p = document.createElement('section');
   p.className = 'hp';
   p.innerHTML = `<div class=hs><p><b></b> <span class=n></span> <span class=dots></span></p><p class=sum></p></div><div class=hn></div>
-<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div>${line(key) || SC || scene()}<div class=fog></div></div><div class=hb></div>`;
-  p._trees = [...p.querySelectorAll('.cn')].map(g => [g, +g.dataset.a, +g.dataset.l]);
-  p._cel = p.querySelector('.cel');
-  p._grass = [...p.querySelectorAll('.gt')].map(g => [g, +g.dataset.x, +g.dataset.y]);
+<div class=hr><div class=hc>${T.scene.weather === false ? '' : clouds()}</div><div class=fog></div></div><div class=hb></div>`;
+  p._trees = p._cel = p._grass = [];
   p._key = key;
   return p;
 }
@@ -337,15 +365,14 @@ function weather(h) {
   cap.textContent = `load ${h.load == null ? '?' : h.load.toFixed(2)} · mem ${h.pressure || '?'} · swap ${h.swapouts == null ? '?' : Math.round(h.swapouts)}`;
 }
 
-// The scene's frame inside its box (xMidYMax slice): scale and left edge for the cloud layer.
+// The tiles at the band's height; the cloud layer spans the band plus one 780-unit period (`_cw`) to drift through.
 function place() {
   for (const p of pages.values()) {
-    const r = p.querySelector('.hr'), w = r.clientWidth, h = r.clientHeight, k = Math.max(w / 390, h / 320);
-    p._k = k;
-    const c = p.querySelector('.hc');
-    c.style.left = (w - 390 * k) / 2 + 'px';
-    c.style.top = h - 320 * k + 'px';
-    c.style.width = 1560 * k + 'px';
+    tiles(p);
+    const r = p.querySelector('.hr'), k = r.clientHeight / 320, c = p.querySelector('.hc');
+    p._cw = Math.max(1560 * k, r.clientWidth + 780 * k);
+    c.style.width = p._cw + 'px';
+    c.style.height = 320 * k + 'px';
   }
 }
 addEventListener('resize', place);
@@ -364,8 +391,8 @@ function frame(ms) {
   if (p) {
     for (const [g, a, l] of p._trees) g.setAttribute('transform', `translate(${f1(sway(t, a, WIND.canopy * l * m))} ${f1(sway(t, a + 1.9, 0.5 * l * m))})`);
     for (const [g, x, y] of p._grass) { const b = bend(t, x, WIND.grass * m) / 10; g.setAttribute('transform', `matrix(1 0 ${-b.toFixed(3)} 1 ${(b * y).toFixed(2)} 0)`); }
-    if (H.classList.contains('night') && p._cel) p._cel.setAttribute('transform', `translate(${cel.toFixed(2)} 0)`);
-    p.querySelector('.hc').style.transform = `translateX(${((drift - 780) * (p._k || 1)).toFixed(1)}px)`;
+    if (H.classList.contains('night')) p._cel.forEach(c => c.setAttribute('transform', `translate(${cel.toFixed(2)} 0)`));
+    p.querySelector('.hc').style.transform = `translateX(${((drift - 780) / 1560 * (p._cw || 1560)).toFixed(1)}px)`;
     // Working horses trot (diagonal leg pairs, Corral's 0.4 s stride) and roam a little.
     p._walk.forEach((s, i) => {
       const g = Math.sin(t * Math.PI / 0.4 + i * 1.3);

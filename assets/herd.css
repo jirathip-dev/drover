@@ -30,9 +30,11 @@
 .hs .dots{letter-spacing:2px;color:#f4ecd8aa}
 .hs .sum{color:#f4ecd8bb;font-size:var(--fs-meta);line-height:var(--s3)}
 .hn{padding:0 var(--s2)}.hn .ask{background:#2a1416ee;color:var(--fg)}
-.hr{position:relative;height:max(120px,22vh);height:max(120px,22svh);overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
+/* #292: the band is as tall as the scene at full width (`--ar`, herd.js tiles()) up to 22 % of the screen (#58); the tiles fill it. */
+.hr{position:relative;height:min(calc(100vw * var(--ar,.82)),max(120px,22vh));height:min(calc(100vw * var(--ar,.82)),max(120px,22svh));overflow:hidden;background:linear-gradient(var(--sky1),var(--sky2));transition:background .6s}
 .hc{position:absolute;filter:blur(3px);will-change:transform}
-.hc svg{display:block;width:100%;height:auto}
+.hc svg{display:block;width:100%;height:100%}
+.rs svg:not(.t0) .moon{display:none}
 .rs{position:absolute;inset:0;width:100%;height:100%}
 .rs .gt{fill:none;stroke:var(--gs);stroke-opacity:.45;stroke-width:.8}
 .storm .rs{filter:brightness(.72) saturate(.8)}
@@ -50,6 +52,10 @@
 .hcap{position:fixed;z-index:2;left:0;right:0;bottom:0;margin:0;padding:0 var(--s2) env(safe-area-inset-bottom);background:#1f2a38;font-size:var(--fs-meta);line-height:var(--ctl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .hcap[data-fps]::after{content:" · " attr(data-fps)}
 .hb{padding-top:var(--s2)}
+/* #292: the ranch's grass fades into the pasture below it, no straight seam. */
+#herd:not(.heat) .hr::after{content:"";position:absolute;left:0;right:0;bottom:0;height:25%;pointer-events:none;background:linear-gradient(#0000,var(--bl,#a3ab68))}
+#herd:not(.heat) .hb{background:linear-gradient(var(--bl,#a3ab68),#0000 calc(3 * var(--s4)))}
+#herd.night{--bl:#4f665d}.fog2{--bl:#b2b9a2}
 .band h4{margin:0;padding:var(--s3) var(--s3) var(--s1);font-size:var(--fs);color:#f4ecd8;text-shadow:0 1px 2px #0008}
 .band h4 span{opacity:.8;font-weight:400}
 .b-blocked{background:#b3261e22}
@@ -98,3 +104,10 @@
 .hqh.n use{animation:var(--flutter,none);transform-box:view-box;transform-origin:50% 0}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
 @media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n use{animation:none}}
+/* #292 wide screens: the cards are a grid of equal columns from the rail's left edge, wide enough for their reasons
+   (still ellipsised past it, the whole line in `title`); the bands sit closer. */
+@media (min-width:900px){
+  .field{display:grid;grid-template-columns:repeat(auto-fill,320px);justify-content:start;padding-left:calc(2 * var(--s1) + var(--s2))}
+  .hh{width:320px}.hl{align-self:stretch;max-width:none}
+  .band h4{padding-top:var(--s2)}
+}
