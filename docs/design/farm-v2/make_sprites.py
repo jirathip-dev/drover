@@ -12,6 +12,8 @@ from pathlib import Path
 
 HOOF = "#3a332e"
 FK = "var(--fk,#8b949e)"
+# #242 fix 3: a dark edge round the project colour, so a blue cloth still reads on the grey coat.
+EDGE = 'stroke="#1d1a17" stroke-opacity="0.6" stroke-width="1.1"'
 WOOD, WOOD_D, WOOD_L = "var(--fp,#9c916a)", "var(--fr,#8b825d)", "var(--fh,#e2d7ac)"
 HAY, HAY_D, TWINE = "#d9b44a", "#b38a2c", "#7a5a22"
 RED, RED_D = "#d2453b", "#9e2a22"
@@ -66,6 +68,7 @@ HEAD = (
 MANE = '<path d="M 82 37 Q 95 26 108 15 L 111 18 Q 98 28 86 39 Z" fill="var(--m)"/>'
 # The project colour: a halter (crown, cheek and nose straps, a brass ring) on the head.
 HALTER = (
+    '<path d="M 108.5 15.5 Q 112 22 118.5 30.5 M 117.5 21.5 Q 119.5 30 121.5 37.6" stroke="#1d1a17" stroke-opacity="0.6" stroke-width="3.5" fill="none" stroke-linecap="round"/>'
     f'<path d="M 108.5 15.5 Q 112 22 118.5 30.5 M 117.5 21.5 Q 119.5 30 121.5 37.6" stroke="{FK}" stroke-width="2.3" fill="none" stroke-linecap="round"/>'
     '<circle cx="119" cy="31" r="1.5" fill="#d9c27a"/>'
 )
@@ -76,7 +79,7 @@ BODY = (
 )
 # The saddle cloth: the project colour on the back, a light trim along its lower edge.
 CLOTH = (
-    f'<path d="M 51 37.6 Q 60 39.2 70 40.6 Q 72 48 71 55 Q 61 56.5 52 54.5 Q 50 46 51 37.6 Z" fill="{FK}"/>'
+    f'<path d="M 51 37.6 Q 60 39.2 70 40.6 Q 72 48 71 55 Q 61 56.5 52 54.5 Q 50 46 51 37.6 Z" fill="{FK}" {EDGE}/>'
     '<path d="M 52 54.5 Q 61 56.5 71 55" stroke="#f4ecd8" stroke-opacity="0.55" stroke-width="1.2" fill="none"/>'
 )
 
@@ -132,18 +135,36 @@ def plough():
 
 TRACES = '<path d="M 40 84 Q 58 72 79.5 55.5" stroke="#3a2b20" stroke-width="1.6" fill="none"/>'
 # A collar round the neck base, in the project colour, for the plough's traces.
-COLLAR = f'<path d="M 79 37 Q 86 46 86 58" stroke="{FK}" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M 79 37 Q 86 46 86 58" stroke="#3a2b20" stroke-opacity="0.35" stroke-width="1.2" fill="none"/>'
+COLLAR = f'<path d="M 79 37 Q 86 46 86 58" stroke="#1d1a17" stroke-opacity="0.6" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M 79 37 Q 86 46 86 58" stroke="{FK}" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M 79 37 Q 86 46 86 58" stroke="#3a2b20" stroke-opacity="0.35" stroke-width="1.2" fill="none"/>'
 
 
-def anvil():
+def forge():
+    """#242 fix 2: the fire is in a brick forge with a chimney, apart from the horse; the cold anvil is by the forelegs."""
     return (
-        '<path d="M 6 97 L 10 88 L 24 88 L 28 97 Z" fill="#5b4a3a"/>'  # the stump
-        '<path d="M 12 88 L 14 82 L 21 82 L 23 88 Z" fill="#3d4148"/>'
-        '<path d="M 4 76 L 28 76 Q 33 76 36 73 Q 33 80 26 81 L 10 81 Q 6 80 4 76 Z" fill="#4a4f57"/>'
-        '<path d="M 4 76 L 28 76 Q 33 76 36 73 L 33 74.5 Q 30 77.2 27 77.4 L 5.6 77.4 Z" fill="#7d838c"/>'
-        '<path d="M 13 74.6 a 3.4 3 0 1 1 6.8 0" stroke="#ff9a3c" stroke-width="2" fill="none"/>'  # a hot shoe
-        '<g transform="rotate(-35 26 60)"><rect x="25" y="52" width="2.4" height="16" rx="1" fill="#6f4b2a"/><rect x="21.5" y="49" width="9.5" height="5" rx="1" fill="#3d4148"/></g>'
-        '<path d="M 18 69 l 1.2 -3 l 1.2 3 l -1.2 3 Z M 9 70 l 1 -2.4 l 1 2.4 l -1 2.4 Z M 27 68 l .9 -2 l .9 2 l -.9 2 Z" fill="#ffd27a"/>'
+        '<rect x="3" y="20" width="9" height="40" fill="#6b4536"/><rect x="1" y="16" width="13" height="5" fill="#4d3127"/>'  # chimney
+        '<path d="M 0 60 L 24 60 L 24 97 L 0 97 Z" fill="#8a5a44"/><path d="M 0 66 h 24 M 0 74 h 24 M 0 82 h 24 M 0 90 h 24 M 8 60 v 6 M 16 66 v 8 M 8 74 v 8 M 16 82 v 8" stroke="#5e3a2c" stroke-width="1"/>'
+        '<rect x="-1" y="56" width="26" height="5" fill="#4d3127"/>'
+        '<path d="M 4 56 Q 6 46 9 50 Q 11 40 14 48 Q 17 42 19 52 Q 21 50 21 56 Z" fill="#ff9a3c"/><path d="M 8 56 Q 10 50 12 53 Q 14 47 16 56 Z" fill="#ffd27a"/>'
+        '<path d="M 10 14 q -3 -5 1 -9 M 6 12 q -2 -4 1 -7" stroke="#b8b0a6" stroke-width="1.6" fill="none" opacity="0.6"/>'
+        '<g transform="translate(83 0)"><path d="M 27 97 L 29 91 L 37 91 L 39 97 Z" fill="#5b4a3a"/><path d="M 30 91 L 31 87 L 35 87 L 36 91 Z" fill="#3d4148"/>'
+        '<path d="M 25 82 L 38 82 Q 41 82 43 80 Q 41 86 37 87 L 28 87 Q 25.5 86 25 82 Z" fill="#4a4f57"/>'
+        '<path d="M 29 80.6 a 2.6 2.4 0 1 1 5.2 0" stroke="#8f949b" stroke-width="1.6" fill="none"/></g>'  # a cold shoe
+    )
+
+
+def farrier():
+    """A farrier in a leather apron behind the horse, bent over the lifted hind hoof, the hammer in his hand."""
+    return (
+        '<g transform="translate(86.5 0) scale(-1 1)">'
+        '<path d="M 50 97 L 52 82 M 62 97 L 59 82" stroke="#3e4a5c" stroke-width="4.6" stroke-linecap="round"/>'  # legs
+        '<path d="M 47.6 97 h 5 M 59.6 97 h 5" stroke="#2f2a26" stroke-width="2.4" stroke-linecap="round"/>'
+        '<path d="M 50 84 Q 49 70 45 63 L 53 59 Q 59 66 62 84 Z" fill="#c8b8a0"/>'  # shirt, bent forward
+        '<path d="M 50.5 84 Q 50 72 47 66 L 53 64 Q 58 72 61 84 Z" fill="#7a4f2e"/>'  # the leather apron
+        '<circle cx="44" cy="60" r="4.4" fill="#d9a77f"/><path d="M 39.8 59 Q 40.4 54.4 44.6 54.6 Q 48.4 55 48.4 58.6 Z" fill="#3a2b20"/>'
+        '<path d="M 47 66 Q 44 73 42.5 78" stroke="#c8b8a0" stroke-width="3.2" stroke-linecap="round" fill="none"/>'  # arm to the hoof
+        '<circle cx="42.5" cy="78.6" r="1.7" fill="#d9a77f"/>'
+        '<path d="M 52 66 Q 56 70 55 75" stroke="#c8b8a0" stroke-width="3.2" stroke-linecap="round" fill="none"/>'
+        '<g transform="rotate(-20 55 76)"><rect x="54" y="72" width="2" height="11" rx="1" fill="#6f4b2a"/><rect x="51.5" y="70" width="7" height="3.6" rx="1" fill="#3d4148"/></g></g>'
     )
 
 
@@ -171,7 +192,7 @@ def vet():
 
 
 def bales_on_back():
-    s = f'<path d="M 50 38 L 72 40.5 L 72 47 L 50 45 Z" fill="{FK}"/>'
+    s = f'<path d="M 50 38 L 72 40.5 L 72 47 L 50 45 Z" fill="{FK}" {EDGE}/>'
     for x, y, w, h in ((41, 23, 21, 16), (62, 24.5, 21, 16), (51, 9, 21, 15)):
         s += bale_shape(x, y, w, h)
     s += f'<path d="M 66 41 Q 68 52 66 63" stroke="{FK}" stroke-width="2.6" fill="none"/>'  # girth strap
@@ -199,14 +220,14 @@ def grass(x, y, n=5):
 
 def stable_front():
     """The stable seen from the side: its facade with a door hole; the horse inside it is dimmed."""
-    wall = "M 90 26 L 111 10 L 132 26 L 132 97 L 90 97 Z M 96 97 L 96 38 L 126 38 L 126 97 Z"
+    wall = "M 84 20 L 108 4 L 132 20 L 132 97 L 84 97 Z M 92 97 L 92 28 L 128 28 L 128 97 Z"
     return (
         f'<path d="{wall}" fill="var(--bn,#a86e52)" fill-rule="evenodd"/>'
-        '<path d="M 86 28 L 111 7 L 136 28 L 132 30 L 111 13 L 90 30 Z" fill="var(--rf,#536456)"/>'
-        '<rect x="96" y="38" width="30" height="59" fill="var(--dr,#344635)" opacity="0.86"/>'
-        '<rect x="94.5" y="36.5" width="33" height="2.5" fill="#efe2c8" opacity="0.8"/>'
-        '<rect x="94.5" y="36.5" width="2.5" height="60.5" fill="#efe2c8" opacity="0.8"/><rect x="125" y="36.5" width="2.5" height="60.5" fill="#efe2c8" opacity="0.8"/>'
-        '<rect x="106" y="17" width="10" height="8" fill="var(--wn,#e5dfb8)" opacity="0.8"/>'
+        '<path d="M 80 22 L 108 1 L 136 22 L 132 24 L 108 7 L 84 24 Z" fill="var(--rf,#536456)"/>'
+        '<rect x="92" y="28" width="36" height="69" fill="var(--dr,#344635)" opacity="0.86"/>'
+        '<rect x="90.5" y="26.5" width="39" height="2.5" fill="#efe2c8" opacity="0.8"/>'
+        '<rect x="90.5" y="26.5" width="2.5" height="70.5" fill="#efe2c8" opacity="0.8"/><rect x="127" y="26.5" width="2.5" height="70.5" fill="#efe2c8" opacity="0.8"/>'
+        '<rect x="104" y="10" width="8" height="6" fill="var(--wn,#e5dfb8)" opacity="0.8"/>'
     )
 
 
@@ -267,8 +288,8 @@ ACTIONS = {
     + "</g>"
     + TRACES,
     # fix: shoeing at the anvil, the near hind hoof lifted, a hot shoe and sparks.
-    "horse-anvil": anvil()
-    + f'<g transform="{SCALE_R}">'
+    "horse-anvil": forge()
+    + '<g transform="translate(30.4 19.4) scale(0.8)">'
     + horse(
         legs=(0, 0, 0, 30),
         bends=(None, None, None, 62),
@@ -276,7 +297,8 @@ ACTIONS = {
         tail="swish",
         shadow=False,
     )
-    + "</g>",
+    + "</g>"
+    + farrier(),
     # rev: the vet checking a front hoof at the fence.
     "horse-vet": fence_back()
     + horse(legs=(0, 0, -44, 0), bends=(None, None, -14, None), neck=-10, tail="down")
@@ -292,16 +314,17 @@ ACTIONS = {
     # idle: grazing, the head down in the grass.
     "horse-graze": horse(neck_t="translate(-1 3) rotate(96 86 50)", tail="down")
     + grass(104, 97, 7),
-    # done: trotting into the stable (the facade covers the front half; inside is dimmed).
-    "horse-stable": '<g transform="translate(-6 0)">'
+    # done: trotting into the stable: the head goes in at the doorway, under the lintel; a diagonal trot.
+    "horse-stable": stable_front()
+    + '<g transform="translate(18 29.1) scale(0.7)">'
     + horse(
-        legs=(-22, 20, 24, -22),
-        neck=-6,
+        legs=(-28, 26, 30, -28),
+        bends=(None, 40, None, None),
+        neck=-2,
         tail="up",
-        wrap="translate(0 -1.5) rotate(-4 66 52)",
+        wrap="translate(0 -1.5) rotate(-3 66 52)",
     )
-    + "</g>"
-    + stable_front(),
+    + "</g>",
     # blocked / needs you: rearing and neighing at the gate.
     "horse-rear": gate(98)
     + '<g transform="translate(4 12) scale(0.86)">'
@@ -410,7 +433,7 @@ MINI = {
     + '<path d="M 0 13 Q 20 11 40 13 L 40 16 L 0 16 Z" fill="#4c6340"/>',
 }
 
-# --- 16 px row sprites: pixel art, one character per pixel ---
+# --- 16 px row sprites: pixel art, one character per pixel; 16 x 12, the 16 px row box at 132 x 100 (#242 fix 4: big props) ---
 # Row sprites take the coat as --rc/--rd/--rm (set inline when the row has a lane), palomino otherwise: the board
 # defines --c (the cyan token), so an inherited --c would paint every row horse cyan.
 PAL = {
@@ -440,79 +463,62 @@ PAL = {
 }
 ROWS = {
     "row-plough": [  # impl
-        "................",
-        "................",
-        "...........mcc..",
-        "..........mccce.",
-        "..........mcc.cc",
-        "w.....cccmcc....",
-        ".w...mckkccc....",
-        "..w..ccccccc....",
-        "..ww.ccccccc....",
-        "..sw..c.c..c.c..",
-        "..s..c...c..c..c",
-        "....h....h.h...h",
-        "nnnnn...........",
-        "................",
-        "................",
-        "................",
+        "ww..............",
+        ".ww........mcc..",
+        "..w.......mccce.",
+        "..w.......mcc.cc",
+        "..ww..cccmcc....",
+        "...w.mckkccc....",
+        "...wwccccccc....",
+        "...ssccccccc....",
+        "..sss.c.c..c.c..",
+        ".sss.c...c..c..c",
+        "nnnnh....h.h...h",
+        "nnnnnn..........",
     ],
     "row-anvil": [  # fix
         "................",
-        "................",
-        "...........mcc..",
-        "..........mccce.",
-        "..........mcc.cc",
-        "......cccmcc....",
-        ".o...mckkccc....",
-        "o.o..ccccccc....",
-        ".....ccccccc....",
-        "....cc...c.c....",
-        "iiii.....c.c....",
-        ".ii......h.h....",
-        "wwww............",
-        "................",
-        "................",
+        ".o.........mcc..",
+        "ooo.......mccce.",
+        "ooo.......mcc.cc",
+        "ooo...cccmcc....",
+        "bbb..mckkccc....",
+        "bob..ccccccc....",
+        "bbb..ccccccc....",
+        "bbb.cc.c..c.c...",
+        "bbbh...c..c.c...",
+        "bbb....h..h.h...",
         "................",
     ],
     "row-vet": [  # rev
-        "................",
-        "................",
-        "........mcc.....",
-        ".......mccce....",
-        ".......mcc.cc...",
-        "p..cccmcc.....p.",
-        "pppmckkccc.pppp.",
-        "p..ccccccc...fp.",
-        "p..ccccccc..vvp.",
-        "pppc.c..ccvvvpp.",
-        "p..c.c....cvv.p.",
-        "p..h.h......v.p.",
-        "................",
-        "................",
-        "................",
+        ".ff.............",
+        ".ff........mcc..",
+        "vvvv......mccce.",
+        "vvvv......mcc.cc",
+        "vvvv..cccmcc....",
+        "vvvvvmckkccc....",
+        "vvvv.ccccccc....",
+        "vvvv.ccccccc....",
+        ".vv...c.c..c.c..",
+        ".vv..c...c..c..c",
+        ".hh.h....h.h...h",
         "................",
     ],
     "row-hay": [  # update / catch-up
-        "................",
-        ".....yyyy.......",
-        "....yytyyy..mcc.",
-        "...yyyyyytymccce",
-        "...YYYYYYYmcc.cc",
-        "...kcccccmcc....",
-        "..mckkkkccc.....",
-        "..cccccccccc....",
-        "...c.c...c.c....",
-        "..c...c.c...c...",
-        "..h...h.h...h...",
-        "................",
-        "................",
-        "................",
-        "................",
+        "....yyytyy......",
+        "....YYYtYY.mcc..",
+        "...yyytyyymccce.",
+        "...YYYtYYYmcc.cc",
+        "....kkkkkmcc....",
+        ".....mckkccc....",
+        ".....ccccccc....",
+        ".....ccccccc....",
+        "......c.c..c.c..",
+        ".....c...c..c..c",
+        "....h....h.h...h",
         "................",
     ],
     "row-graze": [  # idle
-        "................",
         "................",
         "................",
         "................",
@@ -525,9 +531,6 @@ ROWS = {
         "...c.c...c.c..cc",
         "...h.h...h.h.gcg",
         "............g.g.",
-        "................",
-        "................",
-        "................",
     ],
     "row-stable": [  # done
         "...........r....",
@@ -643,7 +646,7 @@ ROWS = {
 def pixels(rows):
     s = ""
     for y, row in enumerate(rows):
-        assert len(row) == 16, (row, len(row))
+        assert len(row) == 16 and len(rows) <= 16, (row, len(row))
         x = 0
         while x < 16:
             ch = row[x]

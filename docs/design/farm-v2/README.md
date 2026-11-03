@@ -143,3 +143,19 @@ The old `poses` stay as the fallback.
    paler (around `#efdca0`), and controls would lose their pop.
 
 `src/` net +0: this is a design lane (docs only). Phase 2's code sits in #241/#244 as above.
+
+## Phase 2: what shipped (approved "Approve all with fixes", 2026-11-03)
+
+`assets/themes/farm/` fills #241's contract: `actions`, `rail` (`bale`, `bale-red`), `moments` (one sprite each: `jump-over`
+hop, `refuse-plant` shake, `bale-red` pulse), `row_sprites` and `ascii` (the art above; the words don't fit 8 columns).
+`sprites.svg` takes these from this sheet, the rail and row sprites fitted to the contract's 132 × 100 box. The Herd
+draws each horse's action (its role while it works), its fleet's colour as `--fk`, and a row sprite wears its lane's
+coat (`--rc/--rd/--rm`). Blocked drops the red tint; dead keeps it.
+
+The approved fixes, in `make_sprites.py`: the stable is taller and the smaller horse trots in under the lintel (1);
+a farrier behind the horse holds the lifted hind hoof, the fire is in a brick forge at the far left and the anvil is
+by the forelegs (2); the project colour has a dark edge (3); the row sprites are 16 × 12 (the 16 px row box at true
+size) with a tall plough handle, an orange forge and a tall white vet (4). Fix 5 (the farm accent) is #244's scheme.
+
+Not in #241's contract, so left out: moment frames, the paddock fence and sign, the scheme, the Host minis, the
+Queue/Events-only sprites (`row-bale`, `row-jump`, `row-refuse`).

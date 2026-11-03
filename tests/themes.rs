@@ -77,11 +77,27 @@ fn farm_fills_the_whole_contract() {
     ] {
         assert!(f.get(k).is_some(), "farm has {k}");
     }
+    // #242: farm fills every key itself, no fallback: an action, row sprite and ASCII art per action, both rail
+    // sprites, the three moments.
+    for a in ACTS {
+        assert!(f["row_sprites"][a].is_string() && f["ascii"][a].is_string(), "farm {a}");
+        assert_ne!(f["row_sprites"][a], f["actions"][a], "farm row sprite {a}");
+    }
+    assert!(f["rail"]["item"].is_string() && f["rail"]["needs"].is_string());
+    assert_ne!(f["rail"]["item"], f["actions"]["idle"]);
+    assert_ne!(f["rail"]["needs"], f["rail"]["item"]);
+    for m in ["merged", "fail", "needs-you"] {
+        assert!(f["moments"][m]["sprite"].is_string(), "farm moment {m}");
+    }
     // Every sprite farm names is in its sprites.svg.
     let r = resolve(&f, &f);
+    for k in ["actions", "row_sprites", "rail", "moments", "ascii"] {
+        assert_eq!(r[k], f[k], "farm's own {k}");
+    }
     let ids = ACTS
         .map(|a| r["actions"][a].clone())
         .into_iter()
+        .chain(ACTS.map(|a| r["row_sprites"][a].clone()))
         .chain([r["rail"]["item"].clone(), r["rail"]["needs"].clone()]);
     for id in ids.chain(["merged", "fail", "needs-you"].map(|m| r["moments"][m]["sprite"].clone())) {
         let id = id.as_str().unwrap().to_string();
@@ -180,7 +196,8 @@ fn every_fallback_step() {
     assert_eq!(t["rail"]["needs"], t["rail"]["item"], "needs: the item");
     assert_eq!(t["glyphs"]["working"], "♨");
     assert_eq!(t["glyphs"]["done"], f["glyphs"]["done"], "key by key");
-    assert_eq!(t["ascii"], json!({"impl": "chop"}));
+    assert_eq!(t["ascii"]["impl"], "chop");
+    assert_eq!(t["ascii"]["fix"], f["ascii"]["fix"], "farm's ASCII horse");
     assert_eq!(
         (&t["modes"], &t["load_scene"], &t["icons"]),
         (&f["modes"], &f["load_scene"], &f["icons"])
