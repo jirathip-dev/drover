@@ -72,6 +72,9 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    iframe (virtual time runs no reload) and fails unless it comes back at night.
    `herd-kitchen` and `herd-nodone` (#172) shoot Herd page 1 in the kitchen theme, and in it with `done` missing:
    each fails unless the chefs and counter scene are drawn, and in `herd-nodone` the done pose is farm's horse.
+   #239: `herd-kitchen`, `-busy` and `-held` shoot the kitchen at each heat level (the demo's calm, gusty, storm) and
+   fail on night, the `[A]` button, the wrong level, no fanning chef or smoke while held, or `! needs you` overflowing
+   its ticket; `herd-kitchen-still` is held under reduced motion and fails if `#herd` still animates.
    #241: on Queue, Lanes, Host and Events, and again in kitchen and terminal (`<view>~<theme>`, `?theme=`), it fails
    unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 16 px
    sprite per Queue/Events glyph, a load scene per Host group and offer `[scene] [ascii]`. `theme-switch` picks

@@ -40,6 +40,9 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("kitchen/sprites.svg", SVG),
     th!("kitchen/theme.json", JSON),
     th!("kitchen/scene.svg", SVG),
+    th!("kitchen/icon-180.png", PNG),
+    th!("kitchen/icon-192.png", PNG),
+    th!("kitchen/icon-512.png", PNG),
     th!("terminal/theme.json", JSON),
     th!("terminal/icon-180.png", PNG),
     th!("terminal/icon-192.png", PNG),
@@ -1844,7 +1847,13 @@ impl<'a> Server<'a> {
         let lanes = |f: Option<&String>| -> Vec<_> {
             all.iter().filter(|l| l.fleet.as_ref() == f).map(|l| {
                 let (title, tone, shown, a) = view(ctx, l, &waits);
-                json!({"name": l.name, "issue": l.issue, "title": title, "role": l.role, "harness": l.harness,
+                // #239: a fix round's lane has role impl; the issue's state says it is fixing.
+                let is = l.issue.and_then(|i| st.get(&(f?.clone(), i))).map_or("", |s| s.state.as_str());
+                let act = match (act(&l.role, &l.state), act(&l.role, is)) {
+                    ("impl", b @ ("fix" | "update")) => b,
+                    (a, _) => a,
+                };
+                json!({"name": l.name, "act": act, "issue": l.issue, "title": title, "role": l.role, "harness": l.harness,
                        "model": l.model, "effort": l.effort, "account": l.account, "host": l.host, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name)})
             }).collect()
         };

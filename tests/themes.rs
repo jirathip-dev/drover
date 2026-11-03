@@ -12,6 +12,8 @@ const FARM: &str = include_str!("../assets/themes/farm/theme.json");
 const FARM_SPRITES: &str = include_str!("../assets/themes/farm/sprites.svg");
 const KITCHEN: &str = include_str!("../assets/themes/kitchen/theme.json");
 const KITCHEN_SCENE: &str = include_str!("../assets/themes/kitchen/scene.svg");
+const KITCHEN_SPRITES: &str = include_str!("../assets/themes/kitchen/sprites.svg");
+const KITCHEN_ICON: &[u8] = include_bytes!("../assets/themes/kitchen/icon-180.png");
 const ICON: &[u8] = include_bytes!("../assets/icon-180.png");
 const TERMINAL_ICON: &[u8] = include_bytes!("../assets/themes/terminal/icon-180.png");
 const ACTS: [&str; 7] = ["impl", "fix", "rev", "update", "idle", "done", "blocked"];
@@ -107,6 +109,34 @@ fn farm_fills_the_whole_contract() {
     assert_eq!(r["load_scene"]["kind"], "weather");
     for t in [KITCHEN, include_str!("../assets/themes/terminal/theme.json")] {
         validate(t.as_bytes()).unwrap();
+    }
+}
+
+/// #239: the kitchen fills the contract with its own sprites: an action per role (cook, chop, taste, carry), each
+/// state's, the rail, the moments, the 16 px rows and the held-heat fan, all in its sprites.svg; nothing falls to farm.
+#[test]
+fn kitchen_draws_every_action_itself() {
+    let k = resolve(&validate(KITCHEN.as_bytes()).unwrap(), &farm());
+    let acts = ACTS.map(|a| k["actions"][a].as_str().unwrap().to_string());
+    assert_eq!(acts[..4], ["chef-cook", "chef-chop", "chef-taste", "chef-carry"]);
+    let mut ids: Vec<Value> = ACTS
+        .iter()
+        .flat_map(|a| [k["actions"][a].clone(), k["row_sprites"][a].clone()])
+        .collect();
+    ids.extend([&k["rail"]["item"], &k["rail"]["needs"], &k["load_scene"]["fan"]].map(Value::clone));
+    ids.extend(["merged", "fail", "needs-you"].map(|m| k["moments"][m]["sprite"].clone()));
+    for id in ids {
+        let id = id.as_str().unwrap().to_string();
+        assert!(KITCHEN_SPRITES.contains(&format!("<g id=\"{id}\"")), "{id}");
+    }
+    assert_eq!(
+        (&k["load_scene"]["kind"], k["looks"].as_array().unwrap().len()),
+        (&json!("heat"), 8)
+    );
+    assert_eq!(k["ascii"]["fix"], "♨\nchop");
+    // The scene's three heat layers.
+    for l in ["h-calm", "h-busy", "h-held", "ksmoke", "kglow"] {
+        assert!(KITCHEN_SCENE.contains(l), "{l}");
     }
 }
 
@@ -337,8 +367,9 @@ fn the_theme_icon_route_and_its_fallback() {
     let (c, r) = server(None, &[("space", "theme.json", "{}"), ("space", "icon-192.png", "own")]);
     assert_eq!(bytes(&c, &r, "/themes/terminal/icon-180.png"), TERMINAL_ICON);
     assert!(get(&c, &r, "/themes/terminal/icon-512.png").contains("Content-Type: image/png"));
-    // No icon of its own (or no such theme): the board's.
-    assert_eq!(bytes(&c, &r, "/themes/kitchen/icon-180.png"), ICON);
+    // #239: the kitchen's own icon; no icon of its own (or no such theme): the board's.
+    assert_eq!(bytes(&c, &r, "/themes/kitchen/icon-180.png"), KITCHEN_ICON);
+    assert_eq!(bytes(&c, &r, "/themes/space/icon-180.png"), ICON);
     assert_eq!(bytes(&c, &r, "/themes/nosuch/icon-180.png"), ICON);
     assert_eq!(bytes(&c, &r, "/themes/space/icon-192.png"), b"own");
     assert_eq!(
