@@ -159,7 +159,7 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// `herdsman spawn … design` (or pre-rename `fleet`) and `serve approve|unpair|devices --revoke`: owner-only.
+/// `herdsman spawn … design` (or pre-rename `fleet`), `setup` and `serve approve|unpair|devices --revoke`: owner-only.
 fn design_spawn(t: &[&str]) -> Option<String> {
     let i = t
         .iter()
@@ -167,6 +167,9 @@ fn design_spawn(t: &[&str]) -> Option<String> {
     let r = &t[i + 1..];
     if r.first() == Some(&"serve") && ["approve", "unpair", "--revoke"].iter().any(|w| r.contains(w)) {
         return Some("REFUSED OWNER_ONLY: only the owner pairs or unpairs devices, never a lane (#288)".into());
+    }
+    if r.first() == Some(&"setup") {
+        return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }
     (t.get(i + 1) == Some(&"spawn") && t[i + 2..].contains(&"design"))
         .then(|| "design lanes are owner-only: only the owner runs `herdsman spawn … design`, never a lane".into())

@@ -21,6 +21,7 @@ pub mod pipeline;
 pub mod protection;
 pub mod queue;
 pub mod runner;
+pub mod setup;
 pub mod spawn;
 pub mod timer;
 pub mod usage;

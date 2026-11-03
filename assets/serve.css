@@ -303,6 +303,9 @@ details.q[open]{padding-bottom:var(--s2)}
 .hhd .dt{flex:none;width:var(--s2);height:var(--s2);border-radius:50%;background:currentColor}
 .hhd .hw{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta)}
 .hhd>form{padding:var(--s1) 0}
+/* #303 [sign in ▾]: the logins by name, a row under the head when open */
+.hhd>.su{padding:var(--s1) 0}.hhd>.su>summary{list-style:none;cursor:pointer}.hhd>.su>summary::-webkit-details-marker{display:none}
+.hhd>.su[open]{flex-basis:100%}.hhd>.su>div{display:flex;flex-wrap:wrap;gap:var(--s4);padding:var(--s2) 0}
 .hcd>:is(.gr,.rw)+:is(.gr,.rw){border-top:1px solid var(--line)}
 /* One-line values: names ellipsise, never break mid-token; a card's bar is in the meta size, so `free 12 GB of 228` fits at 390. */
 .hcd .bar{min-width:0;font-size:var(--fs-meta)}

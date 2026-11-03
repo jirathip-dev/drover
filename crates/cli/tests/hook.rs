@@ -524,3 +524,14 @@ fn serve_approve_is_owner_only() {
     assert_eq!(bash("herdsman serve pending"), None);
     assert_eq!(bash("herdsman serve devices"), None);
 }
+
+/// #303: setup terminals (and the jobs `setup`) are the owner's: `herdsman setup …` denies in a lane.
+#[test]
+fn setup_is_owner_only() {
+    for cmd in ["herdsman setup mini claude", "~/.local/bin/herdsman setup --no-load"] {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let out = hook_in(Some("x:1:impl"), "impl", input.clone());
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+}
