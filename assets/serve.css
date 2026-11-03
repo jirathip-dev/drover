@@ -103,7 +103,12 @@ html[data-tab=queue] :is(#thp,#scp),html:not([data-tab=queue]) :is(#queue,header
 [data-theme=terminal] .av>*{display:none!important}[data-theme=terminal] .av .gl{display:block!important}[data-theme=terminal] .lh{display:none}
 /* #241: a row's 16 px action sprite in its glyph's place, a Host group's load scene, a moment (silent; reduced motion: still). */
 .rsp,.lsc{display:inline-block;flex:none;width:var(--s4);height:var(--s4);vertical-align:middle}
-.gt .rsp{width:2ch}details.q:has(>summary .gt>.rsg){--gw:calc((2 * var(--d, 0) + 2) * 1ch)}
+/* #281: the row sprite is 24 px (the 16 px art at 1.5×, never smoothed) in a fixed 28 px slot; its -4 px block margin keeps
+   the line box (and the row) its height. */
+.rsp{width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2));margin:calc(-1 * var(--s1)) calc(var(--s1) / 2);image-rendering:crisp-edges;image-rendering:pixelated;shape-rendering:crispEdges}
+details.q:has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
+details.er:has(>summary>.rsg)>summary{grid-template-columns:calc(var(--s4) + var(--s3)) var(--s2) 6ch minmax(0,1fr) auto}
+details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * var(--s2))}
 #mo{position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);width:calc(3 * var(--s4));height:calc(2 * var(--s4) + var(--s1));pointer-events:none;animation:.8s ease-in-out 3 hop}
 #mo svg{width:100%;height:100%}#mo.mo-shake{animation-name:shake}#mo.mo-pulse{animation-name:pulse}
 @keyframes hop{50%{translate:0 calc(-1 * var(--s2))}}@keyframes shake{25%{translate:calc(-1 * var(--s1)) 0}75%{translate:var(--s1) 0}}@keyframes pulse{50%{scale:1.2}}
@@ -216,7 +221,8 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .fvr{position:relative;z-index:1;flex:none;display:flex;justify-content:flex-end;margin:0;padding-top:var(--s1)}
 .fv[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
 .qs.note{border-left-color:var(--a)}
-.act.doing,.qnow{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.qnow{font-size:var(--fs-meta);padding-left:2ch}
+.now{display:flex}.now>*{flex:none;min-width:0}.now>.el{flex-shrink:1}.now>.el~.el{flex-shrink:999}.now>i{font-style:normal;white-space:pre}
+.qnow{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.qnow{font-size:var(--fs-meta);padding-left:2ch}
 .unp{margin:auto;padding:var(--s3);text-align:center;border:1px solid var(--a);border-radius:8px;color:var(--a)}
 #dot.demo{color:var(--l)}
 [inert]{opacity:.6}
