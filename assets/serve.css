@@ -76,7 +76,7 @@ nav a.on .n{color:inherit}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
-#rf,#herd-on{width:40px}#herd-on,#look{margin-left:var(--s2)}header .qhelp{margin:0 var(--s2)}#herd-on svg{width:19px;height:14px}
+/* #290: the four header controls are one width, so each bracket sits as far from its glyph */header>button:not(.pairb){width:calc(var(--ctl) + var(--s1));padding:0}header>button:not(.pairb)+button{margin-left:var(--s2)} /* 16 px apart: no tap ring over its neighbour */#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
 button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(1turn)}}
@@ -498,10 +498,12 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .lko[aria-selected=true]::after{content:"✓"}
 .lko:active{background:var(--l)}.lko:active>*,.lko:active::after{color:var(--bg)}
 .lko:focus-visible{box-shadow:inset 0 0 0 2px var(--l)}
-/* The art: a theme's row sprite (24 × 18) or its icon (24 px tile); a scheme's 5 swatches, bg fg green amber red. */
-.lka{display:grid;place-items:center;flex:none;width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2))}
-.lka>svg{width:100%;height:calc(var(--s4) + var(--s1) / 2)}.lka>img{width:100%;height:100%;border-radius:5px}
-.lsw{display:flex;flex:none;width:calc(5 * var(--s3));height:calc(var(--s4) + var(--s1) / 2);border:1px solid var(--edge);border-radius:3px;overflow:hidden}
-.lsw>b{flex:1}
+/* The art, one column wide in both lists so the names line up: a theme's row sprite (crisp) or its icon on a 24 px tile,
+   the same tile for every theme; a scheme's `Aa` (its fg on its bg, bordered), then its green, amber and red chips. */
+.lka,.lsw{display:flex;flex:none;gap:calc(var(--s1) / 2);width:calc(5 * var(--s4));height:calc(var(--s4) + var(--s2))}
+.lka>*{width:calc(var(--s4) + var(--s2));height:100%;border:1px solid var(--edge);border-radius:5px;background:var(--card)}
+.lka>svg{shape-rendering:crispEdges;image-rendering:pixelated}
+.lsw>b{flex:1;border-radius:3px}
+.lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
 .lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
 @media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}

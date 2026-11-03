@@ -147,7 +147,9 @@ const lsprite = n => LS[n] || (LS[n] = Promise.all(['theme.json', 'sprites.svg']
   let t = {};
   try { t = JSON.parse(j); } catch (e) {}
   const id = t.row_sprites && t.row_sprites.impl, g = id && new DOMParser().parseFromString(s, 'image/svg+xml').getElementById(id);
-  if (g) { g.removeAttribute('id'); return `<svg viewBox="0 0 132 100">${g.outerHTML}</svg>`; }
+  // The art is 16 sprite px wide: its viewBox is cropped to them, so each is 1.5 css px at 24 (#281: never smoothed).
+  const m = g && /(?:translate\(([\d.]+)[ ,][^)]*\)\s*)?scale\(([\d.]+)\)/.exec(g.outerHTML), k = m ? +m[2] : 8.25;
+  if (g) { g.removeAttribute('id'); return `<svg viewBox="${m && m[1] || 0} 0 ${16 * k} 100">${g.outerHTML}</svg>`; }
   return `<img alt="" src="${R}${t.icons && t.icons.favicon ? `themes/${n}/${t.icons.favicon}` : 'icon-192.png'}">`;
 }));
 function lrow(k, n, on, art, def) {
@@ -180,7 +182,8 @@ function lsheet(kb) {
     lsprite(n).then(x => { s.innerHTML = x; });
     return lrow('t', n, n === h.dataset.theme, s);
   });
-  const sw = s => { const i = el('i', 'lsw'); i.append(...['--bg', '--fg', '--g', '--a', '--r'].map(t => Object.assign(el('b'), { style: `background:${s.tokens[t]}` }))); return i; };
+  // A scheme's art: its text on its background (`Aa`), then its green, amber and red chips.
+  const sw = s => { const i = el('i', 'lsw'); i.append(Object.assign(el('b', 'aa', 'Aa'), { style: `background:${s.tokens['--bg']};color:${s.tokens['--fg']}` }), ...['--g', '--a', '--r'].map(t => Object.assign(el('b'), { style: `background:${s.tokens[t]}` }))); return i; };
   const ok = Object.keys(SD.s).filter(n => !fails(SD.s[n]).length), no = Object.keys(SD.s).length - ok.length;
   const sc = ok.map(n => lrow('s', n, n === h.dataset.scheme, sw(SD.s[n]), n === choose(SD.s, null, SD.t[h.dataset.theme])));
   $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc),
