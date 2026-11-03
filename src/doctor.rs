@@ -144,8 +144,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — ran {age} → herdsman timer install");
         row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
     }
-    let line = format!("timer — {} loaded → herdsman timer install", crate::timer::TICK);
-    row(rows, crate::timer::loaded(ctx, r), '✗', &line);
+    for (label, state) in crate::timer::drift(ctx, cfg, r) {
+        let line = format!("timer — {label} {state} → herdsman timer install");
+        row(rows, state == "loaded", '✗', &line);
+    }
 }
 
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `herdsman serve`.

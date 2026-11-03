@@ -1913,7 +1913,9 @@ impl<'a> Server<'a> {
             }
         };
         // #98: green, amber or red per service, what clears it otherwise.
-        let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
+        let svc = |s: &&crate::timer::Row| {
+            ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str()) || s.0.starts_with("dev.herdsman.")
+        };
         for (k, t, d, fix) in rows.iter().filter(svc) {
             let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
             s += &kv(
