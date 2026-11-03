@@ -64,7 +64,10 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
 
 /// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
 fn healthy(f: Fake) -> Fake {
-    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
+    let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
+    f.reply("herdr --machine cloud1 agent list", NO_AGENTS)
+        .reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
+        .reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
         .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
         .reply(
@@ -600,12 +603,15 @@ fn the_token_expiry_parses_and_warns_from_14_days() {
     assert!(card.ends_with("expires in 14d"), "{card}");
     assert!(warn.unwrap().starts_with("! github — token expires in 14d"));
     let (_, warn) = herdsman::cloud::token(&head("2024-03-01 00:00:00 UTC"), now);
-    assert!(warn.unwrap().starts_with("✗ github — token expires in -217d"));
+    assert!(warn.unwrap().starts_with("! github — token expires in -217d"));
     assert_eq!(
         herdsman::cloud::token("HTTP/2.0 200 OK\n\n[]", now).0,
         "github: token · 0 repos · no expiry"
     );
-    assert_eq!(herdsman::cloud::token("", now), ("github: unreadable".into(), None));
+    // gh rejects an expired or revoked token: no headers at all, and the host turns red.
+    let (card, warn) = herdsman::cloud::token("", now);
+    assert_eq!(card, "github: unreadable");
+    assert!(warn.unwrap().starts_with("✗ github — gh there has no working token"));
 }
 
 #[test]
@@ -615,7 +621,7 @@ fn a_snapshot_needs_a_green_health_check_first() {
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
     let r = Fake::default().reply(&rc("snapshot"), "");
     let e = herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap_err();
-    assert!(format!("{e:#}").contains("not healthy: ✗ herdr"), "{e:#}");
+    assert!(format!("{e:#}").contains("cloud1 is not healthy"), "{e:#}");
     assert!(!r.called(&rc("snapshot")));
     let r = healthy(Fake::default()).reply(&rc("snapshot"), "");
     herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap();

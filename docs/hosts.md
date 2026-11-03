@@ -206,9 +206,8 @@ overflow_after_minutes = 10  # the default
 Each step checks first and is skipped when already done, then is read back after its install, so it is safe to run
 again. In order:
 
-1. **herdr** at this host's version (`herdr machine add <machine>` from here), then git, gh, Claude Code and Rust
-   (apt and the official install scripts), and whatever each fleet the host fits lists in `[fleet.<n>] bootstrap`
-   (`node`, or any apt package name).
+1. **herdr** at this host's version (`herdr machine add <machine>` from here), then git, gh, Claude Code and Rust with
+   a C linker (apt and the official install scripts). Other toolchains a fleet needs go in your own snapshot.
 2. **herdsman** at this host's exact sha: `cargo install --git <herdsman repo> --rev <sha>` into the same root as
    here (e.g. `~/.local`).
 3. **Logins**, once and by you: for each of Claude and gh that is logged out, bootstrap opens a herdr pane on the
@@ -222,7 +221,8 @@ again. In order:
 **The token.** Make one fine-grained token per cloud host, limited to the fleets' repos, with contents and pull
 requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
 `gh api -i` there: the Host card shows `github: token · 2 repos · expires in 80d`, and from 14 days before the
-expiry the host turns amber (`! github — token expires in 12d`); past it, red.
+expiry the host turns amber (`! github — token expires in 12d`). When gh there can't use its token (expired, revoked
+or not logged in yet) the card says `github: unreadable` and the host turns red, so placement skips it.
 
 **Health on every start.** After a cloud host starts and its address is refreshed, herdsman runs the health checks
 above (and the token look) before placement uses it, so an unhealthy host never takes the lane.

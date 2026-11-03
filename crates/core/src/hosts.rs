@@ -170,7 +170,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                     (s.tags, s.home, s.probed) = (tags, home, ctx.now);
                 }
                 if h.machine.is_some() && h.enabled {
-                    look(ctx, cfg, &on, h, s);
+                    s.health = health(ctx, cfg, &on, &tags(h, Some(&*s)), &s.home);
+                    // #255: a cloud host's GitHub token too.
+                    if h.cloud.is_some() {
+                        let (card, warn) = crate::cloud::github(&on, ctx.now);
+                        (s.github, ()) = (card, s.health.extend(warn));
+                    }
                     if s.health.iter().any(|w| w.starts_with("! herdsman")) && update(ctx, cfg, &on, name, &s.home) {
                         s.probed = ctx.now.saturating_sub(3000); // read its version back in 10 minutes
                     }
@@ -194,27 +199,6 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         eprintln!("host history: {e:#}");
     }
     agents
-}
-
-/// #235: a remote host's health into `s`; #255: with a cloud host's GitHub token.
-fn look(ctx: &Ctx, cfg: &Config, on: &On, h: &HostCfg, s: &mut Seen) {
-    s.health = health(ctx, cfg, on, &tags(h, Some(&*s)), &s.home);
-    if h.cloud.is_some() {
-        let (card, warn) = crate::cloud::github(on, ctx.now);
-        s.health.extend(warn);
-        s.github = card;
-    }
-}
-
-/// #255: probe host `name` and look at its health afresh, saved (a cloud host on each start, before placement reads it).
-pub fn recheck(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) {
-    let (mut all, h) = (cached(ctx), &cfg.hosts[name]);
-    let (on, s) = (On::new(r, h.machine.as_deref()), all.entry(name.into()).or_default());
-    if let Some((tags, home)) = probe(&on) {
-        (s.tags, s.home, s.probed) = (tags, home, ctx.now);
-    }
-    look(ctx, cfg, &on, h, s);
-    let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
 }
 
 /// #275: the asks a lane on host `name` logged in that host's own log (before lanes forwarded them), each imported once

@@ -186,9 +186,6 @@ pub struct Fleet {
     /// #157: host tags every lane of this fleet needs (e.g. `xcode`).
     #[serde(default)]
     pub needs: Vec<String>,
-    /// #255: what `hosts bootstrap` installs for it besides git, gh, Claude, Rust and herdsman (`node`, an apt package).
-    #[serde(default)]
-    pub bootstrap: Vec<String>,
     /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
     pub form_categories: Option<Vec<String>>,
     pub form_rounds: Option<u32>,
