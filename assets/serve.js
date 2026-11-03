@@ -29,11 +29,80 @@ const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { se
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
-const MODES = ['horse', 'ascii', 'glyph'];
-// The mode button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
-function mode(m) { B.dataset.mode = m; const b = $('#mode span') || $('#mode'); if (b) b.textContent = m; put('mode', m); }
-mode(MODES.includes(get('mode')) ? get('mode') : 'horse');
-document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(MODES[(MODES.indexOf(B.dataset.mode) + 1) % MODES.length]); });
+// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone, no button); TT is
+// the theme herd.js loaded (docs/themes.md). The button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
+let TT = null, TM = ['scene', 'ascii'];
+function mode(m) {
+  B.dataset.mode = m = TM.includes(m) ? m : TM[0];
+  const b = $('#mode span') || $('#mode');
+  if (b) { b.textContent = m; b.closest('.lh').hidden = TM.length < 2; }
+  put('mode', m);
+}
+mode(get('mode'));
+document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
+// #241: the `[◐]` picker: this phone's theme, applied in place (no reload); the home-screen icon is iOS's from the install.
+const thp = $('#theme');
+thp.value = document.documentElement.dataset.theme;
+thp.closest('.pk').title = 'theme: ' + thp.value;
+thp.onchange = () => {
+  document.documentElement.dataset.theme = thp.value;
+  thp.closest('.pk').title = 'theme: ' + thp.value;
+  put('theme', thp.value);
+  theme(thp.value);
+  if (!get('theme-hint')) { put('theme-hint', 1); toast('the home-screen icon keeps its install-time look'); }
+};
+// #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 16 px sprite (its title and label
+// the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
+const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
+const hash = t => [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+function rows(root) {
+  root.querySelectorAll('.rsg').forEach(g => { g.textContent = g.dataset.g; g.classList.remove('rsg'); ['title', 'role', 'aria-label', 'data-g'].forEach(a => g.removeAttribute(a)); });
+  const rs = TT && TT.row_sprites, sp = (g, act, word) => {
+    if (!g || !rs || !rs[act]) return;
+    Object.assign(g.dataset, { g: g.textContent });
+    g.classList.add('rsg');
+    g.title = word;
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', word);
+    g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`;
+  };
+  root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
+  const L = (TT && TT.looks) || [];
+  root.querySelectorAll('.av[data-act]').forEach(v => {
+    const a = v.querySelector('.asc'), px = v.querySelector('.px'), t = TT && TT.ascii && TT.ascii[v.dataset.act], n = v.closest('[data-agent]');
+    if (a.dataset.o == null) Object.assign(a.dataset, { o: a.innerHTML, c: px.getAttribute('style') });
+    a.innerHTML = t ? '<b></b>' : a.dataset.o;
+    if (t) a.firstChild.textContent = t;
+    a.classList.toggle('w', !!t);
+    px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
+  });
+}
+// #241: a Host group's load scene in miniature (its status: calm, busy or held): wind and clouds, or flame height.
+const MINI = {
+  weather: ['<circle cx=8 cy=8 r=4 fill="var(--a)"/>', '<path d="M3 12h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M1 4h5M2 7h3" stroke="var(--mute)"/>',
+    '<path d="M3 9h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M5 11l-1 4M8 11l-1 4M11 11l-1 4" stroke="var(--l)"/>'],
+  heat: [5, 9, 13].map((h, i) => `<path d="M8 ${15 - h}C12 ${15 - h / 2} 12 15 8 15C4 15 4 ${15 - h / 2} 8 ${15 - h}Z" fill="var(--${i > 1 ? 'r' : 'a'})"/>`),
+};
+function mini(g) {
+  const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
+  s.querySelector('.lsc')?.remove();
+  if (!ls || !MINI[ls.kind]) return;
+  const word = esc('load: ' + ((ls.levels || {})[l] || l));
+  s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
+}
+// #241: a moment (`moment` on /live: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
+function moment(k) {
+  const m = TT && TT.moments && TT.moments[k];
+  if (!m || !m.sprite) return;
+  let o = $('#mo');
+  if (!o) B.append(o = Object.assign(document.createElement('i'), { id: 'mo' }));
+  o.className = 'mo-' + (m.anim || 'hop');
+  o.innerHTML = `<svg viewBox="0 0 132 100" style="--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc" aria-hidden=true><use href="#hm-${k}"/></svg>`;
+  o.hidden = false;
+  clearTimeout(o.t);
+  o.t = setTimeout(() => { o.hidden = true; }, 2400);
+}
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
 let last = Number(B.dataset.ts) * 1000, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
@@ -213,6 +282,7 @@ function groups() {
     g.dataset.t = 'rag'[w];
     g.querySelector('.gs').textContent = rows.filter(r => rank(r.dataset.t) === w).map(sum).join(' · ');
     g.open = s && s[0] === g.dataset.t ? s[1] === '1' : w < 2;
+    mini(g);
   });
   sparks();
 }
@@ -281,6 +351,7 @@ function connect() {
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
   es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
   es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
+  es.addEventListener('moment', e => moment(e.data));
   es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
@@ -436,6 +507,7 @@ document.addEventListener('click', e => {
 });
 function tidy(root) {
   graph(root);
+  rows(root);
   evf(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {

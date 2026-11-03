@@ -84,11 +84,11 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
         "<div class=\"fc k-a\" data-s=\"serial\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
     ));
     assert!(page.contains(
-        "<details class=\"q\" data-q><summary><span><a href=\"https://github.com/acme/app/issues/1\">#1</a></span>"
+        "<details class=\"q\" data-q data-act=impl><summary><span><a href=\"https://github.com/acme/app/issues/1\">#1</a></span>"
     ));
-    assert!(page.contains("<details class=\"q\" data-q data-b=99><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-s=\"db\"><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
-    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"serial\"><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-b=99 data-act=idle><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-s=\"db\" data-act=idle><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
+    assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"serial\" data-act=idle><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
     // Change 1 of the approval: the card no longer repeats `#n state · age`; the lane stays.
     assert!(!page.contains("<p>#1 impl"), "{page}");
     assert!(page.contains("<p>acme-impl-1</p>"));
@@ -106,7 +106,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let d = tmpdir("queue-graph-png");
     let file = d.join("page.html");
     std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
-    // Per row in page order: #n, its gutter, its state cell with the tags, its moves.
+    // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
     let want = [
         "#1 ● impl ▼after7",
         "#2 ├─○ queued ▼after6",
@@ -122,7 +122,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     .join("|");
     let graph = format!(
         "const got = [...document.querySelectorAll('#queue details.q')].map(d => [d.querySelector('summary>span').textContent, \
-         d.querySelector('.gt').textContent + ' ' + d.querySelector('summary>span:nth-of-type(2)').textContent, \
+         [...d.querySelector('.gt').children].map(n => n.dataset.g ?? n.textContent).join('') + ' ' + d.querySelector('summary>span:nth-of-type(2)').textContent, \
          ...[...d.querySelectorAll('[name=before],[name=after]')].map(i => (i.name === 'before' ? '▲' : '▼') + i.name + i.value)].join(' ')).join('|'); \
          if (got !== '{want}') throw new Error('graph: ' + got); \
          if (document.querySelector('details.q[data-s] .tag').getAttribute('aria-label') !== 'serial: one lane at a time') throw new Error('lock label'); \
