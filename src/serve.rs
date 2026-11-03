@@ -1392,10 +1392,11 @@ impl<'a> Server<'a> {
             let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
             let left = age((a.ts + 60 * mins).saturating_sub(ctx.now));
             let kind = rec.map_or("owner · waits for you".into(), |n| format!("routine · defaults to {n} in {left}"));
+            let host = a.str("from").and_then(|f| f.split(':').next()).map(|h| format!(" · imported from {h}"));
             let who = esc(&who);
             let question = esc(s("question"));
             let form = self.addr.as_ref().map_or(String::new(), |_| answer_form(ctx, a, "Send"));
-            format!("<div class=ask><p><b>needs you</b> <span class=m>{who}</span> <span class=m>· {kind}</span></p><p>{question}</p>{form}</div>")
+            format!("<div class=ask><p><b>needs you</b> <span class=m>{who}</span> <span class=m>· {kind}{}</span></p><p>{question}</p>{form}</div>", host.unwrap_or_default())
         }).collect::<String>() + &blocked + &self.needs_human(ctx, cfg, events, st, paired)
     }
 

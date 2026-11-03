@@ -536,3 +536,47 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     assert!(idle.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"));
     assert_eq!(kinds(&c, "decision-redelivered").len(), 1);
 }
+
+/// #283: 10 due `ask-waiting` alerts push 3 and one summary; an imported ask never pushes.
+#[test]
+fn ask_waiting_pushes_are_capped_per_pass() {
+    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    let d = tmpdir("ask-cap");
+    let sink = d.join("pushed.txt");
+    let config = format!(
+        "{CONFIG}\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"ask-waiting\"]\n",
+        sink.display()
+    );
+    let mut c = ctx(&d, &config);
+    c.now = NOW;
+    for n in 1..=11 {
+        let mut a = json!({"id": format!("q{n}"), "question": format!("Q{n}?"), "options": ["a"]});
+        if n == 11 {
+            a["from"] = json!("air:q99");
+        }
+        append(
+            &c.state,
+            &Event::new(NOW - 40 * 60, "sendmeter", Some(n), "needs-decision", a),
+        )
+        .unwrap();
+    }
+    check(&c, &r);
+    let pushed = std::fs::read_to_string(&sink).unwrap();
+    assert_eq!(pushed.lines().count(), 4, "{pushed}");
+    assert!(
+        pushed
+            .lines()
+            .last()
+            .unwrap()
+            .contains("10 questions waiting — open the board"),
+        "{pushed}"
+    );
+    assert!(!pushed.contains("q11"), "{pushed}");
+    assert_eq!(kinds(&c, "ask-waiting").len(), 11, "10 alerts logged + the summary");
+    check(&c, &r);
+    assert_eq!(
+        std::fs::read_to_string(&sink).unwrap().lines().count(),
+        4,
+        "nothing again"
+    );
+}
