@@ -1960,16 +1960,30 @@ impl<'a> Server<'a> {
                 String::new()
             };
         let screen = screen.unwrap_or_default();
-        // #276: a `now:` line is one line from the server (full text on long-press), a command summarised.
-        let act = match lanes::now_of(l, &screen) {
-            Some(n) => format!(
-                "<span class=\"act nw el\" title=\"{}\">{}</span>",
-                esc(&n),
-                esc(&n
-                    .strip_prefix("now: running ")
-                    .map_or(n.clone(), |c| format!("now: running {}", lanes::short(c))))
-            ),
-            None => format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen))),
+        // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
+        // command summarised; cut first), the elapsed time.
+        let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
+        let act = if now.is_none() && spin.is_none() {
+            format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen)))
+        } else {
+            let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
+            let n = now.as_ref().map(|n| {
+                let s = (n.strip_prefix("now: running "))
+                    .map_or(n.clone(), |c| format!("now: running {}", lanes::short(c)));
+                s.strip_prefix("now: ")
+                    .filter(|_| w.is_some())
+                    .map_or(s.clone(), String::from)
+            });
+            let title = [&w, &now, &t]
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let parts = [(w, "el"), (n, "el"), (t, "t")].into_iter();
+            let parts = parts.filter_map(|(x, c)| x.map(|x| format!("<span class={c}>{}</span>", esc(&x))));
+            let parts = parts.collect::<Vec<_>>().join("<i> · </i>");
+            format!("<span class=\"act nw el now\" title=\"{}\">{parts}</span>", esc(&title))
         };
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);

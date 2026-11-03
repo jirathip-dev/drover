@@ -453,6 +453,16 @@ pub fn short(cmd: &str) -> String {
     }
 }
 
+/// #276: Claude's live spinner as its word and, past a minute, its elapsed time: `✻ Herding… (4m 12s · ↓ 3k tokens)` is
+/// (`✻ Herding…`, `4m`); None when idle, or for a harness without a spinner line.
+pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
+    let s = strip(chat(screen).1.filter(|_| harness == "claude")?);
+    let (w, rest) = s.split_once(" (")?;
+    let mins = |t: &&str| t.strip_suffix(['m', 'h']).is_some_and(|n| n.parse::<u32>().is_ok());
+    let t = rest.split([' ', ')']).find(mins).map(String::from);
+    w.trim().ends_with('…').then(|| (mask(w.trim()), t))
+}
+
 /// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.
 pub fn now(screen: &str) -> Option<String> {
     chat(screen).0.iter().rev().find_map(|l| {
