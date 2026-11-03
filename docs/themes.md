@@ -95,8 +95,8 @@ and `--l` (the option buttons) ≥ 4.5:1 and `--r` ≥ 3:1 on the needs-you card
 from each of them, so a control never reads as a warning. A refused scheme is left out of the picker and named on the
 Host tab with its first reason; a phone that picked it gets its theme's default, then `github-dark`.
 
-**Picking one:** the look sheet's COLOURS list (`[◐]`) shows every scheme that passes, each with its bg, fg, green,
-amber and red swatches, per phone, kept in localStorage. A phone that never picked gets its theme's `scheme`, marked
+**Picking one:** the look sheet's COLOURS list (`[◐]`) shows every scheme that passes, each as `Aa` in its fg on its
+bg, then its green, amber and red chips, per phone, kept in localStorage. A phone that never picked gets its theme's `scheme`, marked
 `(theme default)`: farm `farm`, kitchen `kitchen`, terminal `github-dark`; picking that row forgets the pick, so the
 colours follow the theme again. The page paints the phone's last scheme before the first paint (no flash; else the board
 theme's built-in default), and the iOS status bar takes its `--bg`. The Host tab's `theme` row names this phone's
