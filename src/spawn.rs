@@ -677,7 +677,8 @@ pub fn spawn(
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
-    // #275: on another host the name can be lost while the harness came up: retry only when none did.
+    // #275: on any host (under load, or over `--machine`) the name can be lost while the harness came up: retry only
+    // when none did; one that did is named below.
     let lost = |s: &crate::runner::Out| herdr::failed_with(s, "agent_name_not_found");
     if lost(&start) && herdr::harness_in(r, &pane).is_none() {
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;

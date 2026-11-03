@@ -89,8 +89,9 @@ host's `[hosts]` name must also work as an SSH name on every other host (an `~/.
 That host's own `events.jsonl` is never written; herdsman warns when it finds one. Each `check` imports the asks a lane
 left in a remote host's own log (lanes started before this) under a new id, with `from` naming the old one.
 
-An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` there fails
-`agent_name_not_found`, herdsman names the harness if one came up, else starts it once more.
+An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` fails
+`agent_name_not_found` (on any host, the main one under load too), herdsman names the harness if one came up, else
+starts it once more; it never closes the pane or workspace of a harness that came up.
 
 ## Turn a host off
 

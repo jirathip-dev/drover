@@ -845,3 +845,46 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
     let (_, out) = run(&c, &r, &["asks", "sendmeter"]);
     assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
 }
+
+/// #275 (conductor): `agent_name_not_found` also hits the main host under load: the same retry or naming, and no
+/// pane closed.
+#[test]
+fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
+    let lost = r#"{"error":{"code":"agent_name_not_found"}}"#;
+    let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
+    for up in [false, true] {
+        let c = setup("hosts-lost-main", "", true, 0);
+        with_account(&c);
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude"}}});
+        let mut r = fake(0.1, 0.1)
+            .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+            .reply("git -C", "")
+            .reply("herdr worktree create", ws)
+            .reply(
+                "herdr pane list --workspace w9",
+                r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+            )
+            .reply("herdr pane run w9:p1 export", "{}")
+            .once_err("herdr agent start", 1, lost)
+            .reply("herdr agent start sendmeter-impl-12", "{}")
+            .reply("herdr agent wait sendmeter-impl-12", "{}")
+            .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+        if up {
+            r = r.reply("herdr pane get w9:p1", &pane.to_string());
+        }
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "mini"]);
+        assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+        assert_eq!(r.count("herdr agent start"), if up { 1 } else { 2 });
+        assert_eq!(r.called("herdr agent rename"), up);
+        assert!(!r.called("herdr pane close") && !r.called("herdr --machine"));
+        let spawned = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.kind == "spawn")
+            .unwrap();
+        assert_eq!(
+            (spawned.str("host"), spawned.str("pane")),
+            (Some("mini"), Some("w9:p1"))
+        );
+    }
+}
