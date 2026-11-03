@@ -4,7 +4,7 @@
 //! the `.blocks.json` goldens.
 mod common;
 use common::*;
-use herdsman::lanes::{body, now, roll, said, strip, GAP};
+use herdsman::lanes::{body, now, roll, said, short, strip, GAP};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -239,6 +239,35 @@ fn now_is_the_panes_last_tool_line() {
     assert_eq!(now("  ┊ 💻 $ cargo test\n").as_deref(), Some("now: running cargo test"));
     assert!(now(&screen("hermes-idle")).unwrap().starts_with("now: running sleep 8"));
     assert_eq!(now("⏺ Done (all tests pass).\n"), None);
+}
+
+/// #276: a `now:` shell command reads as its first real command and target, `+N` for the rest of a chain; paths under
+/// $HOME read `~`.
+#[test]
+fn a_now_command_is_summarised_to_its_first_command() {
+    for (cmd, want) in [
+        (
+            "git fetch origin && git merge origin/staging 2>&1 | tail -5; just --list; cat ci/cap.toml",
+            "git fetch origin +3",
+        ),
+        ("cd ~/w/issue-9 && git merge origin/staging 2>&1 | tail -5; just --list", "git merge origin/staging +1"),
+        (
+            "cd /Users/jk/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v '^docs/'); cargo fmt --check $FILES",
+            "cargo fmt",
+        ),
+        ("sed -n '1,80p' src/usage.rs", "sed src/usage.rs"),
+        ("pnpm vitest > t.log 2>&1", "pnpm vitest"),
+        ("RUST_LOG=debug cargo test --test chat_blocks 2>&1 | tee t.log", "cargo test chat_blocks"),
+        ("python3 - <<'EOF'", "python3 (script)"),
+        ("cargo build >/dev/null || cargo build 2>&1 | head -40", "cargo build +1"),
+    ] {
+        assert_eq!(short(cmd), want, "{cmd}");
+    }
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(
+        now(&format!("⏺ Bash(cat {home}/w/a.rs)\n")).as_deref(),
+        Some("now: running cat ~/w/a.rs")
+    );
 }
 
 /// #260: the chat's default view from pane lines: you, the last assistant run before each prompt and the notices; no

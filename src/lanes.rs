@@ -383,8 +383,74 @@ pub fn activity(harness: &str, screen: &str) -> String {
 fn doing(tool: &str, arg: &str) -> String {
     let rows = "running Bash Shell $|editing Edit Write Update MultiEdit|reading Read".split('|');
     let row = rows.into_iter().find(|r| r.split(' ').skip(1).any(|w| w == tool));
-    let first = arg.lines().next().unwrap_or_default();
+    let mut first = arg.lines().next().unwrap_or_default().to_string();
+    if let Some(h) = std::env::var("HOME").ok().filter(|h| h.len() > 1) {
+        first = first.replace(&h, "~"); // #276
+    }
     mask(&format!("now: {} {}", row.map_or(tool, |r| &r[..7]), first.trim()))
+}
+
+/// #276: a shell command as its first real command and target (`git merge origin/staging`, `sed src/usage.rs`): `cd`,
+/// `VAR=…`, redirections and piped parts dropped, `+N` for the rest of a chain, a heredoc as `python3 (script)`.
+pub fn short(cmd: &str) -> String {
+    let (mut segs, mut seg, mut tok, mut q, mut d, mut piped) = (vec![], vec![], String::new(), None, 0, false);
+    let mut cs = cmd.chars().peekable();
+    while let Some(c) = cs.next() {
+        match (q, c) {
+            (Some(x), _) if x == c => q = None,
+            (None, '\'' | '"') => q = Some(c),
+            (None, '(') => d += 1,
+            (None, ')') => d -= 1,
+            (None, '&') if tok.ends_with('>') || cs.peek() == Some(&'>') => {}
+            (None, ';' | '\n' | '&' | '|') if d <= 0 => {
+                let pipe = c == '|' && cs.next_if_eq(&'|').is_none();
+                seg.extend((!tok.is_empty()).then(|| std::mem::take(&mut tok)));
+                segs.push((std::mem::take(&mut seg), std::mem::replace(&mut piped, pipe)));
+                continue;
+            }
+            (None, ' ' | '\t') if d <= 0 => {
+                seg.extend((!tok.is_empty()).then(|| std::mem::take(&mut tok)));
+                continue;
+            }
+            _ => {}
+        }
+        tok.push(c);
+    }
+    seg.extend((!tok.is_empty()).then_some(tok));
+    segs.push((seg, piped));
+    let var = |w: &&String| {
+        w.split_once('=')
+            .is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    };
+    let real: Vec<Vec<&String>> = (segs.iter().filter(|s| !s.1))
+        .map(|s| s.0.iter().skip_while(var).collect::<Vec<_>>())
+        .filter(|s| s.first().is_some_and(|c| *c != "cd"))
+        .collect();
+    let Some(s) = real.first() else {
+        return cmd.trim().to_string();
+    };
+    let word = |w: &&&String| !w.starts_with('-') && w.chars().all(|c| c.is_alphanumeric() || "./~:@_+-".contains(c));
+    let (mut out, mut redir) = (s[0].clone(), false);
+    if s.iter().any(|w| w.starts_with("<<")) {
+        out += " (script)";
+    } else {
+        for w in s[1..]
+            .iter()
+            .filter(|w| !std::mem::replace(&mut redir, ["<", ">", ">>", "2>", "&>"].contains(&w.as_str())))
+        {
+            if word(&w) && out.split(' ').count() < 3 {
+                out = out + " " + w;
+                if w.contains(['/', '.']) {
+                    break;
+                }
+            }
+        }
+    }
+    out + &if real.len() > 1 {
+        format!(" +{}", real.len() - 1)
+    } else {
+        String::new()
+    }
 }
 
 /// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.

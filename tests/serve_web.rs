@@ -538,7 +538,11 @@ fn lanes_group_by_fleet_with_others() {
         rest.find("<h3>synergy (1)</h3>") < rest.find("<h2>"),
         "synergy subgroup inside working"
     );
-    assert!(page.contains("⚠ log/pane mismatch") && page.contains("<span class=act>now: running cargo test</span>"));
+    assert!(
+        page.contains("⚠ log/pane mismatch")
+            && page
+                .contains("<span class=\"act nw el\" title=\"now: running cargo test\">now: running cargo test</span>")
+    );
     // One herdr agent list per 10 s, one pane read per 30 s.
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {

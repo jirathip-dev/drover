@@ -130,6 +130,29 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #276: long `now:` lines as the server emits them (one-line classes, full text in title), drawn by a /live
+    // redraw of the Lanes tab, then a second one: one ellipsised line in each mode, nothing past the row.
+    'lanes-now': async () => {
+      tab('lanes');
+      const L = ['now: running git fetch origin && git merge origin/staging 2>&1 | tail -5; just --list; cat ci/cap.toml',
+        "now: running cd ~/w/issue-2684; S=/tmp/s; FILES=$(git diff --name-only | rg -v '^docs/'); cargo fmt --check $FILES"];
+      const redraw = n => {
+        const c = $('#lanes').cloneNode(true);
+        [...c.querySelectorAll('.lane .act')].slice(0, 4).forEach((a, i) => { a.outerHTML = `<span class="act nw el" title="${esc(L[i % 2])}">${esc(L[(i + n) % 2])}</span>`; });
+        frag('lanes', c.innerHTML);
+      };
+      const one = what => $$('.lane .act').forEach(a => {
+        const g = document.createRange();
+        g.selectNodeContents(a);
+        const lines = new Set([...g.getClientRects()].map(r => Math.round(r.top))).size, r = a.getBoundingClientRect();
+        if (a.textContent.startsWith('now: ') && (lines !== 1 || r.right > a.closest('.lane').getBoundingClientRect().right + 1 || getComputedStyle(a).textOverflow !== 'ellipsis')) early.push(`${what}: now-line "${a.textContent.slice(0, 30)}…" ${lines} lines, right ${r.right}`);
+      });
+      for (const n of [0, 1]) {
+        redraw(n);
+        for (const m of TM) { mode(m); await wait(); one(`after /live ${n + 1}, ${m}`); }
+      }
+      if ($$('.lane .act.nw.el').length < 2) early.push('no long now-lines drawn');
+    },
     sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
       open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);

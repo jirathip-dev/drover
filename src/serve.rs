@@ -1960,7 +1960,17 @@ impl<'a> Server<'a> {
                 String::new()
             };
         let screen = screen.unwrap_or_default();
-        let act = esc(&lanes::now_of(l, &screen).unwrap_or_else(|| lanes::activity(&l.harness, &screen)));
+        // #276: a `now:` line is one line from the server (full text on long-press), a command summarised.
+        let act = match lanes::now_of(l, &screen) {
+            Some(n) => format!(
+                "<span class=\"act nw el\" title=\"{}\">{}</span>",
+                esc(&n),
+                esc(&n
+                    .strip_prefix("now: running ")
+                    .map_or(n.clone(), |c| format!("now: running {}", lanes::short(c))))
+            ),
+            None => format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen))),
+        };
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -1974,7 +1984,7 @@ impl<'a> Server<'a> {
         let a = ago(ctx.now, since);
         format!(
             "<div class=lane data-agent=\"{}\" data-role={}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
-             {why}<span class=act>{act}</span></button><div class=card hidden>{card}</div></div>",
+             {why}{act}</button><div class=card hidden>{card}</div></div>",
             esc(&l.name),
             esc(&l.role) + if l.pane.is_none() { " data-gone" } else { "" },
             avatar(&l.name, &l.role, &l.state),
