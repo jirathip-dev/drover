@@ -456,28 +456,63 @@ fn owner_override_still_refuses_red_ci_and_a_stale_verdict() {
     assert!(!r.called("gh pr merge"));
 }
 
-/// `[one more round]` logs `round-extended`: round 4 of 3 may merge, round 5 is ROUND_LIMIT again.
+/// #309: `review_rounds` 9, `rounds` reviewed shas (the last a PASS at the head), the owner's extend after `at`.
+fn extended(name: &str, rounds: usize, at: usize) -> (std::path::PathBuf, herdsman::Ctx) {
+    let (d, c) = setup(name, &CONFIG.replace("review_rounds = 3", "review_rounds = 9"), &[]);
+    for i in 1..=rounds {
+        let (v, sha) = if i == rounds {
+            ("PASS", HEAD.to_string())
+        } else {
+            ("FAIL", format!("{i:040}"))
+        };
+        append(
+            &c.state,
+            &Event::new(20, "sendmeter", Some(12), "verdict", json!({"verdict": v, "sha": sha})),
+        )
+        .unwrap();
+        if i == at {
+            append(
+                &c.state,
+                &Event::new(30, "sendmeter", Some(12), "round-extended", json!({"by": "owner"})),
+            )
+            .unwrap();
+        }
+    }
+    (d, c)
+}
+
+/// `[one more round]` logs `round-extended`: round 10 of 9+1 merges without override, round 11 is ROUND_LIMIT again.
 #[test]
 fn round_extended_allows_exactly_one_more_round() {
-    let ext = |c: &herdsman::Ctx| {
-        let e = Event::new(30, "sendmeter", Some(12), "round-extended", json!({}));
-        append(&c.state, &e).unwrap();
-    };
-    let (_d, c) = setup("extend-4", CONFIG, &OVER);
-    ext(&c);
+    let (_d, c) = extended("extend-10", 10, 9);
+    let s = st(&c);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let (limit, of) = herdsman::gate::limit(cfg.fleet("sendmeter").unwrap(), "rev", Some(&s));
+    assert_eq!(
+        format!("round {}{of}", s.stage_rounds["rev"]),
+        "round 10 of 9+1 (owner extended)"
+    );
+    assert_eq!(limit, 10);
     let (exit, out) = run_cli(&c, &pr("staging", green()));
-    assert_eq!(exit, 0, "round 4 of 3+1 merges: {out}");
+    assert_eq!(exit, 0, "round 10 of 9+1 merges: {out}");
 
-    let five = [
-        OVER[0],
-        OVER[1],
-        OVER[2],
-        ("FAIL", "5555555555555555555555555555555555555555"),
-        ("PASS", HEAD),
-    ];
-    let (_d, c) = setup("extend-5", CONFIG, &five);
-    ext(&c);
+    let (_d, c) = extended("extend-11", 11, 9);
+    let (exit, out) = run_cli(&c, &pr("staging", green()));
+    assert!(
+        out.contains("review rounds ran out (11 of 9+1 (owner extended))"),
+        "{out}"
+    );
+    assert_eq!(exit, 3, "{out}");
     assert_refused(&c, &pr("staging", green()), "ROUND_LIMIT");
+}
+
+/// #309 (synergy#2940): a round reviewed past the limit (a new head after a PASS) is needs-human; its extend grants the
+/// next round, whose PASS merges.
+#[test]
+fn an_extend_after_an_overrun_round_grants_the_next_one() {
+    let (_d, c) = extended("extend-overrun", 11, 10);
+    let (exit, out) = run_cli(&c, &pr("staging", green()));
+    assert_eq!(exit, 0, "round 11 of 9+2: {out}");
 }
 
 // --- #151: `herdsman extend` / `herdsman park` ---

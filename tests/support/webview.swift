@@ -1,7 +1,7 @@
 // Render a page in WebKit at a phone width; print `scrollWidth viewportWidth` of the body
 // with every <details> open, and optionally save a full-height PNG (with `js`: run it
 // after the tab/mode switch and save one 844 px tall screen, e.g. an open sheet).
-// Numbers the js leaves in `window.measure` are printed after the two widths.
+// Numbers the js leaves in `window.measure` are printed after the two widths (with a png, `window.late` instead if set).
 // #200, with `close`: the page under a sheet as it closes. A baseline before `js` opens the sheet, then `close` and
 // snapshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
@@ -100,14 +100,18 @@ final class Nav: NSObject, WKNavigationDelegate {
         """
         w.evaluateJavaScript(js) { r, e in
             guard let v = r as? [Double] else { print("js error: \(String(describing: e))"); exit(2) }
-            print(([Int(v[0]), Int(v[1])].map { "\($0)" } + v.dropFirst(3).map { "\($0)" }).joined(separator: " "))
-            guard let png else { exit(0) }
+            let wide = [Int(v[0]), Int(v[1])].map { "\($0)" }
+            guard let png else { print((wide + v.dropFirst(3).map { "\($0)" }).joined(separator: " ")); exit(0) }
             w.setFrameSize(NSSize(width: width, height: extra.isEmpty ? CGFloat(v[2]) : 844))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                w.takeSnapshot(with: nil) { img, _ in
-                    let rep = NSBitmapImageRep(data: img!.tiffRepresentation!)!
-                    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: png))
-                    exit(0)
+                // #315: numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
+                w.evaluateJavaScript("window.late || null") { m, _ in
+                    print((wide + ((m as? [Double]) ?? Array(v.dropFirst(3))).map { "\($0)" }).joined(separator: " "))
+                    w.takeSnapshot(with: nil) { img, _ in
+                        let rep = NSBitmapImageRep(data: img!.tiffRepresentation!)!
+                        try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: png))
+                        exit(0)
+                    }
                 }
             }
         }

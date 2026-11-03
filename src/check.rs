@@ -124,10 +124,23 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
             if idle > stall && status != Some("working") && !parked {
                 let st = status.unwrap_or("gone");
+                // #319: a settled fix lane at the FAILed head says what it is missing.
+                let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
+                let same = s.state.starts_with("fix") && pr["headRefOid"].as_str().is_some_and(|h| s.reviewed(h));
+                let ci = cfg
+                    .fleet(&s.fleet)
+                    .map(|f| gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)));
+                let why = match ci {
+                    Ok(ci) if same => format!(
+                        "fix lane idle, head unchanged, CI {ci}: run herdsman done {} {} --no-change \"<why>\" or push",
+                        s.fleet, s.issue
+                    ),
+                    _ => format!("{role} lane {lane} is {st}"),
+                };
                 hits.push((
                     "stall",
                     key,
-                    format!("no event for {} in {}; {role} lane {lane} is {st}", age(idle), s.state),
+                    format!("no event for {} in {}; {why}", age(idle), s.state),
                 ));
             }
         }
