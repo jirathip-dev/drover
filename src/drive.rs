@@ -7,7 +7,7 @@ use crate::waiting::Waiting;
 use crate::{gh, queue, waiting, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -103,6 +103,57 @@ const PAST: [&str; 3] = ["started", "merged", "reviewed"];
 thread_local! {
     /// #166: each fleet's actions in the running pass, a silent repeat too: its `drive-pass` record.
     static ACTS: RefCell<BTreeMap<String, Vec<Value>>> = const { RefCell::new(BTreeMap::new()) };
+    /// #304: the one issue a kick drives (`None`: all); `IN_ACT` while a pass runs a command, which then kicks nothing.
+    static KICK: Cell<Option<u64>> = const { Cell::new(None) };
+    static IN_ACT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
+/// main host), output to `kick.log`; a no-op inside a pass's own command.
+pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) {
+    let a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
+    if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
+        return;
+    }
+    let (exe, args, log) = (&ctx.exe, a.join(" "), state_dir(ctx).join("kick.log"));
+    let sh = format!("nohup '{exe}' {args} --now >> '{}' 2>&1 < /dev/null &", log.display());
+    let _ = r.run("sh", &crate::runner::argv(&["-c", &sh]));
+}
+
+/// #304: `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s
+/// after it, is coalesced into one follow-up; a busy lock is retried as one too.
+pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (&str, u64, &str, bool)) -> Result<()> {
+    let (fleet, n, why, now) = k;
+    if !now {
+        cfg.fleet(fleet)?;
+        kick(ctx, r, fleet, n, why);
+        return Ok(());
+    }
+    std::fs::create_dir_all(state_dir(ctx))?;
+    let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
+    let Some(_k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
+        return Ok(std::fs::write(&again, why)?);
+    };
+    for _ in 0..30 {
+        let mut buf = vec![];
+        KICK.set(Some(n));
+        let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
+        KICK.set(None);
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        out.write_all(&buf)?;
+        if text.starts_with("drive: ") {
+            std::fs::write(&again, why)?;
+        } else {
+            let d = json!({"why": why, "result": summary(fleet, &text)});
+            append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "kick", d))?;
+        }
+        res?;
+        r.sleep(10);
+        if std::fs::remove_file(&again).is_err() {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -219,7 +270,7 @@ pub fn drive(
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     let i = usize::from(fast);
-    gh::FORCE.set(fast);
+    gh::FORCE.set(fast || KICK.get().is_some());
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
     let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
@@ -280,10 +331,10 @@ pub fn drive(
     }
     for name in fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
-        if !fast {
+        if !fast && KICK.get().is_none() {
             let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
         } else if acts.is_empty() {
-            continue; // a fast step that did nothing logs no pass
+            continue; // a fast step or kick that did nothing logs no pass
         }
         // #166: one `drive-pass` per fleet and pass, manual or automatic: the board's result line.
         let end = crate::now();
@@ -303,10 +354,13 @@ fn pass(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &st
     let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
     let agents = crate::hosts::all_agents(cfg, r)?;
+    let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, r, &events, &agents, true);
+    waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, r, &read(&ctx.state)?, &agents, false);
+        waits.retain(one);
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
     let preview = || crate::overlap::preview(ctx, cfg, r, fleet, &events).ok();
@@ -555,7 +609,7 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
     let events = read(&ctx.state)?;
     for s in fold(&events)
         .into_values()
-        .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked")
+        .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked" && KICK.get().is_none_or(|k| k == s.issue))
     {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let num = pr["number"].to_string();
@@ -585,7 +639,12 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
 fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
     let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
     let mut go = start;
-    for n in queue::startable(&events, fleet).into_iter().take_while(|_| start) {
+    let one = |n: &String| KICK.get().is_none_or(|k| n == &k.to_string());
+    for n in queue::startable(&events, fleet)
+        .into_iter()
+        .filter(one)
+        .take_while(|_| start)
+    {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
         go &= !matches!(
@@ -608,11 +667,12 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         e.str("worktree")
             .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
     };
-    if events
-        .iter()
-        .filter(|e| e.kind == "spawn" && e.fleet == fleet)
-        .filter(merged)
-        .any(|e| left(&e))
+    if KICK.get().is_none()
+        && events
+            .iter()
+            .filter(|e| e.kind == "spawn" && e.fleet == fleet)
+            .filter(merged)
+            .any(|e| left(&e))
     {
         act(
             ctx,
@@ -631,6 +691,9 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
 /// a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`)
 /// only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    if KICK.get().is_some() {
+        return Ok(()); // #304: a kick leaves every other issue to the timers
+    }
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
         read(&ctx.state)?,
@@ -730,7 +793,9 @@ type Code = Option<&'static str>;
 fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], at: At, c: &[&str]) -> Result<Code> {
     let (fleet, issue, step) = at;
     let mut buf = vec![];
+    IN_ACT.set(true);
     let res = crate::cli::run(c, ctx, r, &mut buf);
+    IN_ACT.set(false);
     let text = String::from_utf8_lossy(&buf);
     let (result, code) = match res {
         Ok(0) => (text.lines().next().unwrap_or("ok").to_string(), None),

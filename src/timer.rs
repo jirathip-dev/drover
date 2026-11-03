@@ -387,6 +387,11 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = if late { "r" } else { tone(ctx.now, at) };
     let (t, d) = job(1, t, format!("{took}ran {}", ago(ctx.now, at)));
     rows.push(row("fast step", t, d, FIX));
+    // #304: the last kick (a lane push, stop or ask, a board tap) beside the timers.
+    let k = events.iter().rfind(|e| e.kind == "kick");
+    let why = k.map(|e| format!(" ({} #{})", e.str("why").unwrap_or("?"), e.issue.unwrap_or(0)));
+    let d = format!("last kick {}{}", ago(ctx.now, k.map(|e| e.ts)), why.unwrap_or_default());
+    rows.push(row("kick", "m", d, ""));
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

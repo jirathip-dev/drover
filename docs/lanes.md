@@ -87,6 +87,16 @@ issue and PR comments, `gh pr review`, `git push` to main, master, staging or th
 integration branch, and edits to fleet and Hermes profile config. Reviewer lanes are
 read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`.
 
+### Kicks (#304)
+
+The same hook runs on Claude `PostToolUse` (Bash) and `Stop`, and on Hermes `post_tool_call`: a
+`git push` that went through, or a finished turn, runs `herdsman kick <fleet> <issue> --why push|stop`.
+So do `herdsman ask`, `verdict` and `answer`, and the board's answer, override, extend, park and queue
+moves. A kick returns at once: a detached `kick --now` (output in `<state>/kick.log`) drives that issue's
+due steps alone under the drive lock, logs `kick`, and coalesces kicks within 10 s (or while the lock is
+busy) into one follow-up. A lane on another host kicks the main host. The tick and fast timers stay the
+safety net for CI, outside merges and stalls; the Host tab shows the last kick.
+
 ### Denied commands (#216)
 
 The hook also refuses every `deny_commands` entry run as a command word: in a pipeline, after `&&`

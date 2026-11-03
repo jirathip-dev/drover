@@ -1175,6 +1175,7 @@ impl<'a> Server<'a> {
                 let issue = n("issue").context("no issue")?;
                 let d = queue::op("mv", &[issue], false, n("before"), n("after"), None);
                 crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))?;
+                crate::drive::kick(ctx, self.r, fleet, issue, "board");
                 format!(
                     "moved #{issue} {}",
                     n("before").map_or_else(|| format!("after #{}", g("after")), |b| format!("before #{b}"))
@@ -1228,6 +1229,7 @@ impl<'a> Server<'a> {
                     op,
                     (true, "owner"),
                 )?;
+                crate::drive::kick(ctx, self.r, fleet, n, "board");
                 format!("#{n}: {op}")
             }
             "orphans" => {
