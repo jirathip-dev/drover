@@ -974,3 +974,94 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
         );
     }
 }
+
+/// Both hosts idle, #12's impl lane live on bazzite in pane w9:p1.
+fn live_fake() -> Fake {
+    Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(
+            "herdr --machine bazzite agent list",
+            &agents(&[("sendmeter-impl-12", "idle", WT, "w9:p1")]),
+        )
+        .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
+        .reply("sysctl -n hw.ncpu", "4")
+        .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
+        .reply(&format!("{SSH}'nproc'"), "4")
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+}
+
+/// #327: superseding a lane on bazzite kills, reaps and reopens it over `--machine` (never the main host's herdr);
+/// its reopened workspace gone under it (`workspace_not_found`) is opened again and the spawn goes on.
+#[test]
+fn a_remote_supersede_stays_on_its_host_and_outlives_a_gone_workspace() {
+    let c = setup("hosts-supersede", "", true, 0);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    remote_spawn(&c, NOW - 900);
+    let ws = |w: &str| format!(r#"{{"result":{{"workspace":{{"workspace_id":"{w}"}}}}}}"#);
+    let gone = r#"{"error":{"code":"workspace_not_found","message":"workspace w9 not found"}}"#;
+    let r = live_fake()
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+        .reply("herdr --machine bazzite pane close w9:p1", "{}")
+        .once("herdr --machine bazzite worktree open", 0, &ws("w9"))
+        .reply("herdr --machine bazzite worktree open", &ws("wA"))
+        .once_err("herdr --machine bazzite pane list --workspace w9", 1, gone)
+        .reply(
+            "herdr --machine bazzite pane list --workspace wA",
+            r#"{"result":{"panes":[{"pane_id":"wA:p1","agent":null}]}}"#,
+        )
+        .reply("herdr --machine bazzite pane run wA:p1 export", "{}")
+        .reply("herdr --machine bazzite agent start sendmeter-impl-12", "{}")
+        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    let herdr: Vec<_> = calls
+        .iter()
+        .filter(|c| c.starts_with("herdr ") && !c.starts_with("herdr agent list"))
+        .collect();
+    assert!(
+        herdr.iter().all(|c| c.starts_with("herdr --machine bazzite ")),
+        "{herdr:?}"
+    );
+    assert!(r.called("herdr --machine bazzite pane close w9:p1"), "{calls:?}");
+    assert_eq!(r.count("herdr --machine bazzite worktree open"), 2, "{calls:?}");
+    let e = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "spawn")
+        .unwrap();
+    assert_eq!((e.str("workspace"), e.str("pane")), (Some("wA"), Some("wA:p1")));
+}
+
+/// #327: a supersede that moves the lane (`--host mini`) still closes the old lane's pane on bazzite.
+#[test]
+fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
+    let c = setup("hosts-supersede-move", "", true, 0);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    remote_spawn(&c, NOW - 900);
+    let r = live_fake()
+        .reply("git ", "")
+        .reply(
+            "herdr worktree create",
+            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
+        )
+        .reply(
+            "herdr pane list --workspace w1",
+            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run w1:p1 export", "{}")
+        .reply("herdr agent start sendmeter-impl-12", "{}")
+        .reply("herdr agent wait sendmeter-impl-12", "{}")
+        .reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let args = ["spawn", "sendmeter", "12", "impl", "--supersede", "--host", "mini"];
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    assert!(
+        r.called("herdr --machine bazzite pane close w9:p1"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(!r.called("herdr pane close w9:p1"), "never on the main host's herdr");
+}
