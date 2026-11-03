@@ -29,7 +29,7 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 
 - `~/.config/herdsman/claude/` (the per-role Claude profiles) and the Hermes profiles' hooks:
   `herdsman profiles sync`.
-- `gh auth login`, `herdr`, and each fleet's `local` checkout (`gh repo clone <repo> <local>`).
+- `gh auth login`, `herdr`, and each fleet's `local` checkout (`git clone https://github.com/<repo>.git <local>`).
 - Then `herdsman setup` ([setup.md](setup.md#4-watchdog)): the tick and serve jobs, `tailscale serve`
   (with `[serve] tailscale_https_port` set) and the profiles, then doctor.
 
