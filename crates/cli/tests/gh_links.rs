@@ -49,7 +49,7 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
         "herdr agent list",
         &agents(&[("sendmeter-impl-12", "idle", "/x", "w1:p1")]),
     );
-    let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/");
+    let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/?all=1");
     let q = section(&page, "queue");
     assert!(
         q.contains(&format!("<summary><span><a href=\"{GH}/issues/12\">#12</a></span>")),
@@ -93,7 +93,10 @@ fn a_reviewer_event_links_the_prs_checks_not_its_own_branch() {
 #[test]
 fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
     let c = spawned("links-nopr");
-    let page = get(&Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())), "/");
+    let page = get(
+        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        "/?all=1",
+    );
     let q = section(&page, "queue");
     assert!(
         q.contains(&format!("[<a href=\"{GH}/issues/17\">issue</a>] · no PR read yet")),
@@ -119,7 +122,10 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
         "{:?}",
         r.calls.borrow()
     );
-    let page = get(&Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())), "/");
+    let page = get(
+        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        "/?all=1",
+    );
     let q = section(&page, "queue");
     assert!(
         q.contains(&format!(

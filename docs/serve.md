@@ -15,9 +15,23 @@ old rows are numbered by line), each new one goes out as `event: ev` (`{seq, ts,
 message carries `id: <seq>`. A reconnect sends `Last-Event-ID` or `/live?since=N` and gets every event after N
 once (over 500: one `event: refresh`, a full refresh); the page keeps the tab's last seq, drops any seq it has seen
 and plays a moment only within 2 minutes of its event. The dot next to ↻ is green (live; it pulses on an update), amber
-(reconnecting, ↻ spins; back-off 1, 2, 5, 10 s, then a `/?frag=all` poll every 10 s after 30 s
+(reconnecting, ↻ spins; back-off 1, 2, 5, 10 s, then a `/frags?tab=<open tab>` poll every 10 s after 30 s
 down) or red (offline). Tapping ↻, or pulling down from the top (past ~70 px), fetches
-`/?frag=all` from the network.
+`/frags?tab=<open tab>` from the network.
+
+Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
+look at everything the board and `status` show and save it as `<state dir>/snapshot.json`: each read's output by
+command line. Every remote host's reads (verdict files, `git` facts, its herdr's agent list and pane reads) go in one
+ssh call per host per step, a small script that prints each output and exit code; herdsman's ssh keeps one connection
+per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~/.ssh/config` says). Only what decides
+something is read: a verdict file only until its verdict is recorded, `git log` only for an impl/fix not seen pushed
+(or a review with no spawn sha), never a merged or closed lane. A request (`/`, `/frags`, `/herd.json`, `/live`) and
+`status`/`hosts` replay the snapshot: a remote read it lacks fails, it never runs on a request; only a lane's chat
+(`/lane`) reads that one pane live (5 s cache). Its age shows above every tab once it is over 2 minutes old (`as of the
+step's look 5m ago`), and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
+watcher pushes on each new snapshot instead of polling herdr. `tests/perf.rs` is the gate: 30 lanes on 2 hosts, +300 ms
+per remote call, at most one remote call per host per step, `GET /` < 150 ms (< 40 KB), `/herd.json` < 100 ms,
+`status` < 300 ms, first paint in WebKit < 300 ms (warm); a miss fails CI and the numbers go to the job summary.
 
 Speed (#57): a background thread samples the host every 10 s (the 2 s `vm_stat` delta happens there),
 so a request never waits on it. Requests share the watcher's cache of `herdr pane read` and the
@@ -26,10 +40,16 @@ manifest are `public, max-age=86400`. The page is HTML only (`no-store`); its sc
 `/a/<hash8>/serve.js`, `serve.css`, `herd.js`, `herd.css` and the built-in themes (`themes/…`; `<hash8>` is FNV-1a over
 their content at build time) with `cache-control: public, max-age=31536000, immutable`, precached by
 the service worker. The SW serves the page stale-while-revalidate: the cached copy paints at once (the
-dot amber) and the live stream's first `?frag=all` fills it in (green). In scene mode a Lanes avatar shows its
+dot amber) and the live stream's first `frags?tab=` read fills it in (green). In scene mode a Lanes avatar shows its
 glyph until herd.js has built the horse symbols from the theme's `sprites.svg`.
 
-Page size (#60): `GET /` leaves out what the first paint does not show. A fleet's `roles` row is empty
+Page size (#60, #337): `GET /` carries the needs-you cards and the open tab only (the `tab` cookie serve.js keeps,
+else Queue); another tab loads from `GET /frags?tab=<tab>` (that tab and the needs-you cards) when it first opens, its
+last copy from this session (sessionStorage) painted first, as the Herd scene's last data is. A copy over 2 minutes old
+shows `as of HH:MM` in the header until fresh data lands. A load, refresh or action over 300 ms shows the theme's
+`loading` sprite at 96 px, centred near the top of the content over a light scrim (terminal: a spinning ↻); it takes
+no taps, the header stays clear, `[↻]` spins its plain ↻ meanwhile, and it goes as soon as the data paints. Animations
+pause while the app is in the background. `GET /` also leaves out what the first paint does not show. A fleet's `roles` row is empty
 until opened; opening it reads `GET /frag?id=roles&fleet=<fleet>` (the model/effort forms; kept across
 live swaps, re-read on ↻). The Events tab body is read from `GET /frag?id=events` when the tab opens
 (`/?all=1` still renders it in the page; `/frags` and the live stream still carry it). No compression:

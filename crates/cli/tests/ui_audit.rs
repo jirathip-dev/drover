@@ -49,7 +49,7 @@ fn fixture() -> (String, String) {
         .reply("herdr agent list", &list.to_string())
         .reply("herdr pane read", MENU);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = req(&s, "GET", "/", "", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
+    let page = req(&s, "GET", "/?all=1", "", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
     // #60: the parts the live page loads on demand, spliced in as the page shows them once loaded.
     let part = |p: &str| {
         let r = req(&s, "GET", p, "", "");

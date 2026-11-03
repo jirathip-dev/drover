@@ -366,14 +366,24 @@ pub fn scan(
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
         let sp = last_spawn(events, &lane);
-        let wt = sp.and_then(|e| e.str("worktree")).filter(|_| s.state != "merged");
+        let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
         let on = crate::hosts::On::of(r, sp);
-        let git = wt.and_then(|wt| ok(&on, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok());
+        let spawn = s.check_lane().and_then(|l| last_spawn(events, l));
+        // #337: the worktree head only where it decides something: an impl/fix not seen pushed, a review with no sha.
+        let pushed = pr["headRefOid"].as_str().unwrap_or_default();
+        let seen = events
+            .iter()
+            .any(|e| e.is("pushed", &s.fleet, s.issue) && e.str("sha") == Some(pushed));
+        let need = match s.state.split('(').next() {
+            Some("impl" | "fix") => pushed.is_empty() || !seen,
+            Some("review") => spawn.and_then(|e| e.str("sha")).is_none(),
+            _ => false,
+        };
+        let git = (wt.filter(|_| need)).and_then(|wt| ok(&on, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).ok());
         let head = git
             .as_deref()
             .and_then(|g| g.trim().split_once(' '))
             .and_then(|(h, t)| Some((h, t.parse().ok()?)));
-        let spawn = s.check_lane().and_then(|l| last_spawn(events, l));
         let path = spawn
             .and_then(|e| e.str("worktree"))
             .map(|wt| format!("{wt}/verdict.md"));
@@ -384,26 +394,36 @@ pub fn scan(
         };
         // #157: on another host the rev spawn removed any older verdict.md, so one there is this round's.
         let there = crate::hosts::On::of(r, spawn);
-        let text = path.as_ref().and_then(|p| match there.machine {
-            Some(_) => there.read(std::path::Path::new(p)),
-            None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
+        // #337: a verdict recorded since the rev spawn stands for its file, which is then never read again.
+        let kept = spawn.and_then(|sp| {
+            events
+                .iter()
+                .rfind(|e| e.is("verdict", &s.fleet, s.issue) && e.ts >= sp.ts)
         });
+        let text = path
+            .as_ref()
+            .filter(|_| kept.is_none())
+            .and_then(|p| match there.machine {
+                Some(_) => there.read(std::path::Path::new(p)),
+                None => std::fs::read_to_string(p).ok().filter(|_| fresh(p)),
+            });
         let word = text
             .as_deref()
             .map(|v| v.lines().next().unwrap_or_default().trim().to_string())
             // #228: a form-only FAIL is recorded as `FAIL`; `verdict` reads the tag from the file.
-            .map(|v| if v == "FAIL (form-only)" { "FAIL".into() } else { v });
+            .map(|v| if v == "FAIL (form-only)" { "FAIL".into() } else { v })
+            .or_else(|| kept.and_then(|e| e.str("verdict")).map(String::from));
         let named = text
             .as_deref()
             .and_then(|t| t.lines().find(|l| l.contains("Reviewed head")))
-            .and_then(|l| l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40));
+            .and_then(|l| l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40))
+            .or_else(|| kept.and_then(|e| e.str("sha")));
         // In review, `head` is the sha verdict.md names (#293), or the rev spawn head (#92; else its worktree's).
         let at = spawn
             .filter(|_| s.check_lane() == Some(&lane))
             .and_then(|e| Some((named.or(e.str("sha"))?, e.ts)));
         // #207: a PR head that merges the reviewed one with integration and adds nothing carries its verdict, as a
         // logged auto-update does: read as one, the verdict is recorded at the reviewed sha.
-        let pushed = pr["headRefOid"].as_str().unwrap_or_default();
         let updated = |e: &Event| e.is("auto-updated", &s.fleet, s.issue) && e.str("to") == Some(pushed);
         let carry = at.filter(|(x, _)| {
             word.is_some()

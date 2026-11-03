@@ -5,6 +5,7 @@ use crate::events::{age, append, fold, plain, read, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
+use crate::snapshot::Snapshot;
 use crate::{devices, gh, herdr, lanes, queue, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
@@ -171,10 +172,16 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
 }
 
 /// `Server::cached` as a Runner (runner, cache, now, ttl): also `waiting::scan`'s per-issue `git log` on a request.
-struct Memo<'a>(&'a dyn Runner, &'a Cache, u64, u64);
+/// A read the step's snapshot (#337) has comes from it; one it lacks on another host fails, never runs on a request.
+struct Memo<'a>(&'a dyn Runner, &'a Cache, u64, u64, Arc<Snapshot>);
 impl Runner for Memo<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
-        let (key, cache) = (format!("{prog} {}", args.join(" ")), || lock(self.1));
+        let (key, cache) = (crate::snapshot::key(prog, args), || lock(self.1));
+        match self.4.reads.get(&key) {
+            Some(v) => return Ok(crate::snapshot::out(v.clone())),
+            None if self.4.ts > 0 && crate::snapshot::remote(prog, args) => return Ok(crate::snapshot::out(None)),
+            None => {}
+        }
         let hit = cache()
             .get(&key)
             .filter(|(t, _)| self.2 >= *t && self.2 - t < self.3)
@@ -271,10 +278,26 @@ pub struct Server<'a> {
     running: Mutex<BTreeSet<String>>,
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
+    /// #337: the step's snapshot as last loaded, by the file's mtime.
+    snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
+
+const TABS: [&str; 4] = ["queue", "lanes", "host", "events"];
+
+/// #337: the query, with the `tab` cookie (serve.js keeps the open tab there) when it names none.
+fn with_tab(mut q: BTreeMap<String, String>, head: &str) -> BTreeMap<String, String> {
+    let c = header(head, "cookie")
+        .unwrap_or_default()
+        .split(';')
+        .find_map(|c| c.trim().strip_prefix("tab="));
+    if let Some(t) = c.filter(|_| !q.contains_key("tab")) {
+        q.insert("tab".into(), t.into());
+    }
+    q
+}
 
 /// A `303 See Other` to `loc`.
 fn see(loc: &str) -> Vec<u8> {
@@ -626,6 +649,7 @@ impl<'a> Server<'a> {
             jobs: None,
             running: Mutex::default(),
             export: None,
+            snap: Mutex::default(),
         }
     }
 
@@ -746,7 +770,12 @@ impl<'a> Server<'a> {
         }
         let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
         (w.log, w.driving) = (log, driving);
-        if now >= w.herdr.0 + 2 {
+        // #337: a new snapshot is the change to show; none saved, herdr's agent list every 2 s as before.
+        let at = self.snapshot().0;
+        if at.is_some() {
+            changed |= hash(&at) != w.herdr.1;
+            w.herdr = (now, hash(&at));
+        } else if now >= w.herdr.0 + 2 {
             let out = herdr::agent_list(self.r);
             changed |= hash(&out) != w.herdr.1;
             w.herdr = (now, hash(&out));
@@ -784,6 +813,7 @@ impl<'a> Server<'a> {
                     },
                     false,
                     paired,
+                    None,
                 )
                 .unwrap_or_default()
             {
@@ -806,7 +836,25 @@ impl<'a> Server<'a> {
 
     /// The runner whose reads that ran OK within the last `ttl` seconds come from the cache (else run now).
     fn cached(&self, now: u64, ttl: u64) -> Memo<'_> {
-        Memo(self.r, &self.cache, now, if self.fresh { ttl / 3 } else { ttl })
+        Memo(
+            self.r,
+            &self.cache,
+            now,
+            if self.fresh { ttl / 3 } else { ttl },
+            self.snapshot().1,
+        )
+    }
+
+    /// #337: the step's snapshot (reloaded when its file changes) and the file's mtime; none: empty.
+    fn snapshot(&self) -> (Option<std::time::SystemTime>, Arc<Snapshot>) {
+        let at = std::fs::metadata(crate::snapshot::file(self.ctx))
+            .and_then(|m| m.modified())
+            .ok();
+        let mut s = lock(&self.snap);
+        if s.0 != at {
+            *s = (at, Arc::new(crate::snapshot::load(self.ctx).unwrap_or_default()));
+        }
+        s.clone()
     }
 
     /// The full HTTP response to one request.
@@ -845,13 +893,13 @@ impl<'a> Server<'a> {
         let loopback =
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
-            ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some()).map_or_else(fail, |f| {
+            ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some(), form(query).get("tab").map(String::as_str)).map_or_else(fail, |f| {
                 ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
             }),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
-            ("GET", "/") => self.page(ctx, &form(query), self.device(ctx, head).is_some())
+            ("GET", "/") => self.page(ctx, &with_tab(form(query), head), self.device(ctx, head).is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
             ("GET", "/frag") => self.part(ctx, &form(query))
                 .map_or(("404 Not Found", "text/plain", text("no such part\n")), |h| ("200 OK", HTML, h.into_bytes())),
@@ -1060,6 +1108,10 @@ impl<'a> Server<'a> {
         herdr::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
+        // #337: a board tap is a kick: the snapshot is looked at again at once.
+        if let Some(n) = l.issue {
+            crate::drive::kick(ctx, self.r, &fleet, n, "board");
+        }
         self.r.sleep(1);
         Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
             format!("still waiting: {agent}")
@@ -1087,6 +1139,9 @@ impl<'a> Server<'a> {
         herdr::reply(&l.on(self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
         append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
+        if let Some(n) = l.issue {
+            crate::drive::kick(ctx, self.r, fleet, n, "board");
+        }
         Ok(format!("sent to {agent}"))
     }
 
@@ -1137,7 +1192,9 @@ impl<'a> Server<'a> {
             let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
             return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
         };
-        let screen = herdr::recent(&l.on(&self.cached(ctx.now, 5)), l.pane.as_deref()?, "200").ok()?;
+        // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
+        let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
+        let screen = herdr::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
         let end = all.len().saturating_sub(before);
@@ -1259,21 +1316,37 @@ impl<'a> Server<'a> {
     }
 
     /// The live sections' inner HTML by element id (the page, `/?frag=all`, `/live`); pane text only when `paired`.
-    fn frags(&self, ctx: &Ctx, all: bool, paired: bool) -> Result<Vec<(&'static str, String)>> {
+    /// #337: `tab` Some: the needs cards and that tab only.
+    fn frags(&self, ctx: &Ctx, all: bool, paired: bool, tab: Option<&str>) -> Result<Vec<(&'static str, String)>> {
         let events = read(&ctx.state)?;
         let (cfg, st) = (Config::load(&ctx.config).ok(), fold(&events));
-        Ok(vec![
-            ("needs", self.needs_you(ctx, cfg.as_ref(), &events, &st, paired)),
-            ("queue", self.queue_tab(ctx, cfg.as_ref(), &events, &st)),
-            (
-                "lanes",
+        let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
+        let parts: [(&'static str, &dyn Fn() -> String); 5] = [
+            ("needs", &|| self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired)),
+            ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
+            ("lanes", &|| {
                 "<p class=lh><button id=mode type=button aria-label=\"lane display mode\">scene</button></p>"
                     .to_string()
-                    + &self.lanes_tab(ctx, cfg.as_ref(), &events, &st, paired),
-            ),
-            ("host", self.host_tab(ctx, cfg.as_ref(), &events)),
-            ("events", events_tab(ctx, self.r, cfg.as_ref(), &events, all)),
-        ])
+                    + &self.lanes_tab(ctx, cfg, ev, st, paired)
+            }),
+            ("host", &|| self.host_tab(ctx, cfg, ev)),
+            ("events", &|| events_tab(ctx, self.r, cfg, ev, all)),
+        ];
+        let want = |id: &str| tab.is_none_or(|t| id == "needs" || id == t);
+        Ok(parts
+            .into_iter()
+            .filter(|p| want(p.0))
+            .map(|(id, f)| (id, f()))
+            .collect())
+    }
+
+    /// #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
+    fn age(&self, ctx: &Ctx) -> String {
+        let t = self.snapshot().1.ts;
+        let old = (t > 0 && ctx.now > t + 120).then(|| age(ctx.now - t));
+        old.map_or(String::new(), |a| {
+            format!("<p class=\"msg a\">as of the step's look {a} ago</p>")
+        })
     }
 
     /// #60: a part the page loads on demand: a fleet's [config] sheet (`id=config&fleet=`, #162), the Events tab
@@ -1304,11 +1377,14 @@ impl<'a> Server<'a> {
 
     fn page(&self, ctx: &Ctx, q: &BTreeMap<String, String>, paired: bool) -> Result<String> {
         let all = q.get("all").is_some_and(|v| v == "1");
-        let mut f = self.frags(ctx, all, paired)?;
-        // #60: the Events tab body loads when the tab opens (`/frag?id=events`), unless `?all=1` asked for it.
-        if self.export.is_none() && !all {
-            f[4].1.clear();
-        }
+        // #337: the live page carries its tab only (the `tab` cookie, else Queue); the others load when they open.
+        let tab = q
+            .get("tab")
+            .map(String::as_str)
+            .filter(|t| TABS.contains(t))
+            .unwrap_or("queue");
+        let f = self.frags(ctx, all, paired, (self.export.is_none() && !all).then_some(tab))?;
+        let f = |id: &str| f.iter().find(|p| p.0 == id).map_or("", |p| p.1.as_str());
         let msg = q.get("msg").map_or(String::new(), |m| {
             let bad = m.starts_with("REFUSED") || m.starts_with("error");
             format!("<p class=\"msg {}\">{}</p>", if bad { "r" } else { "g" }, esc(m))
@@ -1382,11 +1458,11 @@ impl<'a> Server<'a> {
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
-             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i>{msg}<div id=needs>{}</div><main>\
+             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
              <section id=queue>{}</section><section id=lanes>{}</section><section id=host>{}</section>\
              <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
              <a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f[0].1, f[1].1, f[2].1, f[3].1, f[4].1
+            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("host"), f("events")
         ))
     }
 
@@ -1836,35 +1912,17 @@ impl<'a> Server<'a> {
     /// herdr's agents joined with the log (None when herdr cannot be read).
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.herdr_json(now, "agent")?;
-        let mut agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
-        agents.extend(crate::hosts::remote_agents(cfg, &self.cached(now, 30)));
-        let wsl = self.herdr_json(now, "workspace").unwrap_or_default();
-        let ws: BTreeMap<String, String> = wsl["result"]["workspaces"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|w| Some((w["workspace_id"].as_str()?.into(), w["label"].as_str()?.into())))
-            .collect();
-        Some(lanes::join(
+        Some(crate::snapshot::lanes(
             cfg,
             &self.cached(now, 30),
-            &self.ctx.worktrees,
-            events,
-            st,
-            &agents,
-            &ws,
+            self.ctx,
+            (events, st),
+            &list,
         ))
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
-        let live: Vec<_> = all
-            .iter()
-            .map(|l| json!({"name": l.name, "agent_status": l.state}))
-            .collect();
-        crate::waiting::scan(ctx, cfg, &self.cached(ctx.now, 30), events, &live, false)
-            .into_iter()
-            .map(|x| x.1)
-            .collect()
+        crate::snapshot::waits(ctx, cfg, &self.cached(ctx.now, 30), events, all)
     }
 
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).

@@ -10,7 +10,7 @@ use herdsman::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 bazzite -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 const ADDR: &str = "127.0.0.1:7777";
 
@@ -344,7 +344,7 @@ fn an_offline_host_never_pages_and_shows_grey() {
     assert!(hosts.contains("1 lane(s) sendmeter-impl-12"), "{hosts}");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     let g = &page[page
         .find("<article class=hcd data-h=\"bazzite\"")
         .expect("a bazzite card")..];
@@ -375,7 +375,7 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     assert!(
         page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
         "draining shown"
@@ -411,8 +411,9 @@ fn cli_and_board_toggles_both_log() {
     assert_eq!(run(&c, &r, &["hosts", "off", "nope"]).0, 1);
     // The board's [on] button: paired devices only.
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let get =
-        || String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+    let get = || {
+        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
+    };
     let page = get();
     assert!(
         page.contains("<span class=\"hw m\">off · not used for lanes</span>")
@@ -461,7 +462,7 @@ fn lane_cards_and_the_herd_name_the_host() {
         .reply("herdr agent list", NO_AGENTS);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     let card = &page[page.find("data-agent=\"sendmeter-impl-12\"").expect("lane row")..];
     assert!(
         card[..card.find("</div></div>").unwrap()].contains("impl · bazzite · round 0 · claude"),

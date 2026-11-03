@@ -94,7 +94,7 @@ fn mode_button_only_in_the_lanes_tab() {
     let c = queued("mode");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = get(&s, "/");
+    let page = get(&s, "/?all=1");
     let section = |id: &str| {
         let i = page.find(&format!("<section id={id}>")).unwrap();
         page[i..i + page[i..].find("</section>").unwrap()].to_string()
