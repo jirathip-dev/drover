@@ -2,5 +2,14 @@
   "poses": { "working": "horse-working", "idle": "horse-stand", "done": "horse-done", "blocked": "horse-blocked" },
   "glyphs": { "working": "○", "idle": "◦", "unknown": "?", "parked": "◦", "done": "✓", "blocked": "!", "dead": "✗" },
   "words": { "horse": "horse", "horses": "horses", "herd": "herd", "ranch": "ranch", "barn": "barn" },
-  "scene": { "weather": true }
+  "scene": { "weather": true },
+  "actions": { "impl": "horse-working", "fix": "horse-working", "rev": "horse-working", "update": "horse-working", "idle": "horse-stand", "done": "horse-done", "blocked": "horse-blocked" },
+  "looks": [],
+  "load_scene": { "kind": "weather", "levels": { "calm": "clear", "busy": "windy", "held": "storm" } },
+  "rail": { "item": "horse-stand", "needs": "horse-stand" },
+  "moments": { "merged": { "sprite": "horse-done", "anim": "hop" }, "fail": { "sprite": "horse-blocked", "anim": "shake" }, "needs-you": { "sprite": "horse-blocked", "anim": "pulse" } },
+  "row_sprites": {},
+  "icons": { "180": "icon-180.png", "192": "icon-192.png", "512": "icon-512.png", "favicon": "icon-192.png" },
+  "ascii": {},
+  "modes": ["scene", "ascii"]
 }
