@@ -18,7 +18,7 @@ only through it, and it refuses anything that breaks a rule.
 
 ## Quick start
 ```sh
-cargo install --path .
+cargo install --path crates/cli
 mkdir -p ~/.config/herdsman
 cat > ~/.config/herdsman/fleet.toml <<'EOF'
 [fleet.app]

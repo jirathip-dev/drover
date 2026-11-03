@@ -387,12 +387,39 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64",
+ "herdsman-core",
+ "herdsman-server",
+ "hkdf",
+ "p256",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
+name = "herdsman-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64",
  "clap",
  "hkdf",
  "p256",
  "serde",
  "serde_json",
  "sha2",
+ "toml",
+]
+
+[[package]]
+name = "herdsman-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "herdsman-core",
+ "serde_json",
  "toml",
 ]
 

@@ -7,13 +7,13 @@ Placeholders: `<owner>`, `<repo>`, `<home>` (your home directory), `<machine>`, 
 ## 1. Install
 
 You need `git`, `gh` (logged in), [herdr](https://herdr.dev) 0.9.0 or newer, a Rust toolchain, and at
-least one harness: Claude Code and/or Hermes. Every herdr call goes through `src/herdr.rs`, the one
+least one harness: Claude Code and/or Hermes. Every herdr call goes through `crates/core/src/herdr.rs`, the one
 adapter: a herdr CLI change touches that file only.
 
 ```sh
 gh auth status
 herdr --version
-cargo install --path . --locked --root ~/.local/share/herdsman
+cargo install --path crates/cli --locked --root ~/.local/share/herdsman
 echo 'export PATH="$HOME/.local/share/herdsman/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
@@ -114,7 +114,7 @@ sha=$(git rev-parse origin/staging)
 ok=$(gh run list --branch staging --commit "$sha" --json conclusion -q '.[0].conclusion')
 [ "$ok" = "success" ] || exit 0
 git checkout -q --detach "$sha"
-cargo install --path . --locked --root ~/.local/share/herdsman
+cargo install --path crates/cli --locked --root ~/.local/share/herdsman
 echo "$sha" > ~/.local/share/herdsman/sha
 ```
 
