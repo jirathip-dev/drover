@@ -107,6 +107,13 @@ pub struct Seen {
     pub load: Option<f64>,
     pub mem: Option<f64>,
     pub disk: Option<f64>,
+    /// #234: memory pressure 0 normal, 1 warn, 2 critical; swap-out pages/2s; the top memory users (remote hosts).
+    pub pressure: Option<u8>,
+    pub swap: Option<f64>,
+    pub top: Vec<String>,
+    /// #234: memory and disk size in GB (a bar shows the used part).
+    pub mem_total: Option<f64>,
+    pub disk_total: Option<f64>,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -135,10 +142,11 @@ pub fn probe(r: &dyn Runner) -> Option<(Vec<String>, String)> {
 /// Look at every host: its live agents (None: unreachable), load, memory and disk, its tags when an hour old (or
 /// `refresh`); saved for the board, `hosts` and placement.
 pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMap<String, Option<Vec<Value>>> {
-    let (mut all, mut agents) = (cached(ctx), BTreeMap::new());
+    let (mut all, mut agents, mut rows) = (cached(ctx), BTreeMap::new(), vec![]);
     if cfg.hosts.is_empty() {
         return agents;
     }
+    let events = read(&ctx.state).unwrap_or_default();
     for (name, h) in &cfg.hosts {
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
@@ -152,11 +160,21 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                 }
             }
             let hs = host::sample(&on);
-            (s.load, s.mem, s.disk) = (hs.load_per_cpu, hs.free_mem_gb, host::free_gb(&on));
+            (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
+            ((s.disk, s.disk_total), s.swap) = (host::df(&on).unzip(), hs.swapout);
+            s.pressure = hs.pressure.as_deref().map(level);
+            // #234: a remote host's top memory users and its history row come from this 5-minute look (no extra SSH).
+            if let Some(ag) = a.as_ref().filter(|_| h.machine.is_some()) {
+                s.top = host::top(&on, ag);
+                rows.push(row(ctx.now, name, s, lanes_on(cfg, &events, name).len()));
+            }
         }
         agents.insert(name.clone(), a);
     }
     let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+    if let Err(e) = record(ctx, &rows, cfg.hosts.len()) {
+        eprintln!("host history: {e:#}");
+    }
     agents
 }
 
@@ -319,9 +337,9 @@ pub fn rehome(a: Vec<String>, home: Option<&str>) -> Vec<String> {
     }
 }
 
-/// The agents of the open lanes on host `name` (a spawn without `host` ran on the machine-less one).
+/// The agents of the open lanes on host `name` (a spawn without `host` ran on the machine-less one, or the only one).
 pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
-    let here = cfg.hosts.get(name).is_some_and(|h| h.machine.is_none());
+    let here = cfg.hosts.get(name).is_none_or(|h| h.machine.is_none());
     let on = |l: &&str| last_spawn(events, l).is_some_and(|e| e.str("host").map_or(here, |h| h == name));
     let st = fold(events);
     let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
@@ -329,12 +347,12 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
 }
 
 /// A host as the board and `hosts` say it: (tone, words). Offline and off are grey: neither pages.
-pub fn shown(h: &HostCfg, s: &Seen, lanes: usize, now: u64) -> (&'static str, String) {
+pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, String) {
     if !s.up {
         let last = [age(now.saturating_sub(s.seen)), "never".into()][usize::from(s.seen == 0)].clone();
         return ("m", format!("offline · last seen {last}"));
     }
-    match (h.enabled, lanes) {
+    match (enabled, lanes) {
         (false, 0) => ("m", "off · not used for lanes".into()),
         (false, n) => ("m", format!("off · draining {n} lane{}", if n == 1 { "" } else { "s" })),
         _ => ("g", "up".into()),
@@ -352,7 +370,10 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
     for (name, h) in &cfg.hosts {
         let s = seen.get(name).cloned().unwrap_or_default();
         let lanes = lanes_on(cfg, &events, name);
-        let (words, t) = (shown(h, &s, lanes.len(), ctx.now).1, tags(h, Some(&s)).join(","));
+        let (words, t) = (
+            shown(h.enabled, &s, lanes.len(), ctx.now).1,
+            tags(h, Some(&s)).join(","),
+        );
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
         writeln!(
             out,
@@ -375,4 +396,190 @@ pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) ->
     let (kind, d) = (format!("host-{word}"), json!({"host": name, "by": by}));
     emit(&ctx.state, &cfg, Event::new(ctx.now, "herdsman", None, &kind, d))?;
     Ok(writeln!(out, "{name}: {word} for new lanes")?)
+}
+
+/// #234: memory pressure as the history keeps it: 0 normal, 1 warn, 2 critical.
+pub fn level(p: &str) -> u8 {
+    match p {
+        "warn" => 1,
+        "critical" => 2,
+        _ => 0,
+    }
+}
+
+/// #234: the Host tab's cards in order: the main host (no `machine`; `hostname -s` without `[hosts]`), then A→Z.
+pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a HostCfg>)> {
+    if cfg.hosts.is_empty() {
+        let name = ok(r, "hostname", &["-s"]).map(|s| s.trim().to_string()).ok();
+        return vec![(
+            name.filter(|n| !n.is_empty()).unwrap_or_else(|| "this host".into()),
+            None,
+        )];
+    }
+    let mut v: Vec<_> = cfg.hosts.iter().map(|(n, h)| (n.clone(), Some(h))).collect();
+    v.sort_by_key(|(_, h)| h.is_some_and(|h| h.machine.is_some()));
+    v
+}
+
+/// #234: one row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Row {
+    pub ts: u64,
+    pub host: String,
+    pub load_cpu: Option<f64>,
+    pub pressure: Option<u8>,
+    pub swap_out: Option<f64>,
+    pub mem_free_gb: Option<f64>,
+    pub disk_free_gb: Option<f64>,
+    pub lanes: usize,
+}
+
+impl Row {
+    /// Key `k` (load, swap, mem, disk, pressure, lanes): its value, and true when low is bad (free space).
+    pub fn get(&self, k: &str) -> (Option<f64>, bool) {
+        match k {
+            "load" => (self.load_cpu, false),
+            "swap" => (self.swap_out, false),
+            "mem" => (self.mem_free_gb, true),
+            "disk" => (self.disk_free_gb, true),
+            "pressure" => (self.pressure.map(f64::from), false),
+            _ => (Some(f64::from(u32::try_from(self.lanes).unwrap_or(u32::MAX))), false),
+        }
+    }
+}
+
+const DAY: u64 = 86_400;
+/// #234: the history's size bound per host: 1,600 rows of up to 200 B (a row is about 130 B), so 25 h fit.
+pub const BOUND: usize = 320_000;
+
+fn history_file(ctx: &Ctx) -> PathBuf {
+    ctx.state.with_file_name("host-history.jsonl")
+}
+
+pub fn history(ctx: &Ctx) -> Vec<Row> {
+    let text = std::fs::read_to_string(history_file(ctx)).unwrap_or_default();
+    text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
+/// #234: append `rows`; once the oldest row is over 25 h old or the file over `BOUND` for each of `hosts`, it is
+/// rewritten to the last 24 h, newest first within 9/10 of the bound (the headroom keeps an oversize file from being
+/// rewritten every minute). So it is rewritten at most once an hour.
+pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
+    let (p, bound) = (history_file(ctx), BOUND * hosts.max(1));
+    let new: String = rows
+        .iter()
+        .map(|r| serde_json::to_string(r).unwrap_or_default() + "\n")
+        .collect();
+    let ts = |l: &str| serde_json::from_str::<Row>(l).map_or(0, |r| r.ts);
+    let first = std::fs::File::open(&p)
+        .ok()
+        .and_then(|f| std::io::BufRead::lines(std::io::BufReader::new(f)).next());
+    let len = std::fs::metadata(&p).map_or(0, |m| usize::try_from(m.len()).unwrap_or(usize::MAX)) + new.len();
+    if first
+        .and_then(Result::ok)
+        .is_none_or(|l| ts(&l) + DAY + 3600 >= ctx.now)
+        && len <= bound
+    {
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&p)?;
+        return Ok(f.write_all(new.as_bytes())?);
+    }
+    let (text, mut size) = (std::fs::read_to_string(&p)? + &new, 0);
+    let keep: Vec<&str> = (text.lines().rev().filter(|l| ts(l) + DAY >= ctx.now))
+        .take_while(|l| {
+            size += l.len() + 1;
+            size <= bound / 10 * 9
+        })
+        .collect();
+    write_atomic(&p, &keep.iter().rev().map(|l| format!("{l}\n")).collect::<String>())
+}
+
+/// #234: a history row of `s` at `ts`, rounded so a row stays about 125 B.
+fn row(ts: u64, host: &str, s: &Seen, lanes: usize) -> Row {
+    let q = |x: Option<f64>, m: f64| x.map(|x| (x * m).round() / m);
+    Row {
+        ts,
+        host: host.into(),
+        load_cpu: q(s.load, 100.0),
+        pressure: s.pressure,
+        swap_out: q(s.swap, 1.0),
+        mem_free_gb: q(s.mem, 10.0),
+        disk_free_gb: q(s.disk, 10.0),
+        lanes,
+    }
+}
+
+/// #234 the fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`).
+pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
+    let hs = host::sample(r);
+    let s = Seen {
+        load: hs.load_per_cpu,
+        mem: hs.free_mem_gb,
+        disk: host::free_gb(r),
+        pressure: hs.pressure.as_deref().map(level),
+        swap: hs.swapout,
+        ..Seen::default()
+    };
+    let cards = cards(cfg, r);
+    let main = cards.iter().find(|c| c.1.is_none_or(|h| h.machine.is_none()));
+    let rows: Vec<Row> = main
+        .map(|(n, _)| row(ctx.now, n, &s, lanes_on(cfg, events, n).len()))
+        .into_iter()
+        .collect();
+    record(ctx, &rows, cards.len())
+}
+
+/// #234: host `h`'s key `k` over the `secs` up to `now` in `n` buckets, each its worst row (the max; for free space the
+/// min) and that row's time, so a peak is never averaged away; None where no row fell.
+pub fn spark(rows: &[Row], h: &str, k: &str, (now, secs, n): (u64, u64, usize)) -> Vec<Option<(f64, u64)>> {
+    let (mut out, from) = (vec![None; n], now.saturating_sub(secs));
+    for r in rows.iter().filter(|r| r.host == h && r.ts > from && r.ts <= now) {
+        let (Some(v), low) = r.get(k) else { continue };
+        let i = usize::try_from((r.ts - from - 1) * n as u64 / secs.max(1)).unwrap_or(0);
+        let o: &mut Option<(f64, u64)> = &mut out[i.min(n - 1)];
+        if o.is_none_or(|(w, _)| if low { v < w } else { v > w }) {
+            *o = Some((v, r.ts));
+        }
+    }
+    out
+}
+
+/// #234: host `h`'s key `k` as the board sends it, comma-separated (empty: no row): the 24 h sparkline (120 buckets),
+/// with `all` also the chart's 6 h (120 buckets) and 1 h (60 minutes), `;` apart; `f` prints a bucket.
+fn ranges(rows: &[Row], (h, k, now, all): (&str, &str, u64, bool), f: &dyn Fn((f64, u64)) -> String) -> String {
+    let one = |&(secs, n): &(u64, usize)| {
+        let v = spark(rows, h, k, (now, secs, n));
+        v.into_iter()
+            .map(|v| v.map_or(String::new(), f))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let rs = [(DAY, 120), (21_600, 120), (3_600, 60)];
+    rs[..[1, 3][usize::from(all)]]
+        .iter()
+        .map(one)
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// #234: `ranges` of the values, as few decimals as the row has.
+pub fn series(rows: &[Row], h: &str, k: &str, now: u64, all: bool) -> String {
+    let p = match k {
+        "load" => 2,
+        "mem" | "disk" => 1,
+        _ => 0,
+    };
+    ranges(rows, (h, k, now, all), &|(v, _)| format!("{v:.p$}"))
+}
+
+/// #234: an open chart's series, `|` apart: key `k`, the lanes and the memory pressure with every range, then the
+/// minutes ago of each of `k`'s worst rows (the read-out's time).
+pub fn chart(rows: &[Row], h: &str, k: &str, now: u64) -> String {
+    let c = [k, "lanes", "pressure"]
+        .map(|x| series(rows, h, x, now, true))
+        .join("|");
+    c + "|"
+        + &ranges(rows, (h, k, now, true), &|(_, ts)| {
+            (now.saturating_sub(ts) / 60).to_string()
+        })
 }

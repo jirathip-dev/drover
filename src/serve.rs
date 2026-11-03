@@ -1129,8 +1129,14 @@ impl<'a> Server<'a> {
         ])
     }
 
-    /// #60: a part the page loads on demand: a fleet's [config] sheet (`id=config&fleet=`, #162), the Events tab (`id=events`).
+    /// #60: a part the page loads on demand: a fleet's [config] sheet (`id=config&fleet=`, #162), the Events tab
+    /// (`id=events`), a Host chart's series (`id=hist&host=&k=`, #234).
     fn part(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
+        // #234: an open chart's series: the small history file only (#160).
+        if q.get("id").is_some_and(|i| i == "hist") {
+            let rows = crate::hosts::history(ctx);
+            return Some(crate::hosts::chart(&rows, q.get("host")?, q.get("k")?, ctx.now));
+        }
         let (events, cfg) = (read(&ctx.state).ok()?, Config::load(&ctx.config).ok());
         match q.get("id")?.as_str() {
             "events" => Some(events_tab(ctx, self.r, cfg.as_ref(), &events, false)),
@@ -1826,46 +1832,8 @@ impl<'a> Server<'a> {
         let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
         let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
         let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
-        // #168: swap-out's gauge is the window's median (the rule, with pressure warn/critical); `now` is one sample.
-        let avg = hs.swap_median.map_or("?".into(), |m| format!("{m:.0}"));
-        for (k, x, g, l, p) in [
-            ("load/cpu", hs.load_per_cpu, hs.load_per_cpu, lim.load_per_cpu, 2),
-            (
-                "swap-out",
-                hs.swapout,
-                hs.swap_median.or(hs.swapout),
-                lim.swapout_rate,
-                0,
-            ),
-        ] {
-            let (t, bar, pct) = gauge(g.unwrap_or(0.0) / l, "▏");
-            let x = x.map_or("?".into(), |x| format!("{x:.p$}"));
-            let unit = match p {
-                0 => format!(
-                    " now · {avg} avg <span class=mt>pages/2s · held on the avg with pressure warn/critical</span>"
-                ),
-                _ => String::new(),
-            };
-            let o = if t == "r" { "▶ " } else { "" };
-            m += &kv(
-                k,
-                t,
-                &format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {l}</span>{pct}{unit}"),
-            );
-        }
-        let p = hs.pressure.as_deref().unwrap_or("?");
-        m += &kv("memory", tone(p), &format!("<b class={}>{}</b>", tone(p), esc(p)));
-        // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
-        let top = host::top(r, &herdr::agents(r).unwrap_or_default()).join(" · ");
-        if !top.is_empty() {
-            m += &kv("top memory", "g", &esc(&top));
-        }
-        if let Some(gb) = host::free_gb(r) {
-            let (t, bar, _) = gauge(lim.min_free_gb / gb, "┃");
-            let (min, o) = (lim.min_free_gb, if t == "r" { "▶ " } else { "" });
-            let fl = format!("<span class=\"mt fx\">· floor {min} GB</span>");
-            m += &kv("disk", t, &format!("{bar} <b class={t}>{o}{gb:.0} GB free</b> {fl}"));
-        }
+        let dc = Config::default();
+        let hosts = self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs);
         // #164: the worktree total from the last walk (and its age, #160) against the budget, and folders of no
         // fleet under the worktree root, removed only from here (paired) or `clean --orphans --yes`.
         if let Some(c) = cfg {
@@ -1882,7 +1850,7 @@ impl<'a> Server<'a> {
             let n = crate::check::orphan_dirs(ctx, c).len();
             if n > 0 && self.addr.is_some() {
                 let (hid, s) = (hidden("orphans", "", &mtime(ctx)), if n == 1 { "" } else { "s" });
-                m += &format!("<form method=post>{hid}<button data-confirm=\"Remove {n} orphan folder{s} under the worktree root?\">remove orphans</button> <span class=m>{n} folder{s} of no fleet</span></form>");
+                m += &format!("<form method=post>{hid}<button data-confirm=\"Remove {n} orphan folder{s} under the worktree root?\">remove orphans</button> <span class=m>{n} folder{s} from no project</span></form>");
             }
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
@@ -1898,20 +1866,11 @@ impl<'a> Server<'a> {
             let btn = format!("<form method=post>{}<button data-confirm=\"TERM, then KILL, {n} leftover process(es)?\">reap</button></form>", hidden("reap", "", &mtime(ctx)));
             let btn = if self.addr.is_some() { btn } else { String::new() };
             let val = format!(
-                "<b class=a>{n} running</b> <span class=mt>{:.0} MB · in closed lanes' worktrees</span>{btn}",
+                "<b class=a>{n}</b> processes left in closed lanes <span class=mt>· {:.0} MB</span>{btn}",
                 kb / 1024.0
             );
             m += &kv("leftovers", "a", &val);
         }
-        m += &match (cfg, host::admit(&hs, lim)) {
-            (None, _) => String::new(),
-            (_, Ok(())) => kv("spawns", "g", "<b class=g>admitted</b>"),
-            (_, Err(why)) => {
-                let (why, x) = (esc(&why), "<span class=x><b class=r>held</b> · no new lanes while");
-                let raw = format!("<pre>spawn gate HOST_BUSY: {why}</pre>");
-                hrow("spawns", "r", &format!("{x} {why}</span>"), "", &raw)
-            }
-        };
         // #98: green, amber or red per service, what clears it otherwise.
         let svc = |s: &&crate::timer::Row| ["board", "tick", herdr::BIN].contains(&s.0.as_str());
         for (k, t, d, fix) in rows.iter().filter(svc) {
@@ -2032,36 +1991,8 @@ impl<'a> Server<'a> {
                 a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
             }
         }
-        // #157: one group per `[hosts]` host (gauges from the last `check`); an offline or off host is grey.
-        let mut hg = vec![];
-        let seen = crate::hosts::cached(ctx);
-        for (c, (name, h)) in cfg.into_iter().flat_map(|c| c.hosts.iter().map(move |h| (c, h))) {
-            let s = seen.get(name).cloned().unwrap_or_default();
-            let lanes = crate::hosts::lanes_on(c, events, name);
-            let (t, words) = crate::hosts::shown(h, &s, lanes.len(), ctx.now);
-            let to = if h.enabled { "off" } else { "on" };
-            let rw = usize::from(self.addr.is_some() && self.export.is_none());
-            let btn = [String::new(), format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button>{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(name))][rw].clone();
-            let mut g = kv("state", t, &format!("<b class={t}>{}</b>{btn}", esc(&words)));
-            let grey = |x: &'static str| if h.enabled && s.up { x } else { "m" };
-            let gauges = [
-                ("load/cpu", s.load.map(|x| (x / lim.load_per_cpu, format!("{x:.2}")))),
-                ("memory", s.mem.map(|x| (lim.min_free_mem_gb / x, format!("{x:.1} GB")))),
-                ("disk", s.disk.map(|x| (lim.min_free_gb / x, format!("{x:.0} GB free")))),
-            ];
-            for (k, v) in gauges.into_iter().filter(|_| s.up) {
-                let Some((x, val)) = v else { continue };
-                let (t, bar, _) = gauge(x, "▏");
-                g += &kv(k, grey(t), &format!("{bar} <b class={t}>{val}</b>"));
-            }
-            let tags = crate::hosts::tags(h, Some(&s)).join(" ");
-            g += &kv("tags", "m", &format!("<span class=mt>{}</span>", esc(&tags)));
-            let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
-            g += &kv("lanes", grey("g"), &esc(&ls));
-            hg.push((name.as_str(), g));
-        }
         // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
-        let ks = [&m, &s, &f, &a].map(|g| {
+        let ks = [&hosts, &m, &s, &f, &a].map(|g| {
             g.split("<span class=k>")
                 .skip(1)
                 .map(|k| k.split('<').next().unwrap_or_default().chars().count())
@@ -2071,9 +2002,164 @@ impl<'a> Server<'a> {
         let head = "<details class=grp style=--kw:@ch><summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
         let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
         let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
-        let gs = [("MACHINE", m), ("SERVICES", s), ("FLEETS", f), ("ALERTS", a)];
-        let hosts: String = hg.into_iter().map(grp).collect(); // #157: `.h`, a host's group (serve.js greys it)
-        gs.map(grp).concat() + &hosts.replace("<details class=grp", "<details class=\"grp h\"")
+        // #234: a fixed order: HOSTS (a card per host), FLEET DISK (the worktree budget, orphans, leftovers), the rest.
+        let hosts = format!("<div class=hgd>{hosts}</div>");
+        let gs = [
+            ("HOSTS", hosts),
+            ("FLEET DISK", m),
+            ("SERVICES", s),
+            ("FLEETS", f),
+            ("ALERTS", a),
+        ];
+        gs.into_iter().filter(|g| !g.1.is_empty()).map(grp).collect()
+    }
+
+    /// #234: one card per host (main first, then A→Z), each with the same rows: the state, why its dot is amber or red
+    /// and [off]/[on] in its head, then load/cpu, swap-out, memory, disk, top memory, lanes and tags. A row with history
+    /// carries its 24 h sparkline (`data-s`, worst per bucket); a tap loads its chart (`frag?id=hist`, an export inline).
+    fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> String {
+        let (lim, seen, hist, now) = (
+            &cfg.limits,
+            crate::hosts::cached(ctx),
+            crate::hosts::history(ctx),
+            ctx.now,
+        );
+        let mut out = String::new();
+        for (name, h) in crate::hosts::cards(cfg, r) {
+            let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
+            let mut s = seen.get(&name).cloned().unwrap_or_default();
+            let word = |p: Option<u8>| p.and_then(|p| ["normal", "warn", "critical"].get(usize::from(p)).copied());
+            let mut gate = Host {
+                pressure: word(s.pressure).map(String::from),
+                swapout: s.swap,
+                load_per_cpu: s.load,
+                free_mem_gb: s.mem,
+                ..Host::default()
+            };
+            if main {
+                gate = hs.clone();
+                (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
+                ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
+                s.top = host::top(r, &herdr::agents(r).unwrap_or_default());
+                s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
+            }
+            let lanes = crate::hosts::lanes_on(cfg, events, &name);
+            let (mut t, mut words) = crate::hosts::shown(on, &s, lanes.len(), now);
+            let held = t == "g" && host::admit(&gate, lim).is_err();
+            if t == "g" {
+                (t, words) = match host::admit(&gate, lim) {
+                    Ok(()) => ("g", "up · admits lanes".into()),
+                    Err(why) => ("r", format!("held · {why}")),
+                };
+            }
+            let grey = |x: &'static str| if on && s.up { x } else { "m" };
+            let x = self.export.is_some();
+            let row = |k: &str, key: &str, t: &str, val: &str, l: &str| {
+                let sr = |k: &str| crate::hosts::series(&hist, &name, k, now, false);
+                let p = [String::new(), format!(" data-p=\"{}\"", sr("pressure"))][usize::from(key == "mem")].clone();
+                let c = crate::hosts::chart(&hist, &name, key, now);
+                let c = [String::new(), format!(" data-x=\"{c}\"")][usize::from(x)].clone();
+                format!("<details class=rw data-t={t} data-k={key} data-s=\"{}\"{l}{p}{c}><summary><span class=k>{k}</span><span class=w>{val}</span><span class=t><i class=cv></i></span><span class=sp><svg class=spk></svg><i>24h</i></span></summary></details>", sr(key))
+            };
+            // A gauge row's value, one line (an offline host's age is in its head): (status, html). `used`: (used, size) when the bar shows the used part (free
+            // space, its status from the floor `l`); else the bar is the value against the limit `l`.
+            let val = |x: Option<f64>,
+                       g: Option<f64>,
+                       l: f64,
+                       used: Option<(f64, f64)>,
+                       (p, pre, unit, after): (usize, &str, &str, String)| {
+                let Some(x) = x else {
+                    return ("m", format!("{} <b>{pre}?{unit}</b>{after}", gauge(0.0, "▏").1));
+                };
+                let g = g.unwrap_or(x);
+                let (t, mut bar, pct) = gauge(if used.is_some() { l / g } else { g / l }, "▏");
+                if let Some((u, n)) = used {
+                    let (ut, ub, _) = gauge(u / n, "▏");
+                    bar = ub.replacen(&format!("bar {ut}"), &format!("bar {t}"), 1);
+                }
+                let o = if t == "r" { "▶ " } else { "" };
+                (t, format!("{bar} <b class={t}>{o}{pre}{x:.p$}{unit}</b>{after}{pct}"))
+            };
+            let of = |l: f64| format!(" <span class=m>/ {l}</span>");
+            let (lt, lv) = val(
+                s.load,
+                s.load,
+                lim.load_per_cpu,
+                None,
+                (2, "", "", of(lim.load_per_cpu)),
+            );
+            // #168: swap-out's status is the window's median (the rule, with pressure warn/critical); `now` is one sample.
+            let avg = gate
+                .swap_median
+                .map_or(String::new(), |m| format!(" <span class=mt>· {m:.0} avg</span>"));
+            let sw = (0, "", "", of(lim.swapout_rate) + &avg);
+            let (st, sv) = val(s.swap, gate.swap_median.or(s.swap), lim.swapout_rate, None, sw);
+            let size =
+                |n: Option<f64>, p: usize| n.map_or(String::new(), |n| format!(" <span class=mt>of {n:.p$}</span>"));
+            let pw = word(s.pressure).unwrap_or("?");
+            let used = |f: Option<f64>, n: Option<f64>| f.zip(n).map(|(f, n)| (n - f, n));
+            // The pressure word only when it is up, so the value stays one line at 390.
+            let pr = [format!(" <span class=mt>· {pw}</span>"), String::new()][usize::from(pw == "normal")].clone();
+            let mm = (1, "free ", " GB", size(s.mem_total, 0) + &pr);
+            let (mt, mv) = val(s.mem, s.mem, lim.min_free_mem_gb, used(s.mem, s.mem_total), mm);
+            let mt = ["g", "a", "r"][[mt, tone(pw)]
+                .map(|t| "gar".find(t).unwrap_or(0))
+                .into_iter()
+                .max()
+                .unwrap_or(0)];
+            let dd = (0, "free ", " GB", size(s.disk_total, 0));
+            let (dt, dv) = val(s.disk, s.disk, lim.min_free_gb, used(s.disk, s.disk_total), dd);
+            let dl = |l: f64| format!(" data-l={l}");
+            let mut rows = row("load/cpu", "load", grey(lt), &lv, &dl(lim.load_per_cpu));
+            rows += &row("swap-out", "swap", grey(st), &sv, &dl(lim.swapout_rate));
+            rows += &row("memory", "mem", grey(mt), &mv, &dl(lim.min_free_mem_gb));
+            rows += &row("disk", "disk", grey(dt), &dv, &dl(lim.min_free_gb));
+            // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
+            if !s.top.is_empty() {
+                let at = [
+                    format!(" <span class=mt>· {} ago</span>", age(now.saturating_sub(s.seen))),
+                    String::new(),
+                ];
+                rows += &kv(
+                    "top memory",
+                    grey("g"),
+                    &(esc(&s.top.join(" · ")) + &at[usize::from(main)]),
+                );
+            }
+            let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
+            let ls = format!("<b>{}</b> <span class=mt>{}</span>", lanes.len(), esc(&ls));
+            rows += &row("lanes", "lanes", grey("g"), &ls, "");
+            let tags = h.map_or(s.tags.clone(), |h| crate::hosts::tags(h, Some(&s))).join(" ");
+            rows += &kv("tags", "m", &format!("<span class=mt>{}</span>", esc(&tags)));
+            // Why the dot is amber or red, in words: the rows at the worst status.
+            let rank = |t: &str| "gar".find(t).unwrap_or(0);
+            let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
+            let dot = grey(["g", "a", "r"][worst]);
+            let why: Vec<String> = [
+                (lt, "load", "limit"),
+                (st, "swap-out", "limit"),
+                (mt, "memory", "floor"),
+                (dt, "disk", "floor"),
+            ]
+            .into_iter()
+            .filter(|(t, ..)| worst > 0 && rank(t) == worst)
+            .map(|(_, k, l)| {
+                format!(
+                    "{k} {} {l}",
+                    ["near", if l == "floor" { "under" } else { "over" }][worst - 1]
+                )
+            })
+            .collect();
+            if dot != "m" && !held && !why.is_empty() {
+                (t, words) = (dot, format!("{words} · {}", why.join(", ")));
+            }
+            let to = if on { "off" } else { "on" };
+            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none()).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button>{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name)));
+            let tag = ["", "<span class=\"tag m\">main</span>"][usize::from(main)];
+            let (n, ln) = (esc(&name), crate::hosts::series(&hist, &name, "lanes", now, false));
+            out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{btn}</div>{rows}</article>", esc(&words));
+        }
+        out
     }
 }
 
