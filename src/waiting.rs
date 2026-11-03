@@ -406,6 +406,13 @@ pub fn scan(
         });
         let ev = ev.as_deref().unwrap_or(events);
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
+        if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
+            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "green";
+            let merge = format!("herdsman merge {} {}", s.fleet, s.issue);
+            (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
+            w.what = format!("PASS · behind {} (not required) · merging when CI green", f.integration);
+        }
         // #249: a review on another host names it.
         if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));
