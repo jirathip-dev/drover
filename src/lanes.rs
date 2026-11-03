@@ -30,6 +30,8 @@ pub struct Lane {
     /// #157: the `[hosts]` host it runs on, when fleet.toml has hosts, and its herdr machine (none: this one).
     pub host: Option<String>,
     pub machine: Option<String>,
+    /// #248: why `check` keeps this done lane's session open (its newest `lane-kept-dirty`, none once closed).
+    pub kept: Option<String>,
     /// #260: its worktree, from the spawn.
     pub worktree: Option<String>,
 }
@@ -113,6 +115,12 @@ pub fn join(
             });
         }
     }
+    for l in &mut out {
+        let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
+        let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
+        let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
+        l.kept = why.filter(|_| l.state == "done").map(String::from);
+    }
     out
 }
 
@@ -124,13 +132,17 @@ impl Lane {
     /// #260: a local Claude lane's newest session transcript, `~/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
     pub fn session(&self) -> Option<std::path::PathBuf> {
         let local = self.harness == "claude" && self.machine.is_none();
-        let wt = self.worktree.as_ref().filter(|_| local)?;
-        let d = crate::config::home().join(".claude/projects");
-        let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
-        let paths = all.flatten().map(|e| e.path());
-        let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
-        jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+        session_file(&crate::config::home(), self.worktree.as_ref().filter(|_| local)?)
     }
+}
+
+/// The newest `.jsonl` Claude keeps for worktree `wt` under `<home>/.claude/projects`.
+pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
+    let d = home.join(".claude/projects");
+    let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
+    let paths = all.flatten().map(|e| e.path());
+    let jsonl = paths.filter(|p| p.extension().is_some_and(|x| x == "jsonl"));
+    jsonl.max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -335,6 +347,33 @@ pub fn body(screen: &str) -> Vec<String> {
 pub fn log(state: &Path, agent: &str) -> Option<std::path::PathBuf> {
     let plain = !agent.starts_with('.') && agent.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
     plain.then(|| state.with_file_name("transcripts").join(format!("{agent}.log")))
+}
+
+/// #248: a closed Claude lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`),
+/// as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
+pub fn session(home: &Path, wt: &str) -> Option<Vec<String>> {
+    let file = session_file(home, wt)?;
+    let part = |p: &Value| match p["type"].as_str()? {
+        "text" => p["text"].as_str().map(String::from),
+        "tool_use" => {
+            let arg = p["input"].as_object()?.values().find_map(Value::as_str);
+            let arg = arg.and_then(|a| a.lines().next()).unwrap_or_default();
+            Some(format!("{}({arg})", p["name"].as_str()?))
+        }
+        _ => None,
+    };
+    let (text, mut out) = (read_tail(&file, 1 << 21)?, vec![]);
+    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let mark = ["❯ ", "⏺ "][usize::from(v["type"] == "assistant")];
+        let c = &v["message"]["content"];
+        let parts: Vec<String> = match c.as_str() {
+            Some(t) if v["type"] == "user" => vec![t.into()],
+            _ => c.as_array().into_iter().flatten().filter_map(part).collect(),
+        };
+        let lines = parts.iter().flat_map(|t| t.lines().enumerate());
+        out.extend(lines.map(|(i, l)| mask(&format!("{}{l}", if i == 0 { mark } else { "  " }))));
+    }
+    Some(out)
 }
 
 /// The line where two reads had no overlap: the lane scrolled past between them.
