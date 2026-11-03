@@ -40,6 +40,106 @@ function mode(m) {
 }
 mode(get('mode'));
 document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
+// #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
+// { "label", "color-scheme": "dark" | "light", "tokens": { "--bg": "#rrggbb", … } } (docs/themes.md, docs/design/schemes).
+// gate() is every check it must pass, with what failed; a refused one is named on the Host tab and never shown.
+const TOKENS = ['--bg', '--card', '--edge', '--line', '--scrim', '--fg', '--mute', '--l', '--link',
+  '--g', '--a', '--r', '--p', '--c', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'];
+const hex = s => {
+  const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(s);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+};
+const lin = c => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+// `color-mix(in srgb, c p%, transparent)` over bg, as the board's tints are (.ask, .later, .grp[data-t]).
+const over = (c, bg, p) => c.map((v, i) => v * p + bg[i] * (1 - p));
+function lab([r, g, b]) {
+  const [x, y, z] = [[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]
+    .map(row => row[0] * lin(r) + row[1] * lin(g) + row[2] * lin(b));
+  const f = t => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  const [fx, fy, fz] = [x / 0.95047, y, z / 1.08883].map(f);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+// CIEDE2000 (Sharma et al. 2005).
+function de(c1, c2) {
+  const [L1, a1, b1] = lab(c1), [L2, a2, b2] = lab(c2), rad = Math.PI / 180;
+  const C = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2, G = 0.5 * (1 - Math.sqrt(C ** 7 / (C ** 7 + 25 ** 7)));
+  const ap1 = a1 * (1 + G), ap2 = a2 * (1 + G), C1 = Math.hypot(ap1, b1), C2 = Math.hypot(ap2, b2);
+  const h = (b, a) => { const v = Math.atan2(b, a) / rad; return v < 0 ? v + 360 : v; };
+  const h1 = h(b1, ap1), h2 = h(b2, ap2), dL = L2 - L1, dC = C2 - C1;
+  const dh = C1 * C2 === 0 ? 0 : h2 - h1 > 180 ? h2 - h1 - 360 : h2 - h1 < -180 ? h2 - h1 + 360 : h2 - h1;
+  const dH = 2 * Math.sqrt(C1 * C2) * Math.sin(dh * rad / 2), Lm = (L1 + L2) / 2, Cm = (C1 + C2) / 2;
+  const hm = C1 * C2 === 0 ? h1 + h2 : Math.abs(h1 - h2) > 180 ? (h1 + h2 + 360) / 2 : (h1 + h2) / 2;
+  const T = 1 - 0.17 * Math.cos((hm - 30) * rad) + 0.24 * Math.cos(2 * hm * rad) + 0.32 * Math.cos((3 * hm + 6) * rad) - 0.2 * Math.cos((4 * hm - 63) * rad);
+  const SL = 1 + 0.015 * (Lm - 50) ** 2 / Math.sqrt(20 + (Lm - 50) ** 2), SC = 1 + 0.045 * Cm, SH = 1 + 0.015 * Cm * T;
+  const RT = -2 * Math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((hm - 275) / 25) ** 2)) * rad);
+  return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
+}
+// Every check as [what, value, minimum]: text 4.5:1 (on --bg, --card and the tinted surfaces: the needs-you card with
+// its option buttons, the red and amber group headers), status colours 3:1, green/amber/red ΔE2000 ≥ 20 apart, and
+// the accent and links ≥ 20 from each status colour (a control never reads as a warning).
+function gate(s) {
+  const t = (s && s.tokens) || {}, missing = TOKENS.filter(k => !hex(t[k] || ''));
+  if (missing.length) return [[`missing or not #rrggbb[aa]: ${missing.join(' ')}`, 0, 1]];
+  const c = Object.fromEntries(TOKENS.map(k => [k, hex(t[k])])), rows = [];
+  const on = (ks, bg, min, name = bg) => ks.forEach(k => rows.push([`${k} on ${name}`, ratio(c[k], bg.map ? bg : c[bg]), min]));
+  const card = over(c['--r'], c['--bg'], 0.15), red = over(c['--r'], c['--bg'], 0.12), amber = over(c['--a'], c['--bg'], 0.12);
+  for (const bg of ['--bg', '--card']) {
+    on(['--fg', '--mute', '--l', '--link', '--fk-l', '--fk-p', '--fk-c', '--fk-g', '--fk-a'], bg, 4.5);
+    on(['--g', '--a', '--r'], bg, 3);
+  }
+  on(['--bg'], '--l', 4.5, '--l (pressed control, active tab)');
+  on(['--fg', '--mute', '--l'], card, 4.5, 'the needs-you card');
+  on(['--r'], card, 3, 'the needs-you card');
+  on(['--r'], red, 3, 'a red group header');
+  on(['--a'], amber, 3, 'an amber group header');
+  for (const [x, y] of [['--g', '--a'], ['--a', '--r'], ['--g', '--r'], ...['--l', '--link'].flatMap(x => ['--g', '--a', '--r'].map(y => [x, y]))])
+    rows.push([`ΔE2000 ${x} ↔ ${y}`, de(c[x], c[y]), 20]);
+  if (!['dark', 'light'].includes(s['color-scheme'])) rows.push(['color-scheme is not "dark" or "light"', 0, 1]);
+  return rows;
+}
+// What a scheme fails, in words (none: it passes).
+const fails = s => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
+// A passing scheme's token block, as the head script applies it.
+const block = s => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
+// The scheme a phone shows: its pick, else its theme's default, else github-dark; each only if it passes.
+const choose = (all, pick, def) => [pick, def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
+// schemes:end
+// #244: the `[▦]` colours: every scheme that passes the gate (built-in and `<config dir>/schemes/`; SD from the head
+// script), this phone's pick (localStorage) else its theme's default. Applied in place; the block is kept so the head
+// script paints it first next time (no flash), and the status bar takes its --bg.
+const scp = $('#scheme'), SQ = new URLSearchParams(location.search).get('scheme');
+scp.replaceChildren(...Object.keys(SD.s).filter(n => !fails(SD.s[n]).length).map(n => Object.assign(document.createElement('option'), { textContent: n })));
+function colours() {
+  const h = document.documentElement, n = choose(SD.s, SQ || get('scheme'), SD.t[h.dataset.theme]), b = block(SD.s[n]);
+  h.dataset.scheme = scp.value = n;
+  scp.closest('.pk').title = 'colours: ' + n;
+  $('#sch').textContent = b;
+  $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
+  put('sb', b);
+  hostrow(document);
+}
+scp.onchange = () => { put('scheme', scp.value); colours(); };
+// #244: the Host tab's `theme` row names this phone's theme and colours; under it, each refused scheme with why.
+function hostrow(root) {
+  const r = [...root.querySelectorAll('.gr')].find(p => p.firstChild.textContent === 'theme'), h = document.documentElement;
+  if (!r) return;
+  const w = r.querySelector('.w'), b = t => Object.assign(document.createElement('b'), { textContent: t });
+  if (r.dataset.t === 'g') w.replaceChildren(b(h.dataset.theme));
+  w.querySelectorAll('.sx').forEach(x => x.remove());
+  w.append(...[Object.assign(document.createElement('span'), { textContent: ' · colours ' }), b(h.dataset.scheme)].map(x => (x.classList.add('sx'), x)));
+  root.querySelectorAll('.gr.sx').forEach(x => x.remove());
+  r.after(...Object.entries(SD.s).map(([n, s]) => [n, fails(s)]).filter(([, f]) => f.length).map(([n, f]) => {
+    const p = Object.assign(document.createElement('p'), { className: 'gr sx', innerHTML: '<span class=k>colours</span><span class=w><b class=a></b> <span class=mt></span></span>' });
+    p.dataset.t = 'a';
+    p.querySelector('b').textContent = n;
+    p.querySelector('.mt').textContent = `refused: ${f[0]}${f.length > 1 ? ` (+${f.length - 1} more)` : ''}; phones show their theme's default`;
+    return p;
+  }));
+}
 // #241: the `[◐]` picker: this phone's theme, applied in place (no reload); the home-screen icon is iOS's from the install.
 const thp = $('#theme');
 thp.value = document.documentElement.dataset.theme;
@@ -49,8 +149,10 @@ thp.onchange = () => {
   thp.closest('.pk').title = 'theme: ' + thp.value;
   put('theme', thp.value);
   theme(thp.value);
+  colours();
   if (!get('theme-hint')) { put('theme-hint', 1); toast('the home-screen icon keeps its install-time look'); }
 };
+colours();
 // #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 16 px sprite (its title and label
 // the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
 const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
@@ -91,7 +193,7 @@ function mini(g) {
   const word = esc('load: ' + ((ls.levels || {})[l] || l));
   s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
 }
-// #241: a moment (`moment` on /live: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
+// #241: a moment (`ev` on /live with a `k`: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
 function moment(k) {
   const m = TT && TT.moments && TT.moments[k];
   if (!m || !m.sprite) return;
@@ -105,7 +207,7 @@ function moment(k) {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -346,13 +448,17 @@ async function refresh() {
 function connect() {
   if (DEMO) return;
   if (es) es.close();
-  try { es = new EventSource('live'); } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
+  // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
+  // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
+  const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
   // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  es.addEventListener('frag', e => { const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
-  es.addEventListener('herd', e => herdData(JSON.parse(e.data)));
-  es.addEventListener('moment', e => moment(e.data));
-  es.addEventListener('toast', e => (toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
+  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
+  es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
+  es.addEventListener('refresh', e => (at(e), refresh()));
+  es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
     es.close();
     es = null;
@@ -509,6 +615,7 @@ function tidy(root) {
   graph(root);
   rows(root);
   evf(root);
+  hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;

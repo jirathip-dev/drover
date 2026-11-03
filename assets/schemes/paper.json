@@ -1,0 +1,25 @@
+{
+  "label": "Paper (light)",
+  "color-scheme": "light",
+  "tokens": {
+    "--bg": "#fbf8f1",
+    "--card": "#f3eee2",
+    "--edge": "#d8d0bf",
+    "--line": "#e7e0d0",
+    "--scrim": "#2b241866",
+    "--fg": "#24292f",
+    "--mute": "#5b616a",
+    "--l": "#0b5cad",
+    "--link": "#0b5cad",
+    "--g": "#197b35",
+    "--a": "#8a5a00",
+    "--r": "#c4202b",
+    "--p": "#7c4dcf",
+    "--c": "#0b7480",
+    "--fk-l": "#0b5cad",
+    "--fk-p": "#7c4dcf",
+    "--fk-c": "#0b7480",
+    "--fk-g": "#197b35",
+    "--fk-a": "#8a5a00"
+  }
+}

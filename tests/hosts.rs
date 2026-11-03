@@ -704,3 +704,50 @@ fn a_failed_remote_start_closes_its_workspace() {
     assert!(r.called("herdr --machine bazzite workspace close w9"));
     assert!(!r.called("herdr --machine bazzite pane close"));
 }
+
+/// #249: a review on the remote host: its verdict.md is read over ssh and recorded, its pane closed with `--machine`
+/// (one a worktree remove already closed counts), and the board names the host.
+#[test]
+fn a_remote_review_is_read_over_ssh_and_recorded() {
+    let c = setup("hosts-verdict", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let rev = "/home/me/.herdr/worktrees/sendmeter/rev-12-r1";
+    let head = "a".repeat(40);
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "harness": "claude", "pane": "w8:p1",
+                   "workspace": "w8", "worktree": rev, "branch": "rev-12-r1", "sha": head, "host": "bazzite",
+                   "machine": "bazzite"});
+    ev(&c, NOW - 600, 12, "spawn", d);
+    let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+                    "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]});
+    let r = fake(1.0, 1.0)
+        .reply("gh pr view issue-12", &pr.to_string())
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(
+            &format!("{SSH}'cat' '{rev}/verdict.md'"),
+            "FAIL\n- blocking [code] a.rs:1\n",
+        )
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{head} 20"))
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{rev}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C' '{rev}' 'status'"), "")
+        .reply("herdr --machine bazzite worktree remove --workspace w8", "{}")
+        .once_err(
+            "herdr --machine bazzite pane close w8:p1",
+            1,
+            r#"{"error":{"code":"pane_not_found"}}"#,
+        );
+    let cfg = Config::load(&c.config).unwrap();
+    let w = herdsman::waiting::scan(&c, &cfg, &r, &read(&c.state).unwrap(), &[], true);
+    let w = w.iter().find(|(s, _)| s.issue == 12).unwrap();
+    assert_eq!(w.1.what, "review done on bazzite · recording within 1 min");
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    let all = read(&c.state).unwrap();
+    let v = all.iter().find(|e| e.kind == "verdict").expect(&out);
+    assert_eq!((v.str("verdict"), v.str("sha")), (Some("FAIL"), Some(head.as_str())));
+    assert!(r.called("herdr --machine bazzite pane close w8:p1"));
+    assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
+}

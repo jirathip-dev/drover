@@ -124,3 +124,26 @@ fn corrupt_middle_line_warns_torn_tail_is_silent() {
     assert_eq!(warns.len(), 1, "stderr: {err}");
     assert!(warns[0].contains("line 2:"), "{}", warns[0]);
 }
+
+/// #259: every row gets a monotonic seq under the append lock, across concurrent writers; old rows by line.
+#[test]
+fn seq_is_monotonic_across_concurrent_writers() {
+    let d = tmpdir("seq");
+    let p = d.join("events.jsonl");
+    std::fs::write(&p, serde_json::to_string(&ev(0)).unwrap() + "\n").unwrap();
+    let ws: Vec<_> = (0..8)
+        .map(|w| {
+            let p = p.clone();
+            std::thread::spawn(move || (0..25).for_each(|i| append(&p, &ev(w * 100 + i)).unwrap()))
+        })
+        .collect();
+    ws.into_iter().for_each(|w| w.join().unwrap());
+    let seqs: Vec<u64> = read(&p).unwrap().iter().map(|e| e.seq).collect();
+    assert_eq!(seqs, (1..=201).collect::<Vec<_>>());
+    assert!(std::fs::read_to_string(&p)
+        .unwrap()
+        .lines()
+        .nth(200)
+        .unwrap()
+        .starts_with("{\"seq\":201,"));
+}

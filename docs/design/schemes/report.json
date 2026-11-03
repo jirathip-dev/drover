@@ -1,0 +1,1800 @@
+{
+ "identical": {
+  "queue": true,
+  "host": true
+ },
+ "schemes": [
+  {
+   "name": "dracula",
+   "label": "Dracula",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     13.36,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     6.75,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     5.9,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     10.29,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     5.9,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     5.97,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     10.29,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     10.38,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     8.36,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     11.76,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     5.94,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     5.2,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     9.05,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     5.2,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     5.25,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     9.05,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     9.13,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     7.36,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     10.38,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     8.36,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     4.53,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     9.13,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     7.36,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     3.99,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     5.9,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     11.13,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     3.78,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     44.48,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     30.85,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     80.48,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     54.82,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     49.53,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     36.04,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     36.22,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     41.79,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     66.4,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "farm",
+   "label": "Farm (night pasture; #242 values)",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     14.04,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     7.12,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     10.06,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     9.35,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     9.35,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     8.65,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     9.6,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     9.45,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     8.12,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     13.68,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     6.93,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     9.8,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     9.11,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     9.11,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     8.42,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     9.35,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     9.21,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     7.91,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     9.45,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     8.12,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     7.14,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     9.21,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     7.91,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     6.96,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     10.06,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     11.19,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     5.69,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     42.76,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     20.39,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     61.23,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     25.48,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     16.73,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     35.16,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     44.9,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     45.24,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     48.52,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "github-dark",
+   "label": "GitHub dark (today)",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     12.26,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     6.15,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     7.49,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     7.49,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     7.49,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     7.51,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     9.07,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     7.45,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     7.5,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     11.21,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     5.62,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     6.85,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     6.85,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     6.85,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     6.86,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     8.29,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     6.81,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     6.85,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     7.45,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     7.5,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     5.65,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     6.81,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     6.85,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     5.16,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     7.49,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     10.47,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     4.82,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     36.46,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     34.58,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     71.75,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     53.18,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     52.56,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     48.23,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     53.18,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     52.56,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     48.23,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "gruvbox",
+   "label": "Gruvbox dark",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     10.75,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     5.3,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     5.48,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     5.48,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     5.48,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     5.37,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     7.01,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     6.72,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     8.69,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     9.57,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     4.72,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     4.88,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     4.88,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     4.88,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     4.78,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     6.24,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     5.98,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     7.74,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     6.72,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     8.69,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     4.29,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     5.98,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     7.74,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     3.82,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     5.48,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     9.11,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     3.63,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     21.64,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     38.88,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     49.91,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     19.74,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     34.06,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     46.5,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     19.74,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     34.06,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     46.5,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "kitchen",
+   "label": "Kitchen (charcoal tile; #239 values)",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     13.93,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     6.44,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     7.78,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     7.6,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     7.78,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     7.84,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     8.97,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     8.61,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     11.95,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     12.72,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     5.88,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     7.11,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     6.94,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     7.11,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     7.16,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     8.19,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     7.87,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     10.92,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     8.61,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     11.95,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     6,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     7.87,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     10.92,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     5.48,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     7.78,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     11.36,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     4.89,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     28.1,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     55.22,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     74.16,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     43.78,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     23.69,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     29.79,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     28.55,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     13.66,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     42.64,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "nord",
+   "label": "Nord",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     10.26,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     5.78,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     6.24,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     5.76,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     6.24,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     5.8,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     5.99,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     6.8,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     8,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     8.26,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     4.65,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     5.03,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     4.64,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     5.03,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     4.67,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     4.83,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     5.48,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     6.44,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     6.8,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     8,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     4.03,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     5.48,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     6.44,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     3.24,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     6.24,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     8.44,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     3.31,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     21.55,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     36.96,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     54.86,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     28.07,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     33.57,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     47.81,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     36.58,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     40,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     39.18,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "paper",
+   "label": "Paper (light)",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     13.81,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     5.89,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     6.29,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     6.29,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     6.29,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     5.18,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     5.18,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     5.04,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     5.59,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     12.66,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     5.39,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     5.76,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     5.76,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     5.76,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     4.75,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     4.74,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     4.62,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     5.12,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     5.04,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     5.59,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     5.52,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     4.62,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     5.12,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     5.05,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     6.29,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     10.83,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     4.33,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     35.54,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     29.26,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     66.25,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     48.36,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     49.11,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     44.06,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     48.36,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     49.11,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     44.06,
+     10,
+     true
+    ]
+   ]
+  },
+  {
+   "name": "solarized-dark",
+   "label": "Solarized dark",
+   "ok": true,
+   "fails": [],
+   "rows": [
+    [
+     "--fg on --bg",
+     5.61,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --bg",
+     5.34,
+     4.5,
+     true
+    ],
+    [
+     "--l on --bg",
+     5.33,
+     4.5,
+     true
+    ],
+    [
+     "--link on --bg",
+     5.33,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --bg",
+     5.33,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --bg",
+     5.32,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --bg",
+     5.34,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --bg",
+     5.32,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --bg",
+     5.81,
+     4.5,
+     true
+    ],
+    [
+     "--fg on --card",
+     4.86,
+     4.5,
+     true
+    ],
+    [
+     "--mute on --card",
+     4.63,
+     4.5,
+     true
+    ],
+    [
+     "--l on --card",
+     4.61,
+     4.5,
+     true
+    ],
+    [
+     "--link on --card",
+     4.61,
+     4.5,
+     true
+    ],
+    [
+     "--fk-l on --card",
+     4.61,
+     4.5,
+     true
+    ],
+    [
+     "--fk-p on --card",
+     4.61,
+     4.5,
+     true
+    ],
+    [
+     "--fk-c on --card",
+     4.63,
+     4.5,
+     true
+    ],
+    [
+     "--fk-g on --card",
+     4.61,
+     4.5,
+     true
+    ],
+    [
+     "--fk-a on --card",
+     5.03,
+     4.5,
+     true
+    ],
+    [
+     "--g on --bg",
+     5.32,
+     3,
+     true
+    ],
+    [
+     "--a on --bg",
+     5.81,
+     3,
+     true
+    ],
+    [
+     "--r on --bg",
+     3.59,
+     3,
+     true
+    ],
+    [
+     "--g on --card",
+     4.61,
+     3,
+     true
+    ],
+    [
+     "--a on --card",
+     5.03,
+     3,
+     true
+    ],
+    [
+     "--r on --card",
+     3.11,
+     3,
+     true
+    ],
+    [
+     "--bg on --l (pressed control, active tab)",
+     5.33,
+     4.5,
+     true
+    ],
+    [
+     "--fg on the needs-you tint (--r 15 % over --bg)",
+     5.16,
+     4.5,
+     true
+    ],
+    [
+     "--r on the needs-you tint",
+     3.29,
+     3,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --a",
+     21.82,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --a ↔ --r",
+     39.15,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --g ↔ --r",
+     59.04,
+     20,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --g",
+     55.09,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --a",
+     54.7,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --l ↔ --r",
+     50.68,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --g",
+     55.09,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --a",
+     54.7,
+     10,
+     true
+    ],
+    [
+     "ΔE2000 --link ↔ --r",
+     50.68,
+     10,
+     true
+    ]
+   ]
+  }
+ ]
+}

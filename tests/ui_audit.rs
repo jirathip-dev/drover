@@ -162,6 +162,8 @@ fn closing_a_sheet_never_repaints_the_page() {
         return;
     }
     let (html, _) = fixture();
+    // #244: `judge` reads the backdrop as the page times k, a black scrim: github-dark's (farm's is tinted).
+    let html = html.replace("\"farm\":\"farm\"", "\"farm\":\"github-dark\"");
     let file = tmpdir("ui-close").join("page.html");
     std::fs::write(&file, html).unwrap();
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
