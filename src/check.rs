@@ -173,7 +173,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
         let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
         let Some(at) = due.filter(|_| !asking) else { continue };
-        if let Some(why) = kept(r, wt) {
+        if let Some(why) = dirty(r, Path::new(wt)) {
             let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
             fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
             continue;
@@ -283,20 +283,6 @@ fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) ->
     }
     let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
     events.iter().rev().find(by).map(|x| x.ts)
-}
-
-/// #248: why a done lane stays open: uncommitted changes (lane scratch and generated folders aside) or unpushed commits.
-fn kept(r: &dyn Runner, wt: &str) -> Option<String> {
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let made = |l: &&str| ["?? ui-390/", "?? node_modules/"].contains(&l.trim_end());
-    let st = git(&["status", "--porcelain"]).map(|s| s.lines().filter(|l| !made(l)).collect::<Vec<_>>().join("\n"));
-    let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"]);
-    match (st.map(|s| changes(&s)), ahead) {
-        (Ok(0), Ok(n)) if n.trim() == "0" => None,
-        (Ok(0), Ok(n)) => Some(format!("{} unpushed commit(s)", n.trim())),
-        (Ok(0), Err(e)) | (Err(e), _) => Some(format!("unreadable git state ({e:#})")),
-        (Ok(c), _) => Some(format!("{c} uncommitted change(s)")),
-    }
 }
 
 /// Log and print one alert unless one of its kind already carries `d`'s `key`.

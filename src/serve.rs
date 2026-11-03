@@ -514,10 +514,8 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
         .parked
         .as_ref()
         .map_or((tone, shown), |h| ("m", format!("parked · {}", on(h))));
-    let shown = l
-        .kept
-        .as_ref()
-        .map_or(shown.clone(), |k| format!("{shown} · kept open: {k}"));
+    let kept = |k: &String| format!("{shown} · kept open: {k}");
+    let shown = l.kept.as_ref().map_or(shown.clone(), kept);
     (title, tone, shown, ago(ctx.now, l.since))
 }
 
@@ -2117,11 +2115,8 @@ impl<'a> Server<'a> {
                 let ours: Vec<&serde_json::Value> = all.iter().filter(|a| a["agent"] == "claude").collect();
                 let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
                 let mb: u64 = host::held(r, &ours).iter().sum();
-                let (gb, w, d) = (
-                    format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024),
-                    n("working"),
-                    n("done"),
-                );
+                let gb = format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024);
+                let (w, d) = (n("working"), n("done"));
                 let ls = format!("({} lanes: working {w} / done {d})", ours.len());
                 claude = (!ours.is_empty()).then(|| format!("<b>{gb} GB</b> <span class=mt>{ls}</span>"));
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
