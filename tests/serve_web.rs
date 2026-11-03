@@ -660,7 +660,10 @@ fn page_fits_390px_without_horizontal_scroll() {
                 .contains("overflow-wrap:anywhere")
     );
     assert!(
-        html.contains("<details class=\"q\" data-q data-act=blocked><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"),
+        html.contains("<details class=\"q\" data-q data-act=blocked style=\"--rc:#")
+            && html.contains(
+                "\"><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"
+            ),
         "rows are details"
     );
     assert!(
