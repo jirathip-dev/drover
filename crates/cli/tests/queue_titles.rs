@@ -47,8 +47,8 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     for out in [get(&s, "/"), get(&s, "/?frag=all")] {
         assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
         assert!(
-            out.contains("A very long issue title that goes well past one…"),
-            "cut at a word: {out}"
+            out.contains("well past one phone line<") && !out.contains("past one…"),
+            "#331: whole, CSS ellipsises it: {out}"
         );
     }
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
@@ -65,6 +65,28 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
         "{page}"
     );
     assert_eq!(r.count("gh"), 0, "{:?}", r.calls.borrow());
+}
+
+/// #331: a queued issue never spawned (a blocked chain's nested row) gets its title: `check` caches its spec once.
+#[test]
+fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
+    let c = queued("check-titles");
+    let r = Fake::default()
+        .reply("herdr agent list", "[]")
+        .reply(
+            "gh issue view 12",
+            r#"{"title":"Nested rows show titles","body":"","updatedAt":"t1"}"#,
+        )
+        .reply("gh issue view 17", r#"{"title":"Deep row","body":"","updatedAt":"t1"}"#);
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    assert_eq!(r.count("gh issue view"), 2, "{:?}", r.calls.borrow());
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page = get(&s, "/");
+    assert!(
+        page.contains(">Nested rows show titles</span>") && page.contains(">Deep row</span>"),
+        "{page}"
+    );
 }
 
 #[test]

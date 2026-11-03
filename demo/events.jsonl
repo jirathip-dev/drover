@@ -50,3 +50,6 @@
 {"ts":1793429541,"fleet":"acme-web","issue":46,"type":"notify-failed","cmd":"curl -fsS https://ntfy.sh/demo","event":"needs-decision","error":"timed out after 15s"}
 {"ts":1793429600,"fleet":"acme-web","type":"clean","why":"merged"}
 {"ts":1793429600,"fleet":"acme-web","type":"clean","why":"merged"}
+{"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[49],"on":47,"op":"block"}
+{"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"op":"add"}
+{"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"on":49,"op":"block"}

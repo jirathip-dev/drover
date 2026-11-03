@@ -96,7 +96,7 @@ fn demo_export_writes_the_file_set_without_running_anything() {
     let q: Vec<&Value> = fleets.iter().flat_map(|f| f["queue"].as_array().unwrap()).collect();
     assert_eq!(
         (q.len(), q.iter().filter(|i| !i["blocked_by"].is_null()).count()),
-        (7, 1)
+        (8, 3)
     );
 }
 

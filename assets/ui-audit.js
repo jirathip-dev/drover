@@ -525,6 +525,14 @@
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
     if (['queue', 'lanes', 'host', 'events', 'queue-rows', 'events-rows'].includes(V)) Object.assign(res, { sprites }).outliers.push(...drawn());
+    // #331: every Queue row at every depth (the demo has a 4-deep chain) shows its whole title on one ellipsised line.
+    if (V === 'queue') {
+      if (![...$$('#queue summary .m')].some(e => e.textContent.startsWith('after #'))) res.outliers.push('no clamped (4-deep) chain row');
+      for (const s of $$('#queue details.q>summary')) {
+        const t = s.querySelector(':scope>.tl');
+        if (!t || !seen(t) || t.title !== t.textContent || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight)) res.outliers.push(`no one-line title: ${label(s)}`);
+      }
+    }
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
