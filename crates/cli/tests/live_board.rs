@@ -121,6 +121,11 @@ fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wai
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
+/// `js` once the Lanes rows are in (#337: a tab the page left out loads after it, from `/frags`).
+fn rowed(js: &str) -> String {
+    format!("(function go() {{ if (!document.querySelector('.lane[data-agent]')) return setTimeout(go, 20); {js} }})()")
+}
+
 #[test]
 fn live_board_chat_and_ascii_in_webkit() {
     if !webkit() {
@@ -137,6 +142,7 @@ fn live_board_chat_and_ascii_in_webkit() {
             "open($('.lane[data-agent=\"{agent}\"]')); setTimeout(() => {{ const m = $$('.chat>.now .blk.me, .chat>.now .blk.ai').length; \
              $('.fv').click(); window.late = [m, $$('.chat>.now .blk').length, errs.length + $$('#lanes .blk').length]; if (errs.length) console.log(errs); }}, 2000)"
         );
+        let js = rowed(&js);
         let m = page(
             &url,
             &cookie,
@@ -164,6 +170,7 @@ fn live_board_chat_and_ascii_in_webkit() {
              setTimeout(() => {{ clearInterval(t); const a2 = asc.getAnimations({{subtree: true}}); \
                window.late = [seen.size, blank, n, mut, lv, row().querySelector('.asc') === asc ? 1 : 0, an.length === a2.length && an.every((x, i) => x === a2[i]) ? 1 : 0, '{theme}' === 'farm' ? 1 : 0]; }}, 3500); }})()"
         );
+        let js = rowed(&js);
         let c2 = c.clone();
         let later = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(1500));
