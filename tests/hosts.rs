@@ -312,14 +312,14 @@ fn an_offline_host_never_pages_and_shows_grey() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    let g = &page[page.find("<span class=gn>bazzite</span>").expect("a bazzite group")..];
-    let g = &g[..g.find("</details>").unwrap()];
-    assert!(g.contains("<b class=m>offline · last seen 33m</b>"), "{g}");
-    assert!(
-        g.split("data-t=").skip(1).all(|t| t.starts_with('m')),
-        "all grey, no gauges: {g}"
-    );
-    assert!(page.contains("<span class=gn>mini</span>"));
+    let g = &page[page
+        .find("<article class=hcd data-h=\"bazzite\"")
+        .expect("a bazzite card")..];
+    let g = &g[..g.find("</article>").unwrap()];
+    assert!(g.contains("<span class=\"hw m\">offline · last seen 33m</span>"), "{g}");
+    assert!(g.split("data-t=").skip(1).all(|t| t.starts_with('m')), "all grey: {g}");
+    let mini = page.find("data-h=\"mini\"").expect("a mini card");
+    assert!(mini < page.find("data-h=\"bazzite\"").unwrap(), "main first");
 }
 
 #[test]
@@ -343,7 +343,10 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    assert!(page.contains("<b class=m>off · draining 1 lane</b>"), "draining shown");
+    assert!(
+        page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
+        "draining shown"
+    );
     // Every host off: nothing new starts.
     let text = std::fs::read_to_string(&c.config)
         .unwrap()
@@ -379,7 +382,7 @@ fn cli_and_board_toggles_both_log() {
         || String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
     let page = get();
     assert!(
-        page.contains("<b class=m>off · not used for lanes</b>")
+        page.contains("<span class=\"hw m\">off · not used for lanes</span>")
             && page.contains("name=to value=on><button>on</button>")
     );
     let i = page.find("name=mtime value=").unwrap() + 17;

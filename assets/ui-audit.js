@@ -17,11 +17,12 @@
   };
   const canned = async (status, text, then) => { window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status })) : F(u, o); then(); await wait(); };
   const mid = what => early.push(...measure().outliers.map(o => `${what}: ${o}`));
-  // #141 gate 2: Host groups go red, amber, green down the tab (#157: then grey hosts, a group each past the 4); one tab
-  // is active, its label on the accent fill.
+  // #234 gate 2: the Host groups in their fixed order (HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS), main's card first;
+  // one tab is active, its label on the accent fill.
   const ranked = () => {
-    const t = [...$$('#host>.grp')].map(g => 'ragm'.indexOf(g.dataset.t));
-    if (t.length < 4 || t.length !== 4 + $$('#host>.grp.h').length || t.some((x, i) => x < 0 || (i && x < t[i - 1]))) early.push(`Host groups not ranked by status: ${t}`);
+    const t = [...$$('#host>.grp .gn')].map(g => g.textContent).join(' ');
+    if (!/^HOSTS FLEET DISK SERVICES (FLEETS )?ALERTS$/.test(t)) early.push(`Host groups not in order: ${t}`);
+    if (!$('#host .hcd .tag')?.closest('.hcd').matches(':first-child')) early.push('the main host is not the first card');
     const on = $$('nav a.on'), probe = B.appendChild(Object.assign(document.createElement('i'), { style: 'color:var(--l)' }));
     const accent = getComputedStyle(probe).color;
     probe.remove();
@@ -228,6 +229,16 @@
       $('#push').hidden = false;
       // `--screenshot` captures the document's top: the shot drops the needs cards so Alerts is in it (the check keeps them).
       if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
+    },
+    // #234 gate 2: the hosts fixture with mini's load/cpu chart open (24 h), read from the export's inline series.
+    'host-chart': async () => {
+      tab('host');
+      const r = $('#host .hcd .rw[data-k=load]');
+      r.closest('.grp').open = true;
+      r.open = true;
+      await chart(r, '24h', null, true);
+      if (!r.querySelector('.hpl polyline.ln') || !$$('#host .spk polyline').length) early.push('host chart: no sparkline or chart line drawn');
+      if (!DBG.get('check')) { $('#needs').hidden = true; r.closest('.hcd').scrollIntoView(); }
     },
     // #141 gate 2: the busy and healthy fixtures (scripts/host-fixtures.sh), as the tab first shows them.
     'host-ranked': () => {

@@ -225,6 +225,12 @@ pub fn drive(
             lock.display()
         )?);
     };
+    // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
+    if fast {
+        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
+            writeln!(out, "host history: {e:#}")?;
+        }
+    }
     // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
     if only.is_none() {
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
