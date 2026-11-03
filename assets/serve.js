@@ -119,7 +119,7 @@ function colours() {
   $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
   put('sb', b);
   hostrow(document);
-  if ($('.sh.look')) lsheet(); // #290: an open look sheet moves its ticks
+  if (lopen()) lsheet(); // #290: an open look sheet moves its ticks
 }
 // #244: the Host tab's `theme` row names this phone's theme and colours; under it, each refused scheme with why.
 function hostrow(root) {
@@ -162,8 +162,10 @@ function lrow(k, n, on, art, def) {
   if (def) o.append(el('small', '', '(theme default)'));
   return o;
 }
+// Open is shown, not closing, and still the look sheet: a closed sheet keeps its class until another sheet replaces it.
+const lopen = () => !!$('.sh.look') && shown() && !shut;
 function lsheet(kb) {
-  const h = document.documentElement, re = $('.sh.look'), f = re && document.activeElement.closest('.lko');
+  const h = document.documentElement, re = lopen(), f = re && document.activeElement.closest('.lko');
   const key = f && Object.entries(f.dataset)[0];
   agent = null;
   sh.className = 'sh lg look';

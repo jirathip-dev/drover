@@ -350,7 +350,7 @@
     },
     // #290 gate 2: `[◐]` on all 4 tabs, no native select; its sheet holds THEME and COLOURS listboxes, one row ticked
     // each; a tap applies in place (no reload) and the sheet stays open.
-    look: () => {
+    look: async () => {
       for (const t of ['lanes', 'host', 'events', 'queue']) { tab(t); if (!seen($('#look'))) early.push(`no [◐] on ${t}`); }
       if ($$('select#theme, select#scheme').length) early.push('a native theme/colours select remains');
       $('#look').click();
@@ -360,6 +360,10 @@
       const s = [...$$('.look .lko[data-s]')].find(o => o.getAttribute('aria-selected') !== 'true');
       s.click();
       if (window.kept !== 1 || document.documentElement.dataset.scheme !== s.dataset.s || !$('.sh.look') || !shown()) early.push('a colours tap reloaded, missed or closed the sheet');
+      close(); // closed, `[◐]` opens it again (the closed sheet keeps its class)
+      await new Promise(r => setTimeout(r, 400));
+      $('#look').click();
+      if (!shown()) early.push('[◐] did not reopen the look sheet after a close');
     },
     // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
     'moment-still': () => {
