@@ -223,7 +223,7 @@ tailnet-only.
 [[notify]]
 type = "webpush"
 sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
-# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, decision-undelivered, state-write-failed
+# on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
 ```
 
 It works per fleet too (`[[fleet.<name>.notify]]`), next to the Telegram notifier, which is

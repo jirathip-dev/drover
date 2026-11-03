@@ -298,6 +298,16 @@ pub fn drive(
     }
     let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
     let fleets: Vec<&str> = cfg.fleet.iter().filter(mine).map(|(n, _)| n.as_str()).collect();
+    // #325: an answer that never reached its lane is typed again each fast step, until it lands or the lane is gone.
+    let events = fast
+        .then(|| crate::events::read(&ctx.state).ok())
+        .flatten()
+        .unwrap_or_default();
+    for u in fleets.iter().flat_map(|f| crate::undelivered(&events, f)) {
+        if let Err(e) = crate::deliver(ctx, cfg, r, u, u.str("text").unwrap_or_default(), false) {
+            writeln!(out, "redeliver: {e:#}")?;
+        }
+    }
     // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
     let (mut res, mut start) = (Ok(()), true);
     ACTS.with_borrow_mut(BTreeMap::clear);
