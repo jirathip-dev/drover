@@ -175,6 +175,8 @@ pub struct Fleet {
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
+    /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
+    pub premerge: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

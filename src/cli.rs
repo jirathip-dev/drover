@@ -16,7 +16,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "herdsman",
-    version,
+    version = crate::VERSION,
     about = "State, gates and harness toggle over herdr",
     disable_help_subcommand = true
 )]

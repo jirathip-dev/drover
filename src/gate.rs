@@ -1,6 +1,7 @@
 //! `herdsman verdict` and `herdsman merge`: the review → merge gate.
 use crate::config::{Config, Fleet};
 use crate::events::{emit, fold, read, Event, IssueState};
+use crate::overlap::git;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
 use crate::{check, gh, herdr};
@@ -364,6 +365,75 @@ pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String,
     (format!("{title} (#{num})"), body, !human.is_empty())
 }
 
+fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
+    ctx.state.with_file_name(format!("premerge-{fleet}-{issue}.md"))
+}
+
+/// #272: the fleet's `premerge` checks on `head` merged into current integration, in a scratch worktree; the seconds
+/// they took (`None`: no checks). Integration moving during the checks re-runs them once.
+fn premerge(
+    ctx: &Ctx,
+    f: &Fleet,
+    r: &dyn Runner,
+    (fleet, issue): (&str, u64),
+    head: &str,
+) -> Result<Result<Option<u64>, Refusal>> {
+    let dir = f.local_path();
+    let cap = dir
+        .join("ci/cap.toml")
+        .exists()
+        .then(|| format!("{} cap-check --config ci/cap.toml", ctx.exe));
+    let checks = f.premerge.clone().unwrap_or_else(|| cap.into_iter().collect());
+    if checks.is_empty() {
+        return Ok(Ok(None));
+    }
+    let (wt, into) = (
+        ctx.state.with_file_name(format!("premerge-{fleet}")),
+        format!("origin/{}", f.integration),
+    );
+    let wts = wt.to_string_lossy();
+    let tip = || git(r, &dir, &["fetch", "-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
+    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
+    for _ in 0..2 {
+        let base = tip()?;
+        let _ = tree(&["remove", "--force", &wts]);
+        tree(&["add", "-f", "--detach", &wts, &base])?;
+        let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
+        let t = std::time::Instant::now();
+        let fail = checks.iter().take_while(|_| clean).find_map(|c| {
+            let o = r
+                .run("sh", &argv(&["-c", &format!("cd \"$0\" && {c}"), &wts]))
+                .unwrap_or_default();
+            (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
+        });
+        let secs = t.elapsed().as_secs();
+        let _ = tree(&["remove", "--force", &wts]);
+        if !clean {
+            return Ok(Err(refuse("NOT_MERGEABLE", format!("{head:.7} conflicts with {into}"))));
+        }
+        if let Some((c, o)) = fail {
+            let first = o
+                .lines()
+                .find(|l| l.contains("error"))
+                .or_else(|| o.lines().find(|l| !l.trim().is_empty()));
+            let msg = format!("{c}: {}", first.unwrap_or("failed").trim());
+            let body = format!(
+                "FAIL\n\nPremerge on {head:.7} merged with {into} @ {base:.7}, {secs}s: {msg}\n\n```\n{}\n```\n",
+                crate::lanes::mask(&o)
+            );
+            std::fs::write(premerge_file(ctx, fleet, issue), body)?;
+            return Ok(Err(refuse("STAGING_WOULD_BREAK", msg)));
+        }
+        if tip()? == base {
+            return Ok(Ok(Some(secs)));
+        }
+    }
+    Ok(Err(refuse(
+        "STAGING_MOVED",
+        format!("{into} moved during the premerge checks twice"),
+    )))
+}
+
 /// `over` (`--owner-override`, #130) lifts only `ROUND_LIMIT`.
 pub fn merge(
     ctx: &Ctx,
@@ -422,13 +492,25 @@ pub fn merge(
         }
         res => res,
     };
-    let head = match res {
+    let res = match res {
+        Ok(h) => premerge(ctx, f, r, (fleet, issue), &h)?.map(|s| (h, s)),
+        Err(rf) => Err(rf),
+    };
+    let (head, secs) = match res {
         Ok(h) => h,
         // #148: CI not reported yet or still running is no block; the item stays ready, waiting for CI.
         Err(rf)
-            if rf.code == "CI_NOT_GREEN"
-                && gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "pending" =>
+            if rf.code == "STAGING_MOVED"
+                || rf.code == "CI_NOT_GREEN"
+                    && gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "pending" =>
         {
+            return Err(rf.into());
+        }
+        // #272: like red CI, a FAIL at the passed head: a fix round with the output, no new review round.
+        Err(rf) if rf.code == "STAGING_WOULD_BREAK" => {
+            let file = premerge_file(ctx, fleet, issue);
+            let h = pr["headRefOid"].as_str().unwrap_or_default();
+            verdict(ctx, cfg, r, out, (fleet, issue), false, h, &file.to_string_lossy())?;
             return Err(rf.into());
         }
         Err(rf) => {
@@ -467,6 +549,9 @@ pub fn merge(
     let mc = json(r, "gh", &["pr", "view", &num, "-R", &f.repo, "--json", "mergeCommit"])?;
     let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
+    if let Some(s) = secs {
+        d["premerge_secs"] = json!(s);
+    }
     if over {
         (d["by"], d["override"]) = (json!("owner"), json!("ROUND_LIMIT"));
     }
