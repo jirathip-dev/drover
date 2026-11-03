@@ -321,7 +321,12 @@
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.
-    'herd-kitchen': () => { herd(true); light = 'day'; ranch(); setTimeout(() => { if ($('#hp1 .horse') || !$('.hr .rs pattern')) early.push('kitchen: not its chefs and counter scene'); }, 500); },
+    // #239: its stations and chefs by role at calm, busy (the demo's [gusty]) and held ([storm]: smoke, wall flames, the red glow,
+    // idle chefs fanning); `herd-kitchen-still` is held under reduced motion: a still frame that still shows smoke and glow.
+    'herd-kitchen': () => kitchen('calm'),
+    'herd-kitchen-busy': () => kitchen('gusty'),
+    'herd-kitchen-held': () => kitchen('storm'),
+    'herd-kitchen-still': () => kitchen('storm'),
     'herd-nodone': () => { herd(true); light = 'day'; ranch(); setTimeout(() => { if (!$('#hp3 .horse-done') || $('#hp1 .horse')) early.push("nodone: done is not farm's horse, or the rest not chefs"); }, 500); },
     // #71: Auto is night before 07:00 and from 19:00; [A] cycles auto → day → night, each stored; a fresh load of the
     // page on this phone (an iframe: virtual time runs no reload) comes back at the last tap, night: the night shot.
@@ -367,9 +372,22 @@
       setTimeout(() => { const m = $('.msg.g, .msg.r'); drove = m && m.textContent === drove || `want "${drove}", saw "${m && m.textContent}"`; }, 1000);
     },
   };
+  async function kitchen(wx) {
+    herd(true);
+    await wait();
+    await wait();
+    $(`.hwx button[value=${wx}]`).click();
+    const lv = { calm: 'calm', gusty: 'busy', storm: 'held' }[wx], s = getComputedStyle(H);
+    if ($('#hp1 .horse') || !$('.hr .rs .h-held') || !H.classList.contains('heat-' + lv)) early.push(`kitchen: not its chefs and stations, or not ${lv} (#herd "${H.className}")`);
+    if (H.matches('.night') || !lb.hidden) early.push('kitchen: night or the [A] light shown');
+    if (lv === 'held' && (!$('.hh.idle use[href="#hfan"]') || getComputedStyle($('.hr .rs .ksmoke')).display === 'none')) early.push('held: no fanning chef or no smoke');
+    if (V === 'herd-kitchen-still' && (!matchMedia('(prefers-reduced-motion: reduce)').matches || s.animationName !== 'none')) early.push(`still: #herd animates (${s.animationName})`);
+    const t = $('.hqh.n span');
+    if (t && t.scrollWidth > t.clientWidth) early.push('"! needs you" overflows its ticket');
+  }
   let toasted = null, drove = null, href = null;
   const dragged = [];
-  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
+  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0 }; // the views measuring one Herd page
   const ROOTS = { sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
@@ -483,7 +501,7 @@
     if (se.scrollWidth > se.clientWidth) bad.push(`page scrolls sideways: ${se.scrollWidth}>${se.clientWidth}`);
     if (V in HP) {
       const p = hp(HP[V]), pr = p.getBoundingClientRect();
-      for (const e of [p.querySelector('.hs'), $('.hlt'), $('.hx')]) if (e.offsetHeight !== 28) bad.push(`${e.className}: Herd strip/[A]/[×] ${e.offsetHeight}px, not 28`);
+      for (const e of [p.querySelector('.hs'), $('.hlt'), $('.hx')]) if (!e.hidden && e.offsetHeight !== 28) bad.push(`${e.className}: Herd strip/[A]/[×] ${e.offsetHeight}px, not 28`);
       // #71: the ranch-light button sits inside the strip, left of [×] (the tap checks above scrolled the page, and
       // in a storm #herd itself: the rain tile overflows it, which only scrollIntoView can scroll).
       p.scrollTo({ top: 0, behavior: 'instant' });
