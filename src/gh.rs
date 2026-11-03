@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub const PR_FIELDS: &str =
-    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels";
+    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit";
 pub const PR_TTL: u64 = 60;
 const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
 
@@ -234,6 +234,44 @@ pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     let p = cache_path(ctx, "pr", fleet, issue);
     if let Some(c) = load::<Value>(&p) {
         let _ = store(&p, &json!({"branch": c["branch"], "forgot": true}));
+    }
+}
+
+/// #285: a ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's
+/// rule is `strict`: its ruleset's, else its classic protection's (read once an hour; unreadable = not strict). `r`
+/// None: the cached read only.
+pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -> bool {
+    if f.update_ready.as_deref() == Some("always") {
+        return true;
+    }
+    let p = cache_path(ctx, "strict", fleet, 0);
+    let c = load::<Value>(&p).filter(|c| r.is_none() || ctx.now < c["ts"].as_u64().unwrap_or(0) + 3600);
+    match (c, r) {
+        (Some(c), _) => c["strict"] == true,
+        (None, None) => false,
+        (None, Some(r)) => {
+            let rules = json(
+                r,
+                "gh",
+                &["api", &format!("repos/{}/rules/branches/{}", f.repo, f.integration)],
+            );
+            let rules = rules.unwrap_or_default();
+            let rule = rules
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|x| x["type"] == "required_status_checks");
+            let api = format!("repos/{}/branches/{}/protection", f.repo, f.integration);
+            let s = rule.map_or_else(
+                || {
+                    ok(r, "gh", &["api", &api, "--jq", ".required_status_checks.strict"])
+                        .is_ok_and(|o| o.trim() == "true")
+                },
+                |x| x["parameters"]["strict_required_status_checks_policy"] == true,
+            );
+            let _ = store(&p, &json!({"ts": ctx.now, "strict": s}));
+            s
+        }
     }
 }
 

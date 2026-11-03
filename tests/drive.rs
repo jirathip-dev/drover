@@ -42,6 +42,17 @@ fn pr(head: &str, ci: &str) -> String {
 }
 
 /// A Fake on which spawns succeed and the host is calm; `agents` = the herdr agent list.
+/// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
+fn strict(c: &herdsman::Ctx) {
+    let cache = c.state.with_file_name("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("strict-sendmeter-0.json"),
+        json!({"ts": c.now, "strict": true}).to_string(),
+    )
+    .unwrap();
+}
+
 fn fake(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -405,6 +416,92 @@ fn clean_reclaims_merged_lanes() {
     idle(&c, &r);
 }
 
+/// #285: PR #100 of #12 as GitHub shows it after it left the open set (`MERGED` / `CLOSED`).
+fn gone_pr(state: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&pr(&sha("a1"), "green")).unwrap();
+    v["state"] = json!(state);
+    if state == "MERGED" {
+        (v["mergeCommit"], v["mergedAt"]) = (json!({"oid": "3c05c00a"}), json!("2026-11-03T06:37:00Z"));
+    }
+    v.to_string()
+}
+
+#[test]
+fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
+    let c = setup("drive-external-merge");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    assert_eq!(state(&c), "ready");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &gone_pr("MERGED"))
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 merged outside herdsman (PR #100)"), "{out}");
+    let ev = read(&c.state).unwrap();
+    let m = ev.iter().find(|e| e.is("merged", "sendmeter", 12)).expect("merged");
+    assert_eq!(
+        (m.str("by"), m.str("merge_sha"), m.str("pr"), m.str("into")),
+        (Some("external"), Some("3c05c00a"), Some("100"), Some("staging"))
+    );
+    assert_eq!(m.str("merged_at"), Some("2026-11-03T06:37:00Z"));
+    assert_eq!(state(&c), "merged");
+    assert!(!r.called("gh pr merge") && !r.called("gh issue comment") && !r.called("gh issue close"));
+    // Its lanes go the normal clean way in the same slow pass; the card is gone.
+    assert_eq!(steps, ["clean"], "{out}");
+    assert!(r.called("herdr worktree remove --workspace w9"));
+    std::fs::remove_dir_all(&wt).unwrap(); // herdr removed it
+    assert!(!run(&c, &r, &["waiting", "sendmeter"]).1.contains("#12"));
+    // The repair is once: a later pass logs nothing more.
+    idle(&c, &r);
+    assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "merged").count(), 1);
+}
+
+#[test]
+fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
+    for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
+        let c = setup(&format!("drive-external-{want}"));
+        lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+        ev(
+            &c,
+            20,
+            "verdict",
+            json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+        );
+        let r = fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &gone_pr("CLOSED"))
+            .reply("gh issue list", issues)
+            .reply("git -C", "");
+        let (out, _) = drive(&c, &r);
+        assert!(
+            out.contains(&format!("sendmeter #12 {want} outside herdsman (PR #100)")),
+            "{out}"
+        );
+        assert_eq!(state(&c), want);
+        let e = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.is(want, "sendmeter", 12))
+            .unwrap();
+        if want == "blocked" {
+            assert_eq!(
+                (e.str("code"), e.str("reason")),
+                (Some("PR_CLOSED"), Some("PR closed outside herdsman"))
+            );
+        } else {
+            assert_eq!(e.str("by"), Some("external"));
+        }
+        drive(&c, &r);
+        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == want).count(), 1);
+        assert!(!r.called("gh issue comment"));
+    }
+}
+
 #[test]
 fn paused_fleets_and_host_busy_are_no_ops() {
     let c = setup("drive-paused");
@@ -687,6 +784,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
 #[test]
 fn a_behind_pr_after_pass_is_updated_the_same_way() {
     let c = setup("drive-behind");
+    strict(&c);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
         &c,
@@ -1449,6 +1547,7 @@ fn a_merge_that_fails_on_a_conflict_gets_the_update_lane() {
 #[test]
 fn auto_update_runs_in_a_pass_with_no_merge() {
     let c = setup("drive-catch-up");
+    strict(&c);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("a1");
     ev(

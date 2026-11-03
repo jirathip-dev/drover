@@ -233,7 +233,10 @@ pub fn sync_label(
     if s.done() || pr["state"] != "OPEN" || head.is_empty() {
         return Ok(());
     }
-    let (flag, kind) = match (passed(&read(&ctx.state)?, s, head), gh::has_label(pr, label)) {
+    // #285: a pure merge of the PASS head with integration (#207's carry) keeps the PASS, so the label stays.
+    let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
+    let pass = passed(&read(&ctx.state)?, s, head) || carried();
+    let (flag, kind) = match (pass, gh::has_label(pr, label)) {
         (true, false) => ("--add-label", "labelled"),
         (false, true) => ("--remove-label", "unlabelled"),
         _ => return Ok(()),

@@ -53,7 +53,8 @@ serial_paths = ["supabase/migrations/**"]   # `--serial` lanes, serial_max at a 
 # serial_label = "schema"   # the Queue graph's lock mark for serial issues (🔒schema), ≤ 8 characters; default "serial"
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # premerge = ["herdsman cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
-# merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves
+# merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves past it (a pure merge of integration keeps it)
+# update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `herdsman cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
