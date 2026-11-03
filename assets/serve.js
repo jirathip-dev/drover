@@ -619,7 +619,6 @@ function tidy(root) {
   evf(root);
   hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
-  root.querySelectorAll('.lane .act').forEach(a => a.classList.toggle('doing', a.textContent.startsWith('now: '))); // #260 one line
   root.querySelectorAll('select').forEach(s => {
     if (s.parentNode.matches('.pk')) return;
     const k = el('label', 'pk'), t = el('span', '');

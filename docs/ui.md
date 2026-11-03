@@ -91,6 +91,10 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `sheet-other` (#95) opens the demo's Others agent (a herdr agent that is no lane) and fails unless only
    `[close pane]` shows (no `[stop]`, `[kill]`, `[clean]`), `p.st` reads `not a herdsman lane: herdsman can only
    close its pane`, and nothing in the sheet is in the red (danger) colour.
+   `lanes-now` (#276; also `~terminal`, glyph mode) redraws the Lanes tab twice through `frag()` (the `/live` path) with
+   long `now:` lines as the server emits them (plain; Claude's spinner word, a long action and its time; the word with a
+   long action; an idle row with no spinner), and fails unless each stays one ellipsised line inside its row in every
+   mode, the action cut before the word.
    `needs-later` (#154) pushes three needs-you cards through `frag()` and fails unless `[later]` on one leaves the red
    line `1 need you ▸` and 2 cards, `[later all]` the line alone, a tap on the line all 3, and a changed card comes back.
    #68: on every view, a box whose content is wider than it (`scrollWidth > clientWidth + 1`, tap rings off)
