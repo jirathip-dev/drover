@@ -422,8 +422,67 @@ pub fn activity(harness: &str, screen: &str) -> String {
 fn doing(tool: &str, arg: &str) -> String {
     let rows = "running Bash Shell $|editing Edit Write Update MultiEdit|reading Read".split('|');
     let row = rows.into_iter().find(|r| r.split(' ').skip(1).any(|w| w == tool));
-    let first = arg.lines().next().unwrap_or_default();
+    let mut first = arg.lines().next().unwrap_or_default().to_string();
+    if let Some(h) = std::env::var("HOME").ok().filter(|h| h.len() > 1) {
+        first = first.replace(&h, "~"); // #276
+    }
     mask(&format!("now: {} {}", row.map_or(tool, |r| &r[..7]), first.trim()))
+}
+
+/// #276: a shell command as its first real command and target (`git merge origin/staging`, `sed src/usage.rs`): `cd`,
+/// `VAR=…`, redirections and piped parts dropped, `+N` for the rest of a chain, a heredoc as `python3 (script)`.
+pub fn short(cmd: &str) -> String {
+    let (mut segs, mut seg, mut tok, mut q, mut d, mut piped) = (vec![], vec![], String::new(), None, 0, false);
+    let mut cs = cmd.chars().chain([';']).peekable();
+    while let Some(c) = cs.next() {
+        match (q, c) {
+            (Some(x), _) if x == c => q = None,
+            (None, '\'' | '"') => q = Some(c),
+            (None, '(' | ')') => d += if c == '(' { 1 } else { -1 },
+            (None, '&') if tok.ends_with('>') || cs.peek() == Some(&'>') => {}
+            (None, ';' | '\n' | '&' | '|' | ' ' | '\t') if d <= 0 => {
+                seg.extend((!tok.is_empty()).then(|| std::mem::take(&mut tok)));
+                if !" \t".contains(c) {
+                    let pipe = c == '|' && cs.next_if_eq(&'|').is_none();
+                    segs.push((std::mem::take(&mut seg), std::mem::replace(&mut piped, pipe)));
+                }
+                continue;
+            }
+            _ => {}
+        }
+        tok.push(c);
+    }
+    let id = |c: char| c == '_' || c.is_alphanumeric();
+    let var = |w: &&String| w.split_once('=').is_some_and(|(k, _)| k.chars().all(id));
+    let real: Vec<Vec<&String>> = (segs.iter().filter(|s| !s.1))
+        .map(|s| s.0.iter().skip_while(var).collect::<Vec<_>>())
+        .filter(|s| s.first().is_some_and(|c| *c != "cd"))
+        .collect();
+    let Some(s) = real.first() else {
+        return cmd.trim().to_string();
+    };
+    let word = |w: &&&String| !w.starts_with('-') && w.chars().all(|c| c.is_alphanumeric() || "./~:@_+-".contains(c));
+    let redir = |w: &&String| ["<", ">", ">>", "2>", "&>"].contains(&w.as_str());
+    let args = s.iter().zip(&s[1..]).filter(|(p, _)| !redir(p)).map(|x| x.1);
+    let args: Vec<_> = args.filter(word).take(2).collect();
+    let end = args
+        .iter()
+        .position(|w| w.contains(['/', '.']))
+        .map_or(args.len(), |i| i + 1);
+    let out = args[..end].iter().fold(s[0].clone(), |o, w| o + " " + w);
+    let (more, script) = (real.len() - 1, s.iter().any(|w| w.starts_with("<<")));
+    let tail = [(script, " (script)".to_string()), (more > 0, format!(" +{more}"))];
+    out + &tail.into_iter().filter(|t| t.0).map(|t| t.1).collect::<String>()
+}
+
+/// #276: Claude's live spinner as its word and, past a minute, its elapsed time: `✻ Herding… (4m 12s · ↓ 3k tokens)` is
+/// (`✻ Herding…`, `4m`); None when idle, or for a harness without a spinner line.
+pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
+    let s = strip(chat(screen).1.filter(|_| harness == "claude")?);
+    let (w, rest) = s.split_once(" (")?;
+    let mins = |t: &&str| t.strip_suffix(['m', 'h']).is_some_and(|n| n.parse::<u32>().is_ok());
+    let t = rest.split([' ', ')']).find(mins).map(String::from);
+    w.trim().ends_with('…').then(|| (mask(w.trim()), t))
 }
 
 /// #260: the pane's last tool line as a `now:` line: Claude `⏺ Bash(cargo test)`, Hermes `💻 cargo test`, `$ …`.

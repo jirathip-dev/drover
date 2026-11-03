@@ -1975,7 +1975,23 @@ impl<'a> Server<'a> {
                 String::new()
             };
         let screen = screen.unwrap_or_default();
-        let act = esc(&lanes::now_of(l, &screen).unwrap_or_else(|| lanes::activity(&l.harness, &screen)));
+        // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
+        // command summarised; cut first), the elapsed time.
+        let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
+        let act = if now.is_none() && spin.is_none() {
+            format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen)))
+        } else {
+            let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
+            let n = now.as_ref().map(|n| match n.strip_prefix("now: running ") {
+                Some(c) => format!("{}running {}", if w.is_some() { "" } else { "now: " }, lanes::short(c)),
+                None => n.strip_prefix("now: ").filter(|_| w.is_some()).unwrap_or(n).to_string(),
+            });
+            let title: Vec<_> = [&w, &now, &t].into_iter().flatten().cloned().collect();
+            let tag = |(x, c): (Option<String>, &str)| Some(format!("<span class={c}>{}</span>", esc(&x?)));
+            let parts: Vec<_> = [(w, "el"), (n, "el"), (t, "t")].into_iter().filter_map(tag).collect();
+            let (title, parts) = (esc(&title.join(" · ")), parts.join("<i> · </i>"));
+            format!("<span class=\"act nw el now\" title=\"{title}\">{parts}</span>")
+        };
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -1989,7 +2005,7 @@ impl<'a> Server<'a> {
         let a = ago(ctx.now, since);
         format!(
             "<div class=lane data-agent=\"{}\" data-role={}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
-             {why}<span class=act>{act}</span></button><div class=card hidden>{card}</div></div>",
+             {why}{act}</button><div class=card hidden>{card}</div></div>",
             esc(&l.name),
             esc(&l.role) + if l.pane.is_none() { " data-gone" } else { "" },
             avatar(&l.name, &l.role, &l.state),
