@@ -47,6 +47,9 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
 
+/// #235: `herdsman --version`: the crate version and the git sha it is built from (build.rs).
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("HERDSMAN_SHA"), ")");
+
 #[derive(Clone)]
 pub struct Ctx {
     pub config: PathBuf,

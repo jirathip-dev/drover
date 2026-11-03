@@ -48,6 +48,25 @@ fn fake(mini: f64, remote: f64) -> Fake {
         .reply(&format!("{SSH}'nproc'"), "4")
 }
 
+const HERDR_STATUS: &str = "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.5\n";
+
+/// #235: replies that make bazzite healthy: herdr same version in its login session, git over SSH, gh and Claude
+/// logged in inside a pane, and this herdsman's version.
+fn healthy(f: Fake) -> Fake {
+    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), HERDR_STATUS)
+        .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
+        .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
+        .reply(
+            "herdr --machine bazzite workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w5:p1"}}}"#,
+        )
+        .reply("herdr --machine bazzite pane read w5:p1", "gh:0\nclaude:0\nhs:done\n")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            &format!("herdsman {}\n", herdsman::VERSION),
+        )
+}
+
 fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
@@ -76,7 +95,7 @@ fn placed(c: &herdsman::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&st
 fn tags_are_detected_cached_and_refreshed_hourly() {
     let c = ctx(&tmpdir("hosts-tags"), &config(""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let r = fake(1.0, 1.0)
+    let r = healthy(fake(1.0, 1.0))
         .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\nxcode\n")
         .reply(
             &format!("{SSH}'sh' '-c' 'uname -s"),
@@ -437,6 +456,145 @@ fn lane_cards_and_the_herd_name_the_host() {
     let herd = String::from_utf8_lossy(&s.respond(&format!("GET /herd.json HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW))
         .into_owned();
     assert!(herd.contains("\"host\":\"bazzite\""), "{herd}");
+}
+
+/// #235: bazzite's health rows with every check passing but the one `bad` prefix, which fails.
+fn health_with(c: &herdsman::Ctx, bad: &str) -> Vec<String> {
+    let cfg = Config::load(&c.config).unwrap();
+    let r = healthy(fake(0.1, 0.1)).once(bad, 1, "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.0\n");
+    let on = herdsman::hosts::On::new(&r, Some("bazzite"));
+    herdsman::hosts::health(c, &cfg, &on, &["docker".into()], "/home/me")
+}
+
+#[test]
+fn each_health_check_says_what_failed_and_how_to_fix_it() {
+    let c = setup("hosts-health", "", true, 0);
+    assert!(health_with(&c, "nothing").is_empty(), "all ✓");
+    let cases = [
+        (format!("{SSH}'sh' '-c' 'PATH="), "✗ herdr — server none, client ? → herdr update on the host"),
+        (format!("{SSH}'sh' '-c' 'p=$(pgrep"), "✗ herdr session — the server runs outside the login session (keychain locked) → restart the herdr server from its launchd job: `launchctl kickstart -k gui/<uid>/<label>`"),
+        (format!("{SSH}'git' 'ls-remote'"), "✗ git sendmeter — ls-remote https://github.com/jirathip-dev/sendmeter.git → add the host's SSH key to GitHub and set `git config --global url.git@github.com:.insteadOf https://github.com/`"),
+        ("herdr --machine bazzite workspace create".into(), "✗ gh — not logged in inside a herdr pane → gh auth login"),
+        (format!("{SSH}'/opt/herdsman/bin/herdsman'"), "! herdsman — missing there, herdsman 0.1.0"),
+    ];
+    for (bad, want) in cases {
+        let rows = health_with(&c, &bad);
+        assert!(rows[0].starts_with(want), "{bad}: {rows:?}");
+    }
+    // A server older than its client (a herdr update without a restart).
+    let r = healthy(fake(0.1, 0.1)).once(
+        &format!("{SSH}'sh' '-c' 'PATH="),
+        0,
+        "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.0\n",
+    );
+    let cfg = Config::load(&c.config).unwrap();
+    let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
+    assert!(rows[0].starts_with("✗ herdr — server 0.9.0, client 0.9.5"), "{rows:?}");
+    // Logged out of Claude only (the pane's screen).
+    let r = healthy(fake(0.1, 0.1)).once("herdr --machine bazzite pane read", 0, "gh:0\nclaude:1\nhs:done\n");
+    let rows = herdsman::hosts::health(&c, &cfg, &herdsman::hosts::On::new(&r, Some("bazzite")), &[], "/h");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with("✗ claude — not logged in inside a herdr pane → claude auth login"));
+    assert!(
+        r.called("herdr --machine bazzite workspace close w5"),
+        "the throwaway workspace is closed"
+    );
+    // doctor lists each failure under the host, and exits 1 on a ✗.
+    let r = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .once(&format!("{SSH}'git' 'ls-remote'"), 128, "");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("\n✗ host bazzite git sendmeter — ls-remote"), "{out}");
+    let (_, out) = run(&c, &healthy(r), &["doctor"]);
+    assert!(
+        out.contains("\n✓ host bazzite — herdr, session, git, gh, claude, herdsman 0.1.0 ("),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
+    let c = setup("hosts-sick", "", true, 0);
+    let mut all = cached(&c);
+    all.get_mut("bazzite").unwrap().health = vec!["✗ gh — not logged in inside a herdr pane → gh auth login".into()];
+    std::fs::write(
+        c.state.with_file_name("hosts.json"),
+        serde_json::to_string(&all).unwrap(),
+    )
+    .unwrap();
+    let r = fake(2.0, 0.1);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("mini"),
+        "idle but unhealthy bazzite is skipped"
+    );
+    run(&c, &r, &["queue", "sendmeter", "add", "12", "--needs", "docker"]);
+    let e = placed(&c, &r, 12, "impl", None).unwrap_err();
+    assert_eq!(
+        e,
+        "NO_HOST: bazzite: unhealthy: ✗ gh — not logged in inside a herdr pane → gh auth login"
+    );
+    let cfg = Config::load(&c.config).unwrap();
+    let s = &cached(&c)["bazzite"];
+    let (tone, words) = herdsman::hosts::shown(cfg.hosts["bazzite"].enabled, s, 0, NOW);
+    assert_eq!(
+        (tone, words.as_str()),
+        (
+            "r",
+            "unhealthy · gh — not logged in inside a herdr pane → gh auth login"
+        )
+    );
+}
+
+#[test]
+fn an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once() {
+    let extra =
+        "\n[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/herdsman\"\nintegration = \"staging\"\n";
+    let c = setup("hosts-update", "", true, 0);
+    std::fs::write(&c.config, config("") + extra).unwrap();
+    let old = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
+        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
+        .once(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            0,
+            "herdsman 0.1.0 (0ld)\n",
+        );
+    let (code, out) = run(&c, &old, &["hosts", "refresh"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("bazzite · up · herdsman — herdsman 0.1.0 (0ld) there"),
+        "amber, not red: {out}"
+    );
+    let sha = env!("HERDSMAN_SHA");
+    let script = format!(
+        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path . --locked --root '\\''/opt/herdsman'\\'' --force && '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync'"
+    );
+    assert!(old.called(&script), "{:#?}", old.calls.borrow());
+    let ev = read(&c.state).unwrap();
+    let up = ev.iter().find(|e| e.kind == "host-update").unwrap();
+    assert_eq!((up.str("host"), up.str("sha")), (Some("bazzite"), Some(sha)));
+    assert!(cached(&c)["bazzite"].health[0].starts_with("! herdsman"));
+    // Still old on the next probe: no second build of the same sha.
+    let again = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
+        .once(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
+            0,
+            "herdsman 0.1.0 (0ld)\n",
+        );
+    run(&c, &again, &["hosts", "refresh"]);
+    assert!(!again.called(&format!("{SSH}'sh' '-c' 'nohup")));
+    // The build landed: the version reads back the same and the warning clears.
+    run(
+        &c,
+        &healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n"),
+        &["hosts", "refresh"],
+    );
+    assert!(cached(&c)["bazzite"].health.is_empty());
 }
 
 /// #236: a dry run places the lane first and prints the argvs exactly as a real spawn sends them: bazzite's home in
