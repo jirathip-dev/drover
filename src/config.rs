@@ -251,9 +251,8 @@ pub struct Limits {
     /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
-    /// #283: a remote host's asks older than this are never imported.
+    /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
     pub import_max_age_hours: u64,
-    /// #283: `check` pushes at most this many alerts a pass, then one summary.
     pub max_pushes_per_pass: usize,
 }
 
