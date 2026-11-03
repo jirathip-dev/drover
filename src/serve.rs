@@ -82,7 +82,7 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ("favicon.ico", "image/png", I192),
 ];
 /// FNV-1a over the assets and root files at build time: their `/a/<hash8>/` path and the icons' `?v=<hash8>`.
-#[allow(long_running_const_eval)] // staging build fix: the assets outgrew the default step limit (#310)
+#[allow(long_running_const_eval)] // ~300 KB of assets outgrow rustc's const-eval step budget
 const VER: u32 = {
     let (mut h, mut k, mut i) = (0x811c_9dc5u32, 0, 0);
     while k < ASSETS.len() + FILES.len() {
@@ -927,7 +927,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -986,7 +986,13 @@ impl<'a> Server<'a> {
         }
         times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
-        let res = if pick {
+        let g = |k: &str| f.get(k).map_or("", String::as_str);
+        let res = if path == "/setup" {
+            let via = format!("web {}", dev.label);
+            Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, g("host"), g("name"), &via))
+        } else if let Some(p) = f.get("setup") {
+            crate::setup::send(ctx, self.r, p, g("text"))
+        } else if pick {
             self.pick(ctx, &dev, f)
         } else if act {
             self.act(ctx, &dev, f)
@@ -1111,6 +1117,9 @@ impl<'a> Server<'a> {
     /// The sheet's transcript: up to 200 masked ANSI lines `before` the newest (load more) of the lane's rolling
     /// transcript (#138; the export reads the screen only), the live block's length and the status line, as JSON.
     fn transcript(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
+        if let Some(p) = q.get("setup") {
+            return crate::setup::screen(ctx, self.r, p).ok().map(|j| j.to_string());
+        }
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
         let (cfg, events) = (Config::load(&ctx.config).ok()?, read(&ctx.state).ok()?);
@@ -1959,6 +1968,7 @@ impl<'a> Server<'a> {
             o(&l.model),
             o(&l.effort),
             o(&l.account),
+            o(&l.resting),
             o(&l.port),
             a.clone(),
         ];
@@ -2376,7 +2386,19 @@ impl<'a> Server<'a> {
             let btn = h.filter(|_| self.addr.is_some() && self.export.is_none() && !(main && on)).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button data-confirm=\"turn {1} {to}?{}\">{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name), if on { format!(" no new lanes; {} running lanes finish", lanes.len()) } else { String::new() }));
             let tag = ["", "<span class=\"tag m\">main</span>"][usize::from(main)];
             let (n, ln) = (esc(&name), crate::hosts::series(&hist, &name, "lanes", now, false));
-            out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{btn}</div>{rows}</article>", esc(&words));
+            // #303: [sign in ▾]: the configured logins by name; the sheet runs one in a pane on this host.
+            let su = crate::setup::all(cfg).into_iter().map(|(s, _)| {
+                format!(
+                    "<button type=button data-su=\"{0}\" data-host=\"{n}\">{0}</button>",
+                    esc(&s)
+                )
+            });
+            let su = format!(
+                "<details class=su><summary>sign in ▾</summary><div>{}</div></details>",
+                su.collect::<String>()
+            );
+            let su = [String::new(), su][usize::from(self.addr.is_some() && self.export.is_none())].clone();
+            out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{su}{btn}</div>{rows}</article>", esc(&words));
         }
         out
     }

@@ -15,14 +15,44 @@ pub const TOKEN_VAR: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 /// `|`-separated, case-insensitive substrings of Claude Code's usage-limit banner.
 pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
-/// When the account's latest cap (since any reset) ends: its logged `until`, else `cap_reset_minutes` after it.
+/// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
+const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
+
+/// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged
+/// `until`, else `cap_reset_minutes` after it.
 pub fn capped_until(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<u64> {
-    let mine =
-        |e: &&Event| matches!(e.kind.as_str(), "account-capped" | "account-reset") && e.str("account") == Some(name);
+    let kinds = ["account-capped", "account-reset", "agent-unavailable"];
+    let mine = |e: &&Event| kinds.contains(&e.kind.as_str()) && e.str("account").or(e.str("harness")) == Some(name);
     let last = events.iter().rev().find(mine)?;
     let until = last.data.get("until").and_then(Value::as_u64);
     let until = until.unwrap_or(last.ts + cfg.accounts.cap_reset_minutes * 60);
-    (last.kind == "account-capped" && until > now).then_some(until)
+    (last.kind != "account-reset" && until > now).then_some(until)
+}
+
+/// #302: role `r` on the first of its `fallback` entries (`harness[:account]`) whose harness and account both are not
+/// resting (the earlier ones that are, for the card); `r` itself when it has none.
+pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(Role, Option<(String, u64)>)> {
+    let rest = |e: &&String| e.split(':').filter_map(|k| capped_until(cfg, events, k, now)).max();
+    if r.fallback.is_empty() {
+        return Ok((r.clone(), None));
+    }
+    let Some(i) = r.fallback.iter().position(|e| rest(&e).is_none()) else {
+        return refused("ALL_CAPPED", format!("every fallback {:?} is resting", r.fallback));
+    };
+    let (h, a) = r.fallback[i].split_once(':').unwrap_or((&r.fallback[i], ""));
+    let mut to = r.clone();
+    (to.account, to.accounts) = (Some(a.to_string()).filter(|a| !a.is_empty()), vec![]);
+    if to.harness != h {
+        (to.harness, to.model, to.effort) = (h.into(), None, None);
+    }
+    let (resting, entry) = (r.fallback[..i].join(" "), &r.fallback[i]);
+    let until = r.fallback[..i].iter().filter_map(|e| rest(&e)).max();
+    Ok((to, until.map(|t| (format!("on {entry} ({resting} resting until"), t))))
+}
+
+/// #302: the pane shows Claude Code's signed-out error.
+pub fn signed_out(screen: &str) -> bool {
+    AUTH_PATTERN.split('|').any(|p| screen.to_lowercase().contains(p))
 }
 
 /// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and the
