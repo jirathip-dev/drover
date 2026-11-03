@@ -168,6 +168,7 @@ enum Cmd {
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
     /// Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)
+    #[command(alias = "host")]
     Hosts {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
@@ -389,6 +390,9 @@ enum HostsCmd {
     On { name: String },
     /// No new lanes on this host (its lanes finish there); still monitored; logs `host-off`
     Off { name: String },
+    /// Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`
+    #[command(hide = true)]
+    Destroy { name: String },
 }
 
 #[derive(Subcommand)]
@@ -419,7 +423,7 @@ pub fn usage_doc() -> String {
     let subs: Vec<_> = subs
         .flat_map(|c| {
             if c.has_subcommands() {
-                c.get_subcommands().collect()
+                c.get_subcommands().filter(|c| !c.is_hide_set()).collect()
             } else {
                 vec![c]
             }
@@ -724,6 +728,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
+                    Some(HostsCmd::Destroy { name }) => {
+                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
+                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
+                    }
                 },
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));

@@ -2228,6 +2228,10 @@ impl<'a> Server<'a> {
             }
             let lanes = crate::hosts::lanes_on(cfg, events, &name);
             let (mut t, mut words) = crate::hosts::shown(on, &s, lanes.len(), now);
+            let cloud = crate::cloud::card(ctx, cfg, events, (&name, lanes.len()));
+            if let Some(w) = cloud.as_ref().and_then(|c| c.0.clone()) {
+                (t, words) = ("m", w);
+            }
             let held = t == "g" && host::admit(&gate, lim).is_err();
             if t == "g" {
                 (t, words) = match host::admit(&gate, lim) {
@@ -2310,6 +2314,7 @@ impl<'a> Server<'a> {
                     &(esc(&s.top.join(" · ")) + &at[usize::from(main)]),
                 );
             }
+            rows += &cloud.map_or(String::new(), |c| kv("cloud", c.1, &esc(&c.2)));
             let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
             let ls = format!("<b>{}</b> <span class=mt>{}</span>", lanes.len(), esc(&ls));
             rows += &row("lanes", "lanes", grey("g"), &ls, "");

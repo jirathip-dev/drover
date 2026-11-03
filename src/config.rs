@@ -34,6 +34,12 @@ pub struct HostCfg {
     pub root: Option<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// #254: a cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
+    pub cloud: Option<String>,
+    pub size: Option<String>,
+    pub budget_usd_month: Option<f64>,
+    pub max_hours_day: Option<f64>,
+    pub idle_stop_minutes: Option<u64>,
 }
 
 fn yes() -> bool {
@@ -251,6 +257,8 @@ pub struct Limits {
     /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
+    /// #254: every local host refused this long lets placement start a stopped cloud host.
+    pub overflow_after_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -299,6 +307,7 @@ impl Default for Limits {
                 .unwrap_or_default(),
             fast_secs: 60,
             slow_secs: 300,
+            overflow_after_minutes: 10,
             form_categories: [
                 "trailer",
                 "pr-body",

@@ -14,6 +14,7 @@ pub mod access;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;
+pub mod cloud;
 pub mod config;
 pub mod devices;
 pub mod doctor;

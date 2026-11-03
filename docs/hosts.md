@@ -141,6 +141,47 @@ A host still on the old version stays amber. A failed update never blocks the ma
 Nothing new starts. Lanes on other hosts keep running in their own herdr servers. When the main host comes back,
 `check` finds those lanes again from the log. To move the main host, follow docs/move.md.
 
+## Cloud hosts (#254)
+
+A cloud host is a `[hosts.<name>]` with a `cloud` recipe. herdsman starts it when a lane needs it and stops it when idle.
+
+```toml
+[hosts.boat1]
+machine = "boat1"          # the ssh alias herdsman writes, and the herdr machine label
+cloud = "boat"             # the built-in recipe; or <config>/recipes/<name>.toml
+size = "small"             # a key of the recipe's [rate_usd_hour]
+budget_usd_month = 50      # hard: none set means 0, so it never starts
+max_hours_day = 6          # optional
+idle_stop_minutes = 20     # the default
+tags = ["docker"]
+
+[limits]
+overflow_after_minutes = 10  # the default
+```
+
+- **The recipe** is a TOML file of `sh -c` templates: `create`, `start`, `stop`, `status` (prints `running` when up),
+  `address` (prints `user@host port`, then the host key line), `destroy`. It also sets `key_env`, the provider key's
+  variable, and `[rate_usd_hour]` per size. `{name}` is the host's name and `{size}` its size. The built-in `boat`
+  recipe is assets/recipes/boat.toml. Check its commands and rates against docs.boat.dev, and copy it to
+  `<config>/recipes/boat.toml` to change them.
+- **The provider key** is read on the main host from the environment, else from `[accounts].accounts_env`. Each
+  command gets it on stdin and exports it. It never appears in argv, fleet.toml or the event log.
+- **Start on demand.** Placement uses a stopped cloud host in two cases: every local host has been refused (busy, low
+  memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has. A respawn on a lane's
+  own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
+  It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
+  (`~/.ssh/config.d/herdsman-<name>.known`) from `address`, and then spawns. A dry run never starts a host. Add
+  `Include config.d/*` at the top of `~/.ssh/config` once.
+- **Idle stop.** `check` stops a running cloud host after `idle_stop_minutes` with no live agent on it. First, each
+  lane worktree there with unpushed or dirty work is pushed to `wip/<host>-<lane>`, after the secret scan. A secret
+  or a failed push aborts the stop (logged `cloud-abort`). The disk is kept. Lanes there show `paused: cloud host
+  stopped` on the Host card, and their next spawn starts the host again.
+- **Spend** is the running time (`cloud-start` → `cloud-stop` in the log) × the size's rate, per UTC month and day.
+  The Host card shows `spent $12 of $50 · 3.1 h today of 6`, the address age and the last start and stop. The row
+  turns amber at 80 % and red at the limit. At the limit, placement refuses `CLOUD_BUDGET` and `check` stops a running
+  host (after the wip save). Only an owner edit to fleet.toml raises a limit.
+- **Destroy** is owner only: `herdsman host destroy <name>` does the wip save, then runs the recipe's `destroy`.
+
 ## Limits
 
 Remote lanes run the Claude harness. The dsh harness writes its pre-push hook file on the main host only.
