@@ -59,7 +59,15 @@ pub fn verdict(
     if sha.len() != 40 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return refused("BAD_SHA", format!("--sha {sha} must be a full 40-hex commit sha"));
     }
-    let body = std::fs::read_to_string(file).with_context(|| format!("cannot read verdict file {file}"))?;
+    // #249: a verdict.md in a remote review lane's worktree is read on that lane's host.
+    let evs = read(&ctx.state)?;
+    let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
+    let at = evs
+        .iter()
+        .rfind(reviewer)
+        .filter(|e| e.str("worktree").is_some_and(|w| file.starts_with(w)));
+    let body = (crate::hosts::On::of(r, at).read(Path::new(file)))
+        .with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
     let st = issue_state(ctx, fleet, issue)?;
     let branch = branch_of(st.as_ref(), issue);
@@ -251,8 +259,9 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
 /// of `cats`; at least one blocker.
 #[doc(hidden)]
 pub fn form_only(body: &str, cats: &[String]) -> bool {
+    // #249: a markdown heading (`## Blocking`) is no finding.
     let blockers: Vec<String> = (body.lines().skip(1).map(str::to_lowercase))
-        .filter(|l| l.contains("blocking") && !l.contains("non-blocking"))
+        .filter(|l| !l.trim_start().starts_with('#') && l.contains("blocking") && !l.contains("non-blocking"))
         .collect();
     let tag = |l: &str| {
         let (_, rest) = l.split_once("blocking")?;
