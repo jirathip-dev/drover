@@ -352,21 +352,18 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = if board.is_some() { "g" } else { "r" };
     let d = board.unwrap_or(format!("down on {addr}"));
     let mut rows = vec![row("board", t, d, "herdsman setup")];
-    let (t, d) = tick_row(ctx, &events);
-    rows.push(row("tick", t, d, FIX));
-    // #237: the fast step's stamp, red after 3× its interval; then each own job against this build.
+    let tick = tick_row(ctx, &events);
+    // #237: the fast step's stamp, red after 3× its interval; each row also says its own job against this build.
     let fast = std::fs::read_to_string(ctx.state.with_file_name("drive-fast.at"));
     let fast = fast.ok().and_then(|s| s.trim().parse::<u64>().ok());
     let late = fast.is_none_or(|t| ctx.now.saturating_sub(t) > 3 * cfg.limits.fast_secs);
-    let (t, d) = (["g", "r"][usize::from(late)], format!("ran {}", ago(ctx.now, fast)));
-    rows.push(row("fast step", t, d, FIX));
-    for (label, state) in drift(ctx, cfg, r) {
-        rows.push(row(
-            label,
-            ["r", "g"][usize::from(state == "loaded")],
-            state.into(),
-            FIX,
-        ));
+    let fast = (["g", "r"][usize::from(late)], format!("ran {}", ago(ctx.now, fast)));
+    for ((item, (t, d)), (_, state)) in [("tick", tick), ("fast step", fast)]
+        .into_iter()
+        .zip(drift(ctx, cfg, r))
+    {
+        let t = if state == "loaded" { t } else { "r" };
+        rows.push(row(item, t, format!("{d} · job {state}"), FIX));
     }
     for (name, f) in &cfg.fleet {
         let item = format!("drive {name}");

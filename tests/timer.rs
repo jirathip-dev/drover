@@ -303,8 +303,6 @@ fn services_rows_go_green_amber_and_red() {
             "board",
             "tick",
             "fast step",
-            "dev.herdsman.tick",
-            "dev.herdsman.fast",
             "drive sendmeter",
             "phone alerts",
             "herdr",
@@ -316,11 +314,11 @@ fn services_rows_go_green_amber_and_red() {
         let want = if item == "phone alerts" { "a" } else { "g" }; // no webpush notifier
         assert_eq!(*tone, want, "{item}: {detail}");
     }
-    assert_eq!(all[1].2, "ran 60s ago");
-    assert_eq!((all[2].2.as_str(), all[4].2.as_str()), ("ran 40s ago", "loaded"));
-    assert_eq!(all[8].2, "200 GB free");
+    assert_eq!(all[1].2, "ran 60s ago · job loaded");
+    assert_eq!(all[2].2, "ran 40s ago · job loaded");
+    assert_eq!(all[6].2, "200 GB free");
     assert_eq!(
-        all[9].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
+        all[7].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
         "#164: from the last walk, against the budget"
     );
 
@@ -328,8 +326,8 @@ fn services_rows_go_green_amber_and_red() {
     let amber = host(Fake::default()).reply("lsof ", "x").reply("df -k /", &df(12));
     let all = rows(&c, &amber);
     fleet_disk(21);
-    assert_eq!((all[1].1, all[8].1), ("a", "a"), "{all:?}");
-    assert_eq!(rows(&c, &amber)[9].1, "a", "over 80 % of the budget");
+    assert_eq!((all[1].1, all[6].1), ("a", "a"), "{all:?}");
+    assert_eq!(rows(&c, &amber)[7].1, "a", "over 80 % of the budget");
 
     append(
         &c.state,
@@ -348,12 +346,12 @@ fn services_rows_go_green_amber_and_red() {
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(tones, ["r", "r", "r", "r", "r", "r", "a", "r", "r", "r"], "{all:?}");
-    assert_eq!((all[2].2.as_str(), all[4].2.as_str()), ("ran 3m ago", "missing"));
-    assert_eq!(all[9].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
-    assert_eq!(all[1].2, "failed: herdr: gone");
+    assert_eq!(tones, ["r", "r", "r", "r", "a", "r", "r", "r"], "{all:?}");
+    assert_eq!(all[2].2, "ran 3m ago · job missing");
+    assert_eq!(all[7].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
+    assert_eq!(all[1].2, "failed: herdr: gone · job missing");
     assert_eq!(
-        (all[0].3.as_str(), all[8].3.as_str()),
+        (all[0].3.as_str(), all[6].3.as_str()),
         ("herdsman setup", "herdsman clean --yes")
     );
 
@@ -367,13 +365,11 @@ fn services_rows_go_green_amber_and_red() {
         "{page}"
     );
     assert!(
-        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
+        page.contains("<span class=k>tick</span><span class=w><b class=r>failed: herdr: gone · job missing</b> <span class=\"mt fx\">→ herdsman timer install</span>"),
         "{page}"
     );
-    for (k, d) in [("fast step", "ran 3m ago"), ("dev.herdsman.fast", "missing")] {
-        let want = format!("<span class=k>{k}</span><span class=w><b class=r>{d}</b> <span class=\"mt fx\">→ herdsman");
-        assert!(page.contains(&want), "{want}\n{page}");
-    }
+    let want = "<span class=k>fast step</span><span class=w><b class=r>ran 3m ago · job missing</b>";
+    assert!(page.contains(want), "{want}\n{page}");
 }
 
 /// #160: a 10 s `du` never reaches a request: the page and the config fragment answer at once; `check` stores the total.
