@@ -300,6 +300,7 @@ pub struct Limits {
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize, // #318: concurrent detached spawn kicks (0: in the pass)
+    pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
 }
@@ -366,6 +367,7 @@ impl Default for Limits {
             import_max_age_hours: 24,
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
+            spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
         }
     }
@@ -401,6 +403,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "answer-undelivered",
     "state-write-failed",
     "wip-blocked",
+    "spawn-held",
 ];
 
 impl Notify {

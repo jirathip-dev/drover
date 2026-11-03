@@ -34,7 +34,7 @@ fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
         .and_then(|t| t.elapsed().ok());
     let dead = match pid {
         None => age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS),
-        Some(pid) => ok(r, "kill", &["-0", pid]).is_err(),
+        Some(pid) => !alive(r, pid, age.map_or(0, |a| a.as_secs())),
     };
     if dead {
         let _ = std::fs::remove_file(lock);
@@ -46,6 +46,89 @@ fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
         .ok()?;
     let _ = write!(f, "{} {fleet}", std::process::id());
     Some(Lock(lock.into()))
+}
+
+/// #333: `pid` runs and started no later than `age` secs ago (a reused pid started after its file); no `ps`: alive.
+fn alive(r: &dyn Runner, pid: &str, age: u64) -> bool {
+    let up = |s: String| {
+        let (d, hms) = s
+            .trim()
+            .split_once('-')
+            .map_or(Some((0, s.trim())), |(d, t)| Some((d.parse::<u64>().ok()?, t)))?;
+        Some(
+            d * 86400
+                + hms
+                    .split(':')
+                    .try_fold(0, |a, x| Some(a * 60 + x.parse::<u64>().ok()?))?,
+        )
+    };
+    let up = || ok(r, "ps", &["-o", "etime=", "-p", pid]).ok().and_then(up);
+    ok(r, "kill", &["-0", pid]).is_ok() && up().is_none_or(|up| up + 5 >= age)
+}
+
+/// #333: each spawn marker and kick lock, live or stale: stale once its pid is gone (or reused) or it is older than
+/// `spawn_pending_max_secs` (a marker without a pid: by age alone). `remove`: delete each stale one, log `stale-marker`.
+pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<String>, Vec<Event>) {
+    let (mut live, mut stale) = (vec![], vec![]);
+    for p in std::fs::read_dir(state_dir(ctx))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+    {
+        let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let spawn = name.strip_prefix("spawn-").and_then(|n| n.strip_suffix(".pending"));
+        let Some(id) = spawn.or_else(|| name.strip_prefix("kick-")?.strip_suffix(".lock")) else {
+            continue;
+        };
+        let Some(age) = p
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+        else {
+            continue;
+        };
+        let (age, text) = (age.as_secs(), std::fs::read_to_string(&p).unwrap_or_default());
+        let pid = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| v["pid"].as_u64());
+        let pid = pid.or_else(|| text.split_whitespace().next()?.parse().ok());
+        if age <= cfg.limits.spawn_pending_max_secs && pid.is_none_or(|p| alive(r, &p.to_string(), age)) {
+            live.push(name);
+            continue;
+        }
+        let (fleet, n) = id.rsplit_once('-').map_or((id, None), |(f, n)| (f, n.parse().ok()));
+        let e = Event::new(
+            ctx.now,
+            fleet,
+            n,
+            "stale-marker",
+            json!({"file": name, "pid": pid, "age": age}),
+        );
+        if remove && std::fs::remove_file(&p).is_ok() {
+            let _ = append(&ctx.state, &e);
+        }
+        stale.push(e);
+    }
+    (live, stale)
+}
+
+/// #333: `spawns starting N/<max>` and the stale markers swept in the last day: doctor's and the Host tab's line.
+pub fn spawns_line(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> String {
+    let n = markers(ctx, cfg, r, false)
+        .0
+        .iter()
+        .filter(|m| m.starts_with("spawn-"))
+        .count();
+    let day = |e: &&Event| e.kind == "stale-marker" && ctx.now < e.ts + 86400;
+    let gone: Vec<&str> = events.iter().filter(day).filter_map(|e| e.str("file")).collect();
+    let gone = (!gone.is_empty()).then(|| format!(" · stale removed (24 h): {}", gone.join(", ")));
+    format!(
+        "spawns starting {n}/{}{}",
+        cfg.limits.max_parallel_spawns,
+        gone.unwrap_or_default()
+    )
 }
 
 /// #246: the last fast step: (started, secs) from `drive-fast.at`.
@@ -109,15 +192,23 @@ thread_local! {
 }
 
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command.
-pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) {
+/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid.
+pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
     if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
-        return;
+        return None;
     }
     let (exe, args, log) = (&ctx.exe, a.join(" "), state_dir(ctx).join("kick.log"));
-    let sh = format!("nohup '{exe}' {args} --now >> '{}' 2>&1 < /dev/null &", log.display());
-    let _ = r.run("sh", &crate::runner::argv(&["-c", &sh]));
+    let sh = format!(
+        "nohup '{exe}' {args} --now >> '{}' 2>&1 < /dev/null & echo $!",
+        log.display()
+    );
+    r.run("sh", &crate::runner::argv(&["-c", &sh]))
+        .ok()?
+        .stdout
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// #304: `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s
@@ -132,10 +223,13 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
     std::fs::create_dir_all(state_dir(ctx))?;
     let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
     let mut pending = (why == "drive").then(|| Lock(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))));
-    let Some(_k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
+    let Some(k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
         return Ok(std::fs::write(&again, why)?);
     };
     for _ in 0..30 {
+        // #333: a running kick's lock stays younger than `spawn_pending_max_secs`.
+        let lock = std::fs::File::options().append(true).open(&k.0);
+        let _ = lock.and_then(|f| f.set_modified(std::time::SystemTime::now()));
         let mut buf = vec![];
         KICK.set(Some(n));
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
@@ -160,15 +254,26 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 
 /// #318: a pass's spawn as its own detached kick, at most `max_parallel_spawns` at once, admitted counting those starting.
 fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
+    markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
     if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
         return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
-    let d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
-    let e = serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d))?;
-    std::fs::write(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending")), e)?;
-    kick(ctx, r, fleet, n, "drive");
+    let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
+    let marker = state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"));
+    std::fs::write(
+        &marker,
+        serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()))?,
+    )?;
+    // #333: the marker carries the detached kick's own pid: its death makes the marker stale at once.
+    if let Some(pid) = kick(ctx, r, fleet, n, "drive").filter(|_| marker.exists()) {
+        d["pid"] = pid.into();
+        std::fs::write(
+            &marker,
+            serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d))?,
+        )?;
+    }
     Ok(0)
 }
 

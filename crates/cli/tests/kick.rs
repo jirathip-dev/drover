@@ -152,7 +152,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     assert_eq!(calls.len(), 1, "{calls:?}");
     let log = c.state.with_file_name("kick.log");
     let want = format!(
-        "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 24 --why stop --now >> '{}' 2>&1 < /dev/null &",
+        "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 24 --why stop --now >> '{}' 2>&1 < /dev/null & echo $!",
         log.display()
     );
     assert_eq!(calls[0], want);
