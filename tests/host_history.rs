@@ -103,6 +103,27 @@ fn the_file_stays_under_the_size_bound() {
 }
 
 #[test]
+fn one_host_keeps_24h_and_rewrites_rarely() {
+    use std::os::unix::fs::MetadataExt;
+    let mut c = two_hosts("history-one");
+    let p = c.state.with_file_name("host-history.jsonl");
+    let (host, mut ino, mut rewrites) = ("a-rather-long-hostname-mini-01", 0, 0);
+    for i in 0..1_500 {
+        c.now = NOW + i * 60;
+        record(&c, &[row(c.now, host, 12.34)], 0).unwrap();
+        let now = std::fs::metadata(&p).unwrap().ino();
+        rewrites += usize::from(ino != 0 && now != ino);
+        ino = now;
+    }
+    let size = std::fs::metadata(&p).unwrap().len() as usize;
+    assert!(size <= BOUND, "{size} B over {BOUND} B");
+    assert!(rewrites <= 1, "{rewrites} rewrites");
+    let rows = history(&c);
+    assert!(rows.len() >= 1_440 && rows.len() <= 1_500, "{} rows", rows.len());
+    assert!(rows.first().unwrap().ts + 86_400 <= c.now + 60, "24 h kept");
+}
+
+#[test]
 fn downsampling_keeps_the_worst_per_bucket() {
     let rows: Vec<Row> = (0..60u64)
         .map(|i| {

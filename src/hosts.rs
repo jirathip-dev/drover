@@ -450,8 +450,8 @@ impl Row {
 }
 
 const DAY: u64 = 86_400;
-/// #234: the history's size bound per host (about 1,440 rows of about 125 B).
-pub const BOUND: usize = 180_000;
+/// #234: the history's size bound per host: 1,600 rows of up to 200 B (a row is about 130 B), so 25 h fit.
+pub const BOUND: usize = 320_000;
 
 fn history_file(ctx: &Ctx) -> PathBuf {
     ctx.state.with_file_name("host-history.jsonl")
@@ -463,7 +463,8 @@ pub fn history(ctx: &Ctx) -> Vec<Row> {
 }
 
 /// #234: append `rows`; once the oldest row is over 25 h old or the file over `BOUND` for each of `hosts`, it is
-/// rewritten to the last 24 h, newest first within the bound. So it is rewritten at most once an hour.
+/// rewritten to the last 24 h, newest first within 9/10 of the bound (the headroom keeps an oversize file from being
+/// rewritten every minute). So it is rewritten at most once an hour.
 pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
     let (p, bound) = (history_file(ctx), BOUND * hosts.max(1));
     let new: String = rows
@@ -487,7 +488,7 @@ pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
     let keep: Vec<&str> = (text.lines().rev().filter(|l| ts(l) + DAY >= ctx.now))
         .take_while(|l| {
             size += l.len() + 1;
-            size <= bound
+            size <= bound / 10 * 9
         })
         .collect();
     write_atomic(&p, &keep.iter().rev().map(|l| format!("{l}\n")).collect::<String>())
