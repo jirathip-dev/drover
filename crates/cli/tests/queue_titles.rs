@@ -47,8 +47,8 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     for out in [get(&s, "/"), get(&s, "/?frag=all")] {
         assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
         assert!(
-            out.contains("A very long issue title that goes well past one…"),
-            "cut at a word: {out}"
+            out.contains("well past one phone line<") && !out.contains("past one…"),
+            "#331: whole, CSS ellipsises it: {out}"
         );
     }
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
