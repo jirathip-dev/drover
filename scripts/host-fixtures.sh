@@ -16,6 +16,10 @@ busy = fx == "busy"
 r = json.load(open(f"{d}/runner.json"))
 r["sysctl -n vm.loadavg"] = "{ 33.92 30.10 28.40 }\n" if busy else "{ 14.72 13.10 12.40 }\n"
 r["df -k /"] = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 488245288 400000000 44040192 91% /\n"
+if fx == "healthy":  # #237: both own jobs loaded (their files below), the fast step 40 s before export's now
+    r["launchctl print"] = r["systemctl --user is-active"] = ""
+    ts = max(json.loads(l)["ts"] for l in open(f"{d}/events.jsonl") if l.strip())
+    open(f"{d}/drive-fast.at", "w").write(f"{ts + 20} 2.1\n")
 if busy:  # the server is the second `version:` line
     head, tail = r["herdr status"].rsplit("version: 0.9.5", 1)
     r["herdr status"] = head + "version: 0.9.0" + tail
@@ -61,6 +65,8 @@ os.makedirs(f"{d}/webpush", exist_ok=True)
 sub = {"endpoint": "https://web.push.apple.com/demo", "p256dh": "p", "auth": "a", "label": "iPhone Safari", "created": ts - 28800}
 json.dump([sub], open(f"{d}/webpush/subs.json", "w"))
 EOF
-  HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl" "$bin" serve --export "$site/$fx" --demo
+  export HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl"
+  [ "$fx" = healthy ] && "$bin" timer install --no-load >/dev/null
+  "$bin" serve --export "$site/$fx" --demo
   rm -rf "${d:?}"
 done
