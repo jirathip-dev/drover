@@ -189,3 +189,13 @@ fn the_card_says_not_counted_in_amber() {
         "{page}"
     );
 }
+
+/// #249: a `## Blocking` heading is no finding; tagged items under it are form-only, an untagged one is not.
+#[test]
+fn a_blocking_heading_is_ignored() {
+    let cats = ["pr-body".to_string(), "docs-fresh".to_string()];
+    let ok = |b: &str| herdsman::gate::form_only(b, &cats);
+    let head = "FAIL (form-only)\n\n## Blocking\n- blocking [pr-body] body lags the head\n";
+    assert!(ok(&format!("{head}- blocking [docs-fresh] README\n")));
+    assert!(!ok(&format!("{head}- blocking README is stale\n")));
+}
