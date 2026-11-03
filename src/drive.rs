@@ -131,6 +131,7 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
     }
     std::fs::create_dir_all(state_dir(ctx))?;
     let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
+    let _pending = Lock(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))); // #318: cleared on any end
     let Some(_k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
         return Ok(std::fs::write(&again, why)?);
     };
@@ -154,6 +155,26 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         }
     }
     Ok(())
+}
+
+/// #318: a pass's spawn runs as its own detached kick (the slow harness start there), at most `max_parallel_spawns`
+/// at once; its `spawn-<fleet>-<n>.pending` (stale after `STALE_LOCK_SECS`) keeps later passes off the issue meanwhile.
+fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, n: u64) -> Result<i32> {
+    let mine = state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"));
+    let age = |e: &std::fs::DirEntry| e.metadata().ok()?.modified().ok()?.elapsed().ok();
+    let live = |e: &std::fs::DirEntry| age(e).is_some_and(|a| a.as_secs() < STALE_LOCK_SECS);
+    let all = std::fs::read_dir(state_dir(ctx))?.flatten();
+    let live: Vec<_> = all
+        .filter(|e| e.path().extension() == Some("pending".as_ref()) && live(e))
+        .map(|e| e.path())
+        .collect();
+    if live.len() >= cfg.limits.max_parallel_spawns || live.contains(&mine) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    }
+    std::fs::write(&mine, "")?;
+    IN_ACT.set(false);
+    kick(ctx, r, fleet, n, "drive");
+    Ok(0)
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -273,7 +294,9 @@ pub fn drive(
     gh::FORCE.set(fast || KICK.get().is_some());
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
-    let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
+    // #318: a kick holds its own issue's locks, never the pass's, so many run at once.
+    let kick = KICK.get().map(|n| format!("drive-kick-{n}.lock"));
+    let lock = state_dir(ctx).join(kick.as_deref().unwrap_or(["drive.lock", "drive-fast.lock"][i]));
     let Some(_held) = take(r, &lock, only.unwrap_or_default()) else {
         if manual {
             return wait(ctx, r, out, &lock, only);
@@ -342,7 +365,9 @@ pub fn drive(
             ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
             crate::usage::date(r, end, "+%H:%M"),
         );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "actions": acts});
+        let n = acts.iter().filter(|a| a["launched"] == true).count();
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "actions": acts,
+            "spawns_launched": n});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     res
@@ -793,8 +818,12 @@ type Code = Option<&'static str>;
 fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], at: At, c: &[&str]) -> Result<Code> {
     let (fleet, issue, step) = at;
     let mut buf = vec![];
+    let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
     IN_ACT.set(true);
-    let res = crate::cli::run(c, ctx, r, &mut buf);
+    let res = match issue.filter(|_| kicks) {
+        Some(n) => launch(ctx, cfg, r, fleet, n),
+        None => crate::cli::run(c, ctx, r, &mut buf),
+    };
     IN_ACT.set(false);
     let text = String::from_utf8_lossy(&buf);
     let (result, code) = match res {
@@ -819,9 +848,10 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     };
     let w = words(code, step, &result);
     ACTS.with_borrow_mut(|a| {
-        a.entry(fleet.into())
-            .or_default()
-            .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w}));
+        let launched = kicks && code.is_none();
+        a.entry(fleet.into()).or_default().push(
+            json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "launched": launched}),
+        );
     });
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
