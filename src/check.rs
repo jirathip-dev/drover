@@ -47,6 +47,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let stall = cfg.limits.stall_minutes * 60;
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
     let remote = crate::hosts::survey(ctx, cfg, r, false);
+    crate::setup::reap(ctx, r, &events)?;
     for name in cfg.fleet.keys() {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
     }

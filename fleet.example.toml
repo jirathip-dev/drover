@@ -133,3 +133,9 @@ cmd = "notify <chat>"   # any command; one plain line on stdin
 # cmd = "hermes send -q -t telegram:<chat_id>"   # or Hermes, to Telegram
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing", "account-capped"]
 # format = "json"   # send the raw event JSON instead
+
+# #303: the logins a host card's [sign in ▾] (or `herdsman setup <host> <name>`) runs; claude, gh and codex are built in.
+# [[setup]]
+# name = "claude B"
+# cmd = "claude /login"
+# env = { CLAUDE_CONFIG_DIR = "~/accounts/B" }
