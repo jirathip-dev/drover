@@ -337,13 +337,33 @@
     'theme-switch': async () => {
       tab('queue');
       window.kept = 1;
-      const pick = n => { thp.value = n; thp.dispatchEvent(new Event('change')); return new Promise(r => setTimeout(r, 800)); };
+      $('#look').click(); // #290: the look sheet's rows, not a select
+      const pick = n => { $(`.look .lko[data-t="${n}"]`).click(); return new Promise(r => setTimeout(r, 800)); };
       await pick('terminal');
       if (window.kept !== 1 || document.documentElement.dataset.theme !== 'terminal' || get('theme') !== 'terminal') early.push('the switch to terminal reloaded the page or was not kept');
       if (!$('link[rel=icon]').href.includes('themes/terminal/icon-')) early.push(`favicon ${$('link[rel=icon]').href}, not terminal's`);
       if ($$('.rsp, .lsc').length || B.dataset.mode !== 'glyph') early.push('terminal kept sprites or a scene mode');
       await pick('kitchen');
       if (!$$('#queue .rsp').length || !$('#hr-impl .chef, #hr-impl [shape-rendering]')) early.push("kitchen: no row sprites, or not the chef's");
+      close(); // the board is measured, not the look sheet over it
+      await new Promise(r => setTimeout(r, 400));
+    },
+    // #290 gate 2: `[◐]` on all 4 tabs, no native select; its sheet holds THEME and COLOURS listboxes, one row ticked
+    // each; a tap applies in place (no reload) and the sheet stays open.
+    look: async () => {
+      for (const t of ['lanes', 'host', 'events', 'queue']) { tab(t); if (!seen($('#look'))) early.push(`no [◐] on ${t}`); }
+      if ($$('select#theme, select#scheme').length) early.push('a native theme/colours select remains');
+      $('#look').click();
+      const ls = [...$$('#sheet [role=listbox]')].map(l => `${l.getAttribute('aria-label')}:${l.querySelectorAll('[role=option]').length}/${l.querySelectorAll('[aria-selected=true]').length}`);
+      if (ls.length !== 2 || !/^theme:3\/1,colours:\d+\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
+      window.kept = 1;
+      const s = [...$$('.look .lko[data-s]')].find(o => o.getAttribute('aria-selected') !== 'true');
+      s.click();
+      if (window.kept !== 1 || document.documentElement.dataset.scheme !== s.dataset.s || !$('.sh.look') || !shown()) early.push('a colours tap reloaded, missed or closed the sheet');
+      close(); // closed, `[◐]` opens it again (the closed sheet keeps its class)
+      await new Promise(r => setTimeout(r, 400));
+      $('#look').click();
+      if (!shown()) early.push('[◐] did not reopen the look sheet after a close');
     },
     // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
     'moment-still': () => {
@@ -486,8 +506,8 @@
   let toasted = null, drove = null, href = null;
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
-  const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql', NAME = '.nw, .hl b';
+  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
   const seen = e => e.checkVisibility({ visibilityProperty: true });

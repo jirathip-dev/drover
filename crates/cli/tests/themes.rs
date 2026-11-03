@@ -153,9 +153,11 @@ fn default_theme_is_farm() {
     assert!(page.contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>"));
     // The picker: this phone's choice, else the board's default, set before the first paint.
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
+    // #290: one `[◐]` opens the look sheet (serve.js); no native select for theme or colours.
     assert!(page.contains(
-        "<label class=pk id=thp><span>◐</span><select id=theme aria-label=theme><option>farm</option><option>kitchen</option><option>terminal</option></select></label>"
+        "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>"
     ));
+    assert!(!page.contains("id=theme") && !page.contains("id=scheme"));
 }
 
 #[test]
@@ -165,7 +167,8 @@ fn the_picker_default_is_serve_theme_and_lists_your_own() {
     let (c, r) = server(Some("space"), &[("space", "theme.json", "{}")]);
     let page = get(&c, &r, "/");
     assert!(page.contains("h.dataset.theme=m||\"space\";"));
-    assert!(page.contains("<option>kitchen</option><option>space</option><option>terminal</option>"));
+    // The look sheet lists SD.t's keys: the built-ins and your own.
+    assert!(page.contains("\"kitchen\":\"kitchen\",\"space\":") && page.contains(",\"terminal\":\"github-dark\"}"));
     // A name that would close the script stays a string.
     let (c, r) = server(Some("</script>"), &[]);
     assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"\\u003c/script>\";"));
