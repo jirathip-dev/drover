@@ -180,6 +180,7 @@ enum Cmd {
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
     /// Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)
+    #[command(alias = "host")]
     Hosts {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
@@ -212,6 +213,16 @@ enum Cmd {
         /// #212: only record verdicts and merge PASS + green (the every-minute job); no lane starts
         #[arg(long)]
         fast: bool,
+    },
+    /// Drive one issue's due steps now, detached (lane hooks and board taps run it); the timers stay the safety net
+    Kick {
+        fleet: String,
+        issue: u64,
+        /// What happened: push, verdict, ask, stop, board
+        #[arg(long, default_value = "cli")]
+        why: String,
+        #[arg(long, hide = true)]
+        now: bool,
     },
     /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it
     #[command(hide = true)]
@@ -410,6 +421,9 @@ enum HostsCmd {
     On { name: String },
     /// No new lanes on this host (its lanes finish there); still monitored; logs `host-off`
     Off { name: String },
+    /// Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`
+    #[command(hide = true)]
+    Destroy { name: String },
 }
 
 #[derive(Subcommand)]
@@ -432,7 +446,7 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "pause", "resume", "serve", "setup", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -440,7 +454,7 @@ pub fn usage_doc() -> String {
     let subs: Vec<_> = subs
         .flat_map(|c| {
             if c.has_subcommands() {
-                c.get_subcommands().collect()
+                c.get_subcommands().filter(|c| !c.is_hide_set()).collect()
             } else {
                 vec![c]
             }
@@ -516,7 +530,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
 
 /// #275: a lane on another host has `HERDSMAN_MAIN` (`<main host's ssh name>:<its herdsman>`): its `args` run on the
 /// main host over ssh, so the main log is the only one written and only the main host pushes.
-fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
+pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
     let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
     let main = std::env::var("HERDSMAN_MAIN").ok()?;
     let (host, exe) = main.split_once(':')?;
@@ -749,6 +763,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
         cmd => {
             let cfg = Config::load(&ctx.config)?;
+            let kick = |f: &str, n, why| crate::drive::kick(ctx, r, f, n, why);
             match cmd {
                 Cmd::Profiles {
                     cmd: ProfilesCmd::Sync { check: true },
@@ -788,7 +803,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     options,
                     recommend: n,
                     kind,
-                } => crate::ask(ctx, &cfg, out, (&fleet, lane(&issue)?), &question, &options, (n, &kind))?,
+                } => {
+                    let at = lane(&issue)?;
+                    crate::ask(ctx, &cfg, out, (&fleet, at), &question, &options, (n, &kind))?;
+                    at.inspect(|n| kick(&fleet, *n, "ask"));
+                }
                 Cmd::Answer { fleet, id, choice, by } => {
                     crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?;
                 }
@@ -798,11 +817,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
+                    Some(HostsCmd::Destroy { name }) => {
+                        let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
+                        writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
+                    }
                 },
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
                 Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
+                Cmd::Kick { fleet, issue, why, now } => {
+                    crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now))?;
+                }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let all = crate::waiting::scan(
                         ctx,
@@ -865,6 +891,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => {
                     let pass = verdict == "PASS";
                     gate::verdict(ctx, &cfg, r, out, (&fleet, issue), pass, &sha, &file)?;
+                    kick(&fleet, issue, "verdict");
                 }
                 Cmd::Merge {
                     fleet,
@@ -995,6 +1022,20 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         eprintln!("herdsman hook: input is not JSON; allowing");
         return Ok(());
     };
+    // #304: a turn's end or a push that went through kicks the lane's issue at once.
+    if let Some(why) = hook::kick_why(&input) {
+        let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+        let mut it = lane.split(':');
+        if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
+            crate::drive::kick(ctx, r, f, n, why);
+        }
+    }
+    if matches!(
+        input["hook_event_name"].as_str(),
+        Some("PostToolUse" | "post_tool_call" | "Stop" | "on_session_end")
+    ) {
+        return Ok(()); // after the fact: nothing left to guard
+    }
     let branches = protected_branches(ctx);
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
     let h = home();

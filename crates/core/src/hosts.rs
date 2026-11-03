@@ -117,6 +117,8 @@ pub struct Seen {
     /// #234: memory and disk size in GB (a bar shows the used part).
     pub mem_total: Option<f64>,
     pub disk_total: Option<f64>,
+    /// #254: when it last had a live agent (a cloud host's idle stop).
+    pub busy: u64,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -153,8 +155,12 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
     for (name, h) in &cfg.hosts {
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
-        let a = host::agents(&on).ok();
+        // #254: a stopped cloud host is not looked at (its lanes are paused, never paged).
+        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        let a = (!stopped).then(|| host::agents(&on).ok()).flatten();
         s.up = a.is_some();
+        let live = a.as_ref().is_some_and(|a| !a.is_empty());
+        s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
             if refresh || s.probed + 3600 <= ctx.now {
@@ -294,7 +300,8 @@ pub struct Placed {
 fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str, Option<&str>)) -> Placed {
     let on = On::new(r, machine);
     let mut seen = cached(ctx).remove(name).unwrap_or_default();
-    if machine.is_some() && seen.home.is_empty() {
+    let cloud = crate::cloud::held(ctx, cfg, name);
+    if machine.is_some() && seen.home.is_empty() && cloud.is_none() {
         seen.home = probe(&on).map(|p| p.1).unwrap_or_default();
     }
     let home = machine.and(Some(seen.home.clone()).filter(|h| !h.is_empty()));
@@ -307,8 +314,9 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let root = cfg.hosts.get(name).and_then(|h| h.root.as_deref());
     let reach = format!("can't reach {}:", f.repo); // #307: a repo only keeps its own fleet's lanes off
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
-    let (hs, refusal) = match host::agents(&on) {
-        Err(_) => (Host::default(), Some(("NO_HOST", "unreachable".to_string()))),
+    let (hs, refusal) = match cloud.map_or_else(|| host::agents(&on).map_err(|_| None), |c| Err(Some(c))) {
+        Err(Some(c)) => (Host::default(), Some(c)),
+        Err(None) => (Host::default(), Some(("NO_HOST", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(_) => gate(ctx, cfg, &on),
     };
@@ -466,7 +474,42 @@ pub fn place(
         return refused("NO_HOST", format!("no {enabled}host{has}"));
     }
     on.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(Equal));
-    Ok(Some(on.remove(0)))
+    // #254: a stopped cloud host only when every local host has been refused `overflow_after_minutes`, or it alone fits.
+    let local = |p: &Placed| cfg.hosts.get(&p.name).is_some_and(|h| h.cloud.is_none());
+    let held = held_for(ctx, on.iter().filter(|p| local(p)).all(|p| p.refusal.is_some()));
+    let wake = held >= cfg.limits.overflow_after_minutes * 60 || !on.iter().any(local);
+    let top = on[0].refusal.is_some() && !local(&on[0]);
+    let i = (!wake && top).then(|| on.iter().position(local)).flatten();
+    Ok(Some(on.remove(i.unwrap_or(0))))
+}
+
+/// #254: how long every local host has been refused (`<state dir>/held-since`: `since last`, cleared once one admits;
+/// a mark not seen again within 15 min, three drive passes, is stale and the clock starts over).
+fn held_for(ctx: &Ctx, held: bool) -> u64 {
+    let p = ctx.state.with_file_name("held-since");
+    let s = std::fs::read_to_string(&p).unwrap_or_default();
+    let mut n = s.split_whitespace().map(|w| w.parse::<u64>().ok());
+    let since = match (n.next().flatten(), n.next().flatten()) {
+        (Some(a), Some(b)) if ctx.now.saturating_sub(b) <= 900 => a,
+        _ => ctx.now,
+    };
+    let _ = if held {
+        std::fs::write(&p, format!("{since} {}", ctx.now))
+    } else {
+        std::fs::remove_file(&p)
+    };
+    [0, ctx.now.saturating_sub(since)][usize::from(held)]
+}
+
+/// #254: start the stopped cloud host `place` picked (not on a dry run), then place on it afresh.
+pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Option<Placed>) -> Result<Option<Placed>> {
+    match p {
+        Some(p) if !f.1 && p.refusal.as_ref().is_some_and(|x| x.0 == "CLOUD_STOPPED") => {
+            crate::cloud::start(ctx, cfg, r, &p.name)?;
+            Ok(Some(at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()))))
+        }
+        p => Ok(p),
+    }
 }
 
 /// `a` with this host's `$HOME` moved to the lane host's `home` (a remote lane's profile, prompt and env paths).

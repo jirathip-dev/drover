@@ -347,6 +347,8 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
         "{:?}",
         r.calls.borrow()
     );
+    // #304: the board's answer kicks the ask's issue at once.
+    assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 36 --why board --now"));
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "the ask is closed");
 }
 

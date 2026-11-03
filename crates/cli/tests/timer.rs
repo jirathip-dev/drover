@@ -305,6 +305,7 @@ fn services_rows_go_green_amber_and_red() {
             "tick",
             "drive sendmeter",
             "fast step",
+            "kick",
             "phone alerts",
             "herdr",
             "disk",
@@ -312,16 +313,26 @@ fn services_rows_go_green_amber_and_red() {
         ]
     );
     for (item, tone, detail, _) in &all {
-        let want = if item == "phone alerts" { "a" } else { "g" }; // no webpush notifier
+        let want = match item.as_str() {
+            "phone alerts" => "a", // no webpush notifier
+            "kick" => "m",
+            _ => "g",
+        };
         assert_eq!(*tone, want, "{item}: {detail}");
     }
     assert_eq!(all[1].2, "ran 60s ago");
     assert_eq!(all[3].2, "fast step 2.1 s · ran 40s ago");
-    assert_eq!(all[6].2, "200 GB free");
+    assert_eq!(all[4].2, "last kick never");
+    assert_eq!(all[7].2, "200 GB free");
     assert_eq!(
-        all[7].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
+        all[8].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
         "#164: from the last walk, against the budget"
     );
+    // #304: the last kick beside the timers.
+    let k = serde_json::json!({"why": "push", "result": "sendmeter: started #2940"});
+    let e = herdsman::events::Event::new(c.now - 12, "sendmeter", Some(2940), "kick", k);
+    herdsman::events::append(&c.state, &e).unwrap();
+    assert_eq!(rows(&c, &green)[4].2, "last kick 12s ago (push #2940)");
 
     stamp("check.at", 700);
     let amber = host(Fake::default())
@@ -331,8 +342,8 @@ fn services_rows_go_green_amber_and_red() {
         .reply("systemctl --user is-active", "");
     let all = rows(&c, &amber);
     fleet_disk(21);
-    assert_eq!((all[1].1, all[6].1), ("a", "a"), "{all:?}");
-    assert_eq!(rows(&c, &amber)[7].1, "a", "over 80 % of the budget");
+    assert_eq!((all[1].1, all[7].1), ("a", "a"), "{all:?}");
+    assert_eq!(rows(&c, &amber)[8].1, "a", "over 80 % of the budget");
 
     append(
         &c.state,
@@ -351,12 +362,12 @@ fn services_rows_go_green_amber_and_red() {
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(tones, ["r", "r", "r", "r", "a", "r", "r", "r"], "{all:?}");
+    assert_eq!(tones, ["r", "r", "r", "r", "m", "a", "r", "r", "r"], "{all:?}");
     assert_eq!(all[3].2, "ran 3m ago · job missing");
-    assert_eq!(all[7].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
+    assert_eq!(all[8].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
     assert_eq!(all[1].2, "failed: herdr: gone · job missing");
     assert_eq!(
-        (all[0].3.as_str(), all[6].3.as_str()),
+        (all[0].3.as_str(), all[7].3.as_str()),
         ("herdsman setup", "herdsman clean --yes")
     );
 

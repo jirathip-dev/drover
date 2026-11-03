@@ -1,0 +1,18 @@
+# #254: the built-in `boat` cloud recipe (boat.dev, docs.boat.dev). A file `<config>/recipes/boat.toml` replaces it.
+# Each command is a `sh -c` template: `{name}` is the `[hosts.<name>]` key (the sandbox name), `{size}` its `size`.
+# The provider key (`key_env`) is exported from stdin, never in argv or the event log.
+# `status` prints `running` when up; `address` prints `user@host port`, then the host key (`ssh-ed25519 AAAA…`).
+key_env = "BOAT_API_KEY"
+create = "boat create {name} --size {size}"
+start = "boat resume {name}"
+stop = "boat stop {name}"
+status = "boat status {name} --format '{{.State}}'"
+address = "boat ssh-info {name}"
+destroy = "boat destroy {name} --yes"
+
+# USD per running hour by size; check docs.boat.dev pricing and override in your own recipe file.
+[rate_usd_hour]
+small = 0.05
+medium = 0.10
+large = 0.20
+xlarge = 0.40

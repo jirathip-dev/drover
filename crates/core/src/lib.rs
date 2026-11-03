@@ -3,6 +3,7 @@ pub mod access;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;
+pub mod cloud;
 pub mod config;
 pub mod devices;
 pub mod doctor;
@@ -330,7 +331,7 @@ pub fn answer(
     }
     let agent = ask.str("agent").unwrap_or_default();
     let sp = events::last_spawn(&events, agent);
-    let (pane, r) = (sp.and_then(|e| e.str("pane")), &crate::hosts::On::of(r, sp)); // #157: on the lane's host
+    let (pane, on) = (sp.and_then(|e| e.str("pane")), &crate::hosts::On::of(r, sp)); // #157: on the lane's host
     emit(
         &ctx.state,
         cfg,
@@ -342,10 +343,12 @@ pub fn answer(
             with_via(json!({"id": id, "choice": text, "by": by}), via),
         ),
     )?;
+    let why = via.map_or("answer", |_| "board");
+    ask.issue.inspect(|n| crate::drive::kick(ctx, r, fleet, *n, why)); // #304: after the decision is logged
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
-    let Some(pane) = pane.filter(|_| herdr::prompt(r, agent, &msg).is_ok()) else {
+    let Some(pane) = pane.filter(|_| herdr::prompt(on, agent, &msg).is_ok()) else {
         let open = ask
             .issue
             .filter(|_| events::closed(&events, ask) != Some("closed: merged"));
@@ -357,8 +360,8 @@ pub fn answer(
             "{fleet} {id}: {text} recorded; asking agent gone, not prompted{next}"
         )?);
     };
-    herdr::keys(r, pane, "Enter")?;
-    if !herdr::landed(r, agent, pane, &msg) {
+    herdr::keys(on, pane, "Enter")?;
+    if !herdr::landed(on, agent, pane, &msg) {
         let d = json!({"id": id, "agent": agent, "reason": msg});
         let ev = Event::new(ctx.now, fleet, ask.issue, "decision-undelivered", d);
         emit(&ctx.state, cfg, ev)?;

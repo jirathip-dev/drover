@@ -850,7 +850,9 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
         "{:?}",
         r.calls.borrow()
     );
-    assert_eq!(r.calls.borrow().len(), 3, "{:?}", r.calls.borrow());
+    // #304: plus the answer's kick of #12.
+    assert_eq!(r.calls.borrow().len(), 4, "{:?}", r.calls.borrow());
+    assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 12 --why answer --now"));
 }
 
 /// #275: `agent_name_not_found` on another host: one more start when no harness came up, none when one did (it is
