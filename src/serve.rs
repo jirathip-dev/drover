@@ -479,6 +479,15 @@ fn coat(name: &str) -> String {
     )
 }
 
+/// #242: a lane's coat for its 16 px row sprite, as `--rc/--rd/--rm` (the board's `--c` is a colour token).
+fn row_coat(lane: &str) -> String {
+    if lane.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", coat(lane).replace("--", "--r"))
+    }
+}
+
 /// `age` since `t`, or nothing when `t` is unknown (0).
 fn ago(now: u64, t: u64) -> String {
     if t > 0 {
@@ -1459,6 +1468,7 @@ impl<'a> Server<'a> {
                 need += usize::from(rank == 0);
                 let a = ago(now, s.map_or(0, |s| s.last_ts));
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
+                let coat = row_coat(lane);
                 let head = gh::cached_pr(ctx, f, n)["headRefOid"]
                     .as_str()
                     .unwrap_or_default()
@@ -1549,10 +1559,11 @@ impl<'a> Server<'a> {
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
-                    "class=\"q\"{}{b}{} data-act={}",
+                    "class=\"q\"{}{b}{} data-act={}{}",
                     if k.is_some() { " data-q" } else { "" },
                     s.unwrap_or_default(),
-                    act(["", "update"][usize::from(up)], state)
+                    act(["", "update"][usize::from(up)], state),
+                    coat
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
                 let row = match (qls, row.strip_suffix("</details>")) {
@@ -1754,8 +1765,8 @@ impl<'a> Server<'a> {
         };
         let fleets: Vec<_> = cfg
             .fleet
-            .keys()
-            .map(|f| json!({"name": f, "lanes": lanes(Some(f)), "queue": queued(f), "needs": st.values().filter(|s| &s.fleet == f && s.state == "needs-human").map(|s| s.issue).collect::<Vec<_>>()}))
+            .iter()
+            .map(|(f, fc)| json!({"name": f, "color": fc.color(f), "lanes": lanes(Some(f)), "queue": queued(f), "needs": st.values().filter(|s| &s.fleet == f && s.state == "needs-human").map(|s| s.issue).collect::<Vec<_>>()}))
             .collect();
         let lim = &cfg.limits;
         let sky = [
@@ -3160,7 +3171,7 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
                     format!("<pre>{}</pre>", esc(&raw(e)))
                 };
                 h += &format!(
-                    "<details class=\"er{k}{}\" data-f=\"{}\"><summary><i class=\"kg t-{t}\" data-act={}>{gl}</i><i class=fd></i>{num}<span class=sm>{}{via}</span><span class=ag>{}</span></summary><div class=ex><p class=lk>{gl2}<span class=m>{at}</span></p>{body}</div></details>",
+                    "<details class=\"er{k}{}\" data-f=\"{}\"><summary><i class=\"kg t-{t}\" data-act={}{}>{gl}</i><i class=fd></i>{num}<span class=sm>{}{via}</span><span class=ag>{}</span></summary><div class=ex><p class=lk>{gl2}<span class=m>{at}</span></p>{body}</div></details>",
                     [" imp", ""][usize::from(!imp)],
                     esc(&e.fleet),
                     match (e.kind.as_str(), *t) {
@@ -3170,6 +3181,7 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
                         (_, "g") => "done",
                         _ => "idle",
                     },
+                    row_coat(e.str("agent").unwrap_or_default()),
                     esc(&w),
                     age(ctx.now.saturating_sub(e.ts))
                 );
