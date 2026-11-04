@@ -107,7 +107,6 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 /* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
 [data-mode=glyph] .av .gl,[data-mode=scene]:not(.hz) .av .gl,[data-mode=scene].hz .av .px{display:block}
 [data-mode=ascii] .av .asc{display:grid}
-.asc.w b{animation:none}
 /* #241 terminal (docs/themes.md): today's glyph board from the first paint, before herd.js loads it: glyph avatars, no mode button. */
 [data-theme=terminal] .av>*{display:none!important}[data-theme=terminal] .av .gl{display:block!important}[data-theme=terminal] .lh{display:none}
 /* #241: a row's 16 px action sprite in its glyph's place, a Host group's load scene, a moment (silent; reduced motion: still). */
@@ -230,7 +229,7 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .fvr{position:relative;z-index:1;flex:none;display:flex;justify-content:flex-end;margin:0;padding-top:var(--s1)}
 .fv[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
 .qs.note{border-left-color:var(--a)}
-.now{display:flex}.now>*{flex:none;min-width:0}.now>.el{flex-shrink:1}.now>.el~.el{flex-shrink:999}.now>i{font-style:normal;white-space:pre}
+.act.now{display:flex}.act.now>*{flex:none;min-width:0}.act.now>.el{flex-shrink:1}.act.now>.el~.el{flex-shrink:999}.act.now>i{font-style:normal;white-space:pre}
 .qnow{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.qnow{font-size:var(--fs-meta);padding-left:2ch}
 .unp{margin:auto;padding:var(--s3);text-align:center;border:1px solid var(--a);border-radius:8px;color:var(--a)}
 #dot.demo{color:var(--l)}

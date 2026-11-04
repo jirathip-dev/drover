@@ -263,10 +263,13 @@ function rows(root) {
   const L = (TT && TT.looks) || [];
   root.querySelectorAll('.av[data-act]').forEach(v => {
     const a = v.querySelector('.asc'), px = v.querySelector('.px'), t = TT && TT.ascii && TT.ascii[v.dataset.act], n = v.closest('[data-agent]');
-    if (a.dataset.o == null) Object.assign(a.dataset, { o: a.innerHTML, c: px.getAttribute('style') });
-    a.innerHTML = t ? '<b></b>' : a.dataset.o;
-    if (t) a.firstChild.textContent = t;
-    a.classList.toggle('w', !!t);
+    if (a.dataset.o == null) Object.assign(a.dataset, { o: a.innerHTML, c: px.getAttribute('style'), r: a.classList.contains('run') ? 1 : '' });
+    // #334: a working lane's word gallops in two frames, its legs' `/` and `\` swapped; a word with no legs is one
+    // still frame (never the two-frame blink on its own).
+    const fs = t ? [...new Set([t, a.dataset.r ? t.replace(/[^\n]*$/, l => l.replace(/[/\\]/g, c => c === '/' ? '\\' : '/')) : t])] : [];
+    a.classList.toggle('run', t ? fs.length > 1 : !!a.dataset.r);
+    if (t) a.replaceChildren(...fs.map(f => Object.assign(document.createElement('b'), { textContent: f })));
+    else a.innerHTML = a.dataset.o;
     px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
   });
 }
@@ -609,7 +612,7 @@ B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=
 <form class=reply><textarea name=text rows=1 maxlength=2000 placeholder="Message, or / for commands" aria-label=message></textarea><button>Send</button></form>
 <p class=st></p></div></div>`);
 if (DEMO) sync();
-const S = $('#sheet'), shown = () => S.classList.contains('on'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.now'), more = $('.more');
+const S = $('#sheet'), shown = () => S.classList.contains('on'), sh = $('.sh'), chat = $('.chat'), st = $('.st'), now = $('.chat>.now'), more = $('.more');
 let agent = null, timer = 0, nopane = false, opane = null, spane = null;
 // The Lanes row of `agent` (its sheet card), from the needs-you cards and the herd.
 const laneOf = agent => [...$$('.lane')].find(l => l.dataset.agent === agent);
