@@ -27,6 +27,16 @@ pub struct Config {
     pub setup: Vec<SetupCfg>,
     /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
     pub runtime: Runtime,
+    /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
+    pub conductor: ConductorCfg,
+}
+
+/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands).
+#[derive(Debug, Default, Deserialize)]
+pub struct ConductorCfg {
+    pub instructions: Option<String>,
+    pub skills: Option<String>,
+    pub memory: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -674,6 +684,7 @@ impl Fleet {
     pub fn family(&self, role: &str) -> &'static str {
         match role {
             "design" => "design",
+            "conductor" => "conductor",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }

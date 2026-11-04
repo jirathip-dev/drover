@@ -102,6 +102,10 @@ pub trait Harness: Sync {
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         herdr::run_argv(pane, &[&p.harness])
     }
+    /// #355: `start_cmd` honours `Plan::session` (start it, or resume it with its conversation).
+    fn resumes(&self) -> bool {
+        false
+    }
     /// herdr commands that settle the harness, deliver the kick and confirm it landed.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![herdr::send_text_argv(pane, &p.kick), herdr::keys_argv(pane, "enter")]

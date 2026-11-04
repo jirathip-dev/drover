@@ -5,6 +5,7 @@ pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;
 pub mod cloud;
+pub mod conductor;
 pub mod config;
 pub mod devices;
 pub mod doctor;
@@ -255,7 +256,7 @@ pub fn ask(
     (fleet, issue): (&str, Option<u64>),
     q: &str,
     opts: &[String],
-    (rec, kind): (Option<usize>, &str),
+    (rec, kind, thread): (Option<usize>, &str, Option<&str>),
 ) -> Result<()> {
     cfg.fleet(fleet)?;
     let text = format!("{q} {}", opts.join(" ")).to_lowercase();
@@ -273,6 +274,9 @@ pub fn ask(
         );
     }
     let events = read(&ctx.state)?;
+    if let Some(t) = thread {
+        conductor::find(&events, t)?; // #355: its options become the thread's choice rows
+    }
     let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
@@ -286,7 +290,11 @@ pub fn ask(
     };
     let spawned = events.iter().rev().find(|e| e.kind == "spawn" && at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
-    let d = json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
+    let mut d =
+        json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
+    if let Some(t) = thread {
+        d["thread"] = json!(t);
+    }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "needs-decision", d))?;
     Ok(writeln!(out, "{id}")?)
 }
@@ -346,6 +354,10 @@ pub fn answer(
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
+    if let Some(t) = ask.str("thread") {
+        let agent = conductor::say(ctx, cfg, r, t, &msg, (by, true))?; // #355: back into the thread's conversation
+        return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
+    }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
         let open = ask
             .issue

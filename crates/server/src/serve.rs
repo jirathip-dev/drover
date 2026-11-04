@@ -1,5 +1,8 @@
 //! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
+use crate::api::{
+    body, BacklogIssue, Chat, Frag, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, Moment, Notice, Patch,
+};
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, fold, plain, read, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
@@ -253,27 +256,36 @@ fn sse(e: &Event) -> String {
     format!(
         "id: {}\nevent: ev\ndata: {}\n\n",
         e.seq,
-        json!({"seq": e.seq, "ts": e.ts, "k": moment(e)})
+        json!(Moment {
+            seq: e.seq,
+            ts: e.ts,
+            k: moment(e).map(Into::into)
+        })
     )
 }
 
 /// #351: a `frag` this client had, as a `patch`: length `n`, common prefix `p`, the changed pieces (cut before `<d`).
 fn delta(sent: &mut BTreeMap<String, Vec<String>>, m: &str) -> Option<String> {
-    let f: serde_json::Value = serde_json::from_str(m.split_once("event: frag\ndata: ")?.1).ok()?;
-    let (id, h) = (f["id"].as_str()?, f["html"].as_str()?);
+    let f: Frag = serde_json::from_str(m.split_once("event: frag\ndata: ")?.1).ok()?;
+    let (id, h) = (f.id.as_str(), f.html.as_str());
     let mut at = vec![0];
     at.extend(h.match_indices("<d").map(|m| m.0).filter(|&i| i > 0).chain([h.len()]));
     let new: Vec<String> = at.windows(2).map(|w| h[w[0]..w[1]].into()).collect();
     let old = sent.insert(id.into(), new.clone())?;
     let p = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
     let d = old.len().wrapping_sub(new.len());
-    let mut diff = serde_json::Map::new();
+    let mut diff = BTreeMap::new();
     for (i, s) in new.iter().enumerate().skip(p) {
         if old.get(i.wrapping_add(d)) != Some(s) {
-            diff.insert(i.to_string(), json!(s));
+            diff.insert(i.to_string(), s.clone());
         }
     }
-    let j = json!({"id": id, "n": new.len(), "p": p, "set": diff});
+    let j = json!(Patch {
+        id: id.into(),
+        n: new.len(),
+        p,
+        set: diff
+    });
     Some(format!("{}\nevent: patch\ndata: {j}\n\n", m.lines().next()?))
 }
 
@@ -821,7 +833,7 @@ impl<'a> Server<'a> {
             ..self.ctx.clone()
         };
         if (changed || now >= w.herd.0 + 10) && !lock(&self.clients).is_empty() {
-            let j = self.herd(at, None).map(|v| v.to_string()).unwrap_or_default();
+            let j = self.herd(at, None).map(|v| json!(v).to_string()).unwrap_or_default();
             if w.herd.0 > 0 && hash(&j) != w.herd.1 && !j.is_empty() {
                 let msg = format!("id: {}\nevent: herd\ndata: {j}\n\n", w.seen.unwrap_or(0));
                 lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
@@ -838,8 +850,8 @@ impl<'a> Server<'a> {
                     .insert((paired, id), hash(&html))
                     .is_some_and(|h| h != hash(&html))
                 {
-                    let (seq, j) = (w.seen.unwrap_or(0), json!({"id": id, "html": html}));
-                    let msg = format!("id: {seq}\nevent: frag\ndata: {j}\n\n");
+                    let j = json!(Frag { id: id.into(), html });
+                    let msg = format!("id: {}\nevent: frag\ndata: {j}\n\n", w.seen.unwrap_or(0));
                     lock(&self.clients).retain(|c| c.1.is_some() != paired || c.0.send(msg.clone()).is_ok());
                 }
             }
@@ -927,7 +939,7 @@ impl<'a> Server<'a> {
             ),
             ("GET", "/herd.json") => {
                 let weather = form(query).get("weather").filter(|_| loopback).cloned();
-                self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, j.to_string().into_bytes()))
+                self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, json!(j).to_string().into_bytes()))
             }
             // #241: any theme by name (the phone picks it), theme.json resolved; an unknown name is farm.
             ("GET", p) if p.starts_with("/themes/") => match p[8..].split_once('/').filter(|(n, f)| !n.is_empty() && THEME.contains(f)) {
@@ -1051,18 +1063,19 @@ impl<'a> Server<'a> {
         }
         times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
-        let g = |k: &str| f.get(k).map_or("", String::as_str);
         let res = if path == "/setup" {
-            let via = format!("web {}", dev.label);
-            Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, g("host"), g("name"), &via))
-        } else if let Some(p) = f.get("setup") {
-            crate::setup::send(ctx, self.r, p, g("text"))
+            let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
+            Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
         } else if pick {
-            self.pick(ctx, &dev, f)
+            self.pick(ctx, &dev, &body(f))
         } else if act {
-            self.act(ctx, &dev, f)
+            self.act(ctx, &dev, &body(f))
         } else {
-            self.prompt(ctx, &dev, f)
+            let s = body::<crate::api::Send>(f);
+            s.setup.as_deref().map_or_else(
+                || self.prompt(ctx, &dev, &s),
+                |p| crate::setup::send(ctx, self.r, p, &s.text),
+            )
         };
         if pick || act {
             self.purge();
@@ -1093,11 +1106,8 @@ impl<'a> Server<'a> {
     /// A blocked lane's menu option (`Harness::pending_menu`): its keys (`answer_keys`) via `pane send-keys`, then a re-read ("sent" or
     /// "still waiting"); logs an `answer` event without the question. No menu parsed, or not the
     /// menu the tapped card showed (`h`, read afresh): no key.
-    fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &BTreeMap<String, String>) -> Result<String> {
-        let (agent, choice) = (
-            f.get("agent").map_or("", String::as_str),
-            f.get("choice").map_or("", String::as_str),
-        );
+    fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Answer) -> Result<String> {
+        let (agent, choice) = (f.agent.as_str(), f.choice.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let on = l.on(self.r);
         let screen = || herdr::read(&on, &pane);
@@ -1119,7 +1129,7 @@ impl<'a> Server<'a> {
         {
             return refused("BAD_VALUE", format!("choose 1 to {}", opts.len()));
         }
-        if f.get("h") != Some(&seen(&q, &opts).to_string()) {
+        if f.h != seen(&q, &opts).to_string() {
             return refused("STALE", "menu changed — refreshed");
         }
         herdr::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
@@ -1138,9 +1148,8 @@ impl<'a> Server<'a> {
     }
 
     /// `herdr agent prompt` (dsh: `pane send-text`) + Enter; logs a `prompt` event without the text.
-    fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &BTreeMap<String, String>) -> Result<String> {
-        let g = |k: &str| f.get(k).map_or("", String::as_str);
-        let (agent, text) = (g("agent"), g("text"));
+    fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Send) -> Result<String> {
+        let (agent, text) = (f.agent.as_str(), f.text.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let (fleet, pane) = (&fleet, &pane);
         if reviewer(ctx, fleet, &l.role) {
@@ -1163,26 +1172,22 @@ impl<'a> Server<'a> {
     }
 
     /// A sheet action (`herdsman stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
-    fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &BTreeMap<String, String>) -> Result<String> {
-        let (g, mut out, cfg) = (
-            |k: &str| f.get(k).map_or("", String::as_str),
-            vec![],
-            Config::load(&ctx.config)?,
-        );
-        let (agent, yes) = (g("agent"), g("confirm") == "1");
+    fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
+        let (mut out, cfg) = (vec![], Config::load(&ctx.config)?);
+        let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
         let sp = crate::events::last_spawn(&read(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
-        let Some((fleet, issue)) = sp.or_else(|| (g("op") == "close").then(|| (String::new(), None))) else {
+        let Some((fleet, issue)) = sp.or_else(|| (op == "close").then(|| (String::new(), None))) else {
             return refused("NO_SUCH_AGENT", format!("no lane `{agent}` in the log"));
         };
-        match g("op") {
+        match op {
             "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
             "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, agent, yes)?,
             "clean" => crate::check::clean(ctx, &cfg, self.r, &mut out, Some(&fleet), (None, Some(agent)), yes)?,
             "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
-        if yes || g("op") == "stop" {
-            let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "op": g("op")});
+        if yes || op == "stop" {
+            let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "op": op});
             append(&ctx.state, &Event::new(ctx.now, &fleet, issue, "act", d))?;
         }
         Ok(String::from_utf8_lossy(&out).trim().replace('\n', "; "))
@@ -1207,7 +1212,13 @@ impl<'a> Server<'a> {
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
             let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
             let page = window(&all[..all.len().saturating_sub(before)], lines, 32);
-            return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
+            return serde_json::to_string(&Chat {
+                lines: page.to_vec(),
+                before: before + page.len(),
+                more: all.len() > before + page.len(),
+                ..Chat::default()
+            })
+            .ok();
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
         let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
@@ -1231,10 +1242,32 @@ impl<'a> Server<'a> {
                 "verdict" => Some(format!("verdict {}", e.str("verdict")?)),
                 k => (k == "merged").then(|| k.into()),
             };
-            Some(json!({"at": e.ts, "text": lanes::mask(&t?)}))
+            Some(Notice {
+                at: e.ts,
+                text: lanes::mask(&t?),
+            })
         };
         let notices: Vec<_> = events.iter().filter_map(|e| note(&e)).collect();
-        Some(serde_json::json!({"said": win, "older": win.zip(said.as_ref()).is_some_and(|(w, s)| w.len() < s.len()), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
+        let acts: &[&str] = if l.role == "other" {
+            &["close"]
+        } else {
+            &["stop", "kill", "clean"]
+        };
+        let older = win.zip(said.as_ref()).is_some_and(|(w, s)| w.len() < s.len());
+        serde_json::to_string(&Chat {
+            said: win.map(<[_]>::to_vec),
+            older,
+            notices,
+            harness: l.harness.clone(),
+            acts: acts.iter().map(|&a| a.into()).collect(),
+            pane: l.pane.clone().filter(|_| l.role == "other"),
+            lines: page.to_vec(),
+            live: if before == 0 { live.min(page.len()) } else { 0 },
+            status,
+            before: before + page.len(),
+            more: end > page.len(),
+        })
+        .ok()
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -1866,7 +1899,8 @@ impl<'a> Server<'a> {
             }
             // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
-            let mut open = bl["issues"].as_object().cloned().unwrap_or_default();
+            let mut open: BTreeMap<String, BacklogIssue> =
+                serde_json::from_value(bl["issues"].clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
             if bl["issues"].is_object() {
                 body += &format!(
@@ -1981,35 +2015,72 @@ impl<'a> Server<'a> {
 
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
     /// `weather` (loopback only) forces the host values.
-    fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<serde_json::Value> {
+    fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
         let events = read(&ctx.state)?;
         let (cfg, st) = (Config::load(&ctx.config)?, fold(&events));
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
-            all.iter().filter(|l| l.fleet.as_ref() == f).map(|l| {
-                let (title, tone, shown, a) = view(ctx, l, &waits);
-                // #239: a fix round's lane has role impl; the issue's state says it is fixing.
-                let is = l.issue.and_then(|i| st.get(&(f?.clone(), i))).map_or("", |s| s.state.as_str());
-                let act = match (act(&l.role, &l.state), act(&l.role, is)) {
-                    ("impl", b @ ("fix" | "update")) => b,
-                    (a, _) => a,
-                };
-                json!({"name": l.name, "act": act, "issue": l.issue, "title": title, "role": l.role, "harness": l.harness,
-                       "model": l.model, "effort": l.effort, "account": l.account, "host": l.host, "state": l.state, "shown": shown, "tone": tone, "age": a, "coat": coat(&l.name), "gone": matches!(is, "merged" | "closed")})
-            }).collect()
+            all.iter()
+                .filter(|l| l.fleet.as_ref() == f)
+                .map(|l| {
+                    let (title, tone, shown, a) = view(ctx, l, &waits);
+                    // #239: a fix round's lane has role impl; the issue's state says it is fixing.
+                    let is = l.issue.and_then(|i| st.get(&(f?.clone(), i)));
+                    let is = is.map_or("", |s| s.state.as_str());
+                    let act = match (act(&l.role, &l.state), act(&l.role, is)) {
+                        ("impl", b @ ("fix" | "update")) => b,
+                        (a, _) => a,
+                    };
+                    HerdLane {
+                        name: l.name.clone(),
+                        act: act.into(),
+                        issue: l.issue,
+                        title,
+                        role: l.role.clone(),
+                        harness: l.harness.clone(),
+                        model: l.model.clone(),
+                        effort: l.effort.clone(),
+                        account: l.account.clone(),
+                        host: l.host.clone(),
+                        state: l.state.clone(),
+                        shown,
+                        tone: tone.into(),
+                        age: a,
+                        coat: coat(&l.name),
+                        gone: matches!(is, "merged" | "closed"),
+                    }
+                })
+                .collect()
         };
         let queued = |f: &String| -> Vec<_> {
             let open = |s: &IssueState| s.state == "queued" || s.state == "needs-human";
             let waiting = queue::view(&events, &st, f)
                 .into_iter()
                 .filter(|i| st.get(&(f.clone(), i.issue)).is_none_or(open));
-            waiting.map(|i| json!({"issue": i.issue, "title": gh::cached_title(ctx, f, i.issue), "blocked_by": i.blocked_by, "coat": coat(&format!("{f}#{}", i.issue))})).collect()
+            waiting
+                .map(|i| HerdQueued {
+                    issue: i.issue,
+                    title: gh::cached_title(ctx, f, i.issue),
+                    blocked_by: i.blocked_by,
+                    coat: coat(&format!("{f}#{}", i.issue)),
+                })
+                .collect()
         };
         let fleets: Vec<_> = cfg
             .fleet
             .iter()
-            .map(|(f, fc)| json!({"name": f, "color": fc.color(f), "lanes": lanes(Some(f)), "queue": queued(f), "needs": st.values().filter(|s| &s.fleet == f && s.state == "needs-human").map(|s| s.issue).collect::<Vec<_>>()}))
+            .map(|(f, fc)| HerdFleet {
+                name: f.clone(),
+                color: fc.color(f).into(),
+                lanes: lanes(Some(f)),
+                queue: queued(f),
+                needs: st
+                    .values()
+                    .filter(|s| &s.fleet == f && s.state == "needs-human")
+                    .map(|s| s.issue)
+                    .collect(),
+            })
             .collect();
         let lim = &cfg.limits;
         let sky = [
@@ -2028,8 +2099,18 @@ impl<'a> Server<'a> {
                 ..Host::default()
             },
         );
-        let host = json!({"load": h.load_per_cpu, "limit": lim.load_per_cpu, "pressure": h.pressure, "swapouts": h.swapout, "swap_limit": lim.swapout_rate, "gate": host::admit(&h, lim).err()});
-        Ok(json!({"fleets": fleets, "others": lanes(None), "host": host}))
+        Ok(Herd {
+            fleets,
+            others: lanes(None),
+            host: HerdHost {
+                load: h.load_per_cpu,
+                limit: lim.load_per_cpu,
+                gate: host::admit(&h, lim).err(),
+                pressure: h.pressure,
+                swapouts: h.swapout,
+                swap_limit: lim.swapout_rate,
+            },
+        })
     }
 
     /// State sections, fleet subgroups inside; a row opens the bottom sheet (serve.js) with its hidden card.
@@ -2904,7 +2985,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     let (page, herd) = (
         s.page(ctx, &BTreeMap::new(), demo)?
             .replace("<form method=post", "<form inert"),
-        s.herd(ctx, None)?.to_string(),
+        json!(s.herd(ctx, None)?).to_string(),
     );
     let (sw, v) = (SW.replace("@V", &format!("{VER:08x}")), format!("a/{VER:08x}/"));
     // #63: the demo-only `?audit=<view>` UI gate (scripts/ui-audit.sh); never in the live page.
