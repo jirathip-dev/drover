@@ -759,3 +759,28 @@ fn a_conductor_command_is_logged_for_its_thread() {
     );
     assert!(cmds(&lane[..1], "gh issue list").1.is_empty(), "no thread");
 }
+
+/// #425: a lane may `queue block` its own issue (to hold itself), never another issue.
+#[test]
+fn a_lane_may_queue_block_only_its_own_issue() {
+    let input =
+        |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    for cmd in [
+        "herdsman queue sendmeter block --on 23 24",
+        "herdsman queue sendmeter block 24 --on 23",
+    ] {
+        assert_eq!(
+            hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
+            "",
+            "its own issue: {cmd}"
+        );
+    }
+    for cmd in [
+        "herdsman queue sendmeter block --on 23 25",
+        "cd /tmp && herdsman queue sendmeter block 25 --on 24",
+    ] {
+        let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
+        assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input(cmd)), "", "the owner (no lane) may: {cmd}");
+    }
+}
