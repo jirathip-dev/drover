@@ -227,12 +227,9 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, rw: bool, (before,
 /// #408: `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>, rw: bool) -> Option<String> {
     let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
-    let num = |k: &str, d| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
-    let w = (
-        num("before", u64::MAX),
-        q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30),
-    );
-    Some(page(ctx, &cfg, events, t, rw, w))
+    let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+    let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
+    Some(page(ctx, &cfg, events, t, rw, (before, n)))
 }
 
 /// One thread: the bar, its last 30 messages, the live line and the composer (inert off a paired owner device).

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang=en>
+<meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>#370 the whole board in its theme: words, loops, moments, empty states, push</title>
+<!-- Open over http from the repo root (python3 -m http.server), docs/design/theme-370/sheet.html. Live, the loops run;
+     ?still=1 or Reduce Motion: frame 1. The sprites are proposed/<theme>/sprites.svg; the crops in shots/parts/ are
+     shoot.mjs's, from the real board. -->
+<style>
+:root{--s1:4px;--s2:8px;--s3:12px;--s4:16px;--fs-meta:11px;font:13px/1.45 ui-monospace,Menlo,monospace;color-scheme:dark}
+body{margin:0;background:#121212;color:#d8d2c4}
+section.t{padding:var(--s4);border-bottom:1px solid #333}
+section.t[data-t=farm]{--bg:#0f1a13;--card:#1d1a12;--edge:#3b3a27;--fg:#ece4cc;--mute:#a3a68a;--g:#7fd06a;--a:#f29b4b;--r:#ff7d6e;--l:#ecdba6;background:var(--bg);color:var(--fg)}
+section.t[data-t=kitchen]{--bg:#1a1816;--card:#24201c;--edge:#4a3f2e;--fg:#efe3cb;--mute:#a89c88;--g:#6cc96e;--a:#f4d24e;--r:#ff5c84;--l:#e89a62;background:var(--bg);color:var(--fg)}
+section.t[data-t=terminal]{--bg:#0d1117;--card:#161b22;--edge:#30363d;--fg:#c9d1d9;--mute:#8b949e;--g:#3fb950;--a:#d29922;--r:#f85149;--l:#58a6ff;background:var(--bg);color:var(--fg)}
+h1{font-size:15px;margin:0;padding:var(--s4);color:#f0e8d8}h1 small{display:block;color:#9a9284;font-weight:400;font-size:12px}
+h2{font-size:14px;margin:0 0 var(--s2)}h3{font-size:12px;margin:var(--s4) 0 var(--s2);color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.pw{color:var(--mute);font-size:var(--fs-meta)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:var(--s2)}
+.card{background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2)}
+.card p{margin:0 0 var(--s1)}.card code{color:var(--mute);font-size:var(--fs-meta)}
+.fr{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--s2)}
+.fr figure{margin:0;text-align:center;font-size:10px;color:var(--mute)}
+svg.big{width:64px;height:48px;image-rendering:pixelated;shape-rendering:crispEdges;background:color-mix(in srgb,var(--fg) 6%,transparent)}
+svg.row{width:24px;height:24px;image-rendering:pixelated;shape-rendering:crispEdges}
+svg.mini{width:72px;height:24px;image-rendering:pixelated}
+.f1{--o1:1;--o2:0}.f2{--o1:0;--o2:1}
+.kf1{opacity:var(--o1,1)}.kf2{opacity:var(--o2,0)}
+.live{animation:kfr 1.2s infinite}
+@keyframes kfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+html.still .live{animation:none}@media (prefers-reduced-motion:reduce){.live{animation:none}}
+.heat-calm{--f1:#3d7fd9;--f2:#9cc8ff}.heat-busy{--f1:#ee7a22;--f2:#ffd15a}.heat-held{--f1:#e04a1e;--f2:#ffb03a}
+table{border-collapse:collapse;width:100%;font-size:12px}td,th{padding:3px 6px;border-bottom:1px solid var(--edge);text-align:left;vertical-align:top}th{color:var(--mute);font-weight:400}
+.crops{display:flex;flex-wrap:wrap;gap:var(--s3)}.crops figure{margin:0;width:390px;max-width:100%}.crops img{width:100%;display:block;border:1px solid var(--edge)}.crops figure.px{width:96px}.crops figure.px img{image-rendering:pixelated}.crops figcaption{font-size:var(--fs-meta);color:var(--mute);margin-top:2px}
+/* the push samples: an iOS lock-screen banner, drawn */
+.push{display:grid;gap:var(--s2);max-width:390px}
+.nt{display:grid;grid-template-columns:38px 1fr auto;gap:2px 10px;padding:12px 14px;border-radius:22px;background:#3a3a3cdd;color:#fff;font:13px/1.3 -apple-system,system-ui,sans-serif}
+.nt img{grid-row:1/3;width:38px;height:38px;border-radius:9px}.nt b{font-weight:600}.nt time{color:#ffffff99;font-size:12px}.nt p{grid-column:2/4;margin:0;color:#ffffffdd}
+.lock{padding:var(--s3);border-radius:28px;background:linear-gradient(160deg,#28354a,#3a2a3a);max-width:414px}
+</style>
+<h1>#370: the whole board in its theme. Words on every tab, row loops, moments, empty states, Host and Events, push
+<small>Design sheet, phase 1. The board fixtures are shots/&lt;theme&gt;-&lt;tab&gt;-&lt;width&gt;.png; this page is the parts they are built from.</small></h1>
+<div id=sheet></div>
+<svg width=0 height=0 style=position:absolute aria-hidden=true><defs id=defs></defs></svg>
+<script type=module>
+if (new URLSearchParams(location.search).get('still')) document.documentElement.classList.add('still');
+const PLAIN = { needs: 'needs you', working: 'working', idle: 'idle', done: 'done', queued: 'queued', parked: 'parked', dead: 'dead',
+  impl: 'build', fix: 'fix', rev: 'review', update: 'catch up', merged: 'merged', fail: 'review FAIL',
+  'tab-queue': 'queue', 'tab-lanes': 'lanes', 'tab-host': 'host', 'tab-events': 'events',
+  'empty-queue': 'no open work', 'empty-lanes': 'no agents', 'empty-events': 'no events', loading: 'loading' };
+// What each row sprite stands for: its row_sprites key(s) and where it shows.
+const USE = { impl: 'Queue/Events: build', fix: 'fix round', rev: 'review; Events: PASS', update: 'catch-up round', idle: 'idle, parked',
+  done: 'done', blocked: 'needs you, dead (Lanes)', queued: 'Queue: queued; Events: queue', needs: 'Queue: needs you, no lane; Events: asks', merged: 'Events: merged; the merged moment', fail: 'Events: FAIL; the FAIL moment' };
+const esc = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const pair = (w, k) => w ? `<b>${esc(w)}</b><span class=pw> · ${esc(PLAIN[k] ?? k)}</span>` : `<span>${esc(PLAIN[k] ?? k)}</span>`;
+const get = (t, f) => fetch(`proposed/${t}/${f}`).then(r => f.endsWith('json') ? r.json() : r.text());
+const defs = document.getElementById('defs'), NS = 'http://www.w3.org/2000/svg';
+const sym = (t, id, box = '0 0 132 100') => { const s = `${t}-${id}`; return `<svg class=SIZE viewBox="${box}"><use href="#${s}"/></svg>`; };
+let html = '';
+for (const t of ['farm', 'kitchen']) {
+  const [j, sv] = await Promise.all([get(t, 'theme.json'), get(t, 'sprites.svg')]);
+  const box = document.createElementNS(NS, 'svg');
+  box.innerHTML = sv;
+  for (const g of box.querySelectorAll(':scope>g[id]')) {
+    const s = document.createElementNS(NS, 'symbol');
+    s.id = `${t}-${g.id}`;
+    s.setAttribute('viewBox', g.id.startsWith('load-') ? '0 0 48 16' : '0 0 132 100');
+    g.removeAttribute('id');
+    s.append(g);
+    defs.append(s);
+  }
+  const w = j.words;
+  html += `<section class=t data-t=${t}><h2>${t}</h2>`;
+  // 1. the words
+  html += `<h3>1 · words: theme word · plain word (the plain part muted, --fs-meta)</h3><table><tr><th>where</th><th>key</th><th>label</th></tr>`;
+  const rows = [['Lanes groups, Queue states, needs-you cards', ['needs', 'working', 'idle', 'done', 'queued', 'parked', 'dead']], ['roles (Queue rows, Events)', ['impl', 'fix', 'rev', 'update']],
+    ['Events kinds, moments, push', ['merged', 'fail']], ['each tab\'s first line', ['tab-queue', 'tab-lanes', 'tab-host', 'tab-events']], ['empty tabs', ['empty-queue', 'empty-lanes', 'empty-events']], ['loading overlay', ['loading']]];
+  for (const [where, ks] of rows) ks.forEach((k, i) => { html += `<tr><td>${i ? '' : where}</td><td><code>${k}</code></td><td>${pair(w[k], k)}</td></tr>`; });
+  html += `<tr><td>Host load (load_scene.levels)</td><td><code>levels</code></td><td>${['calm', 'busy', 'held'].map(l => `<b>${j.load_scene.levels[l]}</b><span class=pw> · ${l}</span>`).join(' &nbsp; ')}</td></tr></table>`;
+  // 2. the loops
+  html += `<h3>2 · row sprites: two-frame loops (frame 1 today's art, frame 2 new; 4× and at 24 px, live)</h3><div class=grid>`;
+  for (const [k, id] of Object.entries(j.row_sprites)) {
+    const big = sym(t, id).replace('SIZE', 'big'), row = sym(t, id).replace('SIZE', 'row');
+    html += `<div class=card><p>${pair(w[k === 'blocked' ? 'needs' : k], k === 'blocked' ? 'needs' : k)}</p><code>${id} · ${esc(USE[k] || k)}</code>
+      <div class=fr><figure class=f1>${big}<br>1</figure><figure class=f2>${big}<br>2</figure><figure><span class=f1>${row}</span><span class=f2>${row}</span><br>24 px</figure><figure><span class=live>${row}</span><br>live</figure></div></div>`;
+  }
+  html += `</div>`;
+  // 3. the Host minis
+  html += `<h3>3 · Host card: load_scene.minis (48 × 16 at 1.5×), two frames, with the level word</h3><div class=grid>`;
+  for (const l of ['calm', 'busy', 'held']) {
+    const m = sym(t, `load-${l}`, '0 0 48 16').replace('SIZE', 'mini');
+    html += `<div class="card heat-${l}"><p><b>${esc(j.load_scene.levels[l])}</b><span class=pw> · ${l}</span></p><div class=fr><figure class=f1>${m}<br>1</figure><figure class=f2>${m}<br>2</figure><figure><span class=live>${m}</span><br>live</figure></div></div>`;
+  }
+  html += `</div>`;
+  // 4–6. the crops from the board
+  const crops = (title, list) => `<h3>${title}</h3><div class=crops>${list.map(([f, cap]) => `<figure><img src="shots/parts/${f}" alt="${esc(cap)}"><figcaption>${esc(cap)}</figcaption></figure>`).join('')}</div>`;
+  html += crops('4 · moments on the row, mid-moment (2.4 s, once per event); Reduce Motion: the still frame and tag', [
+    [`mo-${t}-merged.png`, `merged: the row's sprite becomes ${j.row_sprites.merged}, hops; tag "${w.merged}!"`], [`mo-${t}-merged-still.png`, 'merged, Reduce Motion'],
+    [`mo-${t}-fail.png`, `review FAIL (Events): the row shakes; tag "${w.fail}"`], [`mo-${t}-fail-still.png`, 'FAIL, Reduce Motion'],
+    [`mo-${t}-needs-you.png`, `a new ask (Queue): the sprite pulses, the row flashes red; tag "${w.needs}"`], [`mo-${t}-needs-you-still.png`, 'needs you, Reduce Motion']]);
+  html += crops('5 · empty tabs and the loading overlay (390 px)', [[`empty-${t}-queue.png`, 'Queue, nothing open'], [`empty-${t}-lanes.png`, 'Lanes, no agents'], [`empty-${t}-events.png`, 'Events, no rows'], [`loading-${t}.png`, `loading: ${j.loading}, "${w.loading} · loading"`]]);
+  html += crops('a row sprite on the board, two captures 0.6 s apart, a /live patch between (shoot.mjs: the same node)', [[`loop-${t}-a.png`, 'capture 1'], [`loop-${t}-b.png`, 'capture 2']]).replace(/<figure>/g, '<figure class=px>');
+  html += `</section>`;
+}
+// terminal: unchanged
+html += `<section class=t data-t=terminal><h2>terminal</h2><p>No <code>words</code>, <code>row_sprites: false</code>, <code>moments: false</code>: every label is today's plain word, the rows keep their glyphs, no loop, no moment, push text as today. shoot.mjs compares each terminal fixture with today's export pixel for pixel (report.json <code>terminal</code>).</p>
+<div class=crops>${['queue', 'lanes', 'events'].map(x => `<figure><img src="shots/parts/empty-terminal-${x}.png" alt=""><figcaption>empty ${x}: today's line</figcaption></figure>`).join('')}</div></section>`;
+// 7. push
+const P = [['farm', 'Over the fence: #2957 merged', 'api #2957 merged → staging 8ed4a06 (PR #2960)', 'At the gate: api #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
+  ['kitchen', 'Order up: #2957 merged', 'api #2957 merged → staging 8ed4a06 (PR #2960)', 'The bell: api #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
+  ['terminal', 'herdsman', 'api #2957 merged → staging 8ed4a06 (PR #2960)', '#2961 needs you: review rounds ran out (4/3)', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off']];
+const icon = t => t === 'farm' ? '../../../assets/icon-180.png' : `../../../assets/themes/${t}/icon-180.png`;
+html += `<section class=t data-t=terminal><h2>7 · push: each phone's own theme (the theme it had when it turned alerts on, sent again when it switches)</h2><div class=crops>`;
+for (const [t, mt, mb, nt, nb] of P) html += `<figure><div class=lock><div class=push>
+  <div class=nt><img src="${icon(t)}" alt=""><b>${esc(mt)}</b><time>now</time><p>${esc(mb)}</p></div>
+  <div class=nt><img src="${icon(t)}" alt=""><b>${esc(nt)}</b><time>2m ago</time><p>${esc(nb).replace('\n', '<br>')}</p></div></div></div><figcaption>${t}${t === 'terminal' ? ': today\'s text, unchanged' : ''}</figcaption></figure>`;
+html += `</div></section>`;
+document.getElementById('sheet').innerHTML = html;
+await Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+window.sheetReady = true;
+</script>
