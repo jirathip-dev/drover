@@ -6,3 +6,4 @@
   `FAIL (form-only)` only if every blocker is in a form category ({form}); one substantive blocker
   makes it a plain `FAIL`. A form-only FAIL doesn't use up a review round.
 - Required in verdict.md: a `Reviewed head: <40-hex>` line, the sha actually checked out (`git rev-parse HEAD`).
+- Required in verdict.md: a `Tests checked against anti-patterns: yes` (or `no`) line.
