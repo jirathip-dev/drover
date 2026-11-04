@@ -53,3 +53,39 @@
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[49],"on":47,"op":"block"}
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"op":"add"}
 {"ts":1793429610,"fleet":"acme-web","type":"queue","issues":[50],"on":49,"op":"block"}
+{"ts":1793300000,"fleet":"all","type":"thread-new","thread":"t1","title":"Weekly ship notes"}
+{"ts":1793300060,"fleet":"all","type":"thread-msg","thread":"t1","from":"owner","text":"Draft the ship notes from this week's merges, every Friday."}
+{"ts":1793300100,"fleet":"all","type":"conductor-start","thread":"t1","agent":"conductor-t1","pane":"w7:p1","workspace":"w7","harness":"claude","session":"2b9e41c0-5d3a-4f7e-9a61-0c8d2e3f4a5b","resumed":false,"confirmed":true}
+{"ts":1793300400,"fleet":"all","type":"thread-msg","thread":"t1","from":"conductor","text":"Drafted. Friday 17:00, from the merged events of both fleets; I'll send it here first."}
+{"ts":1793300500,"fleet":"all","type":"thread-msg","thread":"t1","from":"owner","text":"good, send it Fridays"}
+{"ts":1793302400,"fleet":"all","type":"conductor-sleep","thread":"t1","agent":"conductor-t1","why":"idle"}
+{"ts":1793380000,"fleet":"acme-api","type":"thread-new","thread":"t2","title":"OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache"}
+{"ts":1793380060,"fleet":"acme-api","type":"thread-msg","thread":"t2","from":"owner","text":"Serve the OpenAPI spec, versioned per release."}
+{"ts":1793380100,"fleet":"acme-api","type":"conductor-start","thread":"t2","agent":"conductor-t2","pane":"w8:p1","workspace":"w8","harness":"claude","session":"5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f","resumed":false,"confirmed":true}
+{"ts":1793380900,"fleet":"acme-api","type":"thread-cmd","thread":"t2","cmd":"gh issue create -R acme-example/acme-api -t \"Serve /v1/openapi.json per release\" -F -","lane":"acme-api:-:conductor"}
+{"ts":1793381000,"fleet":"acme-api","type":"thread-msg","thread":"t2","from":"conductor","text":"Filed #22 and queued it after #17."}
+{"ts":1793381100,"fleet":"acme-api","type":"thread-read","thread":"t2"}
+{"ts":1793383000,"fleet":"acme-api","type":"conductor-sleep","thread":"t2","agent":"conductor-t2","why":"idle"}
+{"ts":1793410000,"fleet":"all","type":"thread-new","thread":"t3","title":"Pipeline: land mode and premerge checks"}
+{"ts":1793410060,"fleet":"all","type":"thread-msg","thread":"t3","from":"owner","text":"Should both fleets land fast-first?"}
+{"ts":1793410100,"fleet":"all","type":"conductor-start","thread":"t3","agent":"conductor-t3","pane":"w9:p1","workspace":"w9","harness":"claude","session":"8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a","resumed":false,"confirmed":true}
+{"ts":1793410600,"fleet":"all","type":"thread-msg","thread":"t3","from":"conductor","text":"Both fleets on fast-first; staging gate stays required."}
+{"ts":1793412400,"fleet":"all","type":"conductor-sleep","thread":"t3","agent":"conductor-t3","why":"idle"}
+{"ts":1793427200,"fleet":"acme-api","type":"thread-new","thread":"t4","title":"Rate limits for /v1/search"}
+{"ts":1793427210,"fleet":"acme-api","type":"thread-msg","thread":"t4","files":[{"name":"IMG_2041.PNG","path":"docs/design/farm-v2/board-events-390.png","size":224249}],"from":"owner","text":"One customer's integration is hammering `/v1/search` and #19's webhook retries keep hitting 429s, see the events. I want proper rate limits. Grill me, then file it."}
+{"ts":1793427215,"fleet":"acme-api","type":"conductor-start","thread":"t4","agent":"conductor-t4","pane":"w10:p1","workspace":"w10","harness":"claude","session":"7f3c9a1e-2b4d-4c6e-8f0a-1b2c3d4e5f60","resumed":false,"confirmed":true}
+{"ts":1793427240,"fleet":"acme-api","type":"thread-cmd","thread":"t4","cmd":"herdsman brief acme-api 19","lane":"acme-api:-:conductor"}
+{"ts":1793427270,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"conductor","text":"I see it: #19's retries got `429` from search four times between 14:02 and 14:20. Three questions, one at a time."}
+{"ts":1793427280,"fleet":"acme-api","type":"needs-decision","id":"q31","question":"Limit per API key or per client IP?","options":["per API key","per client IP"],"recommend":1,"agent":"conductor-t4","kind":"owner","thread":"t4"}
+{"ts":1793427340,"fleet":"acme-api","type":"decision","id":"q31","choice":"per API key","by":"owner","via":"web"}
+{"ts":1793427341,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"owner","text":"DECISION q31: per API key"}
+{"ts":1793427400,"fleet":"acme-api","type":"needs-decision","id":"q32","question":"How much per key?","options":["300 a minute","1,000 a minute"],"recommend":1,"agent":"conductor-t4","kind":"owner","thread":"t4"}
+{"ts":1793427520,"fleet":"acme-api","type":"decision","id":"q32","choice":"600 a minute, burst 100","by":"owner","via":"web"}
+{"ts":1793427521,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"owner","text":"DECISION q32: 600 a minute, burst 100"}
+{"ts":1793427600,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"conductor","text":"Filing it, and queueing it right after #21 (the per-key auth it builds on)."}
+{"ts":1793427620,"fleet":"acme-api","type":"thread-cmd","thread":"t4","cmd":"gh issue create -R acme-example/acme-api -t \"Rate-limit /v1/search per API key (600/min, burst 100)\" -F -","lane":"acme-api:-:conductor"}
+{"ts":1793427640,"fleet":"acme-api","type":"thread-cmd","thread":"t4","cmd":"herdsman queue acme-api add 52 --after 21","lane":"acme-api:-:conductor"}
+{"ts":1793427700,"fleet":"acme-api","type":"thread-msg","thread":"t4","files":[{"name":"rate-limits-docs-390.png","path":"docs/design/conductor-chat/fixtures/rate-limits-docs-390.png","size":129389},{"name":"429-body.json","path":"demo/429-body.json","size":87}],"from":"conductor","text":"Filed #52 and queued it after #21. Here is the docs page I'd ship with it, and the 429 body.\n\nPrior art: https://docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api"}
+{"ts":1793428000,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"system","text":"⇄ switched to account B (A resting until 18:40) · same session"}
+{"ts":1793429400,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"conductor","text":"Last one."}
+{"ts":1793429410,"fleet":"acme-api","type":"needs-decision","id":"q33","question":"Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?","options":["both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response","Retry-After only","headers only behind a ?debug flag"],"recommend":1,"agent":"conductor-t4","kind":"owner","thread":"t4"}

@@ -29,6 +29,15 @@ macro_rules! each {
             Answer,
             Act,
             Setup,
+            State,
+            Fleet,
+            Queued,
+            Lane,
+            Ask,
+            Row,
+            Events,
+            Ev,
+            Reply,
             Event,
             IssueState,
             Waiting,
@@ -154,7 +163,16 @@ fn serde_json_fits_the_types() {
         Send,
         Answer,
         Act,
-        Setup
+        Setup,
+        State,
+        Fleet,
+        Queued,
+        Lane,
+        Ask,
+        Row,
+        Events,
+        Ev,
+        Reply
     );
     checks.extend([
         ("HostSeen", json!(hosts::Seen::default())),

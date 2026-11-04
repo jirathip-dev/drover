@@ -133,6 +133,13 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #386: the [chat] tab's thread list (the needs-you stack folded with [later all]), and one thread open from its
+    // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
+    // shoots blank); at 1440 the list and the thread side by side.
+    chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
+    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
+    'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
     // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
     // second one: one ellipsised line in each mode, nothing past the row.
@@ -529,7 +536,13 @@
       const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.textContent).join(', ');
       if (gs !== 'needs you (1), in progress (2), queued (40)') early.push(`groups "${gs}"`);
       const c = $('#queue .qc'), x = $('#queue .qx');
-      if (!c || c.open || c.querySelector('summary').textContent !== '#302 → #303 · decoupling: split the serve module (6 steps) · next: #400#3' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${c && c.querySelector('summary').textContent}`);
+      // #391: the chain row is a row: the first step's number and title, `chain · 6`, its place, its columns where a queued
+      // row has them, and `▸ #302 → #307 · next: #400 (in impl)` under them.
+      const cs = c && c.querySelector('summary'), cells = s => [':scope>.gt', ':scope>span:first-of-type', ':scope>span:nth-of-type(2)', ':scope>.m', ':scope>.tl'].map(k => s.querySelector(k));
+      const words = cs && [...cells(cs).slice(1), cs.querySelector('.cst')].map(x => x?.textContent).join(' | ');
+      if (!c || c.open || words !== '#302 | chain · 6 | #3 | decoupling: split the serve module | #302 → #307 · next: #400 (in impl)' || getComputedStyle(cs.querySelector('.cst'), '::before').content !== '"▸ "' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${words}`);
+      const q1 = $('#queue .fc:not([hidden]) .qg[data-g=queue]>details.q'), at = s => cells(s).map(x => x && `${x.className}@${Math.round(x.getBoundingClientRect().left)}`).join();
+      if (cs && at(cs) !== at(q1.querySelector('summary'))) early.push(`chain row columns ${at(cs)}, a queued row's ${at(q1.querySelector('summary'))}`);
       if (!x || x.open || x.querySelector('summary').textContent !== '+ 30 more' || [...x.querySelectorAll('details.q')].some(seen)) early.push(`more row: ${x && x.querySelector('summary').textContent}`);
       const rgb = s => s.match(/[\d.]+/g).map(Number), bg = e => { for (; e; e = e.parentElement) { const v = rgb(getComputedStyle(e).backgroundColor); if (v[3] !== 0) return v.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
       for (const t of [...$$('#queue summary>.tl')].filter(seen)) if (ratio(rgb(getComputedStyle(t).color), bg(t)) < 4.5) early.push(`title "${t.textContent.slice(0, 20)}" under 4.5:1`);
@@ -543,6 +556,7 @@
       c.open = x.open = true;
       const steps = [...c.querySelectorAll(':scope>details.q')], rest = [...x.querySelectorAll(':scope>*:not(summary)')];
       if (steps.length !== 6 || !steps.every(seen) || steps.some(d => !/\bd[012]\b/.test(d.className))) early.push(`chain opened ${steps.filter(seen).length} of ${steps.length} steps`);
+      if (getComputedStyle(c.querySelector('summary>.cst'), '::before').content !== '"▾ "') early.push('an open chain row shows no ▾');
       const under = (a, b) => Math.abs(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom) > 1;
       if (under(c.querySelector('summary'), steps[0]) || rest.length !== 30 || !rest.every(seen) || under(x.querySelector('summary'), rest[0])) early.push('chain or more not opened in place');
       const xs = new Set([...$$('#queue summary>.tl')].filter(seen).map(t => Math.round(t.getBoundingClientRect().left + parseFloat(getComputedStyle(t).paddingLeft))));
@@ -608,6 +622,7 @@
     if (t && t.scrollWidth > t.clientWidth) early.push('"! needs you" overflows its ticket');
   }
   let toasted = null, drove = null, href = null;
+  const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
   const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
@@ -637,6 +652,13 @@
         const t = s.querySelector(':scope>.tl');
         if (!t || !seen(t) || t.title !== t.textContent || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight)) res.outliers.push(`no one-line title: ${label(s)}`);
       }
+    }
+    // #397: the error shows whole (wraps, never ellipsised) and covers no row: "all repos" starts under it.
+    if (V === 'chat-error') {
+      const m = $('.msg.r'), row = $('#chat .fc');
+      if (!m || m.textContent !== ERR) res.outliers.push(`error banner reads "${m && m.textContent}"`);
+      else if (m.scrollWidth > m.clientWidth || m.scrollHeight > m.clientHeight) res.outliers.push(`error banner clipped: ${m.scrollWidth}x${m.scrollHeight} in ${m.clientWidth}x${m.clientHeight}`);
+      else if (m.getBoundingClientRect().bottom > row.getBoundingClientRect().top) res.outliers.push(`error banner covers "${label(row)}"`);
     }
     const out = document.createElement('pre');
     out.id = 'audit';

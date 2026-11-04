@@ -18,6 +18,8 @@
       }
     ],
     "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "{{FLEET_HOOK}}" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "{{FLEET_HOOK}}" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "{{FLEET_HOOK}}" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "{{FLEET_HOOK}}" }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "{{FLEET_HOOK}}" }] }]
   }
 }

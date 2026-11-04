@@ -144,6 +144,16 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ThreadCmd,
     },
+    /// #387: fleet.toml changes as thread cards only the owner applies (docs/conductor.md)
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
+    /// #387: secrets in the host's keychain as `herdsman/<fleet>/<NAME>`; fleet `env` reads them as `secret:<NAME>`
+    Secret {
+        #[command(subcommand)]
+        cmd: SecretCmd,
+    },
     /// The open asks, oldest first, with age
     Asks {
         #[command(flatten)]
@@ -362,7 +372,13 @@ enum ThreadCmd {
         by: String,
     },
     /// The conductor's reply to the owner
-    Reply { id: String, text: String },
+    Reply {
+        id: String,
+        text: String,
+        /// A file or image to show with it (repeatable)
+        #[arg(long)]
+        file: Vec<PathBuf>,
+    },
     /// The conversation, asks with their options; marks it read
     Show {
         id: String,
@@ -372,6 +388,32 @@ enum ThreadCmd {
     },
     /// Per repo, its threads: title, last message, unread dot, conductor awake/asleep
     Ls(Scope),
+}
+
+#[derive(Subcommand)]
+enum ConfigCmd {
+    /// Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]
+    Propose { thread: String, file: PathBuf },
+    /// Owner only: apply a proposal (backup kept, doctor run)
+    Apply { id: String },
+    /// Owner only: discard a proposal
+    Discard { id: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCmd {
+    /// Ask the owner for a secret in a thread: a masked card on paired owner devices
+    Request {
+        thread: String,
+        name: String,
+        /// What it is for, as the card shows it
+        #[arg(long)]
+        why: String,
+    },
+    /// Owner only: the secrets set, by fleet
+    Ls,
+    /// Owner only: delete a secret
+    Rm { fleet: String, name: String },
 }
 
 #[derive(Subcommand)]
@@ -490,8 +532,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`).
-pub const HELP_AGENT_MAX: usize = 241;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`).
+pub const HELP_AGENT_MAX: usize = 261;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -560,6 +602,12 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
+    // #298: `[runtime] kind = "berth"`: lanes start, and are reached, on berth.
+    let with = Config::load(&ctx.config)
+        .ok()
+        .and_then(|c| c.runtime.berth())
+        .map(|b| crate::berth::With(r, b));
+    let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
         Some(o) => o.map(|o| {
             let _ = write!(out, "{}", o.stdout);
@@ -936,12 +984,29 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Thread { cmd } => match cmd {
                     ThreadCmd::New { repo, title } => crate::conductor::new(ctx, &cfg, out, &repo, &title)?,
                     ThreadCmd::Say { id, text, by } => {
-                        let agent = crate::conductor::say(ctx, &cfg, r, &id, &text, (&by, false))?;
+                        let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &[]), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
                     }
-                    ThreadCmd::Reply { id, text } => crate::conductor::reply(ctx, &cfg, &id, &text)?,
+                    ThreadCmd::Reply { id, text, file } => crate::conductor::reply(ctx, &cfg, &id, &text, &file)?,
                     ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
                     ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,
+                },
+                Cmd::Config { cmd } => {
+                    let (id, apply) = match cmd {
+                        ConfigCmd::Propose { thread, file } => {
+                            return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
+                        }
+                        ConfigCmd::Apply { id } => (id, true),
+                        ConfigCmd::Discard { id } => (id, false),
+                    };
+                    writeln!(out, "{}", crate::propose::settle(ctx, &cfg, r, &id, apply)?)?;
+                }
+                Cmd::Secret { cmd } => match cmd {
+                    SecretCmd::Request { thread, name, why } => {
+                        crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
+                    }
+                    SecretCmd::Ls => crate::secret::ls(ctx, out)?,
+                    SecretCmd::Rm { fleet, name } => crate::secret::rm(ctx, &cfg, r, &fleet, &name)?,
                 },
                 Cmd::Hosts { cmd } => match cmd {
                     None => crate::hosts::list(ctx, &cfg, r, out, false)?,
@@ -1112,6 +1177,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 g.unwrap_or_default()
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
+                            for &i in &issues {
+                                let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
+                            }
                             if let Some(g) = g {
                                 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
                             }
@@ -1172,6 +1240,25 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         eprintln!("herdsman hook: input is not JSON; allowing");
         return Ok(());
     };
+    // #298: in a berth terminal (`$BERTH`) the hook reports the turn's state, so nothing reads it off the screen.
+    if let (Ok(name), Some(state)) = (std::env::var("BERTH"), hook::reported(&input)) {
+        let w = r.berth().map_or_else(
+            || crate::berth::Wire::Socket(crate::berth::default_socket()),
+            |b| b.wire,
+        );
+        let report = berth_proto::Reported {
+            state: state.into(),
+            note: None,
+        };
+        if let Err(e) = crate::berth::call(
+            r,
+            &w,
+            berth_proto::Method::State,
+            json!(berth_proto::StateParams { name, report }),
+        ) {
+            eprintln!("herdsman hook: berth state: {e:#}");
+        }
+    }
     // #304: a turn's end or a push that went through kicks the lane's issue at once.
     if let Some(why) = hook::kick_why(&input) {
         let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
@@ -1208,8 +1295,15 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             lane_event(ctx, r, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
-    } else if let Some(dir) = hook::push_dir(&input) {
+        return Ok(());
+    }
+    if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
+    }
+    // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+    if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
+        lane_event(ctx, r, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
     }
     Ok(())
 }

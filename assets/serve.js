@@ -20,7 +20,8 @@ function tab(t) {
   // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
-  if (!$('#' + t).childElementCount && sget('c:' + t)) frag(t, sget('c:' + t));
+  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined).
+  if (!$('#' + t).childElementCount && sget('c:' + t)) queueMicrotask(() => frag(t, sget('c:' + t)));
   wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
 }
 // #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
@@ -281,7 +282,7 @@ function rows(root) {
     g.replaceChildren(el('i', 'rsp rsa', f));
     g.firstChild.setAttribute('aria-hidden', true);
   };
-  root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('details.q, .qc').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
   root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
   const L = (TT && TT.looks) || [];
   root.querySelectorAll('.av[data-act]').forEach(v => {
@@ -372,6 +373,7 @@ function frag(id, html) {
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
   if (id === 'events') olds(nu);
+  if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
   bshow(el);
@@ -509,7 +511,12 @@ function groups() {
 }
 document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
 // #141: `[queue·N]`, N the needs-you cards above the tabs.
-function badge() { const n = $$('#needs .ask').length; $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : ''); }
+function badge() {
+  const n = $$('#needs .ask').length, c = +($('#chn')?.dataset.n || 0); // #386: `[chat·N]`, the threads where a choice waits
+  $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : '');
+  const ch = $('nav a[href="#chat"]>span');
+  if (ch) ch.innerHTML = 'chat' + (c ? `<b class=n>·${c}</b>` : '');
+}
 // #68: buttons hold labels, never sentences: a control's runtime result is an 11 px `p.st` under it (red on error).
 function note(b, msg, ok) {
   let s = b.nextElementSibling;
@@ -586,6 +593,8 @@ function connect() {
     if (!o) return refresh();
     got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
   });
+  // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
+  es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
   es.addEventListener('refresh', e => (at(e), refresh()));
@@ -768,10 +777,10 @@ document.addEventListener('click', async e => {
 const QG = { need: 'needs you', prog: 'in progress', queue: 'queued' };
 const qgroup = s => /^(needs-human|⏸)/.test(s) ? 'need' : /^(impl|review|fix|ready|update|dead|parked)/.test(s) ? 'prog' : 'queue';
 const dur = t => t < 60 ? `${t}s` : t < 3600 ? `${Math.floor(t / 60)}m` : t < 86400 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h`;
-const inph = (s, t) => `in ${s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0]} ${dur(t)}`;
-// steps: [{n, title, b}] depth-first, the root first (b: its blocker). Head, title, tail: the tail names the step the
-// chain waits on next: the root's open blocker, else the root.
-const qsum = st => [`#${st[0].n} → #${st[1].n} · `, st[0].title, ` (${st.length} steps) · next: #${st[0].b || st[0].n}`];
+const qphase = s => s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0], inph = (s, t) => `in ${qphase(s)} ${dur(t)}`;
+// steps: [{n, title, b}] depth-first, the root first (b: its blocker); s: the state word of the step the chain waits on
+// next (the root's open blocker, else the root), '' when off the board. #391: the chain row's third line, first → last.
+const qsum = (st, s) => `#${st[0].n} → #${st.at(-1).n} · next: #${st[0].b || st[0].n}${s ? ` (${qgroup(s) === 'prog' ? 'in ' : ''}${qphase(s)})` : ''}`;
 // queue:end
 // #365 backlog: pure from here to `backlog:end` (tests/backlog.rs runs it under node). The server's last read {n: {title,
 // labels, created, updated, ac, pr}} as rows newest first, `stale` when untouched for 90 days; a row shows when it has
@@ -867,11 +876,17 @@ function qfold(root) {
       // A row's place in the queue; a chain's steps leave theirs to the chain row.
       [d, ...rest].forEach(x => { x.querySelector('summary>.m').textContent = rest.length ? '' : '#' + (i + 1); });
       if (!rest.length) return d;
-      const step = x => ({ n: x.querySelector('summary>span').textContent.slice(1), title: x.querySelector('summary>.tl')?.title || '', b: x.dataset.b });
-      const [h, t, tail] = qsum([d, ...rest].map(step)), at = h.indexOf('→') + 1, c = el('details', 'qc');
-      c.innerHTML = '<summary><i class=cv></i><span></span><span class=qct><span></span><span class=el></span><span></span></span><span class=m></span></summary>';
-      const [a, , x, y, z, m] = c.querySelectorAll('summary span');
-      [a.textContent, x.textContent, y.textContent, z.textContent, m.textContent, y.title] = [h.slice(0, at), h.slice(at), t, tail, '#' + (i + 1), t];
+      // #391: a normal row: the first step's avatar, number and title, `chain · N` as its state, its place, and a third
+      // line naming the steps and the one it waits on next, with that one's state when it is on the board.
+      const n = x => x.querySelector('summary>span').textContent, st = [d, ...rest].map(x => ({ n: n(x).slice(1), b: x.dataset.b }));
+      const nx = [...g.parentNode.querySelectorAll('details.q')].find(x => n(x) === '#' + (st[0].b || st[0].n));
+      const c = el('details', 'qc'), s = d.querySelector('summary').cloneNode(true);
+      s.querySelector('.gt>b')?.classList.remove('k');
+      s.querySelector(':scope>span:nth-of-type(2)').replaceChildren(el('span', 'a', `chain · ${st.length}`));
+      s.querySelector(':scope>.m').textContent = '#' + (i + 1);
+      s.append(el('span', 'cst', qsum(st, nx ? nx.querySelector('summary>span:nth-of-type(2)>span').textContent : '')));
+      c.dataset.act = d.dataset.act;
+      c.append(s);
       d.before(c);
       c.append(d, ...rest);
       return c;
@@ -1284,7 +1299,8 @@ document.addEventListener('click', async e => {
   x.innerHTML = '<div class=card><p class="nw el"></p></div>';
   x.querySelector('p').textContent = `sign in: ${b.dataset.su} on ${b.dataset.host}; closes when it exits or in 10 min`;
   Object.assign(x.dataset, { agent: 'sign in · ' + b.dataset.su, role: 'setup', setup: m });
-  b.closest('details').open = false;
+  const d = b.closest('details'); // a chat line's [sign in] has none
+  if (d) d.open = false;
   open(x);
 });
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
@@ -1717,3 +1733,82 @@ function pgraph(d) {
   const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
   return `<div class=pg role=img aria-label="${esc(d.fleet)} pipeline: ${esc(S.map(s => s.name).join(', '))}" style="grid-template-columns:2ch minmax(0,1fr)${rep};grid-template-rows:repeat(${row},var(--ln))">${h}</div>`;
 }
+// #386: the [chat] tab. The page carries every thread's view; one is open (sessionStorage, or a push's `?thread=`):
+// on a phone the list or that thread, from 1000 px both. #cht is the style that picks it, so a live swap keeps it.
+// `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
+var THR = DBG.get('thread') || sget('thread') || '', ATT = null, NT = new Set();
+B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+function chatOpen(t) {
+  THR = t;
+  sput('thread', t);
+  const q = CSS.escape(t);
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+@media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
+  if (t && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') post('thread', { op: 'read', t }).catch(() => {});
+  if (t) scrollTo(0, document.body.scrollHeight);
+}
+// Each block's time in the phone's clock; the [+ thread] forms opened stay open across a swap; a picked file waits.
+// (A live swap paints its new copy before the patch, so nothing flashes.)
+function chatPaint(root = $('#chat')) {
+  if (!root || !NT) return;
+  root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
+  root.querySelectorAll('.nt').forEach(f => { f.hidden = !NT.has(f.dataset.repo); });
+  if (ATT) { const f = root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`); if (f && !f.querySelector('.att')) f.prepend(ATT.el); }
+}
+chatOpen(THR);
+chatPaint();
+document.addEventListener('click', async e => {
+  const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
+  if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
+  else if (t.closest('#chat .bk')) chatOpen('');
+  else if (t.closest('#chat .ntb')) { const f = t.closest('.fc').querySelector('.nt'); NT.has(f.dataset.repo) ? NT.delete(f.dataset.repo) : NT.add(f.dataset.repo); chatPaint(); f.hidden || f.elements.title.focus(); }
+  else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
+  else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
+  else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+});
+document.addEventListener('change', e => {
+  const i = e.target;
+  if (!i.matches('#chat .tw input[type=file]') || !i.files[0]) return;
+  const f = i.files[0], r = new FileReader();
+  r.onload = () => {
+    const el = Object.assign(document.createElement('div'), { className: 'att' }), kb = f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB';
+    el.innerHTML = `${f.type.startsWith('image/') ? `<img src="${r.result}" alt="">` : ''}<span></span><button type=button aria-label="remove the file">×</button>`;
+    el.querySelector('span').textContent = `${f.name} · ${kb}`;
+    if (ATT) ATT.el.remove();
+    ATT = { t: i.closest('.tw').dataset.t, name: f.name, data: r.result.split(',')[1], el };
+    i.value = '';
+    chatPaint();
+  };
+  r.readAsDataURL(f);
+});
+async function chatPost(d, f) {
+  try {
+    const r = await post('thread', d), m = (await r.text()).trim();
+    if (r.status === 401) unpaired();
+    if (m) toast(m);
+    if (r.ok) { if (f) f.reset(); refresh(); }
+    return r.ok;
+  } catch (err) { toast('error: ' + err.message); }
+}
+document.addEventListener('submit', async e => {
+  const f = e.target;
+  if (f.matches('#chat .nt')) {
+    e.preventDefault();
+    if (await chatPost({ op: 'new', repo: f.dataset.repo, title: f.elements.title.value }, f)) NT.delete(f.dataset.repo);
+  } else if (f.matches('#chat .chq')) {
+    e.preventDefault();
+    chatPost({ op: 'answer', fleet: f.dataset.fleet, id: f.dataset.id, text: f.elements.text.value }, f);
+  } else if (f.matches('#chat .chc')) { // #387: a config card's [apply] / [discard]
+    e.preventDefault();
+    chatPost({ op: 'config', id: f.dataset.id, act: e.submitter.value });
+  } else if (f.matches('#chat .chs')) { // #387: a secret card's [save] / [dismiss]; the value only goes in the POST
+    e.preventDefault();
+    const act = e.submitter.value;
+    chatPost({ op: 'secret', t: f.dataset.t, name: f.dataset.name, act, ...(act === 'save' ? { value: f.elements.value.value } : {}) }, f);
+  } else if (f.matches('#chat .tw')) {
+    e.preventDefault();
+    const a = ATT && ATT.t === f.dataset.t ? ATT : null;
+    if (!f.elements.text.value.trim() && !a) return;
+    if (await chatPost({ op: 'say', t: f.dataset.t, text: f.elements.text.value, ...(a ? { name: a.name, data: a.data } : {}) }, f) && a) { a.el.remove(); ATT = null; }
+  }
+});

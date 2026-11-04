@@ -272,6 +272,8 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     let push = match ev.kind.as_str() {
         "needs-decision" if ev.str("kind") == Some("routine") => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
+        // #386: a conductor's reply pushes; the owner's own words and system lines never do.
+        "thread-msg" if ev.str("from") != Some("conductor") => "",
         k => k,
     };
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
@@ -430,6 +432,7 @@ pub fn checks(e: &Event) -> bool {
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    "lane-state",
     "budget-freed",
     "wip-saved",
     "wip-blocked",

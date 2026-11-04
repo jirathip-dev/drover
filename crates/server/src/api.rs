@@ -1,5 +1,5 @@
 //! #375: the JSON shapes the page reads and posts: the one definition of each, `assets/types/api.d.ts` is made from these
-//! (`just types`), with the core rows the board shows (`Event`, `IssueState`, `Waiting`, `hosts::Seen`, `hosts::Row`).
+//! (`just types`), API v1's (#265) too, with the core rows the board shows (`Event`, `IssueState`, `Waiting`, `hosts::Seen`, `hosts::Row`).
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -144,6 +144,96 @@ pub struct Setup {
     pub host: String,
     pub name: String,
 }
+
+/// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
+/// `mtime` a POST sends back (STALE when fleet.toml changed since).
+pub struct State {
+    pub seq: u64,
+    pub age: Option<u64>,
+    pub mtime: String,
+    pub theme: String,
+    pub fleets: Vec<Fleet>,
+    pub queue: Vec<Queued>,
+    pub lanes: Vec<Lane>,
+    pub asks: Vec<Ask>,
+    pub hosts: Vec<Row>,
+    pub services: Vec<Row>,
+    pub alerts: Vec<Row>,
+}
+
+pub struct Fleet {
+    pub name: String,
+    pub color: String,
+    pub paused: bool,
+}
+
+pub struct Queued {
+    pub fleet: String,
+    pub issue: u64,
+    pub title: Option<String>,
+    pub state: String,
+    pub blocked_by: Option<u64>,
+}
+
+/// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
+pub struct Lane {
+    pub name: String,
+    pub fleet: Option<String>,
+    pub issue: Option<u64>,
+    pub title: Option<String>,
+    pub role: String,
+    pub harness: String,
+    pub model: Option<String>,
+    pub state: String,
+    pub shown: String,
+    pub tone: String,
+    pub since: u64,
+}
+
+pub struct Ask {
+    pub id: String,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    pub question: String,
+    pub options: Vec<String>,
+    pub recommend: Option<u64>,
+    pub ts: u64,
+}
+
+/// A Host tab row: HOSTS' (`detail`: its state in words), SERVICES' and ALERTS' (push); `fix` clears a red or amber one.
+pub struct Row {
+    pub name: String,
+    pub tone: String,
+    pub detail: String,
+    pub fix: String,
+}
+
+/// #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+pub struct Events {
+    pub seq: u64,
+    pub refresh: bool,
+    pub list: Vec<Ev>,
+}
+
+/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+pub struct Ev {
+    pub seq: u64,
+    pub ts: u64,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub data: serde_json::Map<String, Value>,
+    pub k: Option<String>,
+}
+
+/// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
+pub struct Reply {
+    pub ok: bool,
+    pub code: String,
+    pub message: String,
+}
+
 }
 
 /// A form body (`application/x-www-form-urlencoded`, decoded) as one of the action bodies above.
