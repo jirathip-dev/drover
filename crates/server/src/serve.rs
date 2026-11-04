@@ -532,7 +532,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue",
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "cond",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -1338,12 +1338,15 @@ impl<'a> Server<'a> {
                 crate::pause(ctx, &mut out, fleet, op == "pause", Some("web"))?;
                 format!("{fleet} {op}d")
             }
-            "set" => {
+            op @ ("set" | "cond") => {
                 let wanted: Vec<_> = ["harness", "model", "effort"]
                     .into_iter()
                     .filter(|k| !g(k).is_empty())
                     .map(|k| (k, g(k).to_string()))
                     .collect();
+                if op == "cond" {
+                    return crate::conductor::set(ctx, self.r, fleet, &wanted); // #401
+                }
                 let line = wanted
                     .iter()
                     .map(|(k, v)| format!("{k} {v}"))
@@ -3179,7 +3182,8 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
 }
 
 /// #162: a fleet's [config] sheet: GENERAL, LIMITS, ROLES (the `set` pickers when `rw`), ALERTS, HOSTS / NEEDS.
-/// Only the role pickers write (through `set`); the rest is read-only, edited in the config file named on top.
+/// Only the role pickers (through `set`) and #401's Conductor choices write; the rest is read-only, edited in the
+/// config file named on top.
 fn config_sheet(
     ctx: &Ctx,
     cfg: &Config,
@@ -3332,17 +3336,50 @@ fn config_sheet(
     let roles: String = fc
         .role
         .iter()
+        .filter(|r| r.0 != "conductor")
         .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt).replacen("</b> ", &format!("</b> {}", tag(name)), 1))
         .collect();
     format!(
         "<p class=cp><span class=m>config</span> {}</p>{}{}{}<section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>{roles}\
-         <p class=rk>profile, accounts, mcp: {edit}</p></section>{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
+         <p class=rk>profile, accounts, mcp: {edit}</p></section>{}{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
          <p class=soon>Which hosts this fleet's lanes may run on, matched by host tags against the issue's needs. Shown here once #157 lands.</p></section>",
         esc(&path),
         group("General", &edit, &general),
         pipeline_group(fleet, fc, st),
         group("Limits", &edit, &limits),
+        conductor_group(fleet, fc, rw, mt),
         group("Alerts", &edit, &alerts),
+    )
+}
+
+/// #401: the fleet's conductor, `default: impl` or `set`; a tap on a harness, model (the fleet's roles') or effort
+/// choice writes it (the `cond` op, a paired device only; disabled without `rw`).
+fn conductor_group(fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str) -> String {
+    let Some(r) = fc.role.get("conductor") else {
+        return String::new();
+    };
+    let row = |key: &str, cur: Option<&str>, opts: &[&str]| {
+        let on = |o: &&str| {
+            format!(
+                "<button name={key} value=\"{0}\" aria-pressed={1}{2}>{0}</button>",
+                esc(o),
+                cur == Some(*o),
+                if rw { "" } else { " disabled" }
+            )
+        };
+        let b: String = opts.iter().map(on).collect();
+        format!(
+            "<form method=post class=chips aria-label={key}>{}<b class=m>{key}</b>{b}</form>",
+            hidden("cond", fleet, mt)
+        )
+    };
+    format!(
+        "<section class=cg><h3>Conductor<span>{}</span></h3><p class=rh><span class=m>{}</span></p>{}{}{}</section>",
+        if r.default { "default: impl" } else { "set" },
+        esc(&r.profile_or("conductor")),
+        row("harness", Some(&r.harness), &crate::harness::NAMES),
+        row("model", r.model.as_deref(), &crate::conductor::models(fc)),
+        row("effort", r.effort.as_deref(), crate::harness::efforts(&r.harness)),
     )
 }
 

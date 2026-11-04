@@ -133,7 +133,8 @@ pub fn say(
     Ok(agent.into())
 }
 
-/// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]`; for `all`, the first fleet's that has one.
+/// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile
+/// `lane-conductor`, `Config::parse`); for `all`, the first fleet's that has one.
 pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     let has = |(n, f): (&'a String, &'a crate::config::Fleet)| Some((n.as_str(), f.role.get("conductor")?));
     let found = match repo {
@@ -144,9 +145,73 @@ pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
         Some(x) => Ok(x),
         None => refused(
             "NO_CONDUCTOR",
-            format!("{repo} has no conductor; add [fleet.<n>.role.conductor]"),
+            format!("{repo} has no conductor or impl role; add [fleet.<n>.role.conductor]"),
         ),
     }
+}
+
+/// #401: the models a fleet's roles use, the [config] sheet's conductor model choices.
+pub fn models(f: &crate::config::Fleet) -> Vec<&str> {
+    let all: std::collections::BTreeSet<_> = f.role.values().filter_map(|r| r.model.as_deref()).collect();
+    all.into_iter().collect()
+}
+
+/// #401: the [config] sheet's conductor choices (harness, model, effort) into `[fleet.<n>.role.conductor]` in place (a
+/// fleet on the default gets the table: its impl role's keys); refused `DOCTOR` if `doctor` with the new file shows a ✗
+/// it did not before. The old file goes to `fleet.toml.bak` first.
+pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) -> Result<String> {
+    let text = std::fs::read_to_string(&ctx.config)?;
+    let cfg = Config::parse(&text)?;
+    let cur = role(&cfg, fleet)?.1;
+    let models = models(cfg.fleet(fleet)?);
+    let bad = |(k, v): &&(&str, String)| {
+        *k == "model" && !models.contains(&v.as_str()) || v.chars().any(|c| c == '"' || c == '\\' || c.is_control())
+    };
+    if let Some((k, v)) = wanted.iter().find(bad) {
+        return refused("BAD_VALUE", format!("conductor {k} {v:?}: not one of the choices"));
+    }
+    let mut new = text.clone();
+    if cur.default {
+        let raw: toml::Table = toml::from_str(&text)?;
+        let imp = raw
+            .get("fleet")
+            .and_then(|f| f.get(fleet)?.get("role")?.get("impl")?.as_table());
+        let mut t = imp.cloned().unwrap_or_default();
+        t.insert("profile".into(), "lane-conductor".into());
+        let nl = if text.ends_with('\n') { "" } else { "\n" };
+        new += &format!("{nl}\n[fleet.{fleet}.role.conductor]\n{}", toml::to_string(&t)?);
+    }
+    for (k, v) in wanted {
+        new = crate::config::set_value(&new, fleet, "conductor", k, v)?;
+    }
+    let new_cfg = Config::parse(&new)?;
+    let fails = |c: &Ctx| -> Result<Vec<String>> {
+        let mut out = vec![];
+        crate::doctor::doctor(c, r, &mut out, true)?;
+        Ok(serde_json::from_slice::<Vec<String>>(&out)?
+            .into_iter()
+            .filter(|l| l.starts_with('✗'))
+            .collect())
+    };
+    let (before, tmp) = (fails(ctx)?, crate::devices::tmp_name(&ctx.config));
+    std::fs::write(&tmp, &new)?;
+    let after = fails(&Ctx {
+        config: tmp.clone(),
+        ..ctx.clone()
+    });
+    std::fs::remove_file(&tmp)?;
+    let bad: Vec<String> = after?.into_iter().filter(|l| !before.contains(l)).collect();
+    if !bad.is_empty() {
+        return refused("DOCTOR", format!("doctor fails with it: {}", bad.join("; ")));
+    }
+    std::fs::copy(&ctx.config, ctx.config.with_extension("toml.bak"))?;
+    crate::config::write_atomic(&ctx.config, &new)?;
+    for (k, v) in wanted {
+        let d = json!({"role": "conductor", "key": k, "new": v, "via": "web"});
+        emit(&ctx.state, &new_cfg, Event::new(ctx.now, fleet, None, "set", d))?;
+    }
+    let line: Vec<String> = wanted.iter().map(|(k, v)| format!("{k} {v}")).collect();
+    Ok(format!("{fleet} conductor: {}", line.join(", ")))
 }
 
 /// A random v4 UUID, a new conductor's session id.
@@ -233,7 +298,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         bail!("herdr agent start failed: {}", o.stderr.trim());
     }
     let kicked = h.kick(r, &p, pane).unwrap_or(false);
-    let d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": wsid, "harness": p.harness,
+    let d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": wsid, "harness": p.harness, "model": p.model,
         "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
     emit(
         &ctx.state,
