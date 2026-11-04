@@ -373,8 +373,7 @@ fn services_rows_go_green_amber_and_red() {
 
     // The page: a SERVICES group with what clears a problem under it.
     let s = herdsman::serve::Server::new(&c, &red, Some("127.0.0.1:7777".into()));
-    let page =
-        String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
+    let page = host_tab(&s, "127.0.0.1:7777", c.now);
     assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
     assert!(
         page.contains("/ 25 GB</span> (104%) <span class=\"mt fx\">· 4m ago</span>"),
@@ -389,7 +388,8 @@ fn services_rows_go_green_amber_and_red() {
     }
 }
 
-/// #160: a 10 s `du` never reaches a request: the page and the config fragment answer at once; `check` stores the total.
+/// #160: a 10 s `du` never reaches a request: the page, the Host tab (#267: its API read) and the config fragment answer
+/// at once; `check` stores the total.
 #[test]
 fn slow_du_never_blocks_the_board() {
     struct SlowDu(Fake);
@@ -404,7 +404,7 @@ fn slow_du_never_blocks_the_board() {
     let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
     let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    for path in ["/?all=1", "/frag?id=config&fleet=sendmeter"] {
+    for path in ["/?all=1", "/api/v1/host", "/frag?id=config&fleet=sendmeter"] {
         let t = std::time::Instant::now();
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), c.now);
         assert!(t.elapsed().as_millis() < 500, "{path} took {:?}", t.elapsed());

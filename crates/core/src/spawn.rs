@@ -668,10 +668,8 @@ pub fn spawn(
         }
         crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        event(
-            "supersede",
-            json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")}),
-        )?;
+        let d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")});
+        event("supersede", d)?;
     }
 
     let mut sha = None;
@@ -861,7 +859,8 @@ pub fn spawn(
             if bt.is_some() {
                 d["runtime"] = json!("berth");
             }
-            d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
+            let confirmed = kicked.as_ref().is_ok_and(|c| *c);
+            d["confirmed"] = json!(confirmed);
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
             d["handover"] = json!(note);
@@ -878,19 +877,21 @@ pub fn spawn(
             let until = p.resting.as_ref().map(|r| crate::usage::date(base, r.1, "+%H:%M"));
             d["resting"] = json!(p.resting.as_ref().zip(until).map(|(r, t)| format!("{} {t})", r.0)));
             let to = entry(d["harness"].as_str(), d["account"].as_str());
+            // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
+            // #424: its close names that pane and comes first, so it never closes the new lane.
+            if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
+                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
+                    let _ = herdr::close(r, old);
+                    let c = json!({"agent": agent, "reason": "superseded", "pane": old});
+                    event("lane-closed", c)?;
+                }
+            }
             event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
             if let Some(sp) = gone {
                 let from = entry(sp.str("harness"), sp.str("account"));
                 event("fallback", json!({"agent": p.agent, "from": from, "to": to}))?;
             }
-            let confirmed = kicked?;
-            // #128: once confirmed, the superseded lane's pane goes (its folder is reused); live agents were handled above.
-            if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
-                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-                    let _ = herdr::close(r, old);
-                    event("lane-closed", json!({"agent": agent, "reason": "superseded"}))?;
-                }
-            }
+            kicked?;
             pj["pane"] = json!(pane);
             pj["confirmed"] = json!(confirmed);
             print_plan(out, &pj, o.json)?;

@@ -12,6 +12,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy, rustfmt
+      # #266: the tests run web/src/events.ts under node (type stripping: node 24).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: build
         run: cargo build --release --locked
       - name: fmt

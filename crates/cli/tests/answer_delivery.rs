@@ -154,3 +154,111 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count("herdr agent prompt"), 0, "{:?}", r.calls.borrow());
 }
+
+/// #424: a supersede logs the old lane's close before the new spawn, naming its pane; the new lane's ask is answered.
+#[test]
+fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
+    let c = ctx(&tmpdir("deliver-supersede"), CONFIG);
+    let wt = c.worktrees.join("sendmeter/issue-36");
+    std::fs::create_dir_all(&wt).unwrap();
+    spawn(&c, json!({"worktree": wt, "branch": "issue-36"}));
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("git -C", "")
+        .reply("gh issue view 36", r#"{"title":"t","body":"b"}"#)
+        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run", "{}")
+        .reply("herdr agent start", "{}")
+        .reply("herdr pane", "{}")
+        .reply("herdr agent prompt", "{}")
+        .reply("herdr agent wait", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "36", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    let ev = read(&c.state).unwrap();
+    let closed = ev
+        .iter()
+        .position(|e| e.kind == "lane-closed")
+        .expect("old lane closed");
+    let spawned = ev.iter().rposition(|e| e.kind == "spawn").unwrap();
+    assert!(closed < spawned, "{ev:?}");
+    assert_eq!(
+        (ev[closed].str("pane"), ev[spawned].str("pane")),
+        (Some("w1:p1"), Some("w9:p1"))
+    );
+    lane_ask(&c);
+    let r = ok_herdr("");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
+    assert!(r.called("herdr pane send-keys w9:p1 Enter"), "{:?}", r.calls.borrow());
+    assert_eq!(kinds(&c, "answer-delivered").len(), 1);
+}
+
+/// #424: the #410 log (new spawn, then the old lane's pane-less `superseded` close) leaves the new lane open.
+#[test]
+fn a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
+    let c = ctx(&tmpdir("deliver-410"), CONFIG);
+    spawn(&c, json!({}));
+    spawn(&c, json!({"pane": "w2:p1"}));
+    let d = json!({"agent": LANE, "reason": "superseded"});
+    append(&c.state, &Event::new(NOW - 50, "sendmeter", Some(36), "lane-closed", d)).unwrap();
+    lane_ask(&c);
+    let r = ok_herdr("");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
+    assert!(r.called("herdr pane send-keys w2:p1 Enter"), "{:?}", r.calls.borrow());
+}
+
+/// #424: no open lane, but the asking agent is live in the issue's worktree: typed there, `answer-delivered-live`.
+#[test]
+fn a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer() {
+    let c = ctx(&tmpdir("deliver-live"), CONFIG);
+    spawn(&c, json!({"worktree": "/wt/issue-36"}));
+    lane_ask(&c);
+    append(
+        &c.state,
+        &Event::new(NOW, "sendmeter", Some(36), "lane-closed", json!({"agent": LANE})),
+    )
+    .unwrap();
+    let r = ok_herdr("").reply(
+        "herdr agent list",
+        &agents(&[(LANE, "idle", "/wt/issue-36/src", "w5:p2")]),
+    );
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
+    assert!(r.called("herdr pane send-keys w5:p2 Enter"), "{:?}", r.calls.borrow());
+    let d = kinds(&c, "answer-delivered-live");
+    assert_eq!((d.len(), d[0].str("agent")), (1, Some(LANE)));
+    assert!(kinds(&c, "answer-undelivered").is_empty());
+}
+
+/// #424: an answer whose lane really is gone is logged `answer-undelivered`; `check` alerts it once, not again.
+#[test]
+fn an_answer_with_no_lane_alerts_once_from_check() {
+    let c = ctx(&tmpdir("deliver-alert"), CONFIG);
+    spawn(&c, json!({"worktree": "/wt/issue-36"}));
+    lane_ask(&c);
+    append(
+        &c.state,
+        &Event::new(NOW, "sendmeter", Some(36), "lane-closed", json!({"agent": LANE})),
+    )
+    .unwrap();
+    let r = ok_herdr("").reply("herdr agent list", NO_AGENTS);
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "1"]).0, 0);
+    let u = kinds(&c, "answer-undelivered");
+    assert_eq!((u.len(), u[0].str("agent")), (1, None));
+    let (_, out) = run(&c, &r, &["check"]);
+    assert!(out.contains("answer-undelivered"), "{out}");
+    let (_, out) = run(&c, &r, &["check"]);
+    assert!(!out.contains("answer-undelivered"), "{out}");
+    let u = kinds(&c, "answer-undelivered");
+    assert_eq!((u.len(), u[1].str("key")), (2, Some("q1")));
+}

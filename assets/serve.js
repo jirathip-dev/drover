@@ -511,7 +511,6 @@ function frag(id, html) {
   const rows = e => new Map([...e.querySelectorAll('details,.lane')].map(r => [key(r), r]));
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
-  if (id === 'events') olds(nu);
   if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
@@ -520,7 +519,7 @@ function frag(id, html) {
   nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
-  rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
+  if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
   last = Date.now();
   sput('c:' + id, html);
   alerts();
@@ -707,6 +706,7 @@ async function refresh(quiet) {
     have.clear();
     have.add(t);
     for (const id in j) frag(id, j[id]);
+    dispatchEvent(new Event('herd-refresh')); // #266: the TypeScript board's tabs read the API again
     herdPull();
     busy = false;
     sync(live() ? 'g' : 'a');
@@ -737,7 +737,8 @@ function connect() {
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
-  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
+  es.addEventListener('host', e => (at(e), dispatchEvent(new CustomEvent('herd-host', { detail: JSON.parse(e.data) })))); // #267: the TypeScript board draws it
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
@@ -869,50 +870,6 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
-// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
-let EF = null;
-try { EF = JSON.parse(get('events:filter')); } catch (e) {}
-if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
-function evf(root) {
-  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
-  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
-  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
-  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
-  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
-  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
-  root.querySelectorAll('.eg').forEach(g => {
-    const n = g.querySelectorAll('.er:not([hidden])').length;
-    g.hidden = !n;
-    g.querySelector('h3>span+span').textContent = n;
-  });
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
-  if (!b) return;
-  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
-  put('events:filter', JSON.stringify(EF));
-  evf(document);
-});
-// #351: Events opens with 100 rows a view; [older] loads the next 100 under them (`frag?id=events&skip=`), kept across
-// live swaps: EO holds each view's loaded pages (marked .pg), put back in place of the first page's [older].
-const EO = {};
-function olds(root) {
-  for (const v in EO) { const b = root.querySelector(`[data-v=${v}]>.eo:not(.pg)`); if (b) b.outerHTML = EO[v]; }
-}
-document.addEventListener('click', async e => {
-  const b = e.target.closest('.eo'), d = b && b.parentNode;
-  if (!b || b.disabled) return;
-  b.disabled = true;
-  const t = document.createElement('div'), v = d.dataset.v;
-  t.innerHTML = (await part('frag?id=events&skip=' + b.dataset.skip)) || '';
-  const ns = [...t.querySelectorAll(`[data-v=${v}]>.eg, [data-v=${v}]>.eo`)];
-  if (!ns.length) return (b.disabled = false);
-  ns.forEach(n => n.classList.add('pg'));
-  b.replaceWith(...ns);
-  tidy(d);
-  EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
-  evf(document);
-});
 // #367 queue: pure from here to `queue:end` (tests/queue_tab.rs runs it under node). A row's group: needs you, in
 // progress, queued (the rest); its time in one unit style, naming the phase it measures; a blocked chain's one line.
 const QG = { need: 'needs you', prog: 'in progress', queue: 'queued' };
@@ -1087,7 +1044,6 @@ function tidy(root) {
   qfold(root);
   qchips(root);
   rows(root);
-  evf(root);
   hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
@@ -1638,6 +1594,9 @@ document.addEventListener('click', async e => {
   if (q) { e.preventDefault(); return byName(q); }
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
+  // #422: a conductor's row opens its thread in the chat tab (a message there wakes an asleep one).
+  const th = b.classList.contains('lr') && b.parentNode.dataset.thread;
+  if (th) { tab('chat'); if (es) connect(); chatOpen(th); return history.pushState({ thr: th }, ''); }
   if (b.classList.contains('lr')) return open(b.parentNode);
   const a = b.closest('.ask'), lane = laneOf(a.dataset.ask);
   if (b.classList.contains('rp')) return lane && open(lane);
@@ -1718,7 +1677,7 @@ $('.reply').onsubmit = async e => {
   if (r.ok) { e.target.text.value = ''; setTimeout(poll, 1500); }
 };
 // #59: Pair this phone (header, blocked cards, the sheet): POST `pair/request` shows a code; its 10 min HttpOnly cookie is this
-// browser's alone. The Mac approves it (`serve approve`, logged: the live Events frag arrives, or ↻), then `pair/claim` keeps it a year.
+// browser's alone. The Mac approves it (`serve approve`, logged: its `ev` arrives on `/live`, or ↻), then `pair/claim` keeps it a year.
 // The panel flows under the header (or the sheet's Pair button), never over a card; a tap closes it; it expires with the code.
 B.insertAdjacentHTML('beforeend', '<div id=pairp class=pairp hidden></div>');
 const pp = $('#pairp');
@@ -1877,7 +1836,8 @@ function pgraph(d) {
 // #386: the [chat] tab. The page carries every thread's view; one is open (sessionStorage, or a push's `?thread=`):
 // on a phone the list or that thread, from 1000 px both. #cht is the style that picks it, so a live swap keeps it.
 // `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
-var THR = DBG.get('thread') || sget('thread') || '', ATT = null, NT = new Set();
+// #405: ATT, the files picked for one thread's next message: { t, l: [{ name, file, src }] } (src: an image's object URL).
+var THR = DBG.get('thread') || sget('thread') || '', ATT = null;
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
 function chatOpen(t) {
   THR = t;
@@ -1885,22 +1845,29 @@ function chatOpen(t) {
   const q = CSS.escape(t);
   $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
-  if (t && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
+  if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
   if (t) scrollTo(0, document.body.scrollHeight);
 }
 // #403: back to the list: the history entry a thread's open pushed, else straight there.
 const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
 addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
-// Each block's time in the phone's clock; the [+ thread] forms opened stay open across a swap; a picked file waits.
+// Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
 // (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
 // working thread's mark is the loading overlay's art (#ld: the theme's sprite, ascii frames or the glyph), and each
 // message sent this session shows: `sending…`, then ✓ on the thread's copy; failed, red with [retry].
 const SENT = [];
 function chatPaint(root = $('#chat')) {
-  if (!root || !NT) return;
+  if (!root || ATT === undefined) return; // before the `var` line runs
   root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
-  root.querySelectorAll('.nt').forEach(f => { f.hidden = !NT.has(f.dataset.repo); });
-  if (ATT) { const f = root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`); if (f && !f.querySelector('.att')) f.prepend(ATT.el); }
+  root.querySelectorAll('.ats').forEach(e => e.remove());
+  const tw = ATT && root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`);
+  if (tw) {
+    const row = tw.insertBefore(el('div', 'ats'), tw.firstChild);
+    ATT.l.forEach((a, i) => {
+      const im = a.src ? Object.assign(document.createElement('img'), { src: a.src, alt: a.name }) : el('span', '', a.name);
+      row.appendChild(el('div', 'att')).append(im, Object.assign(el('button', '', '×'), { type: 'button', ariaLabel: 'remove ' + a.name, value: i }));
+    });
+  }
   root.querySelectorAll('.tw textarea').forEach(a => { a.style.height = $(`#chat .tw[data-t="${CSS.escape(a.form.dataset.t)}"] textarea`)?.style.height || ''; });
   root.querySelectorAll('.tld').forEach(i => { i.innerHTML = $('#ld').innerHTML; });
   root.querySelectorAll('.snt').forEach(e => e.remove());
@@ -1930,12 +1897,27 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
-  else if (t.closest('#chat .ntb')) { const f = t.closest('.fc').querySelector('.nt'); NT.has(f.dataset.repo) ? NT.delete(f.dataset.repo) : NT.add(f.dataset.repo); chatPaint(); f.hidden || f.elements.title.focus(); }
+  else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }
+  else if (t.closest('#chat .sb')) { const b = t.closest('.sb'); chatPost({ op: b.name, t: b.dataset.t }); }
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
-  else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
+  else if (t.closest('#chat .att button')) { ATT.l.splice(+t.closest('button').value, 1); if (!ATT.l.length) ATT = null; chatPaint(); }
   else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
   else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
 });
+// #405: a thread row swiped left shows its [archive] (one row at a time); swiped right, it hides again. The click that
+// ends a swipe opens nothing.
+let rsw = null, rswiped = false;
+document.addEventListener('pointerdown', e => { const r = e.target.closest('#chat .sw>.tr'); rsw = r && { r, x: e.clientX, y: e.clientY }; rswiped = false; });
+document.addEventListener('pointerup', e => {
+  if (!rsw) return;
+  const dx = e.clientX - rsw.x, dy = e.clientY - rsw.y, sw = rsw.r.parentNode;
+  rsw = null;
+  if (Math.abs(dx) < 40 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+  rswiped = true;
+  $$('#chat .sw.op').forEach(o => { if (o !== sw) o.classList.remove('op'); });
+  sw.classList.toggle('op', dx < 0);
+});
+document.addEventListener('click', e => { if (rswiped && e.target.closest('#chat .sw>.tr')) { rswiped = false; e.preventDefault(); e.stopPropagation(); } }, true);
 // #406: an image tap opens the viewer over the page (the URL stays): black, the image fitted; pinch or double-tap to
 // zoom, drag to pan; swipe down or [×] to close; left/right through the message's images; [save] shares or downloads.
 const IV = B.appendChild(Object.assign(document.createElement('div'), { id: 'iv', hidden: true }));
@@ -2006,43 +1988,46 @@ const ivUp = e => {
 IV.addEventListener('pointerup', ivUp);
 IV.addEventListener('pointercancel', ivUp);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') IV.hidden = true; });
+// #405: the picker multi-selects and [+] adds more, up to 10 a message (the rest are dropped with a toast).
 document.addEventListener('change', e => {
   const i = e.target;
-  if (!i.matches('#chat .tw input[type=file]') || !i.files[0]) return;
-  const f = i.files[0], r = new FileReader();
-  r.onload = () => {
-    const el = Object.assign(document.createElement('div'), { className: 'att' }), kb = f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB';
-    el.innerHTML = `${f.type.startsWith('image/') ? `<img src="${r.result}" alt="">` : ''}<span></span><button type=button aria-label="remove the file">×</button>`;
-    el.querySelector('span').textContent = `${f.name} · ${kb}`;
-    if (ATT) ATT.el.remove();
-    ATT = { t: i.closest('.tw').dataset.t, name: f.name, data: r.result.split(',')[1], el };
-    i.value = '';
-    chatPaint();
-  };
-  r.readAsDataURL(f);
+  if (!i.matches('#chat .tw input[type=file]') || !i.files.length) return;
+  const t = i.closest('.tw').dataset.t, fs = [...i.files];
+  i.value = '';
+  if (!ATT || ATT.t !== t) ATT = { t, l: [] };
+  const room = 10 - ATT.l.length;
+  if (fs.length > room) toast(`at most 10 files a message: ${fs.length - room} left out`);
+  ATT.l.push(...fs.slice(0, room).map(f => ({ name: f.name, file: f, src: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' })));
+  chatPaint();
 });
+// A file as base64, read when its message is sent.
+const b64 = f => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.readAsDataURL(f); });
 async function chatPost(d, f) {
   try {
     const r = await send('thread', d), m = (await r.text()).trim();
     if (r.status === 401) unpaired();
-    if (m && !(r.ok && d.op === 'say')) toast(m);
+    if (m && !(r.ok && ['say', 'new'].includes(d.op))) toast(m);
     if (r.ok) { if (f) f.reset(); refresh(true); }
-    return r.ok;
+    return r.ok && (m || true);
   } catch (err) { toast('error: ' + err.message); }
 }
 // #403: [send] clears the box at once and shows the message `sending…`; ✓ once the server logged it; failed, red with
 // [retry], the text (and file) back in the box.
+// #405: in an empty thread (`new-<repo>`, from [+ thread]) the first message starts it: `new`, then its thread opens.
 async function chatSay(f) {
-  const a = ATT && ATT.t === f.dataset.t ? ATT : null, box = f.elements.text, text = box.value;
+  const a = ATT && ATT.t === f.dataset.t ? ATT : null, box = f.elements.text, text = box.value, repo = f.dataset.repo;
   if (!text.trim() && !a) return;
-  const p = { t: f.dataset.t, text: text.trim() ? text : a.name, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
+  const names = a ? a.l.map(x => x.name).join(', ') : '';
+  const p = { t: f.dataset.t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
   SENT.push(p);
   f.reset();
   grow(box);
-  if (a) { a.el.remove(); ATT = null; }
+  if (a) ATT = null;
   chatPaint();
   scrollTo(0, document.body.scrollHeight);
-  const ok = await chatPost({ op: 'say', t: p.t, text, ...(a ? { name: a.name, data: a.data } : {}) });
+  const files = a ? { name: a.l.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.l.map(x => b64(x.file)))).join(',') } : {};
+  const ok = await chatPost({ ...(repo ? { op: 'new', repo } : { op: 'say', t: p.t }), text, ...files });
+  if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }
   p.st = ok ? '✓' : '✗';
   if (!ok && !box.value) { box.value = text; grow(box); }
   if (!ok && a && !ATT) ATT = a;
@@ -2050,10 +2035,7 @@ async function chatSay(f) {
 }
 document.addEventListener('submit', async e => {
   const f = e.target;
-  if (f.matches('#chat .nt')) {
-    e.preventDefault();
-    if (await chatPost({ op: 'new', repo: f.dataset.repo, title: f.elements.title.value }, f)) NT.delete(f.dataset.repo);
-  } else if (f.matches('#chat .chq')) {
+  if (f.matches('#chat .chq')) {
     e.preventDefault();
     chatPost({ op: 'answer', fleet: f.dataset.fleet, id: f.dataset.id, text: f.elements.text.value }, f);
   } else if (f.matches('#chat .chc')) { // #387: a config card's [apply] / [discard]

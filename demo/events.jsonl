@@ -89,3 +89,4 @@
 {"ts":1793428000,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"system","text":"⇄ switched to account B (A resting until 18:40) · same session"}
 {"ts":1793429400,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"conductor","text":"Last one."}
 {"ts":1793429410,"fleet":"acme-api","type":"needs-decision","id":"q33","question":"Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?","options":["both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response","Retry-After only","headers only behind a ?debug flag"],"recommend":1,"agent":"conductor-t4","kind":"owner","thread":"t4"}
+{"ts":1793429410,"fleet":"all","type":"thread-archive","thread":"t1"}

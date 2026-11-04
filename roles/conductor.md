@@ -8,6 +8,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - Each owner message reaches you as `[<thread>] owner: <text>`; a `DECISION <id>: <text>` line answers your ask.
 - The owner reads only the thread, never your pane. Every reply goes there:
   `herdsman thread reply <thread> "<text>"`. Keep replies short; one reply per turn.
+- Once, after your first reply, retitle the thread with a short summary of it (a few words, one line):
+  `herdsman thread title <thread> "<title>"`. Its first title is only the owner's first line.
 - A choice is an ask in the thread, at most 4 options, your recommendation first:
   `herdsman ask <fleet> - "<question>" --thread <thread> --option "<a>" --option "<b>" --recommend 1`.
   Then stop and wait for the `DECISION` line.
