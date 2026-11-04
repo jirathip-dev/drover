@@ -1903,3 +1903,54 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
     assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
 }
+
+/// #425: #12's impl lane held on #11, which merged; `agents` = the herdr agent list.
+fn held(name: &str, agents: &str) -> (herdsman::Ctx, Fake) {
+    let c = setup(name);
+    lane(&c, c.now - 600, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, c.now - 500, "held", json!({"agent": "sendmeter-impl-12", "on": 11}));
+    append(
+        &c.state,
+        &Event::new(c.now - 60, "sendmeter", Some(11), "merged", json!({})),
+    )
+    .unwrap();
+    (c, fake(agents))
+}
+
+/// #425: the blocker merged: drive types the wake into the held lane's pane once and logs `released`.
+#[test]
+fn a_held_lane_is_prompted_once_when_its_blocker_merges() {
+    let (c, r) = held(
+        "drive-held-wake",
+        &agents(&[("sendmeter-impl-12", "idle", "/x", "w9:sendmeter-impl-12")]),
+    );
+    let (out, _) = drive(&c, &r);
+    let typed = "herdr agent prompt sendmeter-impl-12 #11 merged; rebase on staging and continue";
+    assert_eq!(r.count(typed), 1, "{out} {:?}", r.calls.borrow());
+    let rel = &kinds(&c, "released")[0];
+    assert_eq!(
+        (rel.data["on"].as_u64(), rel.data["respawn"].as_bool()),
+        (Some(11), Some(false))
+    );
+    drive(&c, &r);
+    assert_eq!(r.count(typed), 1, "woken once");
+    assert_eq!(kinds(&c, "released").len(), 1);
+}
+
+/// #425: the held lane's pane is gone: drive respawns it `--supersede` instead, then logs `released`.
+#[test]
+fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
+    let (c, r) = held("drive-held-respawn", NO_AGENTS);
+    let r = r.reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert!(
+        r.called("herdr agent start sendmeter-impl-12"),
+        "{out} {:?}",
+        r.calls.borrow()
+    );
+    assert!(!r.called("herdr agent prompt sendmeter-impl-12 #11"));
+    let rel = &kinds(&c, "released")[0];
+    assert_eq!(rel.data["respawn"].as_bool(), Some(true));
+    assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
+}
