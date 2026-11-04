@@ -121,7 +121,12 @@
    "busy": "boil",
    "held": "flare-up"
   },
-  "fan": "chef-fan"
+  "fan": "chef-fan",
+  "minis": {
+   "calm": "load-calm",
+   "busy": "load-busy",
+   "held": "load-held"
+  }
  },
  "rail": {
   "item": "chef-ticket",
@@ -148,7 +153,11 @@
   "update": "row-carry",
   "idle": "row-wait",
   "done": "row-serve",
-  "blocked": "row-bell"
+  "blocked": "row-bell",
+  "queued": "row-ticket",
+  "needs": "row-bell",
+  "merged": "row-serve",
+  "fail": "row-back"
  },
  "icons": {
   "180": "icon-180.png",
@@ -207,7 +216,20 @@
   "working": "on the line",
   "idle": "standing by",
   "done": "at the pass",
-  "blocked/dead": "the bell"
+  "blocked/dead": "the bell",
+  "needs": "the bell",
+  "parked": "off the clock",
+  "dead": "86'd",
+  "merged": "order up",
+  "fail": "sent back",
+  "tab-queue": "tickets",
+  "tab-lanes": "the line",
+  "tab-host": "the kitchen",
+  "tab-events": "the rail",
+  "empty-queue": "the kitchen's quiet: no tickets",
+  "empty-lanes": "nobody on the line",
+  "empty-events": "the rail's clear",
+  "loading": "firing up"
  },
  "scene": {
   "weather": false,
