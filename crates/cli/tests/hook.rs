@@ -425,12 +425,19 @@ fn quoted_text_is_not_a_command() {
         "eval \"x\" $(cat <<'EOF'\nherdsman spawn x 1 design\nEOF\n)",
         "bash <<<\"herdsman spawn x 1 design\"",
         "herdsman ask q \"a\" # '\nherdsman spawn x 1 design",
+        // `$'x\''` is the word `x'`: the command after it still runs; so does a split-quoted word.
+        "herdsman ask q $'x\\'' ; herdsman spawn x 1 design",
+        "herdsman thread reply t1 $'x\\'' ; herdsman spawn x 1 design",
+        "herdsman thread reply t1 'x ; herdsman spawn x 1 design",
+        "herdsman spawn x 1 'des'ign",
+        "herdsman spawn x 1 \"des\"ign",
     ] {
         assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
     }
     for cmd in [
         "bash <<'EOF'\ngh pr merge 5\nEOF",
         "sh -s <<EOF\ngit push origin staging\nEOF",
+        "herdsman ask q $'x\\'' ; gh pr merge 5",
     ] {
         assert!(!run("synergy:12:impl", cmd).is_empty(), "{cmd}");
     }

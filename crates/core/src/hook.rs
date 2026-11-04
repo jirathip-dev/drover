@@ -100,7 +100,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     for seg in cmd.split(seg_breaks) {
         let toks: Vec<String> = seg
             .split_whitespace()
-            .map(|t| t.trim_matches(['"', '\'']).to_string())
+            .map(|t| t.replace(['"', '\''], ""))
             .filter(|t| !t.is_empty())
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
@@ -143,15 +143,21 @@ fn unquote(cmd: &str) -> String {
                 let i = words.iter().position(|w| matches!(word(w), "herdsman" | "fleet"));
                 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
+                // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
+                let ansi = c == '\'' && out.ends_with('$');
                 out.push(c);
-                let (mut span, mut live) = (String::new(), false);
-                while let Some(q) = cs.next().filter(|q| *q != c) {
-                    let esc = (c == '"' && q == '\\').then(|| cs.next()).flatten();
+                let (mut span, mut live, mut closed) = (String::new(), false, false);
+                while let Some(q) = cs.next() {
+                    if q == c {
+                        closed = true;
+                        break;
+                    }
+                    let esc = ((c == '"' || ansi) && q == '\\').then(|| cs.next()).flatten();
                     // `$(…)` and backticks still run inside double quotes.
                     live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
                     span.extend(Some(q).into_iter().chain(esc));
                 }
-                if !text || live {
+                if !text || live || ansi || !closed {
                     cur.push_str(&span);
                     out.push_str(&span);
                 }
