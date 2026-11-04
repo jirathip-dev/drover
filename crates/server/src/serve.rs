@@ -3423,7 +3423,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged"
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing"
             .split(' ')
             .any(|x| x == k)
             || k.starts_with("orch-") =>
