@@ -524,7 +524,7 @@ fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
         "merged" | "ready" | "PASS" | "working" | "done" | "ok" | "normal" => "g",
         "blocked" | "needs-human" | "⏸ waiting: decision" | "dead" | "FAIL" | "critical" | "capped" => "r",
-        "parked" => "m",
+        "parked" | "asleep" => "m",
         _ => "a",
     }
 }
@@ -2121,7 +2121,7 @@ impl<'a> Server<'a> {
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
             all.iter()
-                .filter(|l| l.fleet.as_ref() == f)
+                .filter(|l| l.fleet.as_ref() == f && l.state != "asleep") // #422: no asleep conductor in the herd
                 .map(|l| {
                     let (title, tone, shown, a) = view(ctx, l, &waits);
                     // #239: a fix round's lane has role impl; the issue's state says it is fixing.
@@ -2325,8 +2325,9 @@ impl<'a> Server<'a> {
         let tone = if sup.is_some() { "m" } else { tone };
         let since = w.filter(|_| sup.is_none()).map_or(l.since, |w| w.since);
         let a = ago(ctx.now, since);
+        let th = String::from_iter(l.thread.iter().map(|t| format!(" data-thread={}", esc(t)))); // #422: tap opens it
         format!(
-            "<div class=lane data-agent=\"{}\" data-role={}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
+            "<div class=lane data-agent=\"{}\" data-role={}{th}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
              {why}{act}</button><div class=card hidden>{card}</div></div>",
             esc(&l.name),
             esc(&l.role) + if l.pane.is_none() { " data-gone" } else { "" },
