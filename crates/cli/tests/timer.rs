@@ -464,6 +464,11 @@ fn drift_is_missing_outdated_or_loaded() {
     };
     edit("dev.herdsman.tick", from, to);
     assert_eq!(drift(&up)[0].1, "outdated (args or interval differ)");
+    // #340: a plist without AbandonProcessGroup lets launchd kill the job's detached kicks.
+    if MAC {
+        edit("dev.herdsman.fast", "<key>AbandonProcessGroup</key><true/>\n", "");
+        assert_eq!(drift(&up)[1].1, "outdated (no AbandonProcessGroup)");
+    }
 }
 
 /// #237: the tick reinstalls only the missing fast job, reads it back and logs `timer-repaired`; a failed repair

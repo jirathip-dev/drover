@@ -15,6 +15,7 @@ pub const FAST: &str = "dev.herdsman.fast";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
+const ABANDON: &str = "<key>AbandonProcessGroup</key><true/>";
 const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
@@ -80,6 +81,11 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
         let files = expect(ctx, cfg, label, args, "\0");
         let up = files.iter().all(|f| f.0.exists()) && exec(r, &ctl(ctx, label, true)[0]).is_ok();
         let i = usize::from(up) + usize::from(up && files.iter().all(same));
+        // #340: without it launchd kills the job's detached kicks when the job exits.
+        let abandons = |(p, _): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x.contains(ABANDON));
+        if i == 1 && MAC && !files.iter().all(abandons) {
+            return (label, "outdated (no AbandonProcessGroup)");
+        }
         (label, ["missing", "outdated (args or interval differ)", "loaded"][i])
     };
     JOBS.map(state).to_vec()
