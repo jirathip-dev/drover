@@ -140,7 +140,13 @@ fn unquote(cmd: &str) -> String {
         }
         match c {
             '\'' | '"' => {
+                // Only when `herdsman` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
                 let i = words.iter().position(|w| matches!(word(w), "herdsman" | "fleet"));
+                let i = i.filter(|&i| {
+                    words[..i]
+                        .iter()
+                        .all(|w| w.contains('=') || matches!(word(w), "command" | "time"))
+                });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
                 // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.

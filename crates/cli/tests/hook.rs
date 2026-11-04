@@ -430,6 +430,9 @@ fn quoted_text_is_not_a_command() {
         "herdsman thread reply t1 $'x\\'' ; herdsman spawn x 1 design",
         "herdsman thread reply t1 'x ; herdsman spawn x 1 design",
         "herdsman spawn x 1 'des'ign",
+        // `eval` and `ssh` re-parse the quoted text, so it is a command there.
+        "eval herdsman ask q '; herdsman spawn s 1 design'",
+        "ssh h herdsman ask q '; herdsman spawn s 1 design'",
         "herdsman spawn x 1 \"des\"ign",
     ] {
         assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
@@ -438,10 +441,18 @@ fn quoted_text_is_not_a_command() {
         "bash <<'EOF'\ngh pr merge 5\nEOF",
         "sh -s <<EOF\ngit push origin staging\nEOF",
         "herdsman ask q $'x\\'' ; gh pr merge 5",
+        "eval herdsman ask q '; gh pr merge 5'",
     ] {
         assert!(!run("synergy:12:impl", cmd).is_empty(), "{cmd}");
     }
     assert_eq!(run("synergy:-:orch", "ls # herdsman spawn x 1 design"), "");
+    assert_eq!(
+        run(
+            "synergy:-:orch",
+            "time FOO=1 herdsman ask q '; herdsman spawn s 1 design'"
+        ),
+        ""
+    );
     assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
