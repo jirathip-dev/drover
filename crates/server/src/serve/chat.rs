@@ -281,12 +281,9 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
         esc(line.lines().next().unwrap_or_default()),
     );
     // #413: the threads it is linked to (not its flow-back lines), once each.
-    let mut lk: Vec<_> = of(events, id)
-        .filter(|e| e.str("from") != Some("system"))
-        .filter_map(conductor::link)
+    let lk: std::collections::BTreeSet<_> = of(events, id)
+        .filter_map(|e| conductor::link(e).filter(|_| e.str("from") != Some("system")))
         .collect();
-    lk.sort_unstable();
-    lk.dedup();
     let lk: String = lk.into_iter().map(|l| chip(l) + " ").collect();
     let html = format!(
         "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{lk}{st}{line}</span></a>"

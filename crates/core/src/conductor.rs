@@ -47,8 +47,7 @@ pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
     Ok(id)
 }
 
-/// #413: `herdsman thread handoff <from> <repo|thread> <title> <text>`: a new thread in `to` (a repo or `all`), or thread
-/// `to` itself; logs `thread-handoff`, then types `text` into its conductor as from `from`. The new thread's id.
+/// #413: `thread handoff`: a new thread in `to` (a repo or `all`) or thread `to`, linked; wakes its conductor as `from`.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = read(&ctx.state)?;
@@ -86,12 +85,10 @@ pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
 
 /// A thread id: `t` and a number.
 fn is_id(s: &str) -> bool {
-    s.strip_prefix('t')
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
-/// #413: a linked row's chip: a message from another thread (`from t5`), a flow-back row (`from t6`) or a handoff
-/// (`continued in t6`).
+/// #413: a linked row's chip: `from t5` (a message or flow-back row from t5) or `continued in t6` (a handoff).
 pub fn link(e: &Event) -> Option<(&'static str, &str)> {
     match (e.kind.as_str(), e.str("from")) {
         ("thread-handoff", _) => Some(("continued in", e.str("to")?)),

@@ -311,8 +311,7 @@ pub fn fleet_cmd(input: &Value) -> Option<&str> {
         .then_some(cmd)
 }
 
-/// #413: a `gh issue create` that ran (a post-tool call): its title (`-t`/`--title`) and its number, from the URL it
-/// printed, as its flow-back line (`filed #52: <title>`); `None` for anything else or when neither is known.
+/// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
 pub fn issue_filed(input: &Value) -> Option<String> {
     let cmd = fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
     let title = [" -t ", " --title ", " --title="].iter().find_map(|f| {

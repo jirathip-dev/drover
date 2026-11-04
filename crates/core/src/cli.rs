@@ -952,8 +952,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Thread { cmd } => match cmd {
                     // #413: every thread a conductor starts is logged with its source.
                     ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
-                        let why = "a conductor starts a thread with `herdsman thread handoff <from> <repo|thread> <title> <text>`";
-                        return gate::refused("USE_HANDOFF", why);
+                        gate::refused("USE_HANDOFF", "a conductor starts threads with `thread handoff`")?;
                     }
                     ThreadCmd::New { repo, title } => {
                         writeln!(out, "{}", crate::conductor::new(ctx, &cfg, &repo, &title)?)?;
