@@ -1,6 +1,7 @@
 //! Cached GitHub reads: the issue spec (re-fetched when `updatedAt` moved) and PR/CI views fresh for 60 s, all of a
 //! fleet's open PRs read in one GraphQL call (#246).
-use crate::config::Fleet;
+use crate::config::{Config, Fleet};
+use crate::events::Event;
 use crate::runner::{json, ok, Runner};
 use crate::usage::load;
 use crate::Ctx;
@@ -430,55 +431,28 @@ pub fn wait(
     }
 }
 
-/// #388: why an open PR head still has no checks `grace` s after the first event naming it (its push, PASS or
-/// update): a failed workflow run with no jobs is `CI broken: <file> did not start`, else `CI missing (…)`; None while
-/// checks exist, inside the grace, or with no such event. `r` reads the head's runs at most once per 60 s (None: cache).
-pub fn missing(
-    ctx: &Ctx,
-    r: Option<&dyn Runner>,
-    f: &Fleet,
-    (fleet, issue): (&str, u64),
-    ev: &[crate::events::Event],
-    pr: &Value,
-    grace: u64,
-) -> Option<String> {
+/// #388: an open PR head with no checks `ci_start_minutes` after its first event: CI broken (a jobless run) or missing.
+pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &[Event], pr: &Value) -> Option<String> {
+    let ((fleet, issue), g, f) = (k, c.limits.ci_start_minutes * 60, c.fleet(k.0).ok()?);
     let head = pr["headRefOid"].as_str().filter(|_| pr["state"] == "OPEN")?;
-    let named = |e: &&crate::events::Event| {
-        e.fleet == fleet && e.issue == Some(issue) && e.str("sha").or(e.str("to")) == Some(head)
-    };
-    let since = ev.iter().filter(named).map(|e| e.ts).min()?;
-    if pr["statusCheckRollup"].as_array().is_some_and(|c| !c.is_empty()) || ctx.now < since + grace {
-        return None;
-    }
-    let p = cache_path(ctx, "runs", fleet, issue);
+    let named = |e: &&Event| e.fleet == fleet && e.issue == Some(issue) && e.str("sha").or(e.str("to")) == Some(head);
+    let since = e.iter().filter(named).map(|e| e.ts).min()?;
+    (pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty) && x.now >= since + g).then_some(())?;
+    let p = cache_path(x, "runs", fleet, issue);
+    let api = format!("repos/{}/actions/runs", f.repo);
     let c = load::<Value>(&p).filter(|c| c["head"] == head);
-    let broken = match r.filter(|_| c.as_ref().is_none_or(|c| c["broken"].is_null() && !fresh(c, ctx.now))) {
+    let broken = match r.filter(|_| c.as_ref().is_none_or(|c| c["broken"].is_null() && !fresh(c, x.now))) {
         Some(r) => {
-            let jq = ".workflow_runs[] | select(.conclusion == \"failure\") | \"\\(.id) \\(.path)\"";
-            let runs = ok(
-                r,
-                "gh",
-                &[
-                    "api",
-                    &format!("repos/{}/actions/runs?head_sha={head}", f.repo),
-                    "--jq",
-                    jq,
-                ],
-            );
-            let zero = |id: &str| {
-                let jobs = format!("repos/{}/actions/runs/{id}/jobs", f.repo);
-                ok(r, "gh", &["api", &jobs, "--jq", ".total_count"]).is_ok_and(|n| n.trim() == "0")
-            };
-            let runs = runs.unwrap_or_default();
-            let b = runs.lines().filter_map(|l| l.split_once(' ')).find(|(id, _)| zero(id));
-            let b = b.map(|(_, path)| path.rsplit('/').next().unwrap_or(path).to_string());
-            let _ = store(&p, &json!({"ts": ctx.now, "head": head, "broken": b}));
-            b
+            let jq = ".workflow_runs[] | select(.conclusion==\"failure\") | \"\\(.id) \\(.path|split(\"/\")|last)\"";
+            let runs = ok(r, "gh", &["api", &format!("{api}?head_sha={head}"), "--jq", jq]).unwrap_or_default();
+            let zero = |id: &str| ok(r, "gh", &["api", &format!("{api}/{id}/jobs"), "--jq", ".total_count"]);
+            let mut b = runs.lines().filter_map(|l| l.split_once(' '));
+            let b = b.find(|(id, _)| zero(id).is_ok_and(|n| n.trim() == "0"));
+            let _ = store(&p, &json!({"ts": x.now, "head": head, "broken": b.map(|b| b.1)}));
+            b.map(|b| b.1.to_string())
         }
         None => c.and_then(|c| c["broken"].as_str().map(String::from)),
     };
-    Some(match broken {
-        Some(w) => format!("CI broken: {w} did not start"),
-        None => format!("CI missing (no checks {} after push)", crate::events::age(grace)),
-    })
+    let missing = || format!("CI missing (no checks {} after push)", crate::events::age(g));
+    Some(broken.map_or_else(missing, |w| format!("CI broken: {w} did not start")))
 }

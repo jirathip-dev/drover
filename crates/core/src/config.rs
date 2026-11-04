@@ -386,7 +386,6 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
-    /// #388: a PR head with no checks this long after its push is `CI missing` (or broken), not running.
     pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,

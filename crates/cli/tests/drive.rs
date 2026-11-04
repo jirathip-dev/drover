@@ -1969,7 +1969,7 @@ fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
     let runs = format!("gh api repos/jirathip-dev/sendmeter/actions/runs?head_sha={head}");
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &view.to_string())
-        .reply(&runs, "554 .github/workflows/lint.yml\n555 .github/workflows/ci.yml\n")
+        .reply(&runs, "554 lint.yml\n555 ci.yml\n")
         .reply("gh api repos/jirathip-dev/sendmeter/actions/runs/554/jobs", "2\n")
         .reply("gh api repos/jirathip-dev/sendmeter/actions/runs/555/jobs", "0\n")
         .reply(

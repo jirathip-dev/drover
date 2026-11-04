@@ -196,20 +196,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
         }
         // #388: a PASS whose head never got a check, once per head.
-        let ready = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready");
-        if let Some(f) = ready {
-            let pr = gh::pr(
-                ctx,
-                r,
-                f,
-                (&s.fleet, s.issue),
-                &crate::gate::branch_of(Some(s), s.issue),
-                ctx.now,
-            );
-            let grace = cfg.limits.ci_start_minutes * 60;
-            let pr = pr.unwrap_or_default();
+        if let Some(f) = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready") {
+            let b = crate::gate::branch_of(Some(s), s.issue);
+            let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &b, ctx.now).unwrap_or_default();
             let labelled = f.merge_label.as_deref().is_none_or(|l| gh::has_label(&pr, l));
-            let why = labelled.then(|| gh::missing(ctx, Some(r), f, (&s.fleet, s.issue), &events, &pr, grace));
+            let why = labelled.then(|| gh::missing(ctx, Some(r), cfg, (&s.fleet, s.issue), &events, &pr));
             if let Some(why) = why.flatten() {
                 hits.push(("ci-missing", pr["headRefOid"].as_str().unwrap_or_default().into(), why));
             }
