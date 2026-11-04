@@ -11,10 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
     #[serde(default, skip_serializing_if = "is_zero")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u64>", optional))]
     pub seq: u64,
     pub ts: u64,
     pub fleet: String,
@@ -374,6 +376,7 @@ fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
     }
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct IssueState {
