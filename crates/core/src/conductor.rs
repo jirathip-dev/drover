@@ -460,21 +460,23 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
         s.str("account"),
         s.str("harness").unwrap_or_default(),
     );
-    if account.is_none() && role(cfg, &t.fleet).is_ok_and(|r| r.1.fallback.is_empty()) {
-        return Ok(false); // nothing to switch to
-    }
+    // No account and no `fallback`: nothing to switch to, but a sign-out still gets its [sign in] line.
+    let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
     let (screen, h) = (
         herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
         harness::get(hn),
     );
     let out = h.signed_out(&screen);
     let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
-    let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now).or(rest) else {
+    let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
+    let Some(until) = limit.or(rest) else {
         return Ok(false);
     };
-    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
-    let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
-    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
+    if chain {
+        let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
+        let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
+    }
     herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
     let why = if out { "signed out" } else { "usage limit" };
     let d = json!({"thread": id, "agent": s.str("agent"), "why": why});
@@ -488,8 +490,14 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
             "{hn} is signed out{}: sign in",
             account.map_or(String::new(), |a| format!(" (account {a})"))
         );
-        let d = json!({"thread": id, "from": "system", "text": text, "signin": hn});
+        // #303 names an account's login `claude B` ([[setup]]); without one configured, the harness's own login.
+        let named = account.map(|a| format!("{hn} {a}"));
+        let su = named.filter(|n| crate::setup::all(cfg).iter().any(|s| &s.0 == n));
+        let d = json!({"thread": id, "from": "system", "text": text, "signin": su.as_deref().unwrap_or(hn)});
         emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    }
+    if !chain {
+        return Ok(true);
     }
     let line = format!("[{id}] system: {why}; you resumed on the next account. Carry on where you left off.");
     if let Err(e) = start(ctx, cfg, r, t, &read(&ctx.state)?, &line) {

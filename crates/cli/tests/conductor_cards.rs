@@ -223,6 +223,76 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
     );
 }
 
+#[test]
+fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
+    let signed_out = "Invalid API key · Please run /login";
+    let page = |c: &herdsman::Ctx| {
+        let r = herdr(NO_AGENTS);
+        let s = Server::new(c, &r, Some(ADDR.into()));
+        chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
+    };
+    // The default conductor (no account, no fallback): nothing to switch to, still a [sign in] for `claude`.
+    let c = setup("cards-signin-plain", "", "");
+    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
+    let later = herdsman::Ctx {
+        now: T + 60,
+        ..c.clone()
+    };
+    let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
+    assert_eq!(run(&later, &r, &["check"]).0, 0);
+    assert!(r.called("herdr workspace close w9"));
+    assert_eq!(kinds(&c, "conductor-start").len(), 1, "no account to resume on");
+    assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
+    let lines: Vec<_> = kinds(&c, "thread-msg")
+        .into_iter()
+        .filter(|e| e.str("signin").is_some())
+        .collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].str("signin"), Some("claude"));
+    assert!(page(&c).contains("claude is signed out: sign in <button type=button data-su=\"claude\""));
+    run(
+        &later,
+        &herdr(&live()).reply("herdr pane read w9:p1", signed_out),
+        &["check"],
+    );
+    assert_eq!(
+        kinds(&c, "thread-msg")
+            .iter()
+            .filter(|e| e.str("signin").is_some())
+            .count(),
+        1,
+        "once"
+    );
+
+    // On account A with a `claude A` login configured: the card opens that login, and B carries on.
+    let d = tmpdir("cards-signin-env");
+    let env = d.join("tokens.env");
+    std::fs::write(&env, "CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\n").unwrap();
+    let extra = format!(
+        "[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {{CLAUDE_CONFIG_DIR = \"~/accounts/A\"}}\n",
+        env.display()
+    );
+    let c = setup(
+        "cards-signin-account",
+        "fallback = [\"claude:A\", \"claude:B\"]",
+        &extra,
+    );
+    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
+    let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
+    let later = herdsman::Ctx {
+        now: T + 60,
+        ..c.clone()
+    };
+    assert_eq!(run(&later, &r, &["check"]).0, 0);
+    let line = kinds(&c, "thread-msg")
+        .into_iter()
+        .find(|e| e.str("signin").is_some())
+        .unwrap();
+    assert_eq!(line.str("signin"), Some("claude A"));
+    assert!(page(&c).contains("claude is signed out (account A): sign in <button type=button data-su=\"claude A\""));
+    assert_eq!(kinds(&c, "conductor-start")[1].str("account"), Some("B"));
+}
+
 /// `Fake` that also records each `run_in` stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
 

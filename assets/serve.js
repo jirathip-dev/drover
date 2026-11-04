@@ -1290,7 +1290,8 @@ document.addEventListener('click', async e => {
   x.innerHTML = '<div class=card><p class="nw el"></p></div>';
   x.querySelector('p').textContent = `sign in: ${b.dataset.su} on ${b.dataset.host}; closes when it exits or in 10 min`;
   Object.assign(x.dataset, { agent: 'sign in · ' + b.dataset.su, role: 'setup', setup: m });
-  b.closest('details').open = false;
+  const d = b.closest('details'); // a chat line's [sign in] has none
+  if (d) d.open = false;
   open(x);
 });
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
