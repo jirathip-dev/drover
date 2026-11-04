@@ -220,16 +220,34 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     } else {
         "queue"
     };
-    let url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
+    let mut url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
     // #130: needs-human says who and why in the title; the body adds the last verdict's first finding.
     let n = ev.issue.filter(|_| ev.kind == "needs-human");
+    let thread = ev
+        .str("thread")
+        .filter(|_| ["thread-msg", "needs-decision"].contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
-    let evs = n.map(|_| read(log)).transpose()?.unwrap_or_default();
+    let evs = n
+        .or(thread.map(|_| 0))
+        .map(|_| read(log))
+        .transpose()?
+        .unwrap_or_default();
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
-    let (title, body) = match n {
+    let (title, mut body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
         None => ("herdsman".into(), plain(ev)),
     };
+    // #386: `<repo> · <thread title>: <the reply's first line>`, or `… asks: <question>`; a tap opens the thread.
+    if let Some(t) = thread.and_then(|t| crate::conductor::find(&evs, t).ok()) {
+        let repo = if t.fleet == "all" { "all repos" } else { &t.fleet };
+        let head = format!("{repo} · {}", t.str("title").unwrap_or_default());
+        let text = ev.str("text").and_then(|x| x.lines().find(|l| !l.trim().is_empty()));
+        body = match ev.str("question") {
+            Some(q) => format!("{head} asks: {q}"),
+            None => format!("{head}: {}", text.unwrap_or_default()),
+        };
+        url = format!("?thread={}#chat", t.str("thread").unwrap_or_default());
+    }
     let payload = serde_json::json!({"title": title, "body": body.trim(), "url": format!("/{url}")}).to_string();
     let (mut sent, mut gone, mut errs) = (0, vec![], vec![]);
     for s in &all {

@@ -362,7 +362,13 @@ enum ThreadCmd {
         by: String,
     },
     /// The conductor's reply to the owner
-    Reply { id: String, text: String },
+    Reply {
+        id: String,
+        text: String,
+        /// A file or image to show with it (repeatable)
+        #[arg(long)]
+        file: Vec<PathBuf>,
+    },
     /// The conversation, asks with their options; marks it read
     Show {
         id: String,
@@ -490,8 +496,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`).
-pub const HELP_AGENT_MAX: usize = 241;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`).
+pub const HELP_AGENT_MAX: usize = 242;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -897,10 +903,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Thread { cmd } => match cmd {
                     ThreadCmd::New { repo, title } => crate::conductor::new(ctx, &cfg, out, &repo, &title)?,
                     ThreadCmd::Say { id, text, by } => {
-                        let agent = crate::conductor::say(ctx, &cfg, r, &id, &text, (&by, false))?;
+                        let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &[]), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
                     }
-                    ThreadCmd::Reply { id, text } => crate::conductor::reply(ctx, &cfg, &id, &text)?,
+                    ThreadCmd::Reply { id, text, file } => crate::conductor::reply(ctx, &cfg, &id, &text, &file)?,
                     ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
                     ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,
                 },
@@ -1169,8 +1175,15 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             lane_event(ctx, r, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
-    } else if let Some(dir) = hook::push_dir(&input) {
+        return Ok(());
+    }
+    if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
+    }
+    // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+    if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
+        lane_event(ctx, r, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
     }
     Ok(())
 }

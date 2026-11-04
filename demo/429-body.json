@@ -1,0 +1,1 @@
+{"type":"rate_limited","message":"600 requests a minute per API key","retry_after":12}

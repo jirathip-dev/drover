@@ -12,6 +12,9 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   `herdsman ask <fleet> - "<question>" --thread <thread> --option "<a>" --option "<b>" --recommend 1`.
   Then stop and wait for the `DECISION` line.
 - `herdsman thread show <thread>` prints the conversation so far.
+- Show a file or image (a mockup, a screenshot) with a reply: `herdsman thread reply <thread> "<text>" --file <path>`.
+  An owner message with `(attached: <path>)` carries a file the owner sent; read it there.
+- Your `herdsman` and `gh` commands show in the thread as closed tool rows.
 
 ## Permissions
 

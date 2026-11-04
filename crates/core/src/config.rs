@@ -29,9 +29,11 @@ pub struct Config {
     pub conductor: ConductorCfg,
 }
 
-/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands).
+/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
+/// root of the per-thread working folders (default `<state dir>/conductor`).
 #[derive(Debug, Default, Deserialize)]
 pub struct ConductorCfg {
+    pub dir: Option<String>,
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
@@ -467,6 +469,7 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "thread-msg",
     "blocked",
     "stall",
     "lane-dead",

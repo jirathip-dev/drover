@@ -354,7 +354,7 @@ pub fn answer(
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
     if let Some(t) = ask.str("thread") {
-        let agent = conductor::say(ctx, cfg, r, t, &msg, (by, true))?; // #355: back into the thread's conversation
+        let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
