@@ -28,6 +28,8 @@ summary::-webkit-details-marker{display:none}
 summary>span{min-width:0}
 details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lane{border-bottom:1px solid var(--line)}
+/* #422: an asleep conductor (its pane closed) is dimmed; a tap still opens its thread. */
+.lane[data-thread][data-gone]>.lr{opacity:.55}
 /* #205: an open Queue card's lanes, newest first: one-line 44 px tap rows; `+N older` expands. */
 .ql{display:block;max-width:100%;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
 /* #218: a lane line in the card: the name ellipsises first, `state age` stays at the right (the inline line overflowed the card). */
