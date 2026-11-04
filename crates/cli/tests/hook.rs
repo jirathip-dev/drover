@@ -364,6 +364,104 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }
 
+/// #410: a conductor thread spawns design lanes; impl, rev, orch and other lanes still may not.
+#[test]
+fn a_conductor_may_spawn_design_lanes() {
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    let spawn = "herdsman spawn synergy 2475 design";
+    assert_eq!(run("synergy:-:conductor", spawn), "", "a conductor may");
+    for lane in [
+        "synergy:12:impl",
+        "synergy:12:rev",
+        "synergy:-:orch",
+        "synergy:-:design",
+        "conductor",
+    ] {
+        assert!(run(lane, spawn).contains("owner-only"), "{lane}");
+    }
+    for cmd in ["herdsman setup", "herdsman secret ls"] {
+        assert!(run("synergy:-:conductor", cmd).contains("REFUSED OWNER_ONLY"), "{cmd}");
+    }
+}
+
+/// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
+#[test]
+fn quoted_text_is_not_a_command() {
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    let reply = r#"herdsman thread reply t5 "run \`herdsman spawn synergy 2475 design\`""#;
+    let heredoc = "cat > f.md <<'EOF'\nrun `herdsman spawn synergy 2475 design`\nEOF\nwc -l f.md";
+    for lane in ["synergy:-:conductor", "synergy:-:orch"] {
+        assert_eq!(run(lane, reply), "", "{lane}");
+    }
+    for cmd in [
+        heredoc,
+        "cat <<-EOF > f.md\n\therdsman setup\n\tEOF",
+        "herdsman thread say t1 'herdsman secret ls'",
+        "herdsman ask x 1 \"spawn?\" --option \"herdsman spawn x 1 design\" --option='docker ps'",
+        "herdsman thread reply t1 'run docker ps'",
+    ] {
+        assert_eq!(run("synergy:-:orch", cmd), "", "{cmd}");
+    }
+    for cmd in [
+        "herdsman thread reply t1 x; herdsman spawn x 1 design",
+        "herdsman thread reply t1 \"x\"; herdsman spawn x 1 design",
+        "cat > f.md <<'EOF'\nx\nEOF\nherdsman spawn x 1 design",
+        "sh -c 'herdsman spawn x 1 design'",
+        "echo \"herdsman spawn x 1 design\" | herdsman spawn x 1 design",
+    ] {
+        assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
+    }
+    assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
+}
+
+/// #410: a conductor writes in its own thread folder, but not herdsman's files there, another thread's or the log.
+#[test]
+fn a_conductor_writes_its_own_thread_folder() {
+    let write = |file: &std::path::Path, d: &std::path::Path| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Write",
+            "tool_input": {"file_path": file, "content": "x"}});
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
+        let mut child = cmd
+            .args(["hook", "--role", "conductor"])
+            .env_remove("FLEET_LANE")
+            .env("HERDSMAN_LANE", "synergy:-:conductor")
+            .env("HERDSMAN_THREAD", "t6")
+            .env("FLEET_CONFIG", d.join("fleet.toml"))
+            .env("FLEET_STATE", d.join("state/events.jsonl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let d = tmpdir("hook-own");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let c = d.join("state/conductor");
+    assert_eq!(write(&c.join("t6/mock.png"), &d), "", "its own folder");
+    assert_eq!(write(&c.join("t6/ui/a.html"), &d), "", "a subfolder");
+    for f in [
+        c.join("t6/.thread.md"),
+        c.join("t6/.brief.md"),
+        c.join("t6/../t5/x"),
+        c.join("t5/x"),
+        d.join("state/events.jsonl"),
+    ] {
+        assert!(write(&f, &d).contains("is protected"), "{}", f.display());
+    }
+}
+
 /// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
 #[test]
 fn ai_coauthor_trailer_is_spotted() {

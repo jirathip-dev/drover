@@ -1237,11 +1237,20 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         h.join(".config/fleet-operations").to_string_lossy().into(),
         h.join(".hermes/profiles").to_string_lossy().into(),
     ];
+    // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
+    let conductor = std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2) == Some("conductor"));
+    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+    let own = (conductor && !thread.is_empty() && !thread.contains(['/', '.'])).then(|| {
+        let cfg = Config::load(&ctx.config).unwrap_or_default();
+        crate::conductor::dir(ctx, &cfg, &thread).to_string_lossy().into_owned()
+    });
     let policy = hook::Policy {
         branches,
         paths,
         reviewer,
         deny: deny_list(ctx),
+        conductor,
+        own,
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -1259,7 +1268,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         coauthor_warn(ctx, r, &dir, "HEAD");
     }
     // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
-    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
         lane_event(ctx, r, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
     }
