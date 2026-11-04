@@ -22,6 +22,7 @@ use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+mod chat;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -157,6 +158,22 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
         sc.spawn(move || loop {
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
+        });
+        // #387: the Telegram bridge's long-poll (off without `[telegram] chat`); it moves to Phase C (#345) later.
+        sc.spawn(move || loop {
+            let ctx = &Ctx {
+                now: crate::now(),
+                ..ctx.clone()
+            };
+            let on = Config::load(&ctx.config)
+                .ok()
+                .filter(|c| c.telegram.chat.is_some() && !read_only);
+            let wait = match on.map(|c| crate::telegram::tick(ctx, &c, r, 50)) {
+                Some(Ok(())) => 0,
+                Some(Err(e)) => (eprintln!("herdsman telegram: {e:#}"), 30).1,
+                None => 60,
+            };
+            std::thread::sleep(Duration::from_secs(wait));
         });
         // #140: drive and the needs-human ops run here, one at a time; the board toasts the result.
         sc.spawn(move || {
@@ -328,12 +345,14 @@ pub struct Server<'a> {
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
     snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
+    /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
+    later: Mutex<Vec<(Ctx, (Event, String))>>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
 
-const TABS: [&str; 4] = ["queue", "lanes", "host", "events"];
+const TABS: [&str; 5] = ["queue", "lanes", "chat", "host", "events"];
 
 /// #337: the query, with the `tab` cookie (serve.js keeps the open tab there) when it names none.
 fn with_tab(mut q: BTreeMap<String, String>, head: &str) -> BTreeMap<String, String> {
@@ -458,6 +477,19 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, meta: &[String]) -> Stri
     )
 }
 
+/// #386: a thread file's type by its extension.
+fn ctype(name: &str) -> &'static str {
+    match chat::ext(name).as_str() {
+        "png" => PNG,
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "json" => JSON,
+        "txt" | "md" | "log" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -518,7 +550,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue",
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "cond",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -704,19 +736,29 @@ impl<'a> Server<'a> {
             running: Mutex::default(),
             export: None,
             snap: Mutex::default(),
+            later: Mutex::default(),
         }
     }
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let (mut buf, mut chunk) = (vec![], [0u8; 2048]);
-        let done = |b: &[u8]| {
-            let t = String::from_utf8_lossy(b);
-            t.split_once("\r\n\r\n").is_some_and(|(h, body)| {
-                body.len() >= header(h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0)
-            })
-        };
-        while !done(&buf) && buf.len() < 32_768 {
+        // #386: a thread's message carries an attached file (base64, at most 10 MB): its POST may be that long.
+        let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
+        loop {
+            let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+            if let Some(i) = end.filter(|_| want.is_none()) {
+                let h = String::from_utf8_lossy(&buf[..i]);
+                let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
+                let most = if h.starts_with("POST /thread ") {
+                    24 << 20
+                } else {
+                    32_768
+                };
+                want = Some((i + 4 + n).min(most));
+            }
+            if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
+                break;
+            }
             match s.read(&mut chunk)? {
                 0 => break,
                 n => buf.extend_from_slice(&chunk[..n]),
@@ -749,9 +791,9 @@ impl<'a> Server<'a> {
                 )
                 .map(|d| d.hash),
             ));
-            let mut msg =
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\n"
-                    .to_string();
+            let mut msg = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
+            );
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
@@ -799,7 +841,19 @@ impl<'a> Server<'a> {
             return Ok(());
         }
         drop(clients);
-        s.write_all(&self.respond(&req, crate::now()))
+        s.write_all(&self.reply(&req, crate::now()))?;
+        drop(s);
+        self.deliver();
+        Ok(())
+    }
+
+    /// #403: type in the lines `POST /thread` logged (`chat::deliver`).
+    fn deliver(&self) {
+        let jobs = std::mem::take(&mut *lock(&self.later));
+        for (c, job) in jobs {
+            chat::deliver(&c, self.r, &job);
+            self.kick.store(true, Relaxed);
+        }
     }
 
     /// The watcher's 1 s tick (docs/serve.md): on a change, re-render per audience and push only the changed fragments.
@@ -897,8 +951,14 @@ impl<'a> Server<'a> {
         s.clone()
     }
 
-    /// The full HTTP response to one request.
+    /// The full HTTP response to one request, its conductor deliveries done (the socket's `handle` sends it first).
     pub fn respond(&self, req: &str, now: u64) -> Vec<u8> {
+        let res = self.reply(req, now);
+        self.deliver();
+        res
+    }
+
+    fn reply(&self, req: &str, now: u64) -> Vec<u8> {
         let (head, body) = req.split_once("\r\n\r\n").unwrap_or((req, ""));
         let mut w = head.split_whitespace();
         let (method, target) = (w.next().unwrap_or_default(), w.next().unwrap_or_default());
@@ -925,7 +985,8 @@ impl<'a> Server<'a> {
             return see("/");
         }
         // Host/Origin-checked: the live stream, transcripts, Herd's data and every write.
-        let guarded = method == "GET" && ["/live", "/lane", "/herd.json"].contains(&path)
+        let guarded = method == "GET"
+            && (["/live", "/lane", "/herd.json"].contains(&path) || path.starts_with("/thread/"))
             || method == "POST" && self.addr.is_some();
         let paired_op = form(body.trim())
             .get("op")
@@ -960,6 +1021,16 @@ impl<'a> Server<'a> {
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
+            // #386: a file a thread's message carries.
+            ("GET", p) if p.starts_with("/thread/") => {
+                let (t, name) = p[8..].split_once('/').unwrap_or_default();
+                let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
+                let at = read(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
+                match at.and_then(|p| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", ctype(&name), b),
+                    None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
+                }
+            }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
                 let a = ASSETS.iter().find(|a| p == format!("/a/{VER:08x}/{}", a.0)).inspect(|_| cache = "public, max-age=31536000, immutable");
@@ -1009,7 +1080,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1068,7 +1139,12 @@ impl<'a> Server<'a> {
         }
         times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
-        let res = if path == "/setup" {
+        let res = if path == "/thread" {
+            let mut later = vec![];
+            let res = chat::post(ctx, self.r, f, &mut later);
+            lock(&self.later).extend(later.into_iter().map(|l| (ctx.clone(), l)));
+            res
+        } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
             Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
         } else if pick {
@@ -1082,7 +1158,7 @@ impl<'a> Server<'a> {
                 |p| crate::setup::send(ctx, self.r, p, &s.text),
             )
         };
-        if pick || act {
+        if pick || act || path == "/thread" {
             self.purge();
             self.kick.store(true, Relaxed);
         }
@@ -1302,12 +1378,15 @@ impl<'a> Server<'a> {
                 crate::pause(ctx, &mut out, fleet, op == "pause", Some("web"))?;
                 format!("{fleet} {op}d")
             }
-            "set" => {
+            op @ ("set" | "cond") => {
                 let wanted: Vec<_> = ["harness", "model", "effort"]
                     .into_iter()
                     .filter(|k| !g(k).is_empty())
                     .map(|k| (k, g(k).to_string()))
                     .collect();
+                if op == "cond" {
+                    return crate::conductor::set(ctx, self.r, fleet, &wanted); // #401
+                }
                 let line = wanted
                     .iter()
                     .map(|(k, v)| format!("{k} {v}"))
@@ -1386,10 +1465,18 @@ impl<'a> Server<'a> {
         let events = read(&ctx.state)?;
         let (cfg, st) = (Config::load(&ctx.config).ok(), fold(&events));
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
-        let parts: [(&'static str, &dyn Fn() -> String); 5] = [
-            ("needs", &|| self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired)),
+        let agents = || self.herdr_json(ctx.now, "agent").map(|j| j["result"]["agents"].clone());
+        let agents = || agents().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+        let parts: [(&'static str, &dyn Fn() -> String); 6] = [
+            ("needs", &|| {
+                let n = chat::choosing(ev);
+                self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
+            }),
             ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
             ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
+            ("chat", &|| {
+                chat::tab(ctx, cfg, ev, &agents(), paired && self.addr.is_some())
+            }),
             ("host", &|| self.host_tab(ctx, cfg, ev)),
             ("events", &|| events_tab(ctx, self.r, cfg, ev, all, 0)),
         ];
@@ -1506,6 +1593,13 @@ impl<'a> Server<'a> {
             b["color-scheme"].as_str().unwrap_or("dark")
         );
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
+        // #406: the page opened at any other path (the SW's copy) moves to the root before the body, so its
+        // relative URLs (a thread's files) resolve there.
+        let home = if root.is_empty() {
+            ""
+        } else {
+            ";if(location.pathname!=='/')history.replaceState(null,'','/'+location.search+location.hash)"
+        };
         let badge = if demo {
             "<span class=tag id=demo>demo</span>"
         } else {
@@ -1517,14 +1611,14 @@ impl<'a> Server<'a> {
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
-             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb</script></head>\
+             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
+             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
-             <section id=queue>{}</section><section id=lanes>{}</section><section id=host>{}</section>\
+             <section id=queue>{}</section><section id=lanes>{}</section><section id=chat>{}</section><section id=host>{}</section>\
              <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
-             <a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("host"), f("events")
+             <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script></body></html>\n",
+            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("chat"), f("host"), f("events")
         ))
     }
 
@@ -1537,7 +1631,8 @@ impl<'a> Server<'a> {
             .filter(|l| l.state == "blocked")
             .map(|l| self.blocked(ctx, l, paired))
             .collect();
-        crate::events::open_asks(events).into_iter().map(|a| {
+        // #386: a conductor's asks wait in its thread (amber), not in this stack.
+        crate::events::open_asks(events).into_iter().filter(|a| a.str("thread").is_none()).map(|a| {
             let s = |k| a.str(k).unwrap_or_default();
             let who = join(&[&a.fleet, &a.issue.map_or(String::new(), |n| format!("#{n}")), s("agent"), &age(ctx.now.saturating_sub(a.ts))]);
             let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
@@ -3030,6 +3125,21 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
                 .map_or(Ok(()), |b| std::fs::write(dir.join("themes").join(n).join(f), b))?;
         }
     }
+    // #386: the files threads carry, as `/thread/<t>/<name>` serves them.
+    for e in events.iter().filter(|e| e.kind == "thread-msg") {
+        for f in chat::files_of(e) {
+            let (t, name) = (
+                e.str("thread").unwrap_or_default(),
+                f["name"].as_str().unwrap_or_default(),
+            );
+            let to = dir.join("thread").join(t);
+            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| std::fs::read(p).ok());
+            if let Some(b) = b.filter(|_| !name.contains('/')) {
+                std::fs::create_dir_all(&to)?;
+                std::fs::write(to.join(name), b)?;
+            }
+        }
+    }
     let (cfg, st) = (Config::load(&ctx.config)?, fold(&events));
     for l in s
         .lanes(ctx.now, &cfg, &events, &st)
@@ -3119,7 +3229,8 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
 }
 
 /// #162: a fleet's [config] sheet: GENERAL, LIMITS, ROLES (the `set` pickers when `rw`), ALERTS, HOSTS / NEEDS.
-/// Only the role pickers write (through `set`); the rest is read-only, edited in the config file named on top.
+/// Only the role pickers (through `set`) and #401's Conductor choices write; the rest is read-only, edited in the
+/// config file named on top.
 fn config_sheet(
     ctx: &Ctx,
     cfg: &Config,
@@ -3272,17 +3383,50 @@ fn config_sheet(
     let roles: String = fc
         .role
         .iter()
+        .filter(|r| r.0 != "conductor")
         .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt).replacen("</b> ", &format!("</b> {}", tag(name)), 1))
         .collect();
     format!(
         "<p class=cp><span class=m>config</span> {}</p>{}{}{}<section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>{roles}\
-         <p class=rk>profile, accounts, mcp: {edit}</p></section>{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
+         <p class=rk>profile, accounts, mcp: {edit}</p></section>{}{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
          <p class=soon>Which hosts this fleet's lanes may run on, matched by host tags against the issue's needs. Shown here once #157 lands.</p></section>",
         esc(&path),
         group("General", &edit, &general),
         pipeline_group(fleet, fc, st),
         group("Limits", &edit, &limits),
+        conductor_group(fleet, fc, rw, mt),
         group("Alerts", &edit, &alerts),
+    )
+}
+
+/// #401: the fleet's conductor, `default: impl` or `set`; a tap on a harness, model (the fleet's roles') or effort
+/// choice writes it (the `cond` op, a paired device only; disabled without `rw`).
+fn conductor_group(fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str) -> String {
+    let Some(r) = fc.role.get("conductor") else {
+        return String::new();
+    };
+    let row = |key: &str, cur: Option<&str>, opts: &[&str]| {
+        let on = |o: &&str| {
+            format!(
+                "<button name={key} value=\"{0}\" aria-pressed={1}{2}>{0}</button>",
+                esc(o),
+                cur == Some(*o),
+                if rw { "" } else { " disabled" }
+            )
+        };
+        let b: String = opts.iter().map(on).collect();
+        format!(
+            "<form method=post class=chips aria-label={key}>{}<b class=m>{key}</b>{b}</form>",
+            hidden("cond", fleet, mt)
+        )
+    };
+    format!(
+        "<section class=cg><h3>Conductor<span>{}</span></h3><p class=rh><span class=m>{}</span></p>{}{}{}</section>",
+        if r.default { "default: impl" } else { "set" },
+        esc(&r.profile_or("conductor")),
+        row("harness", Some(&r.harness), &crate::harness::NAMES),
+        row("model", r.model.as_deref(), &crate::conductor::models(fc)),
+        row("effort", r.effort.as_deref(), crate::harness::efforts(&r.harness)),
     )
 }
 

@@ -1,13 +1,13 @@
 # The phone page
 
 `herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
-`last update hh:mm` line) with Queue · Lanes · Host · Events tabs. `--read-only` serves GET only.
+`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
 Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
 slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
-every 15 s, for ages) it re-renders the needs-you cards and the four tabs and pushes only
+every 15 s, for ages) it re-renders the needs-you cards and the five tabs and pushes only
 the changed ones as `event: frag` (`{id, html}`) the first time on a stream, then (#351) only as `event: patch`
 (`{id, n, p, set}`: the part cut before each `<d`, its new piece count, the common prefix and the changed pieces by index;
 a piece past the prefix not in `set` is the old one shifted by the count change; serve.js rebuilds the HTML and swaps it
@@ -71,9 +71,12 @@ siblings.
 One repo at a time (#367): chips on top, `[repo n]` with a red dot when it needs you, and `[all]` for every repo's
 needs-you rows. A tap, a sideways swipe or ←/→ switches; the pick is kept per phone. A repo's rows are grouped (needs
 you, in progress, queued), each tree drawn inside its group. A running row's time reads `in impl 1h 47m`, a needs-you row's `1h 47m`. Queued rows
-show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row,
-`#265 → #270 · <root's title> (6 steps) · next: #266` (next: the root's open blocker, else the root), and `▾` opens
-its steps. Titles start in one column at every depth.
+show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row laid
+out as a queued row (#391): the root's number, `chain · 6` as its state, its place and the root's title, then
+`▸ #265 → #356 · next: #266 (in impl)` (first → last step; next: the root's open blocker, else the root, with its state
+when it is on the board); a tap opens its steps. A page of an older build (the service worker's copy) loads again on
+`/live`'s first `build` event. `queue add` reads an added issue's title right away; a row queued from the backlog shows
+the backlog read's title until then. Titles start in one column at every depth.
 
 Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
 queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
@@ -160,7 +163,7 @@ Sends pass the same Host/Origin checks, are limited to 10 a minute per device, a
 chars, or a control character other than newline). Removing a device also needs a paired cookie. Each send logs `{"type":"prompt","via":"web","agent","device","chars"}`, never the
 text. Secure cookies need https (`tailscale serve`) or localhost.
 
-Open asks (`herdsman ask`) show as a red **needs you** card above every tab: the question, option
+Open asks (`herdsman ask`, but a conductor's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
 buttons (recommended first) and a free-text box, tagged `routine · defaults to 2 in 24m` or `owner · waits
 for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`herdsman answer … --by owner`,
 logged `"via":"web"`) under the same Host/Origin checks and needs a paired device (401 otherwise). In the

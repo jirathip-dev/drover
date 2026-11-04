@@ -167,7 +167,8 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// `herdsman spawn … design` (or pre-rename `fleet`), `setup` and `serve approve|unpair|devices --revoke`: owner-only.
+/// `herdsman spawn … design` (or pre-rename `fleet`), `setup`, `serve approve|unpair|devices --revoke`, `config
+/// apply|discard` and `secret ls|rm`: owner-only.
 fn design_spawn(t: &[&str]) -> Option<String> {
     let i = t
         .iter()
@@ -175,6 +176,15 @@ fn design_spawn(t: &[&str]) -> Option<String> {
     let r = &t[i + 1..];
     if r.first() == Some(&"serve") && ["approve", "unpair", "--revoke"].iter().any(|w| r.contains(w)) {
         return Some("REFUSED OWNER_ONLY: only the owner pairs or unpairs devices, never a lane (#288)".into());
+    }
+    if matches!(
+        (r.first(), r.get(1)),
+        (Some(&"config"), Some(&("apply" | "discard"))) | (Some(&"secret"), Some(&("ls" | "rm")))
+    ) {
+        return Some(
+            "REFUSED OWNER_ONLY: only the owner applies config or lists and removes secrets, never a lane (#387)"
+                .into(),
+        );
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
@@ -289,6 +299,16 @@ pub fn push_dir(input: &Value) -> Option<String> {
             let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
             git_sub(&t, cwd).filter(|(i, _)| t[*i] == "push").map(|(_, d)| d)
         })
+}
+
+/// #386: a shell call's command when it runs `herdsman` or `gh` (but `herdsman thread reply`, which is the reply
+/// itself): a conductor's tool row in its thread.
+pub fn fleet_cmd(input: &Value) -> Option<&str> {
+    let tool = input["tool_name"].as_str().unwrap_or_default();
+    let cmd = tool_input(input)["command"].as_str()?.trim();
+    let first = cmd.split_whitespace().next().map(word)?;
+    (dialects().any(|d| d.shell == tool) && ["herdsman", "gh"].contains(&first) && !cmd.contains("thread reply"))
+        .then_some(cmd)
 }
 
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.

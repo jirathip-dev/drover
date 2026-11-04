@@ -6,7 +6,7 @@ use crate::gate::refused;
 use crate::runner::Runner;
 use crate::spawn::Plan;
 use crate::{harness, herdr, Ctx};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
@@ -54,34 +54,90 @@ fn text_ok(text: &str) -> Result<()> {
     Ok(())
 }
 
-fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, text: &str) -> Result<()> {
-    let d = json!({"thread": t.str("thread"), "from": from, "text": text});
+fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[Value])) -> Result<()> {
+    let mut d = json!({"thread": t.str("thread"), "from": from, "text": text});
+    if !files.is_empty() {
+        d["files"] = json!(files);
+    }
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
-/// `herdsman thread reply`: the conductor's message to the owner.
-pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
-    text_ok(text)?;
-    log(ctx, cfg, find(&read(&ctx.state)?, id)?, "conductor", text)
+/// The thread's conductor's working folder, one per thread: `<state dir>/conductor/<thread>/`, or (#386)
+/// `<[conductor] dir>/<thread>/`.
+pub fn dir(ctx: &Ctx, cfg: &Config, id: &str) -> std::path::PathBuf {
+    let root = cfg.conductor.dir.as_deref().map(expand);
+    root.unwrap_or_else(|| ctx.state.with_file_name("conductor")).join(id)
 }
 
-/// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is): log `from`'s message, then type it into the
-/// thread's conductor, starting or resuming it first; the agent it went to.
-pub fn say(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, text: &str, (from, raw): (&str, bool)) -> Result<String> {
+/// `p` resolved, if it lies in thread `id`'s conductor folder: the only files a thread shows or serves (#386).
+pub fn inside(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Option<std::path::PathBuf> {
+    let root = dir(ctx, cfg, id).canonicalize().ok()?;
+    p.canonicalize().ok().filter(|p| p.starts_with(root))
+}
+
+/// A file a message carries, as the thread logs it: its name, path in the conductor's folder and size.
+pub fn file(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Result<Value> {
+    let Some(p) = inside(ctx, cfg, id, p) else {
+        let d = dir(ctx, cfg, id).display().to_string();
+        bail!("{}: not in the thread's folder {d}; copy it there first", p.display());
+    };
+    let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
+    Ok(json!({"name": name, "path": p, "size": size}))
+}
+
+/// `herdsman thread reply [--file <path>]…`: the conductor's message to the owner, its files shown inline.
+pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::PathBuf]) -> Result<()> {
+    text_ok(text)?;
+    let files = files
+        .iter()
+        .map(|p| file(ctx, cfg, id, p))
+        .collect::<Result<Vec<_>>>()?;
+    log(ctx, cfg, find(&read(&ctx.state)?, id)?, "conductor", (text, &files))
+}
+
+/// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log
+/// `from`'s message, then type it into the thread's conductor, starting or resuming it first; the agent it went to.
+pub fn say(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (id, text, files): (&str, &str, &[Value]),
+    (from, raw): (&str, bool),
+) -> Result<String> {
+    let (t, line) = post(ctx, cfg, (id, text, files), (from, raw))?;
+    deliver(ctx, cfg, r, &t, &line)
+}
+
+/// #403: `say`'s first half: log the message; the thread and the line `deliver` types.
+pub fn post(
+    ctx: &Ctx,
+    cfg: &Config,
+    (id, text, files): (&str, &str, &[Value]),
+    (from, raw): (&str, bool),
+) -> Result<(Event, String)> {
     text_ok(text)?;
     let t = find(&read(&ctx.state)?, id)?.clone();
-    log(ctx, cfg, &t, from, text)?;
+    log(ctx, cfg, &t, from, (text, files))?;
+    let path = |f: &Value| format!(" (attached: {})", f["path"].as_str().unwrap_or_default());
+    let paths: String = files.iter().map(path).collect();
     let line = if raw {
         text.into()
     } else {
-        format!("[{id}] {from}: {text}")
+        format!("[{id}] {from}: {text}{paths}")
     };
+    Ok((t, line))
+}
+
+/// #403: `say`'s second half: type `line` into thread `t`'s conductor, starting or resuming it first.
+pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
+    let id = t.str("thread").unwrap_or_default();
     let events = read(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;
     let awake = last.filter(|s| s.kind == "conductor-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
     let Some(s) = awake else {
-        return start(ctx, cfg, r, &t, &events, &line);
+        return start(ctx, cfg, r, t, &events, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
     herdr::reply(
@@ -94,8 +150,9 @@ pub fn say(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, text: &str, (from,
     Ok(agent.into())
 }
 
-/// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]`; for `all`, the first fleet's that has one.
-fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
+/// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile
+/// `lane-conductor`, `Config::parse`); for `all`, the first fleet's that has one.
+pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     let has = |(n, f): (&'a String, &'a crate::config::Fleet)| Some((n.as_str(), f.role.get("conductor")?));
     let found = match repo {
         "all" => cfg.fleet.iter().find_map(has),
@@ -105,9 +162,73 @@ fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
         Some(x) => Ok(x),
         None => refused(
             "NO_CONDUCTOR",
-            format!("{repo} has no conductor; add [fleet.<n>.role.conductor]"),
+            format!("{repo} has no conductor or impl role; add [fleet.<n>.role.conductor]"),
         ),
     }
+}
+
+/// #401: the models a fleet's roles use, the [config] sheet's conductor model choices.
+pub fn models(f: &crate::config::Fleet) -> Vec<&str> {
+    let all: std::collections::BTreeSet<_> = f.role.values().filter_map(|r| r.model.as_deref()).collect();
+    all.into_iter().collect()
+}
+
+/// #401: the [config] sheet's conductor choices (harness, model, effort) into `[fleet.<n>.role.conductor]` in place (a
+/// fleet on the default gets the table: its impl role's keys); refused `DOCTOR` if `doctor` with the new file shows a ✗
+/// it did not before. The old file goes to `fleet.toml.bak` first.
+pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) -> Result<String> {
+    let text = std::fs::read_to_string(&ctx.config)?;
+    let cfg = Config::parse(&text)?;
+    let cur = role(&cfg, fleet)?.1;
+    let models = models(cfg.fleet(fleet)?);
+    let bad = |(k, v): &&(&str, String)| {
+        *k == "model" && !models.contains(&v.as_str()) || v.chars().any(|c| c == '"' || c == '\\' || c.is_control())
+    };
+    if let Some((k, v)) = wanted.iter().find(bad) {
+        return refused("BAD_VALUE", format!("conductor {k} {v:?}: not one of the choices"));
+    }
+    let mut new = text.clone();
+    if cur.default {
+        let raw: toml::Table = toml::from_str(&text)?;
+        let imp = raw
+            .get("fleet")
+            .and_then(|f| f.get(fleet)?.get("role")?.get("impl")?.as_table());
+        let mut t = imp.cloned().unwrap_or_default();
+        t.insert("profile".into(), "lane-conductor".into());
+        let nl = if text.ends_with('\n') { "" } else { "\n" };
+        new += &format!("{nl}\n[fleet.{fleet}.role.conductor]\n{}", toml::to_string(&t)?);
+    }
+    for (k, v) in wanted {
+        new = crate::config::set_value(&new, fleet, "conductor", k, v)?;
+    }
+    let new_cfg = Config::parse(&new)?;
+    let fails = |c: &Ctx| -> Result<Vec<String>> {
+        let mut out = vec![];
+        crate::doctor::doctor(c, r, &mut out, true)?;
+        Ok(serde_json::from_slice::<Vec<String>>(&out)?
+            .into_iter()
+            .filter(|l| l.starts_with('✗'))
+            .collect())
+    };
+    let (before, tmp) = (fails(ctx)?, crate::devices::tmp_name(&ctx.config));
+    std::fs::write(&tmp, &new)?;
+    let after = fails(&Ctx {
+        config: tmp.clone(),
+        ..ctx.clone()
+    });
+    std::fs::remove_file(&tmp)?;
+    let bad: Vec<String> = after?.into_iter().filter(|l| !before.contains(l)).collect();
+    if !bad.is_empty() {
+        return refused("DOCTOR", format!("doctor fails with it: {}", bad.join("; ")));
+    }
+    std::fs::copy(&ctx.config, ctx.config.with_extension("toml.bak"))?;
+    crate::config::write_atomic(&ctx.config, &new)?;
+    for (k, v) in wanted {
+        let d = json!({"role": "conductor", "key": k, "new": v, "via": "web"});
+        emit(&ctx.state, &new_cfg, Event::new(ctx.now, fleet, None, "set", d))?;
+    }
+    let line: Vec<String> = wanted.iter().map(|(k, v)| format!("{k} {v}")).collect();
+    Ok(format!("{fleet} conductor: {}", line.join(", ")))
 }
 
 /// A random v4 UUID, a new conductor's session id.
@@ -126,7 +247,7 @@ fn uuid() -> Result<String> {
 }
 
 /// Start the thread's conductor with `line`: its first start, or a resume of its session (a harness that can't
-/// resume gets the conversation so far in its kick instead).
+/// resume is pointed at the conversation so far instead).
 fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = role(cfg, &t.fleet)?;
@@ -139,15 +260,19 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         .and_then(|e| e.str("session"))
         .map_or_else(uuid, |s| Ok(s.into()))?;
     let resume = first.is_some() && h.resumes();
-    let dir = ctx.state.with_file_name("conductor").join(id);
+    let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
+    // #397: the kick is one line (herdr refuses a multi-line `agent start` argument); the thread is in a file.
+    let on = crate::hosts::On::new(r, None);
+    let thread = dir.join(".thread.md");
+    on.write(&thread, &render(&items(events, id)))?;
     let kick = if resume {
-        line.into()
+        line.replace(char::is_control, " ")
     } else {
-        let past = render(&items(events, id));
         format!(
-            "Read {} and act on it. The thread so far, the last message new:\n{past}",
-            brief.display()
+            "Read {} and act on it. The thread so far is in {}, the last message new.",
+            brief.display(),
+            thread.display()
         )
     };
     let agent = format!("conductor-{id}");
@@ -179,7 +304,6 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
     h.ready(ctx, r, &p)?;
-    let on = crate::hosts::On::new(r, None);
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
     let pane = &herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
@@ -191,7 +315,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         bail!("herdr agent start failed: {}", o.stderr.trim());
     }
     let kicked = h.kick(r, &p, pane).unwrap_or(false);
-    let d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": wsid, "harness": p.harness,
+    let d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": wsid, "harness": p.harness, "model": p.model,
         "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
     emit(
         &ctx.state,
@@ -204,7 +328,10 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             cfg,
             t,
             "system",
-            &format!("{on} {})", crate::usage::date(r, *until, "+%H:%M")),
+            (
+                &format!("switched to {} {})", &on[3..], crate::usage::date(r, *until, "+%H:%M")),
+                &[],
+            ),
         )?;
     }
     Ok(agent)
@@ -253,7 +380,13 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
 /// recommended one first, `open`).
 pub fn items(events: &[Event], id: &str) -> Vec<Value> {
     let item = |e: &Event| match e.kind.as_str() {
-        "thread-msg" => Some(json!({"ts": e.ts, "from": e.str("from"), "text": e.str("text")})),
+        "thread-msg" => {
+            let mut m = json!({"ts": e.ts, "from": e.str("from"), "text": e.str("text")});
+            if let Some(f) = e.data.get("files") {
+                m["files"] = f.clone();
+            }
+            Some(m)
+        }
         "needs-decision" => {
             let all = e.data["options"].as_array().cloned().unwrap_or_default();
             let mut opts: Vec<Value> = all
@@ -278,7 +411,11 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
 fn render(items: &[Value]) -> String {
     let s = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
     let line = |i: &Value| match i["ask"].as_str() {
-        None => format!("{}: {}\n", s(i, "from"), s(i, "text")),
+        None => {
+            let files = i["files"].as_array().into_iter().flatten();
+            let files: String = files.map(|f| format!(" [file {}]", s(f, "path"))).collect();
+            format!("{}: {}{files}\n", s(i, "from"), s(i, "text"))
+        }
         Some(q) => {
             let rec = |o: &Value| if o["n"] == i["recommend"] { " (recommended)" } else { "" };
             let opts = i["options"].as_array().into_iter().flatten();
@@ -292,10 +429,20 @@ fn render(items: &[Value]) -> String {
 }
 
 /// The conductor spoke (a message or an ask) since the owner last read or wrote.
-fn unread(events: &[Event], id: &str) -> bool {
+pub fn unread(events: &[Event], id: &str) -> bool {
     let seen = |e: &&Event| matches!(e.kind.as_str(), "thread-msg" | "thread-read" | "needs-decision");
     let last = of(events, id).rfind(seen);
     last.is_some_and(|e| e.kind == "needs-decision" || e.str("from") == Some("conductor"))
+}
+
+/// Log `thread-read` for thread `t` if the conductor spoke since the owner last read or wrote (`thread show`, the board).
+pub fn mark_read(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event) -> Result<()> {
+    let id = t.str("thread").unwrap_or_default();
+    let read = Event::new(ctx.now, &t.fleet, None, "thread-read", json!({"thread": id}));
+    if unread(events, id) {
+        emit(&ctx.state, cfg, read)?;
+    }
+    Ok(())
 }
 
 /// `herdsman thread show <id>`: the conversation; marks it read.
@@ -303,10 +450,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: boo
     let events = read(&ctx.state)?;
     let t = find(&events, id)?;
     let items = items(&events, id);
-    if unread(&events, id) {
-        let d = json!({"thread": id});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-read", d))?;
-    }
+    mark_read(ctx, cfg, &events, t)?;
     if as_json {
         let v = json!({"thread": id, "repo": t.fleet, "title": t.str("title"), "items": items});
         return Ok(writeln!(out, "{}", serde_json::to_string_pretty(&v)?)?);
@@ -371,6 +515,9 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let quiet = of(events, id).map(|e| e.ts).max().unwrap_or(0) + IDLE <= ctx.now;
         let a = agents.iter().find(|a| a["name"] == s.data["agent"]);
+        if a.is_some() && switch(ctx, cfg, r, t, s)? {
+            continue;
+        }
         if !quiet || a.is_some_and(|a| a["agent_status"] == "working") {
             continue;
         }
@@ -385,4 +532,64 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         )?;
     }
     Ok(())
+}
+
+/// #387: an awake conductor showing a usage limit (or signed out) rests its account (else its harness) and resumes
+/// the same session on the role's next account or `fallback` entry; signed out, the thread gets a [sign in] line.
+fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
+    let (id, account, hn) = (
+        t.str("thread").unwrap_or_default(),
+        s.str("account"),
+        s.str("harness").unwrap_or_default(),
+    );
+    // No account and no `fallback`: nothing to switch to, but a sign-out still gets its [sign in] line.
+    let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
+    let (screen, h) = (
+        herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
+        harness::get(hn),
+    );
+    let out = h.signed_out(&screen);
+    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
+    let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
+    let Some(until) = limit.or(rest) else {
+        return Ok(false);
+    };
+    if chain {
+        let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
+        let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
+    }
+    herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
+    let why = if out { "signed out" } else { "usage limit" };
+    let d = json!({"thread": id, "agent": s.str("agent"), "why": why});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, "conductor-sleep", d),
+    )?;
+    if out {
+        let text = format!(
+            "{hn} is signed out{}: sign in",
+            account.map_or(String::new(), |a| format!(" (account {a})"))
+        );
+        // #303 names an account's login `claude B` ([[setup]]); without one configured, the harness's own login.
+        let named = account.map(|a| format!("{hn} {a}"));
+        let su = named.filter(|n| crate::setup::all(cfg).iter().any(|s| &s.0 == n));
+        let d = json!({"thread": id, "from": "system", "text": text, "signin": su.as_deref().unwrap_or(hn)});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    }
+    if !chain {
+        return Ok(true);
+    }
+    let line = format!("[{id}] system: {why}; you resumed on the next account. Carry on where you left off.");
+    if let Err(e) = start(ctx, cfg, r, t, &read(&ctx.state)?, &line) {
+        log(
+            ctx,
+            cfg,
+            t,
+            "system",
+            (&format!("the conductor stays asleep: {e:#}"), &[]),
+        )?;
+    }
+    Ok(true)
 }

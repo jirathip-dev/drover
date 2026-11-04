@@ -22,12 +22,15 @@ pub mod land;
 pub mod lanes;
 pub mod overlap;
 pub mod pipeline;
+pub mod propose;
 pub mod protection;
 pub mod queue;
 pub mod runner;
+pub mod secret;
 pub mod setup;
 pub mod snapshot;
 pub mod spawn;
+pub mod telegram;
 pub mod timer;
 pub mod usage;
 pub mod waiting;
@@ -355,7 +358,7 @@ pub fn answer(
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
     if let Some(t) = ask.str("thread") {
-        let agent = conductor::say(ctx, cfg, r, t, &msg, (by, true))?; // #355: back into the thread's conversation
+        let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {

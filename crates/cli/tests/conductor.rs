@@ -90,10 +90,18 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
         first.contains("--append-system-prompt-file") && !first.contains("--resume"),
         "{first}"
     );
-    assert!(first.ends_with("owner: what should #12 cover?\n"), "{first}");
+    let thread = dir.join(".thread.md");
     assert!(
-        first.contains(&format!("Read {}", dir.join(".brief.md").display())),
+        first.ends_with(&format!(
+            "Read {} and act on it. The thread so far is in {}, the last message new.",
+            dir.join(".brief.md").display(),
+            thread.display()
+        )),
         "{first}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&thread).unwrap(),
+        "owner: what should #12 cover?\n"
     );
     let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
     for want in [
@@ -151,7 +159,7 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     );
 }
 
-/// A harness that can't resume its session gets the whole conversation in its kick instead.
+/// A harness that can't resume its session is pointed at the whole conversation instead.
 #[test]
 fn a_harness_without_resume_gets_the_history_in_its_kick() {
     let c = setup("conductor-generic", "hermes");
@@ -166,10 +174,59 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
         .iter()
         .find(|c| c.starts_with("herdr agent prompt conductor-t1 Read"))
         .unwrap();
+    let thread = c.state.with_file_name("conductor").join("t1/.thread.md");
     assert!(
-        kick.ends_with("owner: first\nconductor: noted\nowner: second\n"),
+        kick.contains(&format!("The thread so far is in {}", thread.display())),
         "{kick}"
     );
+    assert_eq!(
+        std::fs::read_to_string(thread).unwrap(),
+        "owner: first\nconductor: noted\nowner: second\n"
+    );
+}
+
+/// #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
+/// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
+#[test]
+fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
+    let bad = |r: &Fake| {
+        let calls = r.calls.borrow();
+        let start = calls.iter().find(|c| c.starts_with("herdr agent start"));
+        assert!(start.is_some(), "{calls:?}");
+        start.filter(|c| c.contains(char::is_control)).cloned()
+    };
+    for h in ["claude", "hermes"] {
+        let c = setup(&format!("conductor-argv-{h}"), h);
+        let r = herdr(NO_AGENTS);
+        let (code, out) = run(&c, &r, &["thread", "say", "t1", "line one\nline\ttwo"]);
+        assert_eq!(code, 0, "{h}: {out}");
+        assert_eq!(bad(&r), None, "{h}: first start");
+        run(&at(&c, NOW + 31 * 60), &herdr(&live("idle")), &["check"]);
+        let r = herdr(NO_AGENTS);
+        let (code, out) = run(&at(&c, NOW + 3600), &r, &["thread", "say", "t1", "and\nagain"]);
+        assert_eq!(code, 0, "{h}: {out}");
+        assert_eq!(bad(&r), None, "{h}: resume");
+    }
+    let c = setup("conductor-argv-lanes", "claude");
+    for h in herdsman::harness::NAMES {
+        for role in ["impl", "rev"] {
+            let set = ["set", "sendmeter", role, "--harness", h];
+            assert_eq!(run(&c, &Fake::default(), &set).0, 0);
+            let dry = ["spawn", "sendmeter", "12", role, "--dry-run", "--json"];
+            let (code, out) = run(&c, &Fake::default(), &dry);
+            assert_eq!(code, 0, "{h} {role}: {out}");
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            let args = v["commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|c| c.as_array().unwrap());
+            assert!(
+                args.clone().all(|a| !a.as_str().unwrap().contains(char::is_control)),
+                "{h} {role}: {out}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -237,8 +294,9 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
 }
 
 #[test]
-fn a_thread_needs_a_conductor_role_and_spawn_never_starts_one() {
-    let c = ctx(&tmpdir("conductor-none"), CONFIG);
+fn a_thread_needs_a_conductor_or_impl_role_and_spawn_never_starts_one() {
+    let no_impl = CONFIG.replace("[fleet.sendmeter.role.impl]", "[fleet.sendmeter.role.build]");
+    let c = ctx(&tmpdir("conductor-none"), &no_impl);
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "all", "Cross-repo"]).0, 0);
     let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "hi"]);
     assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");

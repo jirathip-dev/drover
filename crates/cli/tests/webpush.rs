@@ -492,3 +492,52 @@ fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     webpush::subscribe(&c.state, &f("https://push.example/two"), "iPad", 2, None).unwrap();
     assert_eq!(check(), (0, String::new()), "a notifier: no warning");
 }
+
+/// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
+/// opening the thread; the owner's own message and a system line never push.
+#[test]
+fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
+    let dir = tmpdir("wp-thread");
+    let _path = fake_curl(&dir);
+    std::fs::write(dir.join("code"), "201").unwrap();
+    let c = ctx(&dir, CONFIG);
+    let cfg = Config::parse(PUSH).unwrap();
+    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
+    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+        .split('&')
+        .map(|kv| kv.split_once('=').unwrap())
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+    webpush::subscribe(&c.state, &f, "Mac", 1, None).unwrap();
+    let pushes = || {
+        std::fs::read_to_string(dir.join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let last = || {
+        let body = std::fs::read(dir.join("body")).unwrap();
+        serde_json::from_slice::<serde_json::Value>(&decrypt(&body, &ua, &d(AUTH)).expect("decrypts")).unwrap()
+    };
+    let t = serde_json::json!({"thread": "t1", "title": "Grill #12"});
+    emit(&c.state, &cfg, Event::new(1, "sendmeter", None, "thread-new", t)).unwrap();
+    let msg = |from: &str, text: &str| {
+        let d = serde_json::json!({"thread": "t1", "from": from, "text": text});
+        Event::new(1, "sendmeter", None, "thread-msg", d)
+    };
+    emit(&c.state, &cfg, msg("owner", "what should #12 cover?")).unwrap();
+    emit(&c.state, &cfg, msg("system", "⇄ switched to account B")).unwrap();
+    assert_eq!(pushes(), 0, "the owner's own words and system lines: no push");
+    emit(&c.state, &cfg, msg("conductor", "Scope and tests.\nWhich first?")).unwrap();
+    assert_eq!(pushes(), 1);
+    let j = last();
+    assert_eq!(j["body"], "sendmeter · Grill #12: Scope and tests.");
+    assert_eq!(j["url"], "/?thread=t1#chat");
+    let ask = serde_json::json!({"id": "q1", "question": "Which scope?", "options": ["small", "full"],
+        "recommend": 2, "kind": "owner", "thread": "t1"});
+    emit(&c.state, &cfg, Event::new(1, "sendmeter", None, "needs-decision", ask)).unwrap();
+    assert_eq!(pushes(), 2);
+    let j = last();
+    assert_eq!(j["body"], "sendmeter · Grill #12 asks: Which scope?");
+    assert_eq!(j["url"], "/?thread=t1#chat");
+}
