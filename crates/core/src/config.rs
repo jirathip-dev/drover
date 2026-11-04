@@ -29,6 +29,16 @@ pub struct Config {
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     pub conductor: ConductorCfg,
+    /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
+    pub telegram: Telegram,
+}
+
+/// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
+#[derive(Debug, Default, Deserialize)]
+pub struct Telegram {
+    pub chat: Option<i64>,
+    pub owner: Option<i64>,
+    pub api: Option<String>,
 }
 
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
@@ -548,6 +558,13 @@ impl Config {
                 "SECRET_IN_CONFIG",
                 format!("{k} looks like a secret; keep keys in an env file (docs/providers.md)"),
             );
+        }
+        let env = c.fleet.iter().flat_map(|(n, f)| f.env.values().map(move |v| (n, v)));
+        if let Some((n, v)) = env
+            .filter_map(|(n, v)| Some((n, v.strip_prefix("secret:")?)))
+            .find(|v| !crate::secret::name_ok(v.1))
+        {
+            bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");

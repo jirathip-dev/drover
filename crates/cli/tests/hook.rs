@@ -567,6 +567,24 @@ fn setup_is_owner_only() {
     }
 }
 
+/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
+#[test]
+fn config_apply_and_secret_ls_rm_are_owner_only() {
+    for cmd in [
+        "herdsman config apply c1",
+        "herdsman config discard c1",
+        "herdsman secret ls",
+        "herdsman secret rm all TOKEN",
+    ] {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let out = hook_in(Some("x:-:conductor"), "conductor", input.clone());
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+    assert_eq!(bash("herdsman config propose t1 /tmp/fleet.toml"), None);
+    assert_eq!(bash("herdsman secret request t1 API_KEY --why x"), None);
+}
+
 /// #386: a conductor's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
 /// `thread reply`, other commands, denied ones and calls outside a thread are not.
 #[test]
