@@ -54,6 +54,13 @@
     if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
     g.scrollIntoView();
   };
+  // #403: thread t3 open, its composer as a paired phone has it (the demo's is inert).
+  const composer = () => {
+    tab('chat'); chatOpen('t3'); $('.lall')?.click();
+    const f = $('#chat .tw[data-t=t3]');
+    f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+    return f;
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
@@ -138,6 +145,111 @@
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
+    // several images (the thread's two, on the second).
+    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it. The thread is scrolled to
+    // the top first, as chat-thread: a scrolled view shoots blank, the viewer over it too.)
+    'chat-viewer': () => { VIEWS['chat-thread'](); $('#chat .cvp[data-t="t4"] .im img').click(); },
+    'chat-viewer-zoom': () => { VIEWS['chat-viewer'](); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
+    'chat-viewer-multi': () => { VIEWS['chat-thread'](); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
+    // #403 gate 2: [send] clears the box before the POST answers and shows the message `sending…` (no #ld overlay, ever);
+    // ✓ once accepted; failed, red with [retry] and the text back in the box. The shot: ✓, sending… and failed in t3.
+    'chat-send': async () => {
+      const f = composer(), box = f.elements.text, ld = new MutationObserver(() => { if (!$('#ld').hidden) early.push('the #ld overlay showed on a chat post'); });
+      ld.observe($('#ld'), { attributes: true });
+      const sent = () => [...$$('#chat .cvp[data-t=t3] .snt')].map(b => b.querySelector('.ct').textContent);
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      const say = t => { box.value = t; f.requestSubmit(); };
+      say('ship the notes on Friday, with the 429 change\nand the OpenAPI link');
+      if (box.value || !hold.length || sent().join() !== 'sending…') early.push(`after [send]: box "${box.value}", ${hold.length} POSTs, marks ${sent()}`);
+      await wait();
+      if (sent().join() !== 'sending…') early.push(`300 ms on, unanswered: ${sent()}`);
+      hold[0](new Response('sent\n'));
+      await wait();
+      if (sent().join() !== '✓') early.push(`accepted: ${sent()}, not ✓`);
+      say('and tag the release');
+      say('this one fails');
+      hold[2](new Response('error: herdr agent list failed: exit 1', { status: 409 }));
+      await wait();
+      const bad = $('#chat .snt.bad');
+      if (sent().join() !== '✓,sending…,✗ not sent' || !bad?.querySelector('.rt') || box.value !== 'this one fails') early.push(`failed: marks ${sent()}, [retry] ${!!bad?.querySelector('.rt')}, box "${box.value}"`);
+      if (getComputedStyle(bad.querySelector('.ct')).color !== getComputedStyle(B.appendChild(el('i', 'r'))).color) early.push('the failed mark is not red');
+      $$('body>i.r').forEach(i => i.remove());
+      ld.disconnect();
+      if (!DBG.get('check')) { $$('#chat .cvp[data-t=t3] .tc>:not(.snt)').forEach(e => { e.hidden = true; }); $('.msg.r')?.remove(); }
+    },
+    // #403 gate 2: a long draft grows the box to 6 lines, then it scrolls inside; a send shrinks it back to one.
+    'chat-long': async () => {
+      const f = composer(), box = f.elements.text, h = () => box.getBoundingClientRect().height, lh = parseFloat(getComputedStyle(box).lineHeight);
+      const type = t => { box.value = t; box.dispatchEvent(new Event('input', { bubbles: true })); return h(); };
+      const one = type(''), three = type('one\ntwo\nthree'), long = type('Rate limits: return 429 with Retry-After on /v1/search, per API key, 600 a minute with a burst of 100. '.repeat(6));
+      const cs = getComputedStyle(box), pad = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + parseFloat(cs[k]), 0);
+      if (one > 44 || Math.abs(three - 3 * lh - pad) > 1 || Math.abs(long - 6 * lh - pad) > 1 || box.scrollHeight <= box.clientHeight) early.push(`box heights: empty ${one}, 3 lines ${three}, long ${long} (${box.scrollHeight} of text), not 3 and 6 lines of ${lh} + ${pad}`);
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(() => {}) : F(u, o);
+      if (DBG.get('check')) { f.requestSubmit(); if (h() !== one) early.push(`after [send] the box is ${h()} px, not ${one}`); }
+      else $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    // #403 gate 2: the keyboard up (the box focused): no tab bar on a phone, the composer at the bottom.
+    'chat-kb': async () => {
+      const box = composer().elements.text;
+      box.focus();
+      box.value = 'grill me on the land mode';
+      await wait();
+      if (document.activeElement !== box || seen($('nav'))) early.push(`box focused ${document.activeElement === box}, tab bar shown ${seen($('nav'))}`);
+    },
+    // #403 gate 2: opening a thread pushes a history entry, so back returns to the list; so does [‹], and a swipe
+    // right from the left edge past a third of the width (it follows the finger); a short, mid-screen or downward one does not.
+    'chat-back': async () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const row = () => $('#chat .tr[data-t=t3]'), open = () => THR === 't3' && !seen($('#chat .clp'));
+      const popped = () => new Promise(r => addEventListener('popstate', () => setTimeout(r), { once: true }));
+      row().click();
+      if (!open() || history.state?.thr !== 't3') early.push(`row tap: thread ${THR}, history ${JSON.stringify(history.state)}`);
+      const p = popped(); history.back(); await p;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`back: thread "${THR}", not the list`);
+      row().click();
+      const q = popped(); $('#chat .cvp[data-t=t3] .bk').click(); await q;
+      if (THR !== '') early.push(`[‹]: thread "${THR}", not the list`);
+      const v = $('#chat .cvp[data-t=t3]'), swipe = (x0, y0, x1, y1, mid) => {
+        const t = (x, y) => new Touch({ identifier: 1, target: v, clientX: x, clientY: y });
+        v.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [t(x0, y0)], changedTouches: [t(x0, y0)] }));
+        v.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [t((x0 + x1) / 2, (y0 + y1) / 2)], changedTouches: [t((x0 + x1) / 2, (y0 + y1) / 2)] }));
+        if (mid) mid();
+        v.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [t(x1, y1)] }));
+      };
+      for (const [what, x0, y0, x1, y1] of [['a short edge swipe', 4, 400, 100, 400], ['a swipe from mid-screen', 120, 400, 380, 400], ['a downward drag from the edge', 4, 300, 60, 600]]) {
+        row().click();
+        swipe(x0, y0, x1, y1);
+        if (!open()) early.push(`${what} left the thread`);
+        if (v.style.transform) early.push(`${what}: the thread did not snap back (${v.style.transform})`);
+        const r = popped(); history.back(); await r;
+      }
+      row().click();
+      const s = popped();
+      swipe(4, 400, 300, 400, () => { if (v.style.transform !== 'translateX(148px)') early.push(`mid-swipe the thread is at "${v.style.transform}", not under the finger (148px)`); });
+      await s;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`an edge swipe: thread "${THR}", not the list`);
+    },
+    // #403 gate 2: a working thread (its live line as serve.rs renders it): the overlay's art, small, above the box —
+    // the theme's sprite (pixel), its ascii_loading frames (ascii, `ascii-chat-wait`), the glyph (terminal); a still
+    // frame with reduced motion (`chat-wait-still`); never the #ld overlay.
+    'chat-wait': () => {
+      tab('chat'); chatOpen('t3'); $('.lall')?.click();
+      const c = $('#chat').cloneNode(true);
+      c.querySelector('.cvp[data-t=t3] .tlv').innerHTML = '<i class=tld aria-hidden=true></i> working';
+      frag('chat', c.innerHTML);
+      const i = $('#chat .cvp[data-t=t3] .tld'), t = document.documentElement.dataset.theme, asc = B.dataset.mode === 'ascii';
+      const want = asc ? '.lda' : t === 'terminal' ? 'i' : '.lds', shown = [...i.children].filter(seen), r = i.getBoundingClientRect();
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches, a = shown[0] && getComputedStyle(asc ? shown[0].lastChild : shown[0]).animationName;
+      if (shown.length !== 1 || !shown[0].matches(want)) early.push(`${t}${asc ? ' ascii' : ''}: the mark shows ${shown.map(e => e.outerHTML.slice(0, 30))}, not ${want}`);
+      if (r.height > 24 || r.bottom > $('#chat .tw[data-t=t3]').getBoundingClientRect().top) early.push(`the mark ${r.height} px tall, or not above the box`);
+      if (V.endsWith('still') ? a !== 'none' : a === 'none') early.push(`the mark's animation: ${a}`);
+      if (seen($('#ld'))) early.push('the #ld overlay shows');
+      if (!DBG.get('check')) $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    'chat-wait-still': () => VIEWS['chat-wait'](),
+    'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
@@ -625,7 +737,7 @@
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -659,6 +771,13 @@
       if (!m || m.textContent !== ERR) res.outliers.push(`error banner reads "${m && m.textContent}"`);
       else if (m.scrollWidth > m.clientWidth || m.scrollHeight > m.clientHeight) res.outliers.push(`error banner clipped: ${m.scrollWidth}x${m.scrollHeight} in ${m.clientWidth}x${m.clientHeight}`);
       else if (m.getBoundingClientRect().bottom > row.getBoundingClientRect().top) res.outliers.push(`error banner covers "${label(row)}"`);
+    }
+    // #406: the viewer is open over the thread, its image loaded; fitted inside the screen, zoomed past it; 2 / 2 of two.
+    if (V.startsWith('chat-viewer')) {
+      const i = $('#iv>img'), r = i.getBoundingClientRect(), fit = r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1;
+      if ($('#iv').hidden || !i.complete || !i.naturalWidth) res.outliers.push(`viewer ${$('#iv').hidden ? 'closed' : 'open'}, image ${i.naturalWidth ? 'loaded' : 'not loaded'}`);
+      if (fit !== (V !== 'chat-viewer-zoom')) res.outliers.push(`image ${r.left | 0}..${r.right | 0} × ${r.top | 0}..${r.bottom | 0}: ${fit ? 'fitted' : 'past the screen'}`);
+      if (V === 'chat-viewer-multi' && $('.ivn').textContent !== '2 / 2') res.outliers.push(`count "${$('.ivn').textContent}", not 2 / 2`);
     }
     const out = document.createElement('pre');
     out.id = 'audit';
