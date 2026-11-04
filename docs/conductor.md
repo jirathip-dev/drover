@@ -14,7 +14,13 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
 
 - **Role `conductor`, any harness:** `[fleet.<n>.role.conductor]` takes the usual role keys (`harness`, `model`,
   `effort`, `account`/`accounts`, `fallback`, `mcp`). An `all` thread uses the first fleet that defines one. Without
-  one, `say` refuses `NO_CONDUCTOR`. `herdsman spawn … conductor` refuses `BAD_VALUE`.
+  one (#401), a fleet's conductor is its `impl` role on profile `lane-conductor` (which `profiles sync` writes; a
+  Hermes impl needs `hermes profile create lane-conductor`); only a fleet with neither refuses `NO_CONDUCTOR`.
+  `herdsman spawn … conductor` refuses `BAD_VALUE`.
+- **[config] → Conductor** shows the role in effect (`default: impl` or `set`) with tappable harness, model (the
+  models the fleet's roles use) and effort choices. A tap from a paired device writes `[fleet.<n>.role.conductor]` in
+  place (the first one copies the impl role's keys), after saving the old file as `fleet.toml.bak`; it is refused
+  `DOCTOR` when `herdsman doctor` with the new file shows a ✗ it did not show before. The next conductor start uses it.
 - **No worktree:** it runs in `<state dir>/conductor/<thread>/` (or `<[conductor] dir>/<thread>/`) in its own herdr workspace, as agent
   `conductor-<thread>`, with `HERDSMAN_LANE=<fleet>:-:conductor` (so the lane hook guards it) and
   `HERDSMAN_THREAD=<thread>`.

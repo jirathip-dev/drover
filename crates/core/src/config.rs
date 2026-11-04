@@ -359,6 +359,9 @@ pub struct Role {
     pub needs: Vec<String>,
     /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
+    /// #401: the default conductor `Config::parse` adds for a fleet without one: its impl role on `lane-conductor`.
+    #[serde(skip)]
+    pub default: bool,
 }
 
 impl Role {
@@ -603,6 +606,14 @@ impl Config {
             f.pipeline = Some(p);
         }
         for (name, f) in &mut c.fleet {
+            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("conductor")) {
+                let r = Role {
+                    profile: Some("lane-conductor".into()),
+                    default: true,
+                    ..r.clone()
+                };
+                f.role.insert("conductor".into(), r);
+            }
             if !f.serial_paths.is_empty() {
                 if !f.serial.is_empty() {
                     bail!("fleet.{name}: serial_paths and [[fleet.{name}.serial]] together; keep one");
