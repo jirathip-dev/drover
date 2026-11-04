@@ -1,0 +1,275 @@
+<!doctype html><html lang=en data-tab=chat><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Conductor chat mockup</title>
+<!-- #355 step 0: the [chat] tab. serve.css is the board's, unchanged; the farm scheme's tokens are inlined as serve.rs
+     writes them. The rules in the second <style> are the only additions (existing tokens only) and move to serve.css
+     when the tab is built. Static: the hash picks the view (none: the thread list; #t: a thread; #new: the new-thread
+     form; #states: every card's other states; #guest: a thread on a device that is not a paired owner device).
+     At 1000 px and up the list and the open thread sit side by side. -->
+<style id=sch>:root{--a:#f29b4b;--bg:#0f1a13;--c:#5fd0c4;--card:#1d1a12;--edge:#3b3a27;--fg:#ece4cc;--fk-a:#f29b4b;--fk-c:#5fd0c4;--fk-g:#7fd06a;--fk-l:#7cc4f0;--fk-p:#c7a4ff;--g:#7fd06a;--l:#ecdba6;--line:#26301f;--link:#7cc4f0;--mute:#a3a68a;--p:#c7a4ff;--r:#ff7d6e;--scrim:#050b08aa;color-scheme:dark}</style>
+<link rel=stylesheet href=../../../assets/serve.css>
+<style>
+/* Mockup only: the hash picks a view (see the comment above). */
+body:not(.v-t,.v-g) .cvp,body:is(.v-t,.v-g) .clp,body:not(.v-s) .stp,body.v-s :is(.clp,.cvp),body:not(.v-n) .nt{display:none}
+@media (max-width:999px){body:is(.v-t,.v-g) .later{display:none}}
+body:not(.v-g) .gst,body.v-g .own{display:none}
+/* A device that is not a paired owner device reads the thread but cannot answer or write: inert, as the board's unpaired forms. */
+body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
+
+/* ---- proposed for serve.css (#355) ---- */
+/* The tab: on a phone the thread list or one thread; from 1000 px both, the list a 400 px column on the left and the
+   thread beside it with its prose capped at 100ch. */
+#chat{padding-bottom:var(--s2)}
+@media (min-width:1000px){
+  body:is(.v-l,.v-n,.v-t,.v-g) #chat{display:grid;grid-template-columns:400px minmax(0,1fr);gap:0 calc(2 * var(--s4));align-items:start}
+  body:is(.v-l,.v-n,.v-t,.v-g) :is(.clp,.cvp){display:block}
+  .clp{position:sticky;top:calc(var(--hit) + var(--s1))}
+  .cvp{border-left:1px solid var(--line);padding-left:calc(2 * var(--s4))}
+  .cvp>*{max-width:100ch}
+  .th .bk{display:none}
+}
+/* A repo card is the Queue tab's fleet card (#162: its colour bar and name); "all repos" takes the text colour, as no
+   fleet owns it. The header: name, thread count, [+ thread]. */
+.fc.k-x{--fk:var(--fg)}
+.fc .fh .ds{font-size:var(--fs-meta);color:var(--mute)}
+/* A thread row: one 44 px+ tap row, two lines. Line 1: the unread dot (link blue), the title (ellipsised), `tg` when a
+   Telegram topic is bridged to it, the age. Line 2, 11 px: the conductor's state when it is not plain awake
+   (! choose red: an open choice or card waits for you; ✻ working amber; ☾ asleep grey), then the last message. */
+.tr{display:grid;grid-template-columns:1.5ch minmax(0,1fr) auto;gap:0 var(--s2);align-items:baseline;min-height:var(--hit);padding:var(--s1) 0;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.tr>.ud{font-style:normal;color:var(--link)}
+.tr>.tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr.rd>.tt{color:var(--mute)}
+.tr>.ta{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}
+.tr>.tp{grid-column:2/-1;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr>.tp b{font-weight:400;margin-right:1ch}
+.tr .tg{margin-left:var(--s1)}
+@media (min-width:1000px){.tr[aria-current]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}
+.fc>.done>summary{min-height:var(--hit)}
+/* New thread: a title and [start], in the card it starts in (all repos: the top card). */
+.nt{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;padding:var(--s2) 0;border-top:1px solid var(--line)}
+.nt input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.nt .st{flex-basis:100%;color:var(--mute)}
+/* The thread bar: [‹] back to the list (phone only), the title, one 11 px line: repo, harness, model, state, `tg`.
+   Sticky under the header. */
+.th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
+.th>div{flex:1;min-width:0}
+.th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .ds{font-size:var(--fs-meta);color:var(--mute)}
+.th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
+.cvp .chat{overflow:visible}
+/* Blocks are #138's (.blk): you in the accent, the conductor purple, its commands amber and closed. A block's time (and
+   `via telegram`) sits right of the role. */
+.blk>summary .tm{flex:none;color:var(--mute)}
+/* An image: the picture at the bubble's width, at most 320 px tall (a tall screenshot is cut at the bottom; the tap
+   opens it whole); its name and size under it. A file: one 44 px row with its name and size. */
+.im{margin:var(--s2) 0 0}
+.im img{display:block;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.im figcaption{margin-top:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.fl{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin-top:var(--s2);padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;color:var(--fg);text-decoration:none}
+.fl>span:first-of-type{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fl .m{font-size:var(--fs-meta)}
+/* A choice: the conductor's block holds the question and the choice rows (#63 A, recommended first) plus an "other"
+   box. Once answered only the answer stays, as a ✓ line. */
+.chq{display:flex;flex-direction:column;align-items:stretch;gap:var(--s2);margin-top:var(--s2)}
+.chq .oth{display:flex;gap:var(--s4);align-items:center;margin-top:var(--s1)}
+.chq .oth input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
+.qid{font-size:var(--fs-meta);color:var(--mute)}
+/* An owner card (config proposal, secret request, login): amber, the colour of "waits for the owner" inside a thread
+   (red stays the board's needs-you stack). Title line, the why, the body, the controls, a p.st that says who may act. */
+.oc{margin:0;padding:var(--s2);border:1px solid var(--a);border-radius:8px;background:color-mix(in srgb,var(--a) 8%,var(--bg))}
+.oc>p{margin:0 0 var(--s2)}
+.oc>.oh{display:flex;flex-wrap:wrap;gap:0 var(--s2);align-items:baseline}.oc>.oh>b{color:var(--a)}.oc>.oh>.m{font-size:var(--fs-meta)}
+.oc .out{margin:0 0 var(--s2);background:var(--bg)}
+.oc .out .hh{color:var(--mute)}
+.oc .chk{font-size:var(--fs-meta);color:var(--g)}.oc .chk.r{color:var(--r)}
+.oc .btns{padding:var(--s1) 0}
+.oc .ap{color:var(--a)}
+.oc form{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center}
+.oc form input{flex:1 1 100%;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.oc .st{color:var(--mute)}
+/* A settled card folds to one line, its diff behind ▸. */
+.ocd{margin:0;border-left:2px solid var(--g);border-radius:6px;background:color-mix(in srgb,var(--card) 40%,var(--bg));padding:0 var(--s2);font-size:var(--fs-meta)}
+.ocd>summary{display:flex;gap:var(--s2);align-items:center;min-height:var(--hit);color:var(--mute)}
+.ocd>summary>span{flex:1;min-width:0;padding:var(--s1) 0}.ocd>summary b{font-weight:400;color:var(--g)}
+.ocd.x{border-left-color:var(--mute)}.ocd.x>summary b{color:var(--mute)}
+.ocd .out{margin:0 0 var(--s2)}
+/* System lines are #138's status lines (.qs): ⇄ an account switch (amber edge), ☾ sleep, ↻ resume, 🔒 a secret set. */
+.qs.ok{border-left-color:var(--g)}
+/* The composer: [+] attach (camera roll, files, paste or drop at 1440), the text, [send]. A picked file waits above it
+   as a 56 px thumbnail with its name and [×]. */
+.cvp .reply{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
+.att img{width:56px;height:56px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The states sheet (mockup only): a caption over each state. */
+.stp h3{margin:var(--s4) 0 var(--s2);font-size:var(--fs-meta);font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.stp .chat{overflow:visible}
+/* Mockup only: a full-page shot has no scroll, so the composer stays in the flow there. */
+.shot .cvp .reply{position:static}
+</style></head>
+<body class=v-l>
+<header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i><button type=button class=qhelp aria-label="what the marks mean">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=look type=button aria-label="look: theme and colours">◐</button></header>
+<div class=later><button type=button class=lo>3 need you ▸</button><button type=button class=lall>later all</button></div>
+<main id=chat>
+
+<!-- ============ the thread list ============ -->
+<div class=clp>
+<div class="fc k-x"><div class=fh><span class=fn><b>all repos</b><span class=ds>2 threads</span></span><span class=btns><button type=button>+ thread</button></span></div>
+<a class=tr href=#t><i class=ud>●</i><span class=tt>Pipeline: land mode and premerge checks</span><span class=ta>3h</span><span class=tp><b class=m>☾ asleep</b>conductor: Both fleets on fast-first; staging gate stays required.</span></a>
+<a class="tr rd" href=#t><i class=ud></i><span class=tt>Weekly ship notes</span><span class=ta>4d</span><span class=tp><b class=m>☾ asleep</b>you: good, send it Fridays</span></a>
+</div>
+
+<div class="fc k-g"><div class=fh><span class=fn><b>acme-api</b><span class=ds>3 threads</span></span><span class=btns><button type=button>+ thread</button></span></div>
+<a class=tr href=#t aria-current=true><i class=ud>●</i><span class=tt>Rate limits for /v1/search<span class="tag m tg">tg</span></span><span class=ta>2m</span><span class=tp><b class=r>! choose</b>conductor: Return 429 with Retry-After only, or also the X-RateLimit headers on every response?</span></a>
+<a class=tr href=#t><i class=ud>●</i><span class=tt>Idempotency keys: retry window</span><span class=ta>40m</span><span class=tp><b class=a>✻ working</b>conductor: reading #17's PR diff</span></a>
+<a class="tr rd" href=#t><i class=ud></i><span class=tt>OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache</span><span class=ta>1d</span><span class=tp><b class=m>☾ asleep</b>conductor: Filed #22 and queued it after #17.</span></a>
+<details class=done><summary><span>4 older threads</span><i class=cv></i></summary></details>
+</div>
+
+<div class="fc k-c"><div class=fh><span class=fn><b>acme-web</b><span class=ds>1 thread</span></span><span class=btns><button type=button>+ thread</button></span></div>
+<form class=nt><input aria-label="thread title" placeholder="title, e.g. dark-mode contrast pass" value="Checkout: Thai translation"><button type=button>start</button><p class=st>a conductor starts for acme-web with your [conductor] profile; it sleeps after 30 min idle</p></form>
+<a class="tr rd" href=#t><i class=ud></i><span class=tt>หน้าตั้งค่า: dark mode</span><span class=ta>2d</span><span class=tp><b class=m>☾ asleep</b>conductor: mockup-dark-390.png</span></a>
+</div>
+
+<div class="fc k-l"><div class=fh><span class=fn><b>docs</b><span class=ds>no threads</span></span><span class=btns><button type=button>+ thread</button></span></div></div>
+</div>
+
+<!-- ============ one thread ============ -->
+<div class=cvp>
+<div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>Rate limits for /v1/search</b><span class=ds><i class=dt></i>acme-api · claude · opus · awake · tg topic</span></div></div>
+<div class=chat>
+<p class=qs>thread started by owner · 09:12 · conductor in ~/conductor/acme-api</p>
+
+<details class="blk me" open><summary><span class=k>you</span><span class=pv>One integration is hammering search</span><span class=tm>09:12</span><i class=cv></i></summary>
+<div class=md><p>One customer's integration is hammering <code>/v1/search</code> and #19's webhook retries keep hitting 429s, see the events. I want proper rate limits. Grill me, then file it.</p></div>
+<figure class=im><img src=../farm-v2/board-events-390.png alt="screenshot: the board's Events tab"><figcaption>IMG_2041.PNG · 224 KB</figcaption></figure>
+</details>
+<details class="blk run"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span><i class=cv></i></summary></details>
+<details class="blk run"><summary><span class=k>Read</span><span class=cmd>uploads/IMG_2041.PNG</span><i class=cv></i></summary></details>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>I see it</span><span class=tm>09:13</span><i class=cv></i></summary>
+<div class=md><p>I see it: #19's retries got <code>429</code> from search four times between 14:02 and 14:20. Three questions, one at a time.</p><p class=qid>q31 · 1 of 3</p><p>Limit per API key or per client IP?</p></div>
+<p class=ans>✓ 1. per API key <span class=m>· you · 09:14</span></p>
+</details>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>How much</span><span class=tm>09:14</span><i class=cv></i></summary>
+<div class=md><p class=qid>q32 · 2 of 3</p><p>How much per key?</p></div>
+<p class=ans>✓ other: "600 a minute, burst 100" <span class=m>· you via telegram · 09:16</span></p>
+</details>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>Filing it</span><span class=tm>09:18</span><i class=cv></i></summary>
+<div class=md><p>Filing it, and queueing it right after #21 (the per-key auth it builds on).</p></div>
+</details>
+<details class="blk run"><summary><span class=k>$</span><span class=cmd>gh issue create -R acme/acme-api -t "Rate-limit /v1/search per API key (600/min, burst 100)" -F -</span><i class=cv></i></summary></details>
+<details class="blk run"><summary><span class=k>$</span><span class=cmd>herdsman queue acme-api add 52 --after 21</span><i class=cv></i></summary></details>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>Filed #52</span><span class=tm>09:19</span><i class=cv></i></summary>
+<div class=md><p>Filed <a href=#>#52</a> and queued it after #21. Here is the docs page I'd ship with it:</p></div>
+<figure class=im><img src=fixtures/rate-limits-docs-390.png alt="mockup: the Rate limits docs page"><figcaption>rate-limits-docs-390.png · 129 KB</figcaption></figure>
+<a class=fl href=#><span>▤ 429-body.json</span><span class=m>412 B</span></a>
+<div class=md><p>Prior art: <a href=#>docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api</a></p></div>
+</details>
+
+<details class=ocd><summary><span><b>✓ config c7 applied</b> by owner · 09:24 · backup kept · doctor ✓</span><i class=cv></i></summary>
+<div class=out><pre><span class=hh>fleet.toml · [fleet.acme-api]</span>
+<span class=bg-r>-max_impl = 2</span>
+<span class=bg-g>+max_impl = 3</span></pre></div></details>
+
+<p class="qs note">⇄ switched to account B (A resting until 18:40) · same session</p>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>#52 touches the auth middleware</span><span class=tm>09:31</span><i class=cv></i></summary>
+<div class=md><p>#52 touches the auth middleware, as #21 does. I propose reviewing acme-api on opus and making <code>src/middleware/**</code> a serial path, so the two never run at once.</p></div>
+</details>
+<div class=oc><p class=oh><b>config proposal c8</b><span class=m>acme-api · fleet.toml · 2 changes</span></p>
+<div class=out><pre><span class=hh>@@ [fleet.acme-api.role.rev]</span>
+ harness = "claude"
+<span class=bg-r>-model = "claude-sonnet-5-5"</span>
+<span class=bg-g>+model = "claude-opus-5-5"</span>
+<span class=hh>@@ [fleet.acme-api]</span>
+<span class=bg-r>-serial_paths = ["db/migrations/**"]</span>
+<span class=bg-g>+serial_paths = ["db/migrations/**", "src/middleware/**"]</span></pre></div>
+<p class=chk>✓ validates · on apply: backup, herdsman doctor, a config-applied event</p>
+<div class="btns own"><button type=button class=ap>apply</button><button type=button>discard</button></div>
+<div class="btns gst"><button type=button disabled>apply</button><button type=button>pair this phone</button></div>
+<p class="st own">only the owner applies; the conductor can propose, never apply</p>
+<p class="st gst">apply needs a paired owner device</p>
+</div>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>Over-limit email</span><span class=tm>09:33</span><i class=cv></i></summary>
+<div class=md><p>#52 emails a key's owner the first time it hits the limit, through Resend. The lane needs a key.</p></div>
+</details>
+<div class=oc><p class=oh><b>🔒 secret request</b><span class=m>RESEND_API_KEY · acme-api</span></p>
+<p>why: "#52's over-limit email goes through Resend"</p>
+<form class=own><input type=password autocomplete=off aria-label="RESEND_API_KEY value" placeholder="paste the value"><button type=button class=ap>save</button><button type=button>dismiss</button></form>
+<p class="st own">goes to this host's keychain as herdsman/acme-api/RESEND_API_KEY; lanes get it at spawn, nobody reads it back, the chat keeps only its name</p>
+<p class="st gst">only a paired owner device can set a secret</p>
+</div>
+
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>Last one</span><span class=tm>09:34</span><i class=cv></i></summary>
+<div class=md><p class=qid>q33 · 3 of 3</p><p>Return 429 with <code>Retry-After</code> only, or also the <code>X-RateLimit-*</code> headers on every response?</p></div>
+<form class=chq>
+<button type=button name=choice value=1><span>1. both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response, as in the mockup <small>(recommended)</small></span></button>
+<button type=button name=choice value=2><span>2. Retry-After only</span></button>
+<button type=button name=choice value=3><span>3. headers only behind a ?debug flag</span></button>
+<div class=oth><input aria-label="other answer" placeholder="other: type an answer"><button type=button>send</button></div>
+</form>
+</details>
+</div>
+<p class=live><b>●</b> waiting for your answer · sleeps after 30 min idle</p>
+<p class="st gst">pair this phone to answer or write</p>
+<form class=reply><button type=button aria-label="attach an image or file">+</button><textarea rows=1 aria-label=message placeholder="message the conductor"></textarea><button type=button>send</button></form>
+</div>
+
+<!-- ============ every card's other states ============ -->
+<div class=stp><div class=chat>
+<h3>choice: answered (with a row or the other box)</h3>
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv></span><span class=tm>09:14</span><i class=cv></i></summary>
+<div class=md><p class=qid>q32 · 2 of 3</p><p>How much per key?</p></div>
+<p class=ans>✓ 2. 600 a minute, burst 100 <span class=m>· you · 09:16</span></p></details>
+<h3>choice: a routine ask answered by its default</h3>
+<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv></span><span class=tm>10:02</span><i class=cv></i></summary>
+<div class=md><p class=qid>q34 · routine</p><p>Run #52's load test against staging or a local stack?</p></div>
+<p class=ans>✓ 1. local stack <span class=m>· by: default after 30 min · [change]</span></p></details>
+
+<h3>config proposal: applied, discarded</h3>
+<details class=ocd open><summary><span><b>✓ config c8 applied</b> by owner · 09:40 · backup fleet.toml.bak-20261104-0940 · doctor ✓</span><i class=cv></i></summary>
+<div class=out><pre><span class=bg-r>-model = "claude-sonnet-5-5"</span>
+<span class=bg-g>+model = "claude-opus-5-5"</span></pre></div></details>
+<details class="ocd x"><summary><span><b>✕ config c9 discarded</b> by owner · 09:44</span><i class=cv></i></summary></details>
+
+<h3>config proposal: refused at apply</h3>
+<div class=oc><p class=oh><b>config proposal c10</b><span class=m>acme-api · fleet.toml</span></p>
+<p class="chk r">✕ doctor failed after apply: role rev model claude-opus-9 is not in models. Rolled back from the backup; nothing changed.</p>
+<div class=btns><button type=button>discard</button></div></div>
+
+<h3>config proposal: the conductor tried to apply it</h3>
+<p class=qs>conductor ran herdsman config apply c8 → REFUSED OWNER_ONLY: only the owner's tap applies a proposal</p>
+
+<h3>secret: saved, dismissed, another device</h3>
+<p class="qs ok">🔒 secret RESEND_API_KEY set ✓ (by owner) · 09:36</p>
+<p class=qs>🔒 secret request RESEND_API_KEY dismissed by owner · 09:37</p>
+<div class=oc><p class=oh><b>🔒 secret request</b><span class=m>RESEND_API_KEY · acme-api</span></p>
+<p>why: "#52's over-limit email goes through Resend"</p>
+<p class=st>only a paired owner device can set a secret</p></div>
+
+<h3>login: an account signed out</h3>
+<div class=oc><p class=oh><b>account C signed out</b><span class=m>mac-mini · claude</span></p>
+<p>The conductor moved to account B. Sign C in again on the host's setup terminal.</p>
+<div class=btns><button type=button class=ap>open setup terminal</button><button type=button>later</button></div></div>
+
+<h3>sleep, resume, account switch</h3>
+<p class=qs>☾ asleep after 30 min idle · writes wake it</p>
+<p class=qs>↻ resumed · same session (7f3c…) · 46 messages</p>
+<p class="qs note">⇄ switched to account B (A resting until 18:40) · same session</p>
+<p class="qs note">⇄ no account could resume the session; started on B from a handover summary</p>
+
+<h3>composer: a picked image waits</h3>
+<form class=reply><div class=att><img src=../farm-v2/board-events-390.png alt=""><span>IMG_2041.PNG · 224 KB</span><button type=button aria-label="remove the image">×</button></div><button type=button aria-label="attach an image or file">+</button><textarea rows=1 aria-label=message>see the events</textarea><button type=button>send</button></form>
+</div></div>
+</main>
+<nav><a href=#queue><span>queue<b class=n>·3</b></span></a><a href=#lanes><span>lanes</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a><a href=#chat class=on><span>chat<b class=n>·1</b></span></a></nav>
+<script>
+const v=()=>{const h=location.hash.slice(1);document.body.className='v-'+({t:'t',new:'n',states:'s',guest:'g'}[h]||'l')};v();addEventListener('hashchange',v);
+</script>
+</body></html>
