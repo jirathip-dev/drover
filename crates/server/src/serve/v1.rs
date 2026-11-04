@@ -1,4 +1,4 @@
-//! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`,
+//! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`, `host`,
 //! `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the board's. A
 //! breaking change is `/v2`.
 use super::{act, board, coat, gh, moment, words, BTreeMap, Event, JSON, PAIRED_OPS};
@@ -30,6 +30,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
+            ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
             ("GET", Some("events")) => {
                 let n = |k: &str| f.get(k).and_then(|n| n.parse().ok());
                 out(

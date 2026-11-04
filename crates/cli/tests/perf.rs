@@ -206,9 +206,9 @@ fn the_page_and_frags_carry_one_tab() {
     let page = body("/", "Cookie: tab=lanes\r\n");
     assert!(page.contains("sendmeter-impl-20") && page.contains("<section id=queue></section>"));
     let j: serde_json::Value =
-        serde_json::from_str(body("/frags?tab=host", "").split_once("\r\n\r\n").unwrap().1).unwrap();
+        serde_json::from_str(body("/frags?tab=chat", "").split_once("\r\n\r\n").unwrap().1).unwrap();
     let ids: Vec<&String> = j.as_object().unwrap().keys().collect();
-    assert_eq!(ids, ["host", "needs"]);
+    assert_eq!(ids, ["chat", "needs"]);
 }
 
 /// #337: the first contentful paint in WebKit (warm: the second load in one WebKit, its caches and service worker up;
