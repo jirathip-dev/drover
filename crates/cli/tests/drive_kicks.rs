@@ -317,6 +317,26 @@ fn spawn_pending_for_15_minutes_alerts_once() {
     assert_eq!(alerts(), 1, "once per episode");
 }
 
+/// #438: a launched spawn its kick then refuses DISK_LOW logs only the refusal, never a `driven … ok`.
+#[test]
+fn a_kick_refused_disk_low_leaves_no_driven_ok() {
+    let c = fleet("kicks-disk-low", 6, 1);
+    pass(&c, &fake("1.0"));
+    let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1 239362496 9 2097152 99% /\n";
+    let (code, out) = run(
+        &c,
+        &fake("1.0").reply("df -k /", df),
+        &["kick", "sendmeter", "1", "--why", "drive", "--now"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let driven: Vec<_> = ev.iter().filter(|e| e.kind == "driven" && e.issue == Some(1)).collect();
+    assert!(
+        !driven.is_empty() && driven.iter().all(|e| e.str("code") == Some("DISK_LOW")),
+        "{driven:?}"
+    );
+}
+
 /// #416: a spawn still starting toward a full host (bazzite under `min_free_gb`) holds no `max_parallel_spawns` slot:
 /// the one bound elsewhere launches, and the full host's own is refused `DISK_LOW` without a kick.
 #[test]
