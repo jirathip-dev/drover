@@ -163,7 +163,7 @@ pub fn verdict(
         let wt = Path::new(b.str("worktree").unwrap_or_default());
         let working = |a: &serde_json::Value| a["name"].as_str() == b.str("agent") && a["agent_status"] == "working";
         if wt.is_dir() && herdr::agents(r).is_ok_and(|a| !a.iter().any(working)) {
-            check::purge(r, cfg, fleet, out, wt)?;
+            check::purge(r, cfg, fleet, out, wt, false)?;
         }
     }
     let is_rev = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
@@ -183,7 +183,7 @@ pub fn verdict(
         return Ok(());
     }
     // #164: its build folders go now, even when a dirty worktree stays.
-    check::purge(r, cfg, fleet, out, Path::new(wt))?;
+    check::purge(r, cfg, fleet, out, Path::new(wt), false)?;
     let ws = e.str("workspace").unwrap_or_default();
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
         Some(why) => Err(anyhow::anyhow!(why)),

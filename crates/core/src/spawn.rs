@@ -269,7 +269,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         kick,
         lane,
         account,
-        env: f.env.clone(),
+        env: f.env.clone().into_iter().chain(f.shared_cache.clone()).collect(),
         port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
