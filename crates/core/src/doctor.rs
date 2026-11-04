@@ -60,6 +60,30 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        // #350: each `fast` check must be one the repo's PRs report.
+        if let Some(l) = fleet.fast_first() {
+            let jq = ".[].statusCheckRollup[] | .name // .context";
+            let a = [
+                "pr",
+                "list",
+                "-R",
+                repo,
+                "--state",
+                "merged",
+                "-L",
+                "5",
+                "--json",
+                "statusCheckRollup",
+                "--jq",
+                jq,
+            ];
+            let seen = ok(r, "gh", &a).unwrap_or_default();
+            for x in l.fast.iter().filter(|x| !seen.lines().any(|n| n == x.as_str())) {
+                rows.push(format!(
+                    "! land {name} — fast check `{x}` not seen on recent PRs → fix [fleet.{name}.land] fast"
+                ));
+            }
+        }
         if let Some(g) = fleet.serial.first().filter(|_| !fleet.serial_paths.is_empty()) {
             rows.push(format!(
                 "! serial_paths is the old form; [[fleet.{name}.serial]] name=\"{}\"…",

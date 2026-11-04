@@ -298,6 +298,11 @@ enum Cmd {
     },
     /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
     Migrate,
+    /// Landing numbers: `stats land <fleet>`
+    Stats {
+        #[command(subcommand)]
+        cmd: StatsCmd,
+    },
     /// Help; --agent prints the usage doc agents get
     Help {
         /// Print the agent usage doc
@@ -407,6 +412,12 @@ enum PushCmd {
 }
 
 #[derive(Subcommand)]
+enum StatsCmd {
+    /// #350: per landing mode, median PASS → landed, landings per day, reverts, check time; red minutes on integration
+    Land { fleet: String },
+}
+
+#[derive(Subcommand)]
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
@@ -451,7 +462,7 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -894,6 +905,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
+                Cmd::Stats {
+                    cmd: StatsCmd::Land { fleet },
+                } => crate::land::stats(ctx, &cfg, out, &fleet)?,
                 Cmd::Clean {
                     fleet,
                     lane,

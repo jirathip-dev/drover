@@ -1725,6 +1725,9 @@ impl<'a> Server<'a> {
                 if let Some(b) = blocked_by {
                     card.push(format!("<span class=r>blocked by #{b}</span>"));
                 }
+                if let Some(w) = crate::land::note(events, f, n) {
+                    card.push(format!("<span class=r>{}</span>", esc(&w)));
+                }
                 // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (esc(u.str("id").unwrap_or("?")), esc(u.str("reason").unwrap_or("?")));
@@ -1821,7 +1824,7 @@ impl<'a> Server<'a> {
                         format!(
                             "<p>#{} <span class=g>{}</span> {}{link}</p>",
                             s.issue,
-                            s.state,
+                            esc(&crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone())),
                             age(now.saturating_sub(s.last_ts))
                         )
                     })
@@ -1899,6 +1902,12 @@ impl<'a> Server<'a> {
                     if n == 1 { "" } else { "s" }
                 ),
             };
+            // #350: fast-first landings wait while integration is red.
+            let bad = bad
+                + &crate::land::paused(events, f).map_or(String::new(), |p| {
+                    let at = esc(p.str("at").unwrap_or("?"));
+                    format!("<p class=r>landing paused: {} red since {at}</p>", esc(&fc.integration))
+                });
             cards.push((!need.is_empty(), format!(
                 "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
                  <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{bad}{body}</div>",
