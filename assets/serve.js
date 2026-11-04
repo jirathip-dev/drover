@@ -46,7 +46,6 @@ tab(document.documentElement.dataset.tab || 'queue');
 const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
-$$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
 // #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
 // herd.js loaded (docs/themes.md). #335: the look sheet's STYLE picks it (pixel: scene, ascii: ascii), no Lanes button. In
 // ascii the loading overlay runs the theme's `ascii_loading` frames: built once, then CSS swaps them (no node replaced).
@@ -763,8 +762,116 @@ document.addEventListener('click', async e => {
   EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
   evf(document);
 });
+// #367 queue: pure from here to `queue:end` (tests/queue_tab.rs runs it under node). A row's group: needs you, in
+// progress, queued (the rest); its time in one unit style, naming the phase it measures; a blocked chain's one line.
+const QG = { need: 'needs you', prog: 'in progress', queue: 'queued' };
+const qgroup = s => /^(needs-human|⏸)/.test(s) ? 'need' : /^(impl|review|fix|ready|update|dead|parked)/.test(s) ? 'prog' : 'queue';
+const dur = t => t < 60 ? `${t}s` : t < 3600 ? `${Math.floor(t / 60)}m` : t < 86400 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h`;
+const inph = (s, t) => `in ${s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0]} ${dur(t)}`;
+// steps: [{n, title, b}] depth-first, the root first (b: its blocker). Head, title, tail: the tail names the step the
+// chain waits on next: the root's open blocker, else the root.
+const qsum = st => [`#${st[0].n} → #${st[1].n} · `, st[0].title, ` (${st.length} steps) · next: #${st[0].b || st[0].n}`];
+// queue:end
+// #367: the Queue tab one repo at a time. Chips on top ([repo n], a red dot when it needs you; [all]: every repo's
+// needs-you rows), the pick kept per phone; a tap, a sideways swipe or ←/→ switches. A repo's rows in groups: needs
+// you, in progress (`in impl 1h 47m`), queued: the next 5 by position, `+ N more` opening the rest in place; a blocked
+// chain is one row whose [▾] opens its steps. Every step is idempotent: queue-scroll pushes a tidied copy back.
+const SKEW = Number(B.dataset.ts) - Date.now() / 1000 || 0; // the server's clock, as the page's ages count by it
+const qname = c => c.querySelector('.fn>b').textContent;
+const qst = d => d.querySelector('summary>span:nth-of-type(2)').textContent;
+function qsplit(root) {
+  for (const c of root.querySelectorAll('.fc')) {
+    const rs = [...c.querySelectorAll(':scope>details.q')];
+    if (!rs.length || c.querySelector('.qg')) continue;
+    const gs = {};
+    for (const d of rs) {
+      const g = qgroup(qst(d)), m = d.querySelector('summary>.m');
+      const t = Math.max(0, Math.round(Date.now() / 1000 + SKEW - m.dataset.t));
+      // A running row names its phase; a needs-you row's long state word (`⏸ waiting: decision`) names it already.
+      if (g !== 'queue' && m.dataset.t) m.textContent = g === 'prog' ? inph(qst(d), t) : dur(t);
+      (gs[g] = gs[g] || []).push(d);
+    }
+    const at = el('i', '');
+    rs[0].before(at);
+    at.replaceWith(...Object.keys(QG).filter(g => gs[g]).map(g => {
+      const x = el('div', 'qg');
+      x.dataset.g = g;
+      x.append(el('h3', '', `${QG[g]} (${gs[g].length})`), ...gs[g]);
+      return x;
+    }));
+  }
+}
+function qfold(root) {
+  for (const g of root.querySelectorAll('.qg[data-g=queue]:not(.qd)')) {
+    g.classList.add('qd');
+    const items = [];
+    for (const d of g.querySelectorAll(':scope>details.q')) if (d.matches('.d0') || !items.length) items.push([d]); else items.at(-1).push(d);
+    const tops = items.map(([d, ...rest], i) => {
+      // A row's place in the queue; a chain's steps leave theirs to the chain row.
+      [d, ...rest].forEach(x => { x.querySelector('summary>.m').textContent = rest.length ? '' : '#' + (i + 1); });
+      if (!rest.length) return d;
+      const step = x => ({ n: x.querySelector('summary>span').textContent.slice(1), title: x.querySelector('summary>.tl')?.title || '', b: x.dataset.b });
+      const [h, t, tail] = qsum([d, ...rest].map(step)), at = h.indexOf('→') + 1, c = el('details', 'qc');
+      c.innerHTML = '<summary><i class=cv></i><span></span><span class=qct><span></span><span class=el></span><span></span></span><span class=m></span></summary>';
+      const [a, , x, y, z, m] = c.querySelectorAll('summary span');
+      [a.textContent, x.textContent, y.textContent, z.textContent, m.textContent, y.title] = [h.slice(0, at), h.slice(at), t, tail, '#' + (i + 1), t];
+      d.before(c);
+      c.append(d, ...rest);
+      return c;
+    });
+    if (tops.length <= 5) continue;
+    const x = el('details', 'qx');
+    x.innerHTML = `<summary><span>+</span><span> ${tops.length - 5} more</span></summary>`;
+    tops[4].after(x);
+    x.append(...tops.slice(5));
+  }
+}
+let QR = get('queue:repo');
+function qchips(root) {
+  const q = root.id === 'queue' ? root : root.querySelector('#queue'), cs = q ? [...q.querySelectorAll('.fc')] : [];
+  if (!cs.length) return;
+  const all = q.querySelectorAll('.qg[data-g=need]>details.q').length, p = q.querySelector(':scope>.qch') || el('p', 'chips qch');
+  const chip = (k, name, n, need) => {
+    const b = el('button', 'fc2 ' + k), t = el('span', '', `${name} ${n}`);
+    Object.assign(b, { type: 'button' }).dataset.qr = name;
+    if (need) t.append(el('b', 'r', '●'));
+    b.append(t);
+    return b;
+  };
+  p.replaceChildren(...cs.map(c => chip([...c.classList].find(k => k.startsWith('k-')) || '', qname(c), c.querySelectorAll('details.q').length, c.querySelector('.fn .tag.r'))), chip('', 'all', all, all));
+  q.prepend(p);
+  qshow(q);
+}
+function qshow(q) {
+  const ns = [...q.querySelectorAll('.qch [data-qr]')].map(b => b.dataset.qr), pick = ns.includes(QR) ? QR : ns[0];
+  q.querySelectorAll('.qch [data-qr]').forEach(b => b.setAttribute('aria-pressed', b.dataset.qr === pick));
+  q.querySelectorAll('.fc').forEach(c => {
+    c.hidden = pick === 'all' ? !c.querySelector('.qg[data-g=need]') : qname(c) !== pick;
+    c.classList.toggle('qa', pick === 'all');
+  });
+}
+function qpick(name) { QR = name; put('queue:repo', name); if ($('#queue')) qshow($('#queue')); }
+const qstep = k => { const ns = [...$$('.qch [data-qr]')].map(b => b.dataset.qr), i = ns.indexOf($('.qch [aria-pressed=true]')?.dataset.qr); if (ns.length) qpick(ns[((i + k) % ns.length + ns.length) % ns.length]); };
+document.addEventListener('click', e => { const b = e.target.closest('.qch [data-qr]'); if (b) qpick(b.dataset.qr); });
+document.addEventListener('keydown', e => {
+  if (document.documentElement.dataset.tab !== 'queue' || $('#herd')?.hidden === false || shown() || e.altKey || e.ctrlKey || e.metaKey || e.target.closest?.('input, textarea, select')) return;
+  const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (k) { e.preventDefault(); qstep(k); }
+});
+// A sideways swipe (touch or mouse) over 40 px, more across than down, switches; the click that ends it opens nothing.
+let qsw = null, qswiped = false;
+document.addEventListener('pointerdown', e => { qsw = e.target.closest('#queue') && !e.target.closest('input, textarea, select') ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null; qswiped = false; });
+document.addEventListener('pointerup', e => {
+  const dx = qsw && qsw.id === e.pointerId ? e.clientX - qsw.x : 0, dy = qsw ? e.clientY - qsw.y : 0;
+  qsw = null;
+  if (Math.abs(dx) > 40 && Math.abs(dx) > 2 * Math.abs(dy)) { qswiped = true; qstep(-Math.sign(dx)); }
+});
+document.addEventListener('click', e => { if (qswiped && e.target.closest('#queue')) { qswiped = false; e.preventDefault(); e.stopPropagation(); } }, true);
 function tidy(root) {
+  qsplit(root);
   graph(root);
+  qfold(root);
+  qchips(root);
   rows(root);
   evf(root);
   hostrow(root);
@@ -790,6 +897,12 @@ function tidy(root) {
 }
 tidy(document);
 nows();
+// A tapped alert's issue: its repo picked, its row open (the chain or `+ N more` around it too), in view.
+for (const d of $$('#queue details.q')) if (want && d.querySelector('summary>span').textContent === '#' + want) {
+  qpick(qname(d.closest('.fc')));
+  for (let p = d; p; p = p.parentElement.closest('details')) p.open = true;
+  d.scrollIntoView();
+}
 // [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the overlay's, herd.js builds #hload).
 rf.innerHTML = '<i>↻</i>';
 document.addEventListener('visibilitychange', () => document.documentElement.classList.toggle('bg', document.hidden));

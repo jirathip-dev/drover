@@ -247,7 +247,9 @@ details.q{position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1c
   background:linear-gradient(var(--line),var(--line)) no-repeat calc(var(--gw) + var(--s2)) 100%/100% 1px}
 .d0{--d:0}.d1{--d:1}.d2{--d:2}
 details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
-details.q .tl{grid-column:2/-1}
+/* #367: titles start in one column at every depth: past the depth-2 gutter (--gm), so no graph line crosses one. */
+details.q{--gm:5ch}details.q:has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
+details.q .tl{grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
 details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
@@ -523,3 +525,14 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
 .lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
 @media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}
+/* #367: the Queue tab one repo at a time (serve.js qchips): repo chips in #170's look, a red dot when it needs you; the
+   repo's groups under 13 px headers; a blocked chain one row ([▾] opens its steps in place), `+ N more` likewise; [all]
+   shows only the needs-you groups. A sideways swipe is the page's (no pan), a vertical one scrolls. */
+#queue{touch-action:pan-y}
+.qch{padding-left:0;padding-right:0}.qch .r{margin-left:.6ch}
+.qg>h3{margin:var(--s3) 0 0}
+.qc>summary{grid-template-columns:1ch auto minmax(0,1fr) auto;align-items:start;padding:var(--s1) 0}.qc>summary>span:first-of-type{margin-right:calc(-1 * var(--s2))}
+/* Its title ellipsises on the first line; `(6 steps) · next: #n` is the second, as a row's title line is. */
+.qct{display:flex;flex-wrap:wrap;min-width:0;white-space:pre}.qct>span{flex:none}.qct>.el{flex:1 1 0;min-width:0}.qct>:last-child{flex-basis:100%;color:var(--mute);font-size:var(--fs-meta)}
+.qx{border-bottom:0}.qx>summary{display:flex;white-space:pre;color:var(--link)}.qx>summary>:last-child{flex:1}
+.fc.qa>:not(.fh,summary,.qg[data-g=need]){display:none}
