@@ -138,6 +138,8 @@
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
+    'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
     // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
     // second one: one ellipsised line in each mode, nothing past the row.
@@ -613,6 +615,7 @@
     if (t && t.scrollWidth > t.clientWidth) early.push('"! needs you" overflows its ticket');
   }
   let toasted = null, drove = null, href = null;
+  const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
   const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
@@ -642,6 +645,13 @@
         const t = s.querySelector(':scope>.tl');
         if (!t || !seen(t) || t.title !== t.textContent || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight)) res.outliers.push(`no one-line title: ${label(s)}`);
       }
+    }
+    // #397: the error shows whole (wraps, never ellipsised) and covers no row: "all repos" starts under it.
+    if (V === 'chat-error') {
+      const m = $('.msg.r'), row = $('#chat .fc');
+      if (!m || m.textContent !== ERR) res.outliers.push(`error banner reads "${m && m.textContent}"`);
+      else if (m.scrollWidth > m.clientWidth || m.scrollHeight > m.clientHeight) res.outliers.push(`error banner clipped: ${m.scrollWidth}x${m.scrollHeight} in ${m.clientWidth}x${m.clientHeight}`);
+      else if (m.getBoundingClientRect().bottom > row.getBoundingClientRect().top) res.outliers.push(`error banner covers "${label(row)}"`);
     }
     const out = document.createElement('pre');
     out.id = 'audit';
