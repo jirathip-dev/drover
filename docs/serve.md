@@ -61,14 +61,17 @@ each Events view opens with its last 100 rows; its **older** button shows the ne
 unfolded. No compression:
 a repeat visit downloads the page HTML only, the assets come from the service worker's cache. A
 `serve --export` inlines both, so the static demo needs no `/frag`; it writes `api/v1/state`, `api/v1/events` (every
-event) and `api/v1/host` (#267) as files for the board.
+event), `api/v1/host` (#267) and `api/v1/queue` (#268) as files for the board.
 
 Queue tab (#115): each fleet's rows are a `git log --graph` tree in queue order. A row blocked by another row in
 view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and an `on #b` tag), a blocker out of view is a red
 `! #b` tag. A dot per row: `●` a lane works on it, `○` waiting, `✓` ready, `!` needs you. An issue in a serial group shows
 `🔒<name>` per group (docs/config.md). `[?]` opens the legend sheet: every state word in plain words (the same line is
 each state word's title on Queue, Lanes and Herd), the dots, and each fleet's serial paths. ▲/▼ move a row among its
-siblings.
+siblings. #268: the tab is the TypeScript board's (`web/src/queue.ts`), drawn from API v1's `queue` on load and ↻; when
+its data changes the live stream sends it as `event: queue` (the JSON itself, to every device), and the board draws it
+again. A fleet's [config] sheet is drawn from the same data (no `/frag` read); serve.js then groups, graphs and folds
+the rows as before.
 
 One repo at a time (#367): chips on top, `[repo n]` with a red dot when it needs you, and `[all]` for every repo's
 needs-you rows. A tap, a sideways swipe or ←/→ switches; the pick is kept per phone. A repo's rows are grouped (needs
@@ -316,6 +319,7 @@ transcript, and the paired ops: answer, drive, override, extend, park, unpair, o
 |---|---|
 | `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
 | `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
+| `GET queue` | #268: the Queue tab: a card per fleet (needing you first) with its `k` colour, serial groups, `need`, `paused` line or `drive` line and red `notes`, its `rows` (state, age and `t`, stage chips, lane, PR line, notes, a defaulted decision and its `ask`, ▲/▼ targets, the `lanes` list), `done` today, the `backlog` and the `config` sheet's data; `rw` and `live` say which forms show and whether they post |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
 | `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |

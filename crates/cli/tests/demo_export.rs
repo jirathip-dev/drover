@@ -120,6 +120,12 @@ fn demo_page_is_inert_and_relative() {
     ]
     .iter()
     .fold(html.clone(), |p, f| p + &std::fs::read_to_string(v.join(f)).unwrap());
+    // #268: the Queue tab is the TypeScript board's, from the export's `api/v1/queue` (its forms inert too).
+    assert!(
+        html.contains("<section id=queue></section>"),
+        "the page has no Queue HTML"
+    );
+    let page = page + &queue_html(&std::fs::read_to_string(site.join("api/v1/queue")).unwrap(), "tab(d)");
     assert!(html.contains(&format!(
         "<script src=a/{}/serve.js>",
         v.file_name().unwrap().to_string_lossy()

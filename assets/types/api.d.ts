@@ -147,6 +147,86 @@ export type Sub = { id: string, label: string, created: number, };
 export type Paired = { hash: string, label: string, created: number, used: number, };
 
 /**
+ * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
+ * unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
+ */
+export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
+
+/**
+ * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's
+ * line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of
+ * `done_n`), the backlog and the [config] sheet.
+ */
+export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, };
+
+/**
+ * #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
+ * ran, so none is `nothing was due`).
+ */
+export type Drive = { tone: string, line: string, meta: Array<string>, pass: boolean, acts: Array<DriveAct>, };
+
+/**
+ * A pass's action: its issue (`#N`) or step, in words, its raw `code` on tap.
+ */
+export type DriveAct = { who: string, words: string, code: string, };
+
+/**
+ * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act` and
+ * `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
+ * pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
+ * answer not delivered), the decision taken by default
+ * (and its ask to change it), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+ */
+export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
+
+/**
+ * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
+ * issue is, a check's PASS at the PR head `ok`.
+ */
+export type Stage = { name: string, k: string, g: string, at: number, ok: boolean, };
+
+/**
+ * #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last
+ * verdict in `vtone` and its round, `form` the form-only rounds used.
+ */
+export type PrLine = { pr?: number | null, run?: string | null, ci?: string | null, verdict?: string | null, vtone: string, rounds: number, form?: string | null, };
+
+/**
+ * #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live`
+ * opens its Lanes sheet, `gone` its stored transcript, empty none.
+ */
+export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
+
+/**
+ * A row of `done today`: its land note (else state), age and merged PR.
+ */
+export type DoneRow = { issue: number, note: string, age: string, pr?: string | null, };
+
+/**
+ * #365: the open issues not queued and with no lane, by number, as last read `ago`.
+ */
+export type Backlog = { issues: { [key in string]: BacklogIssue }, ago: string, };
+
+/**
+ * #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`),
+ * LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
+ */
+export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, line_cap?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
+
+export type Harness = { name: string, efforts: Array<string>, };
+
+/**
+ * A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`,
+ * `effort_default`).
+ */
+export type RoleRow = { name: string, profile: string, harness: string, model?: string | null, effort?: string | null, efforts: Array<string>, model_default: string, effort_default: string, accounts: Array<string>, mcp: Array<string>, };
+
+/**
+ * #401: the fleet's conductor (`default`: impl's), its choices: models the fleet's roles name.
+ */
+export type Conductor = { default: boolean, profile: string, harness: string, model?: string | null, effort?: string | null, efforts: Array<string>, models: Array<string>, };
+
+/**
  * #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
  */
 export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };

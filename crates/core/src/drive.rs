@@ -248,8 +248,17 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
-    if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
-        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
+    let low =
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
+    let bound = |p: &Event| {
+        ev.iter()
+            .rev()
+            .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
+    };
+    let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
+    if n_live >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -598,6 +607,8 @@ fn pass(
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
+        // #388: CI that never starts is red too, as the card says it (an unlabelled PR has no full CI by design).
+        let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
         let n = s.issue.to_string();
         // #294: a PR's diff joins its serial groups; an issue waiting for a slot does nothing else this pass.
         if pr["state"] == "OPEN" && !f.serial.is_empty() && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)? {
@@ -667,11 +678,12 @@ fn pass(
             writeln!(out, "{fleet} #{n} no-action: {}", w.what)?;
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
-        } else if !fast && s.state == "ready" && ci == "failed" {
+        } else if !fast && s.state == "ready" && (ci == "failed" || gone.is_some()) {
             // Red CI after a PASS is a FAIL at the same head (no new round), the failed checks as the finding.
             let head = pr["headRefOid"].as_str().unwrap_or_default();
             let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-            std::fs::write(&file, ci_findings(r, f, &pr, head))?;
+            let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
+            std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, &pr, head)))?;
             let file = file.to_string_lossy();
             let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
@@ -976,7 +988,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if KICK.get().is_none()
         && events
             .iter()
-            .filter(|e| e.kind == "spawn" && e.fleet == fleet)
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
             .filter(merged)
             .any(|e| left(&e))
     {

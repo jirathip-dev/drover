@@ -316,3 +316,26 @@ fn spawn_pending_for_15_minutes_alerts_once() {
     run(&later, &Fake::default(), &["check"]);
     assert_eq!(alerts(), 1, "once per episode");
 }
+
+/// #416: a spawn still starting toward a full host (bazzite under `min_free_gb`) holds no `max_parallel_spawns` slot:
+/// the one bound elsewhere launches, and the full host's own is refused `DISK_LOW` without a kick.
+#[test]
+fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
+    let hosts = "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n";
+    let c = fleet_with("kicks-full-host", 1, hosts, 2, &[]);
+    let d = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-1", "pane": "w9:p1", "host": "bazzite",
+        "machine": "bazzite", "worktree": "/home/me/.herdr/worktrees/sendmeter/issue-1", "branch": "issue-1"});
+    herdsman::events::append(
+        &c.state,
+        &herdsman::events::Event::new(1, "sendmeter", Some(1), "spawn", d),
+    )
+    .unwrap();
+    let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": 1, "type": "spawn", "role": "impl"});
+    std::fs::write(marker(&c, 1), e.to_string()).unwrap();
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
+    let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
+    let r = fake("1.0").reply(&format!("{ssh}'df' '-k' '/'"), df);
+    let d = pass(&c, &r);
+    assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+    assert_eq!((launched(&r, 1), launched(&r, 2)), (0, 1), "{d}");
+}
