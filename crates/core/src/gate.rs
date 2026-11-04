@@ -1,5 +1,5 @@
 //! `herdsman verdict` and `herdsman merge`: the review → merge gate.
-use crate::config::{Config, Fleet};
+use crate::config::{Check, Config, Fleet, Premerge};
 use crate::events::{emit, fold, read, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{argv, json, ok, Runner};
@@ -412,7 +412,7 @@ fn premerge(
         }
         if let Some((c, o)) = fail {
             let at = format!("{head:.7} merged with {into} @ {base:.7}, {secs}s");
-            return Err(premerge_failed(ctx, cfg, r, out, (fleet, issue), head, &at, c, &o)?.into());
+            return Err(premerge_failed(ctx, cfg, r, out, (fleet, issue), (head, &at), (c, &o))?.into());
         }
         if tip()? == base {
             return Ok(Ok(Some(secs)));
@@ -424,36 +424,28 @@ fn premerge(
     )))
 }
 
-pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<crate::config::Check> {
-    let cap =
-        (f.local_path().join("ci/cap.toml").exists()).then(|| format!("{} cap-check --config ci/cap.toml", ctx.exe));
-    let plain = || cap.into_iter().map(crate::config::Premerge::Cmd).collect();
-    f.premerge
-        .clone()
-        .unwrap_or_else(plain)
-        .iter()
-        .map(crate::config::Premerge::check)
-        .collect()
+pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<Check> {
+    let has = f.local_path().join("ci/cap.toml").exists();
+    let cap = has.then(|| Premerge::Cmd(format!("{} cap-check --config ci/cap.toml", ctx.exe)));
+    let check = |p| match p {
+        Premerge::Cmd(run) => Check {
+            name: run.clone(),
+            run,
+            ..Check::default()
+        },
+        Premerge::Named(c) => c,
+    };
+    let all = f.premerge.clone().unwrap_or(cap.into_iter().collect());
+    all.into_iter().map(check).collect()
 }
 
-/// #373: the first failing check in the scratch worktree `wt` (`base` merged with the PR) and its output; a check with
-/// `when` runs only if the merge changes a path its globs match.
-pub(crate) fn run_checks<'a>(
-    r: &dyn Runner,
-    wt: &Path,
-    base: &str,
-    checks: &'a [crate::config::Check],
-) -> Option<(&'a crate::config::Check, String)> {
-    let files = if checks.iter().any(|c| !c.when.is_empty()) {
-        git(r, wt, &["diff", "--name-only", base, "HEAD"]).unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let hit = |c: &&crate::config::Check| {
-        let glob = |g: &String| files.lines().any(|p| crate::config::glob(g.as_bytes(), p.as_bytes()));
-        c.when.is_empty() || c.when.iter().any(glob)
-    };
-    checks.iter().filter(hit).find_map(|c| {
+/// #373: the first failing check (and its output) in the scratch worktree `wt`, `base` merged with the PR.
+pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Check]) -> Option<(&'a Check, String)> {
+    let diff = || git(r, wt, &["diff", "--name-only", base, "HEAD"]).unwrap_or_default();
+    let files = cs.iter().any(|c| !c.when.is_empty()).then(diff).unwrap_or_default();
+    let glob = |g: &String| files.lines().any(|p| crate::config::glob(g.as_bytes(), p.as_bytes()));
+    let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
+    cs.iter().filter(hit).find_map(|c| {
         let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
         let o = r.run("sh", &sh).unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
@@ -462,57 +454,34 @@ pub(crate) fn run_checks<'a>(
 
 /// #272/#373: a failed check at `head` is a FAIL verdict (a fix round briefed with its output or `fix` text, no new
 /// review round) and `premerge-failed`; returns the refusal: the check's `code` (else `STAGING_WOULD_BREAK`).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn premerge_failed(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     (fleet, issue): (&str, u64),
-    head: &str,
-    at: &str,
-    c: &crate::config::Check,
-    o: &str,
+    (head, at): (&str, &str),
+    (c, o): (&Check, &str),
 ) -> Result<Refusal> {
     let o = crate::lanes::mask(o);
-    let line = |l: &&str| !l.trim().is_empty();
-    let msg = if c.code.is_some() {
-        o.lines().find(line).unwrap_or("failed").trim().to_string()
-    } else {
-        let first = o.lines().find(|l| l.contains("error")).or_else(|| o.lines().find(line));
-        format!("{}: {}", c.name, first.unwrap_or("failed").trim())
-    };
-    let lines: Vec<&str> = o.lines().collect();
-    let tail = lines[lines.len().saturating_sub(20)..].join("\n");
-    let min = o
-        .lines()
-        .find_map(|l| l.split_once("min_version="))
-        .map_or("", |m| m.1.trim());
-    let fix = c.fix.as_ref().map_or(format!("```\n{o}\n```"), |t| {
-        t.replace("{output}", &format!("\n```\n{tail}\n```\n"))
-            .replace("{min}", min)
-    });
+    let lines: Vec<&str> = o.lines().filter(|l| !l.trim().is_empty()).collect();
+    let err = |l: &&&str| c.code.is_none() && l.contains("error");
+    let first = lines.iter().find(err).or(lines.first()).map_or("failed", |l| l.trim());
+    let msg = c.code.as_ref().map_or(format!("{}: {first}", c.name), |_| first.into());
+    let block = format!("\n```\n{}\n```\n", lines[lines.len().saturating_sub(20)..].join("\n"));
+    let min = o.lines().find_map(|l| l.split_once("min_version="));
+    let min = min.map_or("", |m| m.1.trim());
+    let tpl = |t: &String| t.replace("{output}", &block).replace("{min}", min);
     let file = premerge_file(ctx, fleet, issue);
+    let fix = c.fix.as_ref().map_or(format!("```\n{o}\n```"), tpl);
     std::fs::write(&file, format!("FAIL\n\nPremerge on {at}: {msg}\n\n{fix}\n"))?;
-    // The card's line: `migration-order failed: rename needed` (the fix text's first word).
-    let what = c
-        .fix
-        .as_deref()
-        .and_then(|t| t.split_whitespace().next())
-        .map(str::to_lowercase);
-    let note = what.map_or(format!("{} failed", c.name), |w| {
-        format!("{} failed: {w} needed", c.name)
-    });
-    let code: &'static str = match &c.code {
-        Some(k) => Box::leak(k.clone().into_boxed_str()),
-        None => "STAGING_WOULD_BREAK",
-    };
-    let d = json!({"name": crate::lanes::mask(&c.name), "code": code, "note": crate::lanes::mask(&note)});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, fleet, Some(issue), "premerge-failed", d),
-    )?;
+    let what = c.fix.as_deref().and_then(|t| t.split_whitespace().next());
+    let what = what.map(|w| format!(": {} needed", w.to_lowercase()));
+    let code: &'static str = c.code.clone().map_or("STAGING_WOULD_BREAK", |k| &*k.leak());
+    let note = crate::lanes::mask(&format!("{} failed{}", c.name, what.unwrap_or_default()));
+    let d = json!({"name": crate::lanes::mask(&c.name), "code": code, "note": note});
+    let ev = Event::new(ctx.now, fleet, Some(issue), "premerge-failed", d);
+    emit(&ctx.state, cfg, ev)?;
     verdict(ctx, cfg, r, out, (fleet, issue), false, head, &file.to_string_lossy())?;
     Ok(refuse(code, msg))
 }

@@ -239,8 +239,7 @@ pub struct Land {
     pub full_first_paths: Vec<String>,
 }
 
-/// #373: a `premerge` check: a plain command, or a named one that runs only when the PR changes `when` paths and
-/// refuses with `code`, its fix round briefed with `fix` (`{output}`: the last 20 lines, `{min}`: a `min_version=`).
+/// #373: a plain command, or a named check: runs if the PR changes `when` paths, refuses with `code`, briefs `fix`.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Premerge {
@@ -256,19 +255,6 @@ pub struct Check {
     pub when: Vec<String>,
     pub code: Option<String>,
     pub fix: Option<String>,
-}
-
-impl Premerge {
-    pub fn check(&self) -> Check {
-        match self {
-            Premerge::Cmd(c) => Check {
-                name: c.clone(),
-                run: c.clone(),
-                ..Check::default()
-            },
-            Premerge::Named(c) => c.clone(),
-        }
-    }
 }
 
 /// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.

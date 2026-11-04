@@ -1001,14 +1001,12 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let push = to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
         // #373: the premerge checks re-run on the updated head before it is pushed; a failure is its fix round.
-        let fail = (clean && push)
-            .then(|| crate::gate::run_checks(r, &wt, &into, &checks))
-            .flatten();
+        let fail = crate::gate::run_checks(r, &wt, &into, if clean && push { &checks[..] } else { &[] });
         let res = if !clean {
             update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
         } else if let Some((c, o)) = fail {
             let at = format!("{from:.7} updated onto {into}");
-            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), &from, &at, c, &o);
+            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), (&from, &at), (c, &o));
             rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
         } else if push {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {

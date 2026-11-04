@@ -284,10 +284,9 @@ pub fn board(events: &[Event], fleet: &str, now: u64, cfg: Option<&crate::config
             format!("\n         ⚠ conflicts with {o} ({})", names.join(", "))
         });
         // #373: its own line too, until a PASS: `✗ migration-order failed: rename needed`.
-        let pf = |e: &&Event| {
-            e.is("premerge-failed", fleet, n) || e.is("verdict", fleet, n) && e.str("verdict") == Some("PASS")
-        };
-        let note = events.iter().rev().find(pf).and_then(|e| e.str("note"));
+        let pass = |e: &&Event| e.is("verdict", fleet, n) && e.str("verdict") == Some("PASS");
+        let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
+        let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
         let last = last.unwrap_or_else(|| if ev.is_empty() { "-".into() } else { ev.into() });
         format!(
