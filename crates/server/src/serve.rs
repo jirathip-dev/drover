@@ -747,7 +747,7 @@ impl<'a> Server<'a> {
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        // #386: a thread's message carries an attached file (base64, at most 10 MB): its POST may be that long.
+        // #386: a thread's message carries attached files (base64, at most 10 MB each): its POST may be that long.
         let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
         loop {
             let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
@@ -755,7 +755,7 @@ impl<'a> Server<'a> {
                 let h = String::from_utf8_lossy(&buf[..i]);
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") {
-                    24 << 20
+                    140 << 20 // #405: up to 10 files a message
                 } else {
                     32_768
                 };

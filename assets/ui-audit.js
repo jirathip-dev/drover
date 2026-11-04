@@ -253,6 +253,51 @@
     },
     'chat-wait-still': () => VIEWS['chat-wait'](),
     'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
+    // #405 gate 2: [+ thread]'s empty thread (`new-<repo>`, as the tap opens it): no title form, no blocks, the
+    // composer (its first message starts the thread); the demo's controls inert, so enabled as a paired phone's.
+    'chat-new': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      chatOpen('new-acme-api');
+      const v = $('#chat .cvp[data-t="new-acme-api"]');
+      v.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+      if (!seen(v) || v.querySelector('.tc').childElementCount || v.querySelector('input:not([type=file])') || v.querySelector('.tw').dataset.repo !== 'acme-api') early.push('the new thread is not empty with a composer for acme-api');
+    },
+    // #405 gate 2: a thread row swiped left shows [archive]; swiped right it hides; a short or downward drag does nothing.
+    'chat-archive': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const r = $('#chat .tr[data-t=t4]'), b = r.parentNode.querySelector('.sb[name=archive]'), y = r.getBoundingClientRect().top + 10;
+      const swipe = (x0, x1, dy = 0) => {
+        r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x0, clientY: y }));
+        r.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x1, clientY: y + dy }));
+      };
+      b.disabled = false;
+      for (const [what, x0, x1, dy, want] of [['a short drag', 300, 280, 0, false], ['a downward drag', 300, 240, 200, false], ['a left swipe', 300, 150, 0, true], ['a right swipe', 150, 300, 0, false], ['a left swipe again', 300, 150, 0, true]]) {
+        swipe(x0, x1, dy);
+        if (seen(b) !== want) early.push(`${what}: [archive] ${seen(b) ? 'shows' : 'hidden'}`);
+      }
+      scrollTo({ top: 0, behavior: 'instant' });
+    },
+    // #405 gate 2: the archived fold at the bottom of its repo card, open: t1 with [restore].
+    'chat-archived': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const f = $('#chat .fc .arc');
+      if (!f) return early.push('no archived fold');
+      f.open = true;
+      f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+      if (f.nextElementSibling || !f.querySelector('.tr[data-t=t1]') || !f.querySelector('.sb[name=restore]') || $('#chat .fc>.sw .tr[data-t=t1]')) early.push('t1 is not in its card\'s last fold with [restore]');
+    },
+    // #405 gate 2: three images picked at once wait above t3's box as thumbnails, each with [×]; [×] drops one.
+    'chat-thumbs': async () => {
+      const f = composer(), i = f.querySelector('input[type=file]'), d = new DataTransfer();
+      const srcs = [...$$('#chat .cvp[data-t="t4"] .im img')].map(m => m.src);
+      for (const [n, src] of [srcs[0], srcs[1], srcs[0]].entries()) d.items.add(new File([await fetch(src).then(r => r.blob())], `IMG_20${41 + n}.PNG`, { type: 'image/png' }));
+      i.files = d.files;
+      i.dispatchEvent(new Event('change', { bubbles: true }));
+      const th = () => [...$$('#chat .tw[data-t=t3] .att')].filter(a => a.querySelector('img') && a.querySelector('button'));
+      if (th().length !== 3) early.push(`${th().length} thumbnails with [×], not 3`);
+      if (DBG.get('check') && th()[1]) { th()[1].querySelector('button').click(); if (th().length !== 2) early.push(`[×]: ${th().length} left, not 2`); }
+      else $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
