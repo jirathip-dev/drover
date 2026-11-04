@@ -119,7 +119,9 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     );
     let page = |r: &Fake| {
         let s = Server::new(&c, r, Some("127.0.0.1:7777".into()));
-        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned()
+        let page =
+            String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
+        with_queue(&page, &s, "127.0.0.1:7777", NOW) // #268: the Queue tab as the board draws it
     };
     assert!(page(&Fake::default()).contains("<span class=r>answer q1 not delivered: "));
 

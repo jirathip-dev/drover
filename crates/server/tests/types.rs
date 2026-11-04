@@ -47,6 +47,20 @@ macro_rules! each {
             FleetRow,
             Sub,
             Paired,
+            QueueTab,
+            QueueCard,
+            Drive,
+            DriveAct,
+            QueueRow,
+            Stage,
+            PrLine,
+            QueueLane,
+            DoneRow,
+            Backlog,
+            ConfigSheet,
+            Harness,
+            RoleRow,
+            Conductor,
             Events,
             Ev,
             Reply,
@@ -114,6 +128,8 @@ fn serde_json_fits_the_types() {
     let mut checks = vec![("Herd", same::<Herd>(&file(&site.join("herd.json"))))];
     // #267: the Host tab's data, its cards' rows (gauges, sparklines, charts inline) included.
     checks.push(("HostTab", same::<HostTab>(&file(&site.join("api/v1/host")))));
+    // #268: the Queue tab's data, its rows, drive lines, backlogs and [config] sheets included.
+    checks.push(("QueueTab", same::<QueueTab>(&file(&site.join("api/v1/queue")))));
     for l in std::fs::read_dir(site.join("lane")).unwrap() {
         checks.push(("Chat", same::<Chat>(&file(&l.unwrap().path()))));
     }
@@ -198,6 +214,20 @@ fn serde_json_fits_the_types() {
         FleetRow,
         Sub,
         Paired,
+        QueueTab,
+        QueueCard,
+        Drive,
+        DriveAct,
+        QueueRow,
+        Stage,
+        PrLine,
+        QueueLane,
+        DoneRow,
+        Backlog,
+        ConfigSheet,
+        Harness,
+        RoleRow,
+        Conductor,
         Events,
         Ev,
         Reply

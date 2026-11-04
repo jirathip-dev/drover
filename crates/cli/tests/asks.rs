@@ -207,6 +207,7 @@ fn needs_you_card_tops_every_tab_and_answer_needs_a_paired_device() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
+    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #268: the Queue tab as the board draws it
     let (card, main) = (
         page.find("<div class=ask>").expect("no needs-you card"),
         page.find("<main>").unwrap(),
@@ -429,7 +430,9 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     c.now = NOW - 60;
     let page = |c: &herdsman::Ctx| {
         let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
-        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned()
+        let page =
+            String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
+        with_queue(&page, &s, "127.0.0.1:7777", c.now) // #268: the Queue tab as the board draws it
     };
     let p = page(&c);
     assert!(

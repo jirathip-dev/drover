@@ -543,10 +543,9 @@ fn page_has_no_dash_placeholders() {
     let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/?all=1", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
-    // #60: and the parts the page loads on demand ([config] sheet; #266: the board's Events).
+    // #60: and the parts the page loads on demand (#266: the board's Events; #268: its Queue tab and [config] sheet).
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let p = req(&s, "GET", "/frag?id=config&fleet=sendmeter", "", "", T);
-    html += &p[p.find("\r\n\r\n").unwrap()..];
+    html += &queue_js(&s, ADDR, T, "tab(d) + sheet(d, 'sendmeter')");
     html += &events_tab(&s, ADDR, T, "{}").unwrap_or_default();
     assert!(
         !html.contains(" - ") && !html.contains(">-<") && !html.contains(" · -") && !html.contains('—'),

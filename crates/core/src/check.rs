@@ -1,6 +1,6 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
 
-use crate::config::Config;
+use crate::config::{Config, Fleet};
 use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
@@ -10,18 +10,17 @@ use crate::spawn::{changes, dirty, OWN_FILES};
 use crate::Ctx;
 use crate::{gh, herdr};
 use anyhow::{Context, Result};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
-/// Head sha of an open PR that passes every merge gate, if any.
-fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<String> {
-    let f = cfg.fleet(&s.fleet).ok()?;
+/// A ready issue's open PR.
+fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
+    let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
     let branch = crate::gate::branch_of(Some(s), s.issue);
     let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).ok()?;
-    (pr["state"] == "OPEN").then_some(())?;
-    gate(f, &pr, Some(s), false).ok()
+    (pr["state"] == "OPEN").then_some((f, pr))
 }
 
 /// `(url, prompt)` when the issue's latest amendment is missing from the lane's `.brief.md` (#101).
@@ -221,13 +220,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
         }
-        if s.state == "ready" && idle > stall {
-            if let Some(head) = mergeable(ctx, r, cfg, s) {
-                let why = format!(
-                    "PASS @ {} with green CI, unmerged for {}; run `herdsman merge`",
-                    &head[..7.min(head.len())],
-                    age(idle)
-                );
+        if let Some((f, pr)) = ready(ctx, r, cfg, s) {
+            // #388: a PASS whose head never got a check, once per head.
+            if let Some(why) = gh::missing(ctx, Some(r), cfg, (&s.fleet, s.issue), &events, &pr) {
+                hits.push(("ci-missing", pr["headRefOid"].as_str().unwrap_or_default().into(), why));
+            }
+            if let Some(head) = gate(f, &pr, Some(s), false).ok().filter(|_| idle > stall) {
+                let (short, ago) = (&head[..7.min(head.len())], age(idle));
+                let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `herdsman merge`");
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
             }
         }
@@ -425,11 +425,11 @@ pub fn clean(
     let mut failed = 0;
     let mut freed = 0;
     let mut closed = BTreeMap::new();
-    // Newest spawn per worktree wins (it has the current pane).
+    // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
     for e in events
         .iter()
         .rev()
-        .filter(|e| e.kind == "spawn" && fleet.is_none_or(|f| f == e.fleet))
+        .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
     {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
@@ -460,6 +460,7 @@ pub fn clean(
         };
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
+        let shown = (e.str("host").filter(|_| on.machine.is_some())).map_or(wt.into(), |h| format!("{h}:{wt}")); // #416
         let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
         let keep = if live {
             Some("live agent".to_string())
@@ -474,7 +475,7 @@ pub fn clean(
         };
         let keep = match keep {
             Some(why) if !yes && !live && lane.is_none() => {
-                writeln!(out, "would save {wt} to wip/ ({why}), then remove it")?;
+                writeln!(out, "would save {shown} to wip/ ({why}), then remove it")?;
                 continue;
             }
             Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, &on, out, &events, e, wt)?,
@@ -484,11 +485,11 @@ pub fn clean(
             if lane.is_some() {
                 return unsafe_lane(&reason);
             }
-            writeln!(out, "keep {wt}: {reason}")?;
+            writeln!(out, "keep {shown}: {reason}")?;
             continue;
         }
         if !yes {
-            writeln!(out, "would remove {wt} (pane {pane}, {}#{n} {why})", e.fleet)?;
+            writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
         }
         if let Err(err) = remove(
@@ -500,7 +501,7 @@ pub fn clean(
                 .or_else(|| pane.split(':').next())
                 .unwrap_or_default(),
         ) {
-            writeln!(out, "failed {wt}: {err:#}")?;
+            writeln!(out, "failed {shown}: {err:#}")?;
             failed += 1;
             continue;
         }
@@ -508,7 +509,7 @@ pub fn clean(
             let _ = herdr::close(&on, pane);
         }
         drop_log(ctx, e.str("agent"));
-        writeln!(out, "removed {wt} ({}#{n} {why})", e.fleet)?;
+        writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(
             &ctx.state,
             cfg,
@@ -785,6 +786,39 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Re
     }
     Ok(found.len())
 }
+
+/// #416: `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
+pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove: bool) -> Result<usize> {
+    let (ours, mut found): (Vec<&str>, _) = (cfg.fleet.values().map(crate::config::Fleet::repo_name).collect(), 0);
+    for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
+        let (on, root) = (
+            On::new(r, h.machine.as_deref()),
+            h.root.as_deref().unwrap_or("~/.herdr/worktrees"),
+        );
+        let list = ok(&on, "sh", &["-c", DIRS, "sh", root.trim_start_matches("~/")]);
+        let list = list.or_else(|e| writeln!(out, "cannot list orphans on {name}: {e:#}").map(|()| String::new()))?;
+        for (kb, p) in list.lines().filter_map(|l| l.split_once('\t')) {
+            if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
+                found += 1;
+                if remove {
+                    ok(&on, "rm", &["-rf", "--", p])?;
+                    writeln!(out, "removed orphan {name}:{p}")?;
+                } else {
+                    writeln!(
+                        out,
+                        "orphan {name}:{p} {:.1} GB",
+                        gb(kb.parse::<u64>().unwrap_or(0) * 1024)
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// `<KB>\t<path>` per folder (not a symlink) under the root `$1`, from `$HOME` unless absolute.
+const DIRS: &str = "cd && cd \"$1\" 2>/dev/null || exit 0; \
+for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; true";
 
 /// #138: the lane's rolling transcript goes with it.
 fn drop_log(ctx: &Ctx, agent: Option<&str>) {

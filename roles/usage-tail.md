@@ -56,7 +56,7 @@ an `account-capped` one is skipped until the banner's reset time (else `cap_rese
 
 ## Events
 
-`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `account-capped` (limit banner), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `herdsman merge` emits
+`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `ci-missing` (a PR head with no checks `ci_start_minutes` (10) after its push, once per head), `account-capped` (limit banner), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `herdsman merge` emits
 `evidence-missing` (issue left open) if the evidence comment fails twice. Notifiers get one plain line, or raw event JSON with `format = "json"`. A fleet's own `[[fleet.<name>.notify]]` (same fields)
 replaces the global `[[notify]]` for its events; `notify_global = true` in `[fleet.<name>]` sends to both.
 Owner-only: `herdsman pause|resume <fleet>` (PAUSED), `herdsman drive`, `herdsman setup|timer|tick` (the 5-minute job), `herdsman doctor` (host check), `herdsman reclaim` (idle worktrees' build folders), `herdsman host destroy <name>` (a cloud host, after a wip save), `herdsman serve`, the phone page (its writes log `"via":"web"`), and `herdsman report [id]`, its bug reports.

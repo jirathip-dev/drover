@@ -273,7 +273,7 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
-    /// Alert once per state on stall, lane-dead, ready-unmerged, ask-waiting, orphan-lane; idempotent, safe from cron
+    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
     Accounts {
@@ -1078,6 +1078,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
+                        check::remote_orphans(&cfg, r, out, orphans && yes)?;
                     }
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,

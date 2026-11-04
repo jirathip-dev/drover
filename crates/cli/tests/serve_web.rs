@@ -13,8 +13,11 @@ fn config() -> String {
     format!("models = [\"opus\", \"sonnet\"]\n\n[serve]\nallowed_hosts = [\"mac.tail1.ts.net\"]\n\n{CONFIG}")
 }
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
-    String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).into_owned()
+    let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
+        .into_owned();
+    with_queue(&res, s, ADDR, 1_000_000)
 }
 
 /// The hidden mtime the page renders into every form.
@@ -185,9 +188,10 @@ fn role_dropdowns_set_like_herdsman_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    // #162: a fleet's role forms are in its [config] sheet, loaded when [config] is tapped.
+    // #162: a fleet's role forms are in its [config] sheet, opened when [config] is tapped (#268: the board draws it
+    // from API v1's `queue`).
     assert!(get(&s, "/").contains("<button type=button class=cfg data-f=\"sendmeter\">Config</button>"));
-    let page = get(&s, "/frag?id=config&fleet=sendmeter");
+    let page = queue_js(&s, ADDR, 1_000_000, "sheet(d, 'sendmeter')");
     assert!(
         page.contains("<option selected>opus</option><option>sonnet</option>"),
         "only `models`"
@@ -918,7 +922,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
         assert!(j.is_object(), "{path}");
     }
-    assert!(send("/frags", "").contains("\"queue\""), "frags by element id");
+    assert!(send("/frags", "").contains("\"needs\""), "frags by element id");
     for path in ["/frags", "/?frag=all", "/herd.json", "/lane?agent=sendmeter-impl-12"] {
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
@@ -950,7 +954,8 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
     assert!(send(&format!("{v}/serve.js"), "").contains("fetch(R + 'frags?tab='"));
 }
 
-/// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404.
+/// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404. #268:
+/// a [config] sheet is the TypeScript board's (API v1's `queue`), no part.
 #[test]
 fn frag_parts_redirect_navigations_and_404_unknown_ids() {
     let (c, r) = (ctx(&tmpdir("frag-part"), &config()), Fake::default());
@@ -962,7 +967,7 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
         ))
         .into_owned()
     };
-    for path in ["/frag?id=config&fleet=sendmeter"] {
+    for path in ["/frag?id=hist&host=mini&k=load"] {
         assert!(send(path, "").starts_with("HTTP/1.1 200 OK"), "{path}");
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
@@ -981,6 +986,7 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
         "/frag?id=roles&fleet=sendmeter",
         "/frag?id=config",
         "/frag?id=config&fleet=nope",
+        "/frag?id=config&fleet=sendmeter",
     ] {
         let res = send(path, "");
         assert!(
