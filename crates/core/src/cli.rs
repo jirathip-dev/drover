@@ -144,6 +144,16 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ThreadCmd,
     },
+    /// #387: fleet.toml changes as thread cards only the owner applies (docs/conductor.md)
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCmd,
+    },
+    /// #387: secrets in the host's keychain as `herdsman/<fleet>/<NAME>`; fleet `env` reads them as `secret:<NAME>`
+    Secret {
+        #[command(subcommand)]
+        cmd: SecretCmd,
+    },
     /// The open asks, oldest first, with age
     Asks {
         #[command(flatten)]
@@ -381,6 +391,32 @@ enum ThreadCmd {
 }
 
 #[derive(Subcommand)]
+enum ConfigCmd {
+    /// Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]
+    Propose { thread: String, file: PathBuf },
+    /// Owner only: apply a proposal (backup kept, doctor run)
+    Apply { id: String },
+    /// Owner only: discard a proposal
+    Discard { id: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCmd {
+    /// Ask the owner for a secret in a thread: a masked card on paired owner devices
+    Request {
+        thread: String,
+        name: String,
+        /// What it is for, as the card shows it
+        #[arg(long)]
+        why: String,
+    },
+    /// Owner only: the secrets set, by fleet
+    Ls,
+    /// Owner only: delete a secret
+    Rm { fleet: String, name: String },
+}
+
+#[derive(Subcommand)]
 enum QueueCmd {
     /// Append issues to the queue (or put them on top / after N)
     Add {
@@ -496,8 +532,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`).
-pub const HELP_AGENT_MAX: usize = 242;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`).
+pub const HELP_AGENT_MAX: usize = 261;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -915,6 +951,23 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ThreadCmd::Reply { id, text, file } => crate::conductor::reply(ctx, &cfg, &id, &text, &file)?,
                     ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
                     ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,
+                },
+                Cmd::Config { cmd } => {
+                    let (id, apply) = match cmd {
+                        ConfigCmd::Propose { thread, file } => {
+                            return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
+                        }
+                        ConfigCmd::Apply { id } => (id, true),
+                        ConfigCmd::Discard { id } => (id, false),
+                    };
+                    writeln!(out, "{}", crate::propose::settle(ctx, &cfg, r, &id, apply)?)?;
+                }
+                Cmd::Secret { cmd } => match cmd {
+                    SecretCmd::Request { thread, name, why } => {
+                        crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
+                    }
+                    SecretCmd::Ls => crate::secret::ls(ctx, out)?,
+                    SecretCmd::Rm { fleet, name } => crate::secret::rm(ctx, &cfg, r, &fleet, &name)?,
                 },
                 Cmd::Hosts { cmd } => match cmd {
                     None => crate::hosts::list(ctx, &cfg, r, out, false)?,

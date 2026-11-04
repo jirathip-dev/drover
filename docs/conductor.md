@@ -1,4 +1,4 @@
-# Conductor chat (#355, steps 1 and 2)
+# Conductor chat (#355, steps 1 to 3)
 
 Talk to a **conductor** through herdsman itself, with no Hermes needed. A **thread** belongs to one fleet's repo, or
 to `all` for cross-cutting work. Each thread is talked through by one conductor lane.
@@ -76,6 +76,57 @@ choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The 
 lines never push.
 
 Events: `thread-new`, `thread-msg` (`files`), `thread-cmd`, `thread-read`, `conductor-start` (session, resumed,
-account), `conductor-sleep`.
+account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
+`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only), `telegram-topic`.
 
-Still to come: the `config propose` cards, secrets and the Telegram bridge (step 3).
+## Config changes (#387)
+
+`herdsman config propose <thread> <file>`: `<file>` is the whole new fleet.toml (the conductor edits a copy). It is
+validated like fleet.toml itself, and its diff shows in the thread as a card with **[apply] [discard]**. Only the
+owner applies it: a tap on a paired device, or `herdsman config apply|discard <id>` outside a lane (the lane hook
+refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
+new one and runs `doctor`. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
+thread's system line, e.g. `config c1 applied by owner, backup kept, doctor ✓` (the conductor gets it too).
+
+## Accounts (#387)
+
+The conductor uses its role's `account`/`accounts` or #302's `fallback` chain. When `check` sees the awake conductor's
+usage-limit banner (or a sign-out), it rests that account (else that harness), closes the pane, and resumes the
+**same session** on the next one (Claude Code `--resume <id>`). The thread shows `switched to claude:B (claude:A
+resting until 18:40)`. A harness that can't resume gets the thread so far in its kick. A sign-out also adds a
+`<harness> is signed out: [sign in]` line; the button opens #303's setup terminal on the main host. The conductor
+never edits the account list itself: that change is a `config propose` card.
+
+## Secrets (#387)
+
+- `herdsman secret request <thread> <NAME> --why "…"` shows a masked-input card with [save] [dismiss], on paired
+  owner devices only (elsewhere the card says so).
+- [save] stores the value in the host's keychain as `herdsman/<fleet>/<NAME>` (`<fleet>` is the thread's, or `all`),
+  hex-encoded on `security -i`'s stdin, never in argv. Events, the chat and lanes never see it. The thread records
+  only `secret <NAME> set ✓ (by owner)`.
+- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn the lane's own shell reads it
+  (`security find-generic-password … -w`, the fleet's item, else `all`'s).
+- `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
+
+## Telegram (#387, optional)
+
+herdsman talks to the Telegram Bot API itself (no Hermes). The bot token is the keychain item
+`herdsman/all/TELEGRAM_BOT_TOKEN` (a `secret request` in an `all` thread stores it there), never fleet.toml. curl
+gets it on stdin only.
+
+```toml
+[telegram]
+chat = -100123     # a forum supergroup the bot administers (topics on)
+owner = 4242          # your Telegram user id: only your messages and taps count
+# api = "https://api.telegram.org"
+```
+
+- `herdsman serve` long-polls it (it moves to Phase C, #345, later).
+- **One forum topic is one thread.** A new topic starts a thread under **all repos**, unless its name starts with a
+  repo's fleet name. A thread started on the board gets a new topic.
+- The conductor's replies and system lines go to the topic. An ask's options become inline keyboard buttons (a tap
+  answers it, `via: telegram`). Images go both ways: a photo you send is saved in the thread's `uploads/` and typed
+  in with its path, and the conductor's images arrive as photos (other files as documents). A config or secret card
+  says it waits on the board.
+- The board stays the primary UI and shows the whole conversation. Your own messages stay where you wrote them.
+- Cursor: `<state dir>/telegram.json` (the next update id, the events relayed). The first run relays nothing older.

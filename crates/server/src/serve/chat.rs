@@ -167,7 +167,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     for e in of(events, id) {
         let s = |k| e.str(k).unwrap_or_default();
         h += &match (e.kind.as_str(), s("from")) {
-            ("thread-msg", "system") => format!("<p class=\"qs note\">{}</p>", esc(s("text"))),
+            ("thread-msg", "system") => format!("<p class=\"qs note\">{}{}</p>", esc(s("text")), signin(cfg, e, dis)),
             ("thread-msg", _) if s("text").starts_with("DECISION ") => String::new(),
             ("thread-msg", f) => {
                 let (k, who) = if f == "conductor" { ("ai", "conductor") } else { ("me", "you") };
@@ -176,6 +176,19 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
             }
             ("thread-cmd", _) => format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>{}</span><i class=cv></i></summary></details>", esc(s("cmd"))),
             ("needs-decision", _) => ask(ctx, events, e, dis),
+            ("config-propose", _) if crate::propose::settled(events, s("id")).is_none() => {
+                let (q, d) = (esc(s("id")), esc(s("diff")));
+                let b = |v: &str| format!("<button name=act value={v}{dis}>{v}</button>");
+                let body = format!("<div class=md><p class=qid>config {q}</p><pre class=df>{d}</pre></div><form class=chc data-id=\"{q}\">{}{}</form>", b("apply"), b("discard"));
+                block(ctx.now, "ai", "conductor", &format!("proposes config {}", s("id")), &body, e.ts)
+            }
+            ("secret-request", _) if crate::secret::open(events, id, s("name")).is_some_and(|o| std::ptr::eq(o, e)) => {
+                let (n, why) = (esc(s("name")), prose(s("why")));
+                let form = format!("<form class=chs data-t=\"{id}\" data-name=\"{n}\"><input type=password name=value autocomplete=off aria-label=\"value of {n}\" placeholder=\"paste the value\"><button name=act value=save>save</button><button name=act value=dismiss>dismiss</button></form>");
+                let form = if rw { form } else { "<p class=m>only a paired owner device can enter it</p>".into() };
+                let body = format!("<div class=md><p class=qid>secret {n} · stored in the keychain, never in the chat</p>{why}</div>{form}");
+                block(ctx.now, "ai", "conductor", &format!("asks for secret {}", s("name")), &body, e.ts)
+            }
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => {
                 format!("<p class=qs>↻ resumed · same session ({:.4}…)</p>", esc(s("session")))
             }
@@ -205,6 +218,23 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
         "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span></div></div>\
          <div class=tc>{h}</div><p class=tlv>{live}</p>{guest}<form class=tw data-t=\"{id}\"><input type=file hidden{dis}><button type=button class=add aria-label=\"attach an image or file\"{dis}>+</button>\
          <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button{dis}>send</button></form></div>"
+    )
+}
+
+/// #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
+fn signin(cfg: &Config, e: &Event, dis: &str) -> String {
+    let Some(name) = e.str("signin") else {
+        return String::new();
+    };
+    let main = cfg
+        .hosts
+        .iter()
+        .find(|h| h.1.machine.is_none())
+        .map_or("local", |h| h.0.as_str());
+    format!(
+        " <button type=button data-su=\"{}\" data-host=\"{}\"{dis}>sign in</button>",
+        esc(name),
+        esc(main)
     )
 }
 
@@ -292,7 +322,8 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
 }
 
 /// `POST /thread` from a paired owner device: `new` (start a thread and its conductor), `say` (with an attached
-/// file, base64 `data`), `answer` (a choice row or the "other" box) or `read`.
+/// file, base64 `data`), `answer` (a choice row or the "other" box), #387's `config` ([apply]/[discard]) and `secret`
+/// ([save] with `value`, or [dismiss]), or `read`.
 pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<String> {
     let cfg = Config::load(&ctx.config)?;
     let events = crate::events::read(&ctx.state)?;
@@ -334,6 +365,8 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
             crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
             Ok(format!("answered {}", g("id")))
         }
+        "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
+        "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),
         "read" => {
             conductor::mark_read(ctx, &cfg, &events, conductor::find(&events, id)?)?;
             Ok(String::new())

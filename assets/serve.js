@@ -1788,6 +1788,13 @@ document.addEventListener('submit', async e => {
   } else if (f.matches('#chat .chq')) {
     e.preventDefault();
     chatPost({ op: 'answer', fleet: f.dataset.fleet, id: f.dataset.id, text: f.elements.text.value }, f);
+  } else if (f.matches('#chat .chc')) { // #387: a config card's [apply] / [discard]
+    e.preventDefault();
+    chatPost({ op: 'config', id: f.dataset.id, act: e.submitter.value });
+  } else if (f.matches('#chat .chs')) { // #387: a secret card's [save] / [dismiss]; the value only goes in the POST
+    e.preventDefault();
+    const act = e.submitter.value;
+    chatPost({ op: 'secret', t: f.dataset.t, name: f.dataset.name, act, ...(act === 'save' ? { value: f.elements.value.value } : {}) }, f);
   } else if (f.matches('#chat .tw')) {
     e.preventDefault();
     const a = ATT && ATT.t === f.dataset.t ? ATT : null;

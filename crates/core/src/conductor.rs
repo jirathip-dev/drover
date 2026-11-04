@@ -243,7 +243,10 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             cfg,
             t,
             "system",
-            (&format!("{on} {})", crate::usage::date(r, *until, "+%H:%M")), &[]),
+            (
+                &format!("switched to {} {})", &on[3..], crate::usage::date(r, *until, "+%H:%M")),
+                &[],
+            ),
         )?;
     }
     Ok(agent)
@@ -427,6 +430,9 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let quiet = of(events, id).map(|e| e.ts).max().unwrap_or(0) + IDLE <= ctx.now;
         let a = agents.iter().find(|a| a["name"] == s.data["agent"]);
+        if a.is_some() && switch(ctx, cfg, r, t, s)? {
+            continue;
+        }
         if !quiet || a.is_some_and(|a| a["agent_status"] == "working") {
             continue;
         }
@@ -441,4 +447,56 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         )?;
     }
     Ok(())
+}
+
+/// #387: an awake conductor showing a usage limit (or signed out) rests its account (else its harness) and resumes
+/// the same session on the role's next account or `fallback` entry; signed out, the thread gets a [sign in] line.
+fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
+    let (id, account, hn) = (
+        t.str("thread").unwrap_or_default(),
+        s.str("account"),
+        s.str("harness").unwrap_or_default(),
+    );
+    if account.is_none() && role(cfg, &t.fleet).is_ok_and(|r| r.1.fallback.is_empty()) {
+        return Ok(false); // nothing to switch to
+    }
+    let (screen, h) = (
+        herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
+        harness::get(hn),
+    );
+    let out = h.signed_out(&screen);
+    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
+    let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now).or(rest) else {
+        return Ok(false);
+    };
+    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
+    let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
+    herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
+    let why = if out { "signed out" } else { "usage limit" };
+    let d = json!({"thread": id, "agent": s.str("agent"), "why": why});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, "conductor-sleep", d),
+    )?;
+    if out {
+        let text = format!(
+            "{hn} is signed out{}: sign in",
+            account.map_or(String::new(), |a| format!(" (account {a})"))
+        );
+        let d = json!({"thread": id, "from": "system", "text": text, "signin": hn});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    }
+    let line = format!("[{id}] system: {why}; you resumed on the next account. Carry on where you left off.");
+    if let Err(e) = start(ctx, cfg, r, t, &read(&ctx.state)?, &line) {
+        log(
+            ctx,
+            cfg,
+            t,
+            "system",
+            (&format!("the conductor stays asleep: {e:#}"), &[]),
+        )?;
+    }
+    Ok(true)
 }
