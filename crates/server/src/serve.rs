@@ -700,6 +700,7 @@ impl<'a> Server<'a> {
                     .to_string();
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
+            let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
             let mut top = 0;
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
@@ -712,9 +713,10 @@ impl<'a> Server<'a> {
                 };
             }
             // Each second: a frag (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
-            // the slot), else a ping every 15 s.
+            // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
                 while s.write_all(msg.as_bytes()).is_ok() {
+                    let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
                         match rx.recv_timeout(Duration::from_secs(1)) {
