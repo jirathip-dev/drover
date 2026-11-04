@@ -373,6 +373,7 @@ function frag(id, html) {
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
   if (id === 'events') olds(nu);
+  if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
   bshow(el);
@@ -510,7 +511,12 @@ function groups() {
 }
 document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
 // #141: `[queue·N]`, N the needs-you cards above the tabs.
-function badge() { const n = $$('#needs .ask').length; $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : ''); }
+function badge() {
+  const n = $$('#needs .ask').length, c = +($('#chn')?.dataset.n || 0); // #386: `[chat·N]`, the threads where a choice waits
+  $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : '');
+  const ch = $('nav a[href="#chat"]>span');
+  if (ch) ch.innerHTML = 'chat' + (c ? `<b class=n>·${c}</b>` : '');
+}
 // #68: buttons hold labels, never sentences: a control's runtime result is an 11 px `p.st` under it (red on error).
 function note(b, msg, ok) {
   let s = b.nextElementSibling;
@@ -1726,3 +1732,75 @@ function pgraph(d) {
   const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
   return `<div class=pg role=img aria-label="${esc(d.fleet)} pipeline: ${esc(S.map(s => s.name).join(', '))}" style="grid-template-columns:2ch minmax(0,1fr)${rep};grid-template-rows:repeat(${row},var(--ln))">${h}</div>`;
 }
+// #386: the [chat] tab. The page carries every thread's view; one is open (sessionStorage, or a push's `?thread=`):
+// on a phone the list or that thread, from 1000 px both. #cht is the style that picks it, so a live swap keeps it.
+// `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
+var THR = DBG.get('thread') || sget('thread') || '', ATT = null, NT = new Set();
+B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+function chatOpen(t) {
+  THR = t;
+  sput('thread', t);
+  const q = CSS.escape(t);
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+@media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
+  if (t && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') post('thread', { op: 'read', t }).catch(() => {});
+  if (t) scrollTo(0, document.body.scrollHeight);
+}
+// Each block's time in the phone's clock; the [+ thread] forms opened stay open across a swap; a picked file waits.
+// (A live swap paints its new copy before the patch, so nothing flashes.)
+function chatPaint(root = $('#chat')) {
+  if (!root || !NT) return;
+  root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
+  root.querySelectorAll('.nt').forEach(f => { f.hidden = !NT.has(f.dataset.repo); });
+  if (ATT) { const f = root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`); if (f && !f.querySelector('.att')) f.prepend(ATT.el); }
+}
+chatOpen(THR);
+chatPaint();
+document.addEventListener('click', async e => {
+  const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
+  if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
+  else if (t.closest('#chat .bk')) chatOpen('');
+  else if (t.closest('#chat .ntb')) { const f = t.closest('.fc').querySelector('.nt'); NT.has(f.dataset.repo) ? NT.delete(f.dataset.repo) : NT.add(f.dataset.repo); chatPaint(); f.hidden || f.elements.title.focus(); }
+  else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
+  else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
+  else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+});
+document.addEventListener('change', e => {
+  const i = e.target;
+  if (!i.matches('#chat .tw input[type=file]') || !i.files[0]) return;
+  const f = i.files[0], r = new FileReader();
+  r.onload = () => {
+    const el = Object.assign(document.createElement('div'), { className: 'att' }), kb = f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB';
+    el.innerHTML = `${f.type.startsWith('image/') ? `<img src="${r.result}" alt="">` : ''}<span></span><button type=button aria-label="remove the file">×</button>`;
+    el.querySelector('span').textContent = `${f.name} · ${kb}`;
+    if (ATT) ATT.el.remove();
+    ATT = { t: i.closest('.tw').dataset.t, name: f.name, data: r.result.split(',')[1], el };
+    i.value = '';
+    chatPaint();
+  };
+  r.readAsDataURL(f);
+});
+async function chatPost(d, f) {
+  try {
+    const r = await post('thread', d), m = (await r.text()).trim();
+    if (r.status === 401) unpaired();
+    if (m) toast(m);
+    if (r.ok) { if (f) f.reset(); refresh(); }
+    return r.ok;
+  } catch (err) { toast('error: ' + err.message); }
+}
+document.addEventListener('submit', async e => {
+  const f = e.target;
+  if (f.matches('#chat .nt')) {
+    e.preventDefault();
+    if (await chatPost({ op: 'new', repo: f.dataset.repo, title: f.elements.title.value }, f)) NT.delete(f.dataset.repo);
+  } else if (f.matches('#chat .chq')) {
+    e.preventDefault();
+    chatPost({ op: 'answer', fleet: f.dataset.fleet, id: f.dataset.id, text: f.elements.text.value }, f);
+  } else if (f.matches('#chat .tw')) {
+    e.preventDefault();
+    const a = ATT && ATT.t === f.dataset.t ? ATT : null;
+    if (!f.elements.text.value.trim() && !a) return;
+    if (await chatPost({ op: 'say', t: f.dataset.t, text: f.elements.text.value, ...(a ? { name: a.name, data: a.data } : {}) }, f) && a) { a.el.remove(); ATT = null; }
+  }
+});

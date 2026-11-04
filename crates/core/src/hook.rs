@@ -291,6 +291,16 @@ pub fn push_dir(input: &Value) -> Option<String> {
         })
 }
 
+/// #386: a shell call's command when it runs `herdsman` or `gh` (but `herdsman thread reply`, which is the reply
+/// itself): a conductor's tool row in its thread.
+pub fn fleet_cmd(input: &Value) -> Option<&str> {
+    let tool = input["tool_name"].as_str().unwrap_or_default();
+    let cmd = tool_input(input)["command"].as_str()?.trim();
+    let first = cmd.split_whitespace().next().map(word)?;
+    (dialects().any(|d| d.shell == tool) && ["herdsman", "gh"].contains(&first) && !cmd.contains("thread reply"))
+        .then_some(cmd)
+}
+
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
     const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];

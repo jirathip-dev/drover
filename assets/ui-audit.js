@@ -133,6 +133,11 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #386: the [chat] tab's thread list (the needs-you stack folded with [later all]), and one thread open from its
+    // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
+    // shoots blank); at 1440 the list and the thread side by side.
+    chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
+    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
     // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
     // second one: one ellipsised line in each mode, nothing past the row.

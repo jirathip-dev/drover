@@ -92,7 +92,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -543,3 +543,67 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .bi>.tl{grid-column:3;margin-top:0;color:var(--fg)}.bi>.m{grid-column:3;font-size:var(--fs-meta)}
 .bl:has(>.bbar:not([hidden])){padding-bottom:calc(var(--hit) + var(--s3))}
 .bbar{position:fixed;left:0;right:0;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;justify-content:flex-end;padding:var(--s2);background:var(--bg);border-top:1px solid var(--line)}
+/* #386: the [chat] tab (docs/design/conductor-chat/): on a phone the thread list or one thread (serve.js's #cht style
+   picks it); from 1000 px both, the list a 400 px column on the left, the thread beside it, its prose capped at 100ch. */
+#chat{padding-bottom:var(--s2)}
+@media (min-width:1000px){
+  #chat{display:grid;grid-template-columns:400px minmax(0,1fr);gap:0 calc(2 * var(--s4));align-items:start}
+  html:not([data-tab=chat]) #chat{display:none}
+  .clp{position:sticky;top:calc(var(--hit) + var(--s1))}
+  .cvp{border-left:1px solid var(--line);padding-left:calc(2 * var(--s4))}
+  .cvp>*{max-width:100ch}
+  .th .bk{display:none}
+}
+/* A repo card is the Queue tab's fleet card (#162); "all repos" takes the text colour. */
+.fc.k-x{--fk:var(--fg)}
+.fc .fh .ds{margin-left:1ch;font-size:var(--fs-meta);color:var(--mute)}
+/* A thread row: the unread dot, the title, the age; then, 11 px, the state when not plain awake and the last message. */
+.tr{display:grid;grid-template-columns:1.5ch minmax(0,1fr) auto;gap:0 var(--s2);align-items:baseline;min-height:var(--hit);padding:var(--s1) 0;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.tr>.ud{font-style:normal;color:var(--link)}
+.tr>.tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr.rd>.tt{color:var(--mute)}
+.tr>.ta{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}
+.tr>.tp{grid-column:2/-1;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr>.tp b{font-weight:400;margin-right:1ch}
+.fc>.done>summary{min-height:var(--hit)}
+/* New thread: a title and [start], in its card. */
+.nt{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;padding:var(--s2) 0;border-top:1px solid var(--line)}
+.nt[hidden]{display:none}
+.nt input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.nt .ns{flex-basis:100%;margin:0;color:var(--mute);font-size:var(--fs-meta)}
+/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. */
+.th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
+.th>div{flex:1;min-width:0}
+.th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .ds{font-size:var(--fs-meta);color:var(--mute)}
+.th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
+.tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
+.blk>summary .ct{flex:none;color:var(--mute)}
+/* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
+.im{margin:var(--s2) 0 0}
+.im img{display:block;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.im figcaption{margin-top:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.tf{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin-top:var(--s2);padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;color:var(--fg);text-decoration:none}
+.tf>span:first-of-type{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tf .m{font-size:var(--fs-meta)}
+/* A choice (#63 A's rows, recommended first, and an "other" box); answered, only the green ✓ line stays. Inside a
+   thread "waits for you" is amber; red stays the needs-you stack. */
+.chq{display:flex;flex-direction:column;align-items:stretch;gap:var(--s2);margin-top:var(--s2)}
+.chq .oth{display:flex;gap:var(--s4);align-items:center;margin-top:var(--s1)}
+.chq .oth input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.blk:has(>.md+.chq){--k:var(--a)}
+.ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
+.qid{font-size:var(--fs-meta);color:var(--mute)}
+/* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
+.cvp :is(.chq,.tw):has([disabled]){opacity:.6}
+.cvp>.ns{margin:0;font-size:var(--fs-meta)}
+/* The live line and the composer are the sheet's (.live, .reply). */
+.tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tlv b{font-weight:400;color:var(--a)}.tlv b.g{color:var(--g)}
+.tw{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
+.tw textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
+/* The composer, sticky above the tab bar: [+] attach, the text, [send]; a picked file waits above as a 56 px thumbnail. */
+.cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));margin-bottom:var(--hit);background:var(--bg);border-top:1px solid var(--line)}
+.att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
+.att img{width:calc(var(--hit) + var(--s3));height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
