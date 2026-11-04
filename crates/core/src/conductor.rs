@@ -32,8 +32,8 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-/// `herdsman thread new <fleet|all> <title>`: print its id.
-pub fn new(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, repo: &str, title: &str) -> Result<()> {
+/// `herdsman thread new <fleet|all> <title>`: its id.
+pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
     if repo != "all" {
         cfg.fleet(repo)?;
     }
@@ -44,7 +44,58 @@ pub fn new(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, repo: &str, title: &str
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
     let d = json!({"thread": id, "title": title});
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
-    Ok(writeln!(out, "{id}")?)
+    Ok(id)
+}
+
+/// #413: `thread handoff`: a new thread in `to` (a repo or `all`) or thread `to`, linked; wakes its conductor as `from`.
+pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
+    text_ok(text)?;
+    let events = read(&ctx.state)?;
+    let t = find(&events, from)?;
+    // The target's conductor is checked first: no thread or link is left behind without delivery.
+    let to = if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
+    } else {
+        role(cfg, to)?;
+        new(ctx, cfg, to, title)?
+    };
+    if to == from {
+        return refused("BAD_VALUE", "a thread hands off to another thread");
+    }
+    let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text});
+    let e = Event::new(ctx.now, &t.fleet, None, "thread-handoff", d);
+    emit(&ctx.state, cfg, e)?;
+    say(ctx, cfg, r, (&to, text, &[]), (from, false))?;
+    Ok(to)
+}
+
+/// #413: a one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
+pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
+    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
+    for s in srcs {
+        let d = json!({"thread": s, "from": "system", "via": id, "text": text});
+        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
+        emit(&ctx.state, cfg, e)?;
+    }
+    Ok(())
+}
+
+/// A thread id: `t` and a number.
+fn is_id(s: &str) -> bool {
+    s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// #413: a linked row's chip: `from t5` (a message or flow-back row from t5) or `continued in t6` (a handoff).
+pub fn link(e: &Event) -> Option<(&'static str, &str)> {
+    match (e.kind.as_str(), e.str("from")) {
+        ("thread-handoff", _) => Some(("continued in", e.str("to")?)),
+        ("thread-msg", Some("system")) => Some(("from", e.str("via")?)),
+        ("thread-msg", Some(f)) if is_id(f) => Some(("from", f)),
+        _ => None,
+    }
 }
 
 fn text_ok(text: &str) -> Result<()> {
@@ -385,8 +436,14 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             if let Some(f) = e.data.get("files") {
                 m["files"] = f.clone();
             }
+            if let Some((w, t)) = link(e) {
+                m["link"] = json!(format!("{w} {t}"));
+            }
             Some(m)
         }
+        "thread-handoff" => Some(
+            json!({"ts": e.ts, "from": "system", "text": e.str("title"), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
+        ),
         "needs-decision" => {
             let all = e.data["options"].as_array().cloned().unwrap_or_default();
             let mut opts: Vec<Value> = all
@@ -414,7 +471,8 @@ fn render(items: &[Value]) -> String {
         None => {
             let files = i["files"].as_array().into_iter().flatten();
             let files: String = files.map(|f| format!(" [file {}]", s(f, "path"))).collect();
-            format!("{}: {}{files}\n", s(i, "from"), s(i, "text"))
+            let who = i["link"].as_str().unwrap_or(i["from"].as_str().unwrap_or_default());
+            format!("{who}: {}{files}\n", s(i, "text"))
         }
         Some(q) => {
             let rec = |o: &Value| if o["n"] == i["recommend"] { " (recommended)" } else { "" };
