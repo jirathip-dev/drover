@@ -71,7 +71,11 @@ A lane needs the union of three lists:
    CPU first, then the most free memory.
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
-skipped. When every fitting host fails, the spawn is refused with the least-busy host's reason. When no host fits at
+skipped. A `DISK_LOW` names the done lanes' worktrees `herdsman clean --yes` would remove on that host (or says there
+are none and points to `herdsman reclaim`), and a spawn still starting toward a full host holds no `max_parallel_spawns`
+slot, so it never holds back spawns bound for another host (#416). `herdsman clean` covers every host's merged or
+closed lanes (shown as `<host>:<path>`) and lists the orphan folders under each enabled host's worktree root;
+`--orphans --yes` removes them. When every fitting host fails, the spawn is refused with the least-busy host's reason. When no host fits at
 all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_HOST: no host with docker`, plus
 ` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
 retries on its next pass.
