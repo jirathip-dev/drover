@@ -211,15 +211,22 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     // #107: a herdr agent named like a lane (`<fleet>-<role>-<n>…`) that no `spawn` event logged; once per agent.
+    // #376: only one of no tracked issue: drive adopts (or closes) the rest.
+    let tracked = fold(&events);
     for name in agents.iter().flatten().filter_map(|a| a["name"].as_str()) {
-        let lane = cfg.fleet.iter().find_map(|(fl, f)| {
-            let mut w = name.strip_prefix(&format!("{fl}-"))?.split('-');
-            f.role.contains_key(w.next()?).then_some(())?;
-            Some((fl.as_str(), Some(w.next()?.parse().ok()?)))
-        });
-        if let Some(at) = lane.filter(|_| last_spawn(&events, name).is_none()) {
-            let d = json!({"key": name, "reason": format!("herdr agent {name} has no spawn event; spawn adopts it")});
-            fire(ctx, cfg, out, &events, at, "orphan-lane", d)?;
+        let lane = crate::spawn::shaped(cfg, &json!({"name": name}));
+        let lane = lane.filter(|l| l.2.is_some() && !tracked.contains_key(&(l.0.to_string(), l.1)));
+        if let Some(l) = lane.filter(|_| last_spawn(&events, name).is_none()) {
+            let why = format!("herdr agent {name} has no spawn event and matches no tracked issue");
+            fire(
+                ctx,
+                cfg,
+                out,
+                &events,
+                (l.0, Some(l.1)),
+                "orphan-lane",
+                json!({"key": name, "reason": why}),
+            )?;
         }
     }
     let open = open_asks(&events);
