@@ -332,7 +332,12 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, read(&ctx.state).unwrap_or_default());
-    let gb = host::free_gb(on).filter(|g| *g < min)?;
+    let low = || host::free_gb(on).filter(|g| *g < min);
+    let mut gb = low()?;
+    // #438: short of disk, the shared build folder's idle profiles go first; then the disk is read again.
+    if crate::check::trim_on(on, cfg, 0.0, &mut std::io::sink()).unwrap_or(0) > 0 {
+        gb = low()?;
+    }
     let st = fold(&events);
     let lane = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.str("machine") == on.machine;
     let done = |e: &&Event| {
