@@ -42,7 +42,8 @@ const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
-const DBG = new URLSearchParams(location.search), want = DBG.get('issue');
+const DBG = new URLSearchParams(location.search);
+let want = DBG.get('issue');
 tab(document.documentElement.dataset.tab || 'queue');
 // #206 `?debug` (kept for the tab's session): how the page came up. A load or reload repaints it all; a pull only refresh()es.
 const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
@@ -525,6 +526,8 @@ function frag(id, html) {
   alerts();
   badge();
   if (id === 'needs') fold();
+  if (id === 'queue') sync(dot.classList[0]); // #268: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
+  if (id === 'queue' && want) wanted();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
 // (1 h / 6 h / 24 h from `frag?id=hist`; an export carries it as `data-x`). The value's line is red past the limit
@@ -738,6 +741,7 @@ function connect() {
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
   es.addEventListener('host', e => (at(e), dispatchEvent(new CustomEvent('herd-host', { detail: JSON.parse(e.data) })))); // #267: the TypeScript board draws it
+  es.addEventListener('queue', e => (at(e), dispatchEvent(new CustomEvent('herd-queue', { detail: JSON.parse(e.data) })))); // #268: and the Queue tab
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
@@ -1068,11 +1072,15 @@ function tidy(root) {
 }
 tidy(document);
 nows();
-// A tapped alert's issue: its repo picked, its row open (the chain or `+ N more` around it too), in view.
-for (const d of $$('#queue details.q')) if (want && d.querySelector('summary>span').textContent === '#' + want) {
-  qpick(qname(d.closest('.fc')));
-  for (let p = d; p; p = p.parentElement.closest('details')) p.open = true;
-  d.scrollIntoView();
+// A tapped alert's issue: its repo picked, its row open (the chain or `+ N more` around it too), in view (#268: once
+// the TypeScript board first draws the Queue tab).
+function wanted() {
+  if (document.documentElement.dataset.tab === 'queue') for (const d of $$('#queue details.q')) if (want && d.querySelector('summary>span').textContent === '#' + want) {
+    qpick(qname(d.closest('.fc')));
+    for (let p = d; p; p = p.parentElement.closest('details')) p.open = true;
+    d.scrollIntoView();
+  }
+  want = null;
 }
 // [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the overlay's, herd.js builds #hload).
 rf.innerHTML = '<i>↻</i>';
@@ -1430,10 +1438,9 @@ function legend() {
   show('mid');
 }
 // #162: [config] shows the fleet's settings in the same sheet, the lane parts hidden and its bar in the fleet's colour.
-// The page loads it (`frag?id=config`); an export carries it inline (`template[data-cfg]`).
+// #268: the TypeScript board draws it from the Queue tab's last data.
 async function config(b) {
-  const f = b.dataset.f, t = [...$$('template[data-cfg]')].find(t => t.dataset.cfg === f);
-  const h = t ? t.innerHTML : await part('frag?id=config&fleet=' + encodeURIComponent(f));
+  const f = b.dataset.f, h = window.queueSheet?.(f) ?? null;
   if (h === null) return toast('error: cannot read the config');
   agent = null;
   sh.className = 'sh lg cs ' + [...b.closest('.fc').classList].find(c => c.startsWith('k-'));

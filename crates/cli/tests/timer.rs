@@ -404,7 +404,7 @@ fn slow_du_never_blocks_the_board() {
     let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
     let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    for path in ["/?all=1", "/api/v1/host", "/frag?id=config&fleet=sendmeter"] {
+    for path in ["/?all=1", "/api/v1/host", "/api/v1/queue"] {
         let t = std::time::Instant::now();
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), c.now);
         assert!(t.elapsed().as_millis() < 500, "{path} took {:?}", t.elapsed());

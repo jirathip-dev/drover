@@ -31,9 +31,10 @@ fn first_read() -> String {
     .concat()
 }
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let req = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    String::from_utf8_lossy(&s.respond(&req, NOW)).into_owned()
+    with_queue(&String::from_utf8_lossy(&s.respond(&req, NOW)), s, ADDR, NOW)
 }
 
 fn post(s: &Server, cookie: &str, body: &str) -> String {
@@ -182,11 +183,8 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
         "never read: no backlog section"
     );
     assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
-    for out in [
-        get(&s, "/", &cookie),
-        get(&s, "/?frag=all", &cookie),
-        get(&s, "/frags?tab=queue", &cookie),
-    ] {
+    // #268: the Queue tab (the backlog in it) is the TypeScript board's, from API v1's `queue`: paired or not.
+    for out in [get(&s, "/", &cookie), get(&s, "/", "")] {
         let out = out.replace("\\\"", "\"");
         let at = out
             .find("<details class=bl data-bl=\"")
@@ -313,7 +311,8 @@ fn rows_search_filters_and_ticks_in_serve_js() {
 
 /// #391 in headless Chrome (`CHROME`, the ui job's chrome-headless-shell; skipped without it): the real server
 /// (`serve_on`), a backlog and a 3-step chain. The backlog draws its count, rows, search and quick filters on a fresh
-/// load, after a `/live` patch, and on a page that carried the Lanes tab only, with no uncaught error. A `build` of
+/// load, after a `/live` change (#268: each a `queue`, drawn by the TypeScript board), and on a page that carried the
+/// Lanes tab only, with no uncaught error. A `build` of
 /// another build reloads the page once; its own build none. The stream's first event names the server's build.
 #[test]
 fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
@@ -370,9 +369,9 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
     assert_eq!(
         (&out["frag"], &out["patched"]),
         (&json!(true), &json!(true)),
-        "a frag, then a patch: {out}"
+        "a first `queue`, then a second: {out}"
     );
-    assert_eq!(out["after_patch"], drawn, "after a /live patch: {out}");
+    assert_eq!(out["after_patch"], drawn, "after a /live change: {out}");
     assert_eq!(out["reloads"], json!([0, 1, 0]), "{out}");
     assert_eq!(
         (&out["served_queue"], &out["tab"]),

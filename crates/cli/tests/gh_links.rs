@@ -8,12 +8,14 @@ use serde_json::json;
 
 const GH: &str = "https://github.com/jirathip-dev/sendmeter";
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
-    String::from_utf8_lossy(&s.respond(
+    let res = String::from_utf8_lossy(&s.respond(
         &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
         1_000_000,
     ))
-    .into_owned()
+    .into_owned();
+    with_queue(&res, s, "127.0.0.1:7777", 1_000_000)
 }
 
 fn section(page: &str, id: &str) -> String {

@@ -1,8 +1,9 @@
 // #265: the TypeScript board's start, a typed client for the JSON API v1 (`/api/v1/`, docs/serve.md). The tabs move
-// here one PR each (Events, Host, Queue, Lanes); #266: Events is drawn here, #267 Host; the other tabs are still the HTML board's.
-import type { Chat, Ev, Events, HostTab, Reply, State } from '../../assets/types/api';
+// here one PR each (Events, Host, Queue, Lanes); #266: Events is drawn here, #267 Host, #268 Queue; Lanes is still the HTML board's.
+import type { Chat, Ev, Events, HostTab, QueueTab, Reply, State } from '../../assets/types/api';
 import { rows, tab, type Filter } from './events';
 import { tab as hostTab } from './host';
+import { sheet, tab as queueTab } from './queue';
 
 /** serve.js's: paint a section's new HTML (rows keep their open state, changed ones flash, row sprites drawn). */
 declare function frag(id: string, html: string): void;
@@ -20,6 +21,7 @@ export const api = {
   /** #259: the events after `since` (#266: up to `until`); `refresh` means read `state` again. */
   events: (since: number, until?: number) => get<Events>(`events?since=${since}${until == null ? '' : `&until=${until}`}`),
   host: () => get<HostTab>('host'),
+  queue: () => get<QueueTab>('queue'),
   lane: (agent: string, before = 0) => get<Chat>(`lane/${encodeURIComponent(agent)}?before=${before}`),
   /** A form op (`answer`, `drive`, `pause`, `extend`, …) with the HTML form's fields; `mtime` is `State.mtime`. */
   async post(op: string, fields: Record<string, string>): Promise<Reply> {
@@ -78,5 +80,14 @@ const host = (d: HostTab) => frag('host', hostTab(d));
 const hostLoad = () => api.host().then(host).catch(() => {});
 addEventListener('herd-host', e => host((e as CustomEvent<HostTab>).detail));
 addEventListener('herd-refresh', hostLoad);
+
+// #268: the Queue tab likewise (`herd-queue`); serve.js's [config] reads a fleet's sheet from the last data.
+let qd: QueueTab | null = null;
+const queue = (d: QueueTab) => frag('queue', queueTab((qd = d)));
+const queueLoad = () => api.queue().then(queue).catch(() => {});
+addEventListener('herd-queue', e => queue((e as CustomEvent<QueueTab>).detail));
+addEventListener('herd-refresh', queueLoad);
+const w = window as unknown as { boardReady: Promise<unknown>; queueSheet: (f: string) => string | null };
+w.queueSheet = f => (qd && sheet(qd, f));
 /** ui-audit.js waits for the first draw. */
-(window as unknown as { boardReady: Promise<unknown> }).boardReady = Promise.all([run(load), hostLoad()]);
+w.boardReady = Promise.all([run(load), hostLoad(), queueLoad()]);
