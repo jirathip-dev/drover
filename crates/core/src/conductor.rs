@@ -165,7 +165,7 @@ fn uuid() -> Result<String> {
 }
 
 /// Start the thread's conductor with `line`: its first start, or a resume of its session (a harness that can't
-/// resume gets the conversation so far in its kick instead).
+/// resume is pointed at the conversation so far instead).
 fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = role(cfg, &t.fleet)?;
@@ -180,13 +180,17 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let resume = first.is_some() && h.resumes();
     let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
+    // #397: the kick is one line (herdr refuses a multi-line `agent start` argument); the thread is in a file.
+    let on = crate::hosts::On::new(r, None);
+    let thread = dir.join(".thread.md");
+    on.write(&thread, &render(&items(events, id)))?;
     let kick = if resume {
-        line.into()
+        line.replace(char::is_control, " ")
     } else {
-        let past = render(&items(events, id));
         format!(
-            "Read {} and act on it. The thread so far, the last message new:\n{past}",
-            brief.display()
+            "Read {} and act on it. The thread so far is in {}, the last message new.",
+            brief.display(),
+            thread.display()
         )
     };
     let agent = format!("conductor-{id}");
@@ -218,7 +222,6 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
     h.ready(ctx, r, &p)?;
-    let on = crate::hosts::On::new(r, None);
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
     let pane = &herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
