@@ -21,9 +21,9 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
- * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`).
+ * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
  */
-export type Moment = { seq: number, ts: number, k?: string | null, };
+export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
  * `/live`'s `frag`: a fragment's new HTML.

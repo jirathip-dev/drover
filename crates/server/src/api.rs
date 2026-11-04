@@ -85,11 +85,13 @@ pub struct Notice {
     pub text: String,
 }
 
-/// `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`).
+/// `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
 pub struct Moment {
     pub seq: u64,
     pub ts: u64,
     pub k: Option<String>,
+    pub f: String,
+    pub n: Option<u64>,
 }
 
 /// `/live`'s `frag`: a fragment's new HTML.

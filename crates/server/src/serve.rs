@@ -281,7 +281,9 @@ fn sse(e: &Event) -> String {
         json!(Moment {
             seq: e.seq,
             ts: e.ts,
-            k: moment(e).map(Into::into)
+            k: moment(e).map(Into::into),
+            f: e.fleet.clone(),
+            n: e.issue
         })
     )
 }
@@ -2859,6 +2861,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
     let v: Value = serde_json::from_slice(j).map_err(|e| format!("not JSON ({e})"))?;
     let o = v.as_object().ok_or("not a JSON object")?;
     let acts: Vec<&str> = ACTS.iter().map(|a| a.0).collect();
+    let rows = [&acts[..], &["queued", "needs", "merged", "fail"]].concat(); // #370: Queue and Events kinds too
     let id = |x: &Value| x.is_string();
     let moment = |x: &Value| {
         x.as_object().is_some_and(|m| {
@@ -2890,7 +2893,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
         ("words", &[], &id, "a string"),
         ("actions", &acts, &id, "a sprite id"),
         ("rail", &["item", "needs"], &id, "a sprite id"),
-        ("row_sprites", &acts, &id, "a sprite id"),
+        ("row_sprites", &rows, &id, "a sprite id"),
         (
             "moments",
             &["merged", "fail", "needs-you"],
@@ -3002,6 +3005,7 @@ pub fn resolve(own: &serde_json::Value, farm: &serde_json::Value) -> serde_json:
             t["row_sprites"][a] = pick("row_sprites", a).unwrap_or_else(|| t["actions"][a].clone());
         }
     }
+    t["words"] = own.get("words").cloned().unwrap_or_else(|| json!({})); // #370: a word it lacks is the plain one
     t["scheme"] = own.get("scheme").cloned().unwrap_or_else(|| "github-dark".into());
     t["loading"] = own.get("loading").cloned().unwrap_or_default(); // #305: none is the spinning ↻, never farm's
     t["rail"]["item"] = pick("rail", "item").unwrap_or_else(|| t["actions"]["idle"].clone());

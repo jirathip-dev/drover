@@ -340,7 +340,8 @@ fn a_fleet_chip_hides_the_others_and_a_row_links_its_pr() {
     let all = view(&h, "all");
     assert_eq!(all.len(), 3, "{h}");
     assert!(
-        all[0].contains("data-f=\"sendmeter\" hidden>") && all[1].contains("data-f=\"atlas\">"),
+        all[0].contains("data-f=\"sendmeter\" data-k=merged hidden>")
+            && all[1].contains("data-f=\"atlas\" data-k=verdict>"),
         "{h}"
     );
     assert!(h.contains("data-fl=\"atlas\" aria-pressed=true") && h.contains("<div data-v=imp hidden>"));

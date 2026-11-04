@@ -103,7 +103,7 @@ export function tab(list: Ev[], d: Draw): string {
         const at = `${hm(e.ts).join(':')} · ${esc(e.fleet)} · ${esc(e.type)}`, via = e.data.via === 'web' ? ' (web)' : '';
         const body = evs.length > 1 ? `<ul class=fl2>${evs.map(x => `<li>${esc(x.plain)}</li>`).join('')}</ul>` : `<pre>${esc(raw(e))}</pre>`;
         const coat = e.coat ? ` style="${e.coat.replace(/--/g, '--r')}"` : '';
-        h += `<details class="er${k}${e.imp ? ' imp' : ''}" data-f="${esc(e.fleet)}"${hide(e.fleet) ? ' hidden' : ''}><summary><i class="kg t-${e.tone}" data-act=${e.act}${coat}>${e.glyph}</i><i class=fd></i>${num}<span class=sm>${esc(w)}${via}</span><span class=ag>${age(Math.max(0, d.now - e.ts))}</span></summary><div class=ex><p class=lk>${lk}<span class=m>${at}</span></p>${body}</div></details>`;
+        h += `<details class="er${k}${e.imp ? ' imp' : ''}" data-f="${esc(e.fleet)}" data-k=${esc(e.type)}${hide(e.fleet) ? ' hidden' : ''}><summary><i class="kg t-${e.tone}" data-act=${e.act}${coat}>${e.glyph}</i><i class=fd></i>${num}<span class=sm>${esc(w)}${via}</span><span class=ag>${age(Math.max(0, d.now - e.ts))}</span></summary><div class=ex><p class=lk>${lk}<span class=m>${at}</span></p>${body}</div></details>`;
       }
       h += '</div>';
       i += n;
