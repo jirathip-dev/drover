@@ -303,6 +303,8 @@ pub struct Limits {
     pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
+    /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
+    pub rotate_mb: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -369,6 +371,7 @@ impl Default for Limits {
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
+            rotate_mb: 20,
         }
     }
 }

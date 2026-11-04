@@ -499,6 +499,12 @@ pub fn drive(
             "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
+    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`.
+    if !fast && KICK.get().is_none() {
+        let max = cfg.limits.rotate_mb << 20;
+        let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
+        cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
+    }
     res
 }
 

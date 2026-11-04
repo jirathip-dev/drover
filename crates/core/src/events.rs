@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::Path;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -60,15 +61,26 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let f = OpenOptions::new().create(true).append(true).read(true).open(path);
-    let mut f = f.with_context(|| format!("cannot open event log {}", path.display()))?;
-    f.lock()?;
+    let mut f = loop {
+        let f = OpenOptions::new().create(true).append(true).read(true).open(path);
+        let f = f.with_context(|| format!("cannot open event log {}", path.display()))?;
+        f.lock()?;
+        // #343: unless a rotation renamed a new log over the one this waited on.
+        if std::fs::metadata(path).is_ok_and(|m| m.ino() == f.metadata().map_or(0, |m| m.ino())) {
+            break f;
+        }
+    };
     let mut old = vec![];
     f.read_to_end(&mut old)?;
     let torn = old.last().is_some_and(|&b| b != b'\n');
-    let lines = String::from_utf8_lossy(&old).lines().count(); // as `read` numbers them
+    let text = String::from_utf8_lossy(&old);
+    // #343: after the last row's seq (a rotated log's rows are not their line numbers); old rows: as `read` numbers them.
+    let last = text.lines().rev().find_map(|l| serde_json::from_str::<Event>(l).ok());
     let ev = Event {
-        seq: lines as u64 + 1,
+        seq: last
+            .filter(|e| e.seq > 0)
+            .map_or(text.lines().count() as u64, |e| e.seq)
+            + 1,
         ..ev.clone()
     };
     let mut line = serde_json::to_string(&ev)?;
@@ -83,11 +95,14 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 
 /// Every complete record: a torn last line is skipped silently, any other bad line with a warning.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(e.into()),
-    };
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(parse(&t, path)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn parse(text: &str, path: &Path) -> Vec<Event> {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = Vec::with_capacity(lines.len());
     for (i, l) in lines.iter().enumerate() {
@@ -105,7 +120,146 @@ pub fn read(path: &Path) -> Result<Vec<Event>> {
             ),
         }
     }
-    Ok(out)
+    out
+}
+
+/// #343: the fold up to `seq` (`state.snapshot.json`), and the live log's length then: a cache, the logs rebuild it.
+#[derive(Serialize, Deserialize, Default)]
+struct Checkpoint {
+    seq: u64,
+    len: u64,
+    states: Vec<IssueState>,
+}
+
+fn saved(path: &Path) -> Option<Checkpoint> {
+    serde_json::from_str(&std::fs::read_to_string(path.with_file_name("state.snapshot.json")).ok()?).ok()
+}
+
+/// #343: every event, the rotated archives' (`events-YYYYMM.jsonl.gz`, read on demand) and the live log's, by seq.
+pub fn history(path: &Path) -> Result<Vec<Event>> {
+    let dir = std::fs::read_dir(path.parent().unwrap_or(Path::new(".")));
+    let mut gz: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
+    gz.retain(|p| {
+        p.file_name()
+            .is_some_and(|n| n.to_string_lossy().ends_with(".jsonl.gz"))
+    });
+    gz.sort();
+    let mut all = vec![];
+    for g in gz {
+        let o = Command::new("gzip")
+            .arg("-dc")
+            .arg(&g)
+            .stderr(Stdio::inherit())
+            .output()?;
+        all.extend(parse(&String::from_utf8_lossy(&o.stdout), &g));
+    }
+    all.extend(read(path)?);
+    all.sort_by_key(|e| e.seq);
+    all.dedup_by_key(|e| e.seq); // a rotation that died between its archive and its rename
+    Ok(all)
+}
+
+/// #343: the checkpoint's states and seq, the events after it and the log's length read (no checkpoint: every event).
+fn load(path: &Path) -> Result<(States, u64, Vec<Event>, u64)> {
+    // Up to the last complete row: a torn or half-written one is read again next time.
+    let end = |b: &[u8]| b.iter().rposition(|&c| c == b'\n').map_or(0, |i| i as u64 + 1);
+    let Some(cp) = saved(path) else {
+        let len = std::fs::read(path).map_or(0, |b| end(&b));
+        return Ok((States::new(), 0, history(path)?, len));
+    };
+    let m = cp.states.into_iter().map(|s| ((s.fleet.clone(), s.issue), s)).collect();
+    let (Ok(mut f), mut tail) = (std::fs::File::open(path), vec![]) else {
+        return Ok((m, cp.seq, vec![], 0));
+    };
+    f.seek(SeekFrom::Start(cp.len.saturating_sub(1)))?;
+    f.read_to_end(&mut tail)?;
+    let ev = (cp.len == 0 || tail.first() == Some(&b'\n')).then(|| parse(&String::from_utf8_lossy(&tail), path));
+    if let Some(ev) = ev.filter(|ev| ev.first().is_none_or(|e| e.seq == cp.seq + 1)) {
+        return Ok((m, cp.seq, ev, cp.len.saturating_sub(1) + end(&tail)));
+    }
+    // The log was rotated or rewritten since: its rows after the checkpoint's seq.
+    let all = std::fs::read(path)?;
+    let ev = parse(&String::from_utf8_lossy(&all), path);
+    Ok((
+        m,
+        cp.seq,
+        ev.into_iter().filter(|e| e.seq > cp.seq).collect(),
+        end(&all),
+    ))
+}
+
+/// #343: the current per-issue state, from the checkpoint and the events after it: `fold` of every event.
+pub fn states(path: &Path) -> Result<States> {
+    let (m, _, ev, _) = load(path)?;
+    Ok(fold_into(m, &ev))
+}
+
+/// #343: save the checkpoint (each slow pass), atomically; returns its seq.
+pub fn checkpoint(path: &Path) -> Result<u64> {
+    let (m, seq, ev, len) = load(path)?;
+    let seq = ev.last().map_or(seq, |e| e.seq);
+    let states = fold_into(m, &ev).into_values().collect();
+    let tmp = path.with_file_name("state.snapshot.tmp");
+    std::fs::write(&tmp, serde_json::to_string(&Checkpoint { seq, len, states })?)?;
+    std::fs::rename(&tmp, path.with_file_name("state.snapshot.json"))?;
+    Ok(seq)
+}
+
+/// #343: over `max` bytes, the events up to the checkpoint and older than 30 days go to `events-YYYYMM.jsonl.gz`
+/// (kept, never deleted), under the append lock. The live log keeps what its readers need: queue changes, every event
+/// of an issue still open or active in the 30 days, and a done issue's merge or close.
+pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
+    if std::fs::metadata(path).map_or(0, |m| m.len()) <= max {
+        return Ok(());
+    }
+    let f = OpenOptions::new().read(true).append(true).open(path)?;
+    f.lock()?;
+    let (cut, st, all) = (checkpoint(path)?, states(path)?, read(path)?);
+    let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
+    let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
+    for e in &all {
+        if let Some(n) = e.issue {
+            let done = st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done);
+            *live_issue.entry((&e.fleet, n)).or_default() |= !done || !old(e);
+        }
+    }
+    // A merged issue keeps its merge; a closed one (it never merged) what closed it.
+    let ends = |e: &Event, s: &IssueState| match s.state.as_str() {
+        "merged" => e.kind == "merged",
+        _ => e.kind == "closed" || e.kind == "clean" && e.str("why") != Some("merged"),
+    };
+    let moved = |e: &Event| match e.issue {
+        Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
+        None => old(e),
+    };
+    let (mut by, mut live) = (BTreeMap::<String, String>::new(), String::new());
+    for e in &all {
+        let (day, row) = (e.ts / 86_400, serde_json::to_string(e)? + "\n");
+        let ym = format!(
+            "{}{:02}",
+            crate::access::civil_year(day),
+            crate::access::civil_month_day(day).0
+        );
+        *if moved(e) { by.entry(ym).or_default() } else { &mut live } += &row;
+    }
+    for (ym, text) in &by {
+        let gz = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path.with_file_name(format!("events-{ym}.jsonl.gz")))?;
+        let mut c = Command::new("gzip")
+            .arg("-c")
+            .stdin(Stdio::piped())
+            .stdout(gz)
+            .spawn()?;
+        c.stdin.take().context("gzip stdin")?.write_all(text.as_bytes())?;
+        anyhow::ensure!(c.wait()?.success(), "gzip failed");
+    }
+    let tmp = path.with_extension("rotate");
+    std::fs::write(&tmp, live)?;
+    std::fs::File::open(&tmp)?.sync_all()?;
+    std::fs::rename(&tmp, path)?;
+    checkpoint(path).map(drop)
 }
 
 /// Append, then run notifiers. Notifier failures never fail the caller.
@@ -220,7 +374,8 @@ fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct IssueState {
     pub fleet: String,
     pub issue: u64,
@@ -341,8 +496,12 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
 }
 
 /// Current per-issue state (the states in `roles/usage-tail.md`).
-pub fn fold(events: &[Event]) -> BTreeMap<(String, u64), IssueState> {
-    let mut m: BTreeMap<(String, u64), IssueState> = BTreeMap::new();
+pub fn fold(events: &[Event]) -> States {
+    fold_into(States::new(), events)
+}
+
+/// #343: `fold` on from the states `m` (a checkpoint's).
+fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
         let Some(n) = e.issue else { continue };
         let new = || IssueState {
