@@ -229,7 +229,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
 
 /// #413: a linked row's chip (`from t5`, `continued in t6`); a tap opens that thread (serve.js).
 fn chip((w, t): (&str, &str)) -> String {
-    format!("<span class=lk data-go=\"{}\">{w} {}</span>", esc(t), esc(t))
+    format!("<span class=lc data-go=\"{}\">{w} {}</span>", esc(t), esc(t))
 }
 
 /// #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).

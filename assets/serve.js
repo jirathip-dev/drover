@@ -1750,7 +1750,7 @@ chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
-  const lk = t.closest('#chat .lk'); // #413: a linked row's chip opens the other thread
+  const lk = t.closest('#chat .lc'); // #413: a linked row's chip opens the other thread
   if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); }
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
   else if (t.closest('#chat .bk')) chatOpen('');

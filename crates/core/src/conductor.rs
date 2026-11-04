@@ -60,9 +60,12 @@ pub fn handoff(
     text_ok(text)?;
     let events = read(&ctx.state)?;
     let t = find(&events, from)?;
+    // The target's conductor is checked first: no thread or link is left behind without delivery.
     let to = if is_id(to) {
-        find(&events, to).map(|_| to.to_string())?
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
     } else {
+        role(cfg, to)?;
         new(ctx, cfg, to, title)?
     };
     if to == from {

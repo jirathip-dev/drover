@@ -569,7 +569,8 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .tr>.tp{grid-column:2/-1;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tr>.tp b{font-weight:400;margin-right:1ch}
 /* #413: a linked row's chip, `from t5` / `continued in t6`: a tap opens that thread. */
-.lk{color:var(--link);border:1px solid var(--edge);border-radius:6px;padding:0 .5ch;cursor:pointer}
+/* `.lk` is the event card's link line; this chip is inline. */
+.lc{display:inline;margin:0;color:var(--link);border:1px solid var(--edge);border-radius:6px;padding:0 .5ch;cursor:pointer}
 .fc>.done>summary{min-height:var(--hit)}
 /* New thread: a title and [start], in its card. */
 .nt{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;padding:var(--s2) 0;border-top:1px solid var(--line)}

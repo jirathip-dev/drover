@@ -137,6 +137,21 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_t
     assert_eq!(kinds(&c, "thread-new").len(), 2, "refusals start no thread");
 }
 
+/// A handoff to a repo with no conductor is refused before a thread or a link is logged.
+#[test]
+fn a_handoff_to_a_repo_without_a_conductor_logs_nothing() {
+    let c = setup("handoff-noconductor");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let other = "\n[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\nintegration = \"staging\"\n";
+    std::fs::write(&c.config, cfg + other).unwrap();
+    let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "handoff", "t1", "other", "x", "y"]);
+    assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");
+    assert_eq!(
+        (kinds(&c, "thread-new").len(), kinds(&c, "thread-handoff").len()),
+        (1, 0)
+    );
+}
+
 #[test]
 fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conductor() {
     let c = setup("handoff-reuse");
@@ -303,15 +318,15 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
         v[..v.find("</form></div>").unwrap()].to_string()
     };
     let (go1, go2) = (
-        "<span class=lk data-go=\"t1\">from t1</span>",
-        "<span class=lk data-go=\"t2\">continued in t2</span>",
+        "<span class=lc data-go=\"t1\">from t1</span>",
+        "<span class=lc data-go=\"t2\">continued in t2</span>",
     );
     assert!(
         view("t1").contains(&format!("<p class=qs>{go2} · Rate limits</p>")),
         "{}",
         view("t1")
     );
-    let back = "<p class=\"qs note\"><span class=lk data-go=\"t2\">from t2</span> filed #52: Rate-limit search</p>";
+    let back = "<p class=\"qs note\"><span class=lc data-go=\"t2\">from t2</span> filed #52: Rate-limit search</p>";
     assert!(view("t1").contains(back), "{}", view("t1"));
     assert!(
         view("t2").contains(&format!(
@@ -346,16 +361,21 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
         &format!("<section id=chat>{}", j["chat"].as_str().unwrap()),
         1,
     );
-    assert!(html.contains("class=lk data-go"), "the chat tab is on the page");
+    assert!(html.contains("class=lc data-go"), "the chat tab is on the page");
     let d = tmpdir("handoff-tap-page");
     let (file, png) = (d.join("page.html"), d.join("tap.png"));
     std::fs::write(&file, html).unwrap();
-    // 1: t1's handoff chip opens t2; 2: t2's message chip opens t1; 3: t2's row chip in the list opens t2.
+    // 1: t1's handoff chip opens t2; 2: t2's message chip opens t1; 3: t1's row chip in the list opens t2;
+    // 5: every chip lays out inline, one line high, inside its list row's line.
     let js = "window.fetch = async () => new Response('', {status: 404}); const tap = s => document.querySelector(s).click(); \
-        chatOpen('t1'); tap('.cvp[data-t=\"t1\"] p.qs .lk[data-go=\"t2\"]'); const a = THR === 't2' ? 1 : 0; \
-        tap('.cvp[data-t=\"t2\"] summary .lk[data-go=\"t1\"]'); const b = THR === 't1' ? 1 : 0; \
-        chatOpen(''); tap('.tr[data-t=\"t1\"] .lk[data-go=\"t2\"]'); const d = THR === 't2' ? 1 : 0; \
-        window.measure = [a, b, d, document.querySelector('.cvp[data-t=\"t2\"] summary').parentElement.open ? 1 : 0]";
+        chatOpen('t1'); tap('.cvp[data-t=\"t1\"] p.qs .lc[data-go=\"t2\"]'); const a = THR === 't2' ? 1 : 0; \
+        tap('.cvp[data-t=\"t2\"] summary .lc[data-go=\"t1\"]'); const b = THR === 't1' ? 1 : 0; \
+        chatOpen(''); const r = document.querySelector('.tr[data-t=\"t1\"] .lc').getBoundingClientRect(), \
+        tp = document.querySelector('.tr[data-t=\"t1\"] .tp').getBoundingClientRect(); \
+        const e = [...document.querySelectorAll('#chat .lc')].every(c => getComputedStyle(c).display === 'inline') \
+        && r.height > 0 && r.height < 24 && r.top >= tp.top && r.bottom <= tp.bottom + 1 ? 1 : 0; \
+        tap('.tr[data-t=\"t1\"] .lc[data-go=\"t2\"]'); const d = THR === 't2' ? 1 : 0; \
+        window.measure = [a, b, d, document.querySelector('.cvp[data-t=\"t2\"] summary').parentElement.open ? 1 : 0, e]";
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let o = swift()
         .args([
@@ -373,7 +393,7 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
     let v: Vec<f64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
     assert_eq!(
         v.get(2..),
-        Some(&[1.0, 1.0, 1.0, 1.0][..]),
+        Some(&[1.0, 1.0, 1.0, 1.0, 1.0][..]),
         "{out} {}",
         String::from_utf8_lossy(&o.stderr)
     );
