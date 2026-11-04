@@ -298,6 +298,7 @@ function rows(root) {
     else a.innerHTML = a.dataset.o;
     px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
   });
+  words(root);
 }
 // #241: a Host group's load scene in miniature (its status: calm, busy or held): wind and clouds, or flame height.
 const MINI = {
@@ -324,6 +325,142 @@ function moment(k) {
   o.hidden = false;
   clearTimeout(o.t);
   o.t = setTimeout(() => { o.hidden = true; }, 2400);
+}
+// #370: the theme's words on every tab, `<b class=thw>on the line</b><small class=pw> · working</small>` (the plain word
+// muted); a word the theme lacks is the plain word alone, so terminal (no words) is today's board. A label keeps its
+// plain text in data-p, so a theme switch re-pairs it from the original.
+const PW = { needs: 'needs you', working: 'working', idle: 'idle', done: 'done', queued: 'queued', parked: 'parked', dead: 'dead',
+  impl: 'build', fix: 'fix', rev: 'review', update: 'catch up', merged: 'merged', fail: 'FAIL' };
+const TW = () => (TT && TT.words) || {};
+const tw = (k, plain, rest = '') => TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw> · ${esc(plain + rest)}</small>` : esc(plain + rest);
+function relabel(n, k, plain, rest = '') {
+  if (!n) return;
+  if (n.dataset.p == null) n.dataset.p = n.textContent;
+  const h = TW()[k] ? tw(k, plain, rest) : esc(n.dataset.p);
+  if (n.innerHTML !== h) n.innerHTML = h;
+}
+// A row sprite shows `hr-<k>` (a queued, needs-you, merged or FAIL row) while the theme has it, else its action's: the
+// same <use>, its href changed, never a new node (#334).
+function use(g, k) {
+  const u = g && g.querySelector('use');
+  if (!u) return;
+  if (u.dataset.a == null) u.dataset.a = u.getAttribute('href');
+  const h = k && document.getElementById('hr-' + k) ? '#hr-' + k : u.dataset.a;
+  if (u.getAttribute('href') !== h) u.setAttribute('href', h);
+}
+const QK = { need: 'needs', prog: 'working', queue: 'queued' }, ROLE = { impl: 'impl', review: 'rev', fix: 'fix', update: 'update' };
+const EVK = d => {
+  const k = d.dataset.k, a = d.querySelector('.kg')?.dataset.act;
+  return k === 'merged' ? 'merged' : k === 'verdict' ? (a === 'blocked' ? 'fail' : 'rev') : /^needs-(human|decision)$/.test(k) ? 'needs' : k === 'queue' ? 'queued' : k === 'spawn' ? a : null;
+};
+function words(root) {
+  if (!TT) return; // esc and the theme come later; herd.js's theme() runs rows(document) again
+  for (const t of ['queue', 'lanes', 'host', 'events']) { // each tab's own first line: `the rail · events`
+    const s = root.id === t ? root : root === document ? document.getElementById(t) : null;
+    if (!s) continue;
+    let p = s.querySelector(':scope>.tsub');
+    if (!TW()['tab-' + t]) { p?.remove(); continue; }
+    if (!p) s.prepend(p = el('p', 'tsub'));
+    p.innerHTML = tw('tab-' + t, t);
+  }
+  root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
+  root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
+  root.querySelectorAll('details.q').forEach(d => {
+    const o = d.querySelector('summary>span:nth-of-type(2)'), s = o && (o.querySelector(':scope>span') || o);
+    if (!s) return;
+    const p = s.dataset.p ?? s.textContent, m = p.match(/^(impl|review|fix|update)(.*)$/), k = m ? ROLE[m[1]]
+      : /^queued/.test(p) ? 'queued' : /needs-human|waiting/.test(p) ? 'needs' : p === 'dead' || p === 'parked' ? p : null;
+    if (k) relabel(s, k, m ? PW[k] : k === 'needs' ? p.replace(/^⏸ /, '').replace('needs-human', 'needs you') : p, m ? m[2] : '');
+    use(d.querySelector('summary .gt>b'), k === 'queued' || k === 'needs' ? k : null);
+  });
+  root.querySelectorAll('details.done>summary>span').forEach(s => relabel(s, 'done', s.dataset.p ?? s.textContent));
+  root.querySelectorAll('#lanes h2>span').forEach(s => {
+    const [, g, n] = (s.dataset.p ?? s.textContent).match(/^(\S+) (\(\d+\))$/) || [], k = g === 'blocked' ? 'needs' : g;
+    if (PW[k]) relabel(s, k, PW[k], ' ' + n);
+  });
+  // Events: the kind's theme word before the row's words, in the row's tone, and its sprite by kind.
+  root.querySelectorAll('details.er').forEach(d => {
+    const sm = d.querySelector('.sm'), k = EVK(d);
+    if (sm.dataset.p == null) sm.dataset.p = sm.innerHTML;
+    const h = k && TW()[k] ? `<b class="thw ev">${esc(TW()[k])}</b> ${sm.dataset.p}` : sm.dataset.p;
+    if (sm.innerHTML !== h) sm.innerHTML = h;
+    use(d.querySelector('.kg'), k);
+  });
+  root.querySelectorAll('[data-v]').forEach(v => { if (!v.querySelector('.er, .ne')) v.append(el('p', 'm ne', 'no events')); });
+  root.querySelectorAll('p.m').forEach(p => { // an empty tab: the theme line over the server's plain one
+    const t = p.dataset.p ?? p.textContent, k = { 'no open work': 'empty-queue', 'no agents': 'empty-lanes', 'no events': 'empty-events' }[t];
+    if (!k) return;
+    p.dataset.p = t;
+    p.classList.toggle('empty', !!TW()[k]);
+    const h = TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw>${esc(t)}</small>` : esc(t);
+    if (p.innerHTML !== h) p.innerHTML = h;
+  });
+  const ld = $('#ld');
+  let q = ld.querySelector('.ldw');
+  if (!q) ld.append(q = el('p', 'ldw'));
+  if (q.innerHTML !== (TW().loading ? tw('loading', 'loading') : '')) q.innerHTML = TW().loading ? tw('loading', 'loading') : '';
+  // A Host card's load: the theme's 48 × 16 mini (two frames) and its level word, `simmer · calm`; the same level keeps it.
+  root.querySelectorAll('article.hcd').forEach(c => {
+    const h = c.querySelector('.hhd .hnm'), had = h.querySelector('.lsm'), r = c.querySelector('details.rw[data-k=load]'), ls = TT.load_scene || {};
+    const x = r && +r.querySelector('summary .w b')?.textContent / +r.dataset.l;
+    if (!ls.minis || ls.kind === 'none' || !(x >= 0) || !document.getElementById('hl-calm')) return void had?.remove();
+    const l = x >= 1 ? 'held' : x >= 0.5 ? 'busy' : 'calm', w = (ls.levels || {})[l] || l;
+    if (had && had.dataset.l === l + w) return;
+    had?.remove();
+    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 48 16" aria-hidden=true><use href="#hl-${l}"/></svg><b class=thw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
+  });
+  pushwords();
+}
+// #370: a moment plays on its issue's row on the visible tab, once per seq, 2.4 s (else the #mo overlay, as before). A
+// swap that rebuilds the row mid-moment re-applies it with a negative delay: it resumes, never restarts.
+const MO = new Map(), PLAYED = new Set(), MK = { merged: 'merged', fail: 'fail', 'needs-you': 'needs' };
+function target(f, n, k) {
+  const t = document.documentElement.dataset.tab, hit = a => a && a.textContent === '#' + n;
+  if (t === 'queue') return [...$$('#queue details.q')].find(d => d.offsetParent && hit(d.querySelector('summary a')) && d.closest('.fc')?.querySelector('.fn>b')?.textContent === f);
+  if (t === 'events') {
+    const all = [...$$('#events details.er')].filter(d => d.dataset.f === f && d.offsetParent && hit(d.querySelector('summary .n')));
+    return all.find(d => EVK(d) === MK[k]) || all[0];
+  }
+  if (t === 'lanes') return [...$$('#lanes .lane')].find(l => (l.dataset.agent || '').startsWith(f + '-') && l.dataset.agent.endsWith('-' + n));
+}
+const msum = r => r.querySelector('summary') || r.querySelector('.lr') || r;
+function play(r, k, t0) {
+  const s = msum(r);
+  s.dataset.mo = k;
+  s.style.setProperty('--mo-d', `${t0 - Date.now()}ms`);
+  use(s.querySelector('.rsg, .kg'), MK[k]);
+  if (!s.querySelector('.mot') && TW()[MK[k]]) s.insertAdjacentHTML('beforeend', `<i class=mot>${esc(TW()[MK[k]])}${k === 'merged' ? '!' : ''}</i>`);
+}
+function rmoment(k, f, n, seq) {
+  if (PLAYED.has(seq)) return;
+  PLAYED.add(seq);
+  const r = n != null && TT && TT.moments && TT.moments[k] && target(f, n, k);
+  if (!r) return moment(k);
+  const m = { k, f, n, t0: Date.now() };
+  MO.set(seq, m);
+  play(r, k, m.t0);
+  setTimeout(() => {
+    MO.delete(seq);
+    const x = target(f, n, k), s = x && msum(x);
+    if (!s) return;
+    delete s.dataset.mo;
+    s.querySelector('.mot')?.remove();
+    words(x.parentNode);
+  }, 2400);
+}
+const again = () => MO.forEach(m => { const r = target(m.f, m.n, m.k); if (r && !msum(r).dataset.mo) play(r, m.k, m.t0); });
+// #370: the push words of this phone's theme go with its subscription (`Order up: #2957 merged`); a theme switch re-sends
+// them quietly (no test push). None: today's titles.
+const pw = () => ({ words: JSON.stringify(Object.fromEntries(['merged', 'needs'].filter(k => TW()[k]).map(k => [k, TW()[k][0].toUpperCase() + TW()[k].slice(1)]))) });
+let PWT = '';
+async function pushwords() {
+  const w = JSON.stringify(pw());
+  if (DEMO || PWT === w || (get('push:w') ?? JSON.stringify({ words: '{}' })) === w || !('serviceWorker' in navigator)) return;
+  PWT = w; // one try per page and theme
+  try {
+    const s = (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.toJSON();
+    if (s && (await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth, quiet: 1, ...pw() })).ok) put('push:w', w);
+  } catch (e) {}
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
@@ -378,6 +515,7 @@ function frag(id, html) {
   if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
+  again();
   bshow(el);
   nows();
   if (id === 'host') groups();
@@ -549,7 +687,8 @@ document.addEventListener('click', async e => {
     const key = Uint8Array.from(atob(b.dataset.key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
     const reg = await navigator.serviceWorker.ready;
     const s = (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })).toJSON();
-    const r = await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth });
+    const r = await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth, ...pw() });
+    if (r.ok) put('push:w', JSON.stringify(pw()));
     const msg = (await r.text()).trim();
     if (r.status === 401) return unpaired();
     note(b, msg, r.ok);
@@ -598,7 +737,7 @@ function connect() {
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
-  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
