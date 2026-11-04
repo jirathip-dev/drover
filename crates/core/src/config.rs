@@ -227,7 +227,7 @@ pub struct Fleet {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
-    pub premerge: Option<Vec<String>>,
+    pub premerge: Option<Vec<Premerge>>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
 }
@@ -240,6 +240,24 @@ pub struct Land {
     pub mode: String,
     pub fast: Vec<String>,
     pub full_first_paths: Vec<String>,
+}
+
+/// #373: a plain command, or a named check: runs if the PR changes `when` paths, refuses with `code`, briefs `fix`.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Premerge {
+    Cmd(String),
+    Named(Check),
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct Check {
+    pub name: String,
+    pub run: String,
+    #[serde(default)]
+    pub when: Vec<String>,
+    pub code: Option<String>,
+    pub fix: Option<String>,
 }
 
 /// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.
