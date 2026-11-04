@@ -36,8 +36,9 @@ function wait(p) {
 function loading(on) { $('#ld').hidden = !on; }
 // #60: a part of the page read on demand (null when it cannot be read).
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
-// A form POST of `data` (an object or FormData) to `path`.
-const post = (path, data) => wait(fetch(R + path, { method: 'POST', body: new URLSearchParams(data) }));
+// A form POST of `data` (an object or FormData) to `path`; #403: `send` without the loading overlay (every chat post).
+const send = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
+const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
@@ -63,6 +64,7 @@ function mode(m) {
     a.classList.toggle('run', fs.length > 1);
   }
   ld.classList.toggle('la', m === 'ascii' && fs.length > 0);
+  chatPaint();
 }
 mode(get('mode'));
 // #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
@@ -554,15 +556,15 @@ document.addEventListener('click', async e => {
     if (r.ok) refresh();
   } catch (err) { note(b, 'alerts failed: ' + err.message, false); }
 });
-// Network only (the SW passes `frags` through); spins ↻ until done.
-async function refresh() {
+// Network only (the SW passes `frags` through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
+async function refresh(quiet) {
   dbg('refresh');
   if (DEMO) return herdPull();
   claim();
   busy = true;
   sync('a');
   try {
-    const t = document.documentElement.dataset.tab, j = await wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
+    const t = document.documentElement.dataset.tab, j = await (quiet ? x => x : wait)(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
     have.clear();
     have.add(t);
     for (const id in j) frag(id, j[id]);
@@ -1744,23 +1746,49 @@ function chatOpen(t) {
   const q = CSS.escape(t);
   $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
-  if (t && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') post('thread', { op: 'read', t }).catch(() => {});
+  if (t && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
   if (t) scrollTo(0, document.body.scrollHeight);
 }
+// #403: back to the list: the history entry a thread's open pushed, else straight there.
+const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
+addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
 // Each block's time in the phone's clock; the [+ thread] forms opened stay open across a swap; a picked file waits.
-// (A live swap paints its new copy before the patch, so nothing flashes.)
+// (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
+// working thread's mark is the loading overlay's art (#ld: the theme's sprite, ascii frames or the glyph), and each
+// message sent this session shows: `sending…`, then ✓ on the thread's copy; failed, red with [retry].
+const SENT = [];
 function chatPaint(root = $('#chat')) {
   if (!root || !NT) return;
   root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
   root.querySelectorAll('.nt').forEach(f => { f.hidden = !NT.has(f.dataset.repo); });
   if (ATT) { const f = root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`); if (f && !f.querySelector('.att')) f.prepend(ATT.el); }
+  root.querySelectorAll('.tw textarea').forEach(a => { a.style.height = $(`#chat .tw[data-t="${CSS.escape(a.form.dataset.t)}"] textarea`)?.style.height || ''; });
+  root.querySelectorAll('.tld').forEach(i => { i.innerHTML = $('#ld').innerHTML; });
+  root.querySelectorAll('.snt').forEach(e => e.remove());
+  for (const p of SENT) {
+    const tc = root.querySelector(`.cvp[data-t="${CSS.escape(p.t)}"] .tc`), mine = tc ? tc.querySelectorAll('.blk.me:not(.snt)') : [];
+    if (mine.length > p.n) { mine[p.n].querySelector('summary .ct').before(el('b', 'snt sk', '✓')); continue; }
+    if (!tc) continue;
+    const b = tc.appendChild(el('details', 'blk me snt' + (p.st === '✗' ? ' bad' : '')));
+    b.open = true;
+    b.innerHTML = '<summary><span class=k>you</span><span class=pv></span><span class=ct></span><i class=cv></i></summary><div class=md><p></p></div>';
+    b.querySelector('.pv').textContent = p.text.split('\n')[0];
+    b.querySelector('.ct').textContent = p.st === '✗' ? '✗ not sent' : p.st;
+    b.querySelector('.md p').textContent = p.text;
+    if (p.st === '✗') b.querySelector('.md').append(Object.assign(el('button', 'rt', 'retry'), { type: 'button' }));
+  }
 }
+// #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
+const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
+document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
 chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
-  if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
-  else if (t.closest('#chat .bk')) chatOpen('');
+  if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
+  else if (t.closest('#chat .bk')) chatBack();
+  else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
+  else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const f = t.closest('.fc').querySelector('.nt'); NT.has(f.dataset.repo) ? NT.delete(f.dataset.repo) : NT.add(f.dataset.repo); chatPaint(); f.hidden || f.elements.title.focus(); }
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
   else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
@@ -1783,12 +1811,30 @@ document.addEventListener('change', e => {
 });
 async function chatPost(d, f) {
   try {
-    const r = await post('thread', d), m = (await r.text()).trim();
+    const r = await send('thread', d), m = (await r.text()).trim();
     if (r.status === 401) unpaired();
-    if (m) toast(m);
-    if (r.ok) { if (f) f.reset(); refresh(); }
+    if (m && !(r.ok && d.op === 'say')) toast(m);
+    if (r.ok) { if (f) f.reset(); refresh(true); }
     return r.ok;
   } catch (err) { toast('error: ' + err.message); }
+}
+// #403: [send] clears the box at once and shows the message `sending…`; ✓ once the server logged it; failed, red with
+// [retry], the text (and file) back in the box.
+async function chatSay(f) {
+  const a = ATT && ATT.t === f.dataset.t ? ATT : null, box = f.elements.text, text = box.value;
+  if (!text.trim() && !a) return;
+  const p = { t: f.dataset.t, text: text.trim() ? text : a.name, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
+  SENT.push(p);
+  f.reset();
+  grow(box);
+  if (a) { a.el.remove(); ATT = null; }
+  chatPaint();
+  scrollTo(0, document.body.scrollHeight);
+  const ok = await chatPost({ op: 'say', t: p.t, text, ...(a ? { name: a.name, data: a.data } : {}) });
+  p.st = ok ? '✓' : '✗';
+  if (!ok && !box.value) { box.value = text; grow(box); }
+  if (!ok && a && !ATT) ATT = a;
+  chatPaint();
 }
 document.addEventListener('submit', async e => {
   const f = e.target;
@@ -1807,8 +1853,28 @@ document.addEventListener('submit', async e => {
     chatPost({ op: 'secret', t: f.dataset.t, name: f.dataset.name, act, ...(act === 'save' ? { value: f.elements.value.value } : {}) }, f);
   } else if (f.matches('#chat .tw')) {
     e.preventDefault();
-    const a = ATT && ATT.t === f.dataset.t ? ATT : null;
-    if (!f.elements.text.value.trim() && !a) return;
-    if (await chatPost({ op: 'say', t: f.dataset.t, text: f.elements.text.value, ...(a ? { name: a.name, data: a.data } : {}) }, f) && a) { a.el.remove(); ATT = null; }
+    chatSay(f);
   }
+});
+// #403: on a phone a swipe right from the left edge (iOS style) takes a thread back to the list: it follows the finger,
+// past a third of the width it goes, else it snaps back. Only from the edge, and only sideways: a diff's scroll stays.
+let esw = null;
+addEventListener('touchstart', e => {
+  const v = THR && document.documentElement.dataset.tab === 'chat' && $(`#chat .cvp[data-t="${CSS.escape(THR)}"]`), x = e.touches[0];
+  esw = v && innerWidth < 1000 && !shown() && x.clientX < 24 ? { v, x: x.clientX, y: x.clientY, on: false } : null;
+  if (esw) v.style.transition = 'none';
+}, { passive: true });
+addEventListener('touchmove', e => {
+  if (!esw) return;
+  const dx = e.touches[0].clientX - esw.x, dy = e.touches[0].clientY - esw.y;
+  if (!esw.on && Math.hypot(dx, dy) > 10) { if (dx < 2 * Math.abs(dy)) return void (esw = null); esw.on = true; }
+  if (esw.on) esw.v.style.transform = `translateX(${Math.max(0, dx)}px)`;
+}, { passive: true });
+for (const k of ['touchend', 'touchcancel']) addEventListener(k, e => {
+  if (!esw) return;
+  const { v, x, on } = esw, back = on && k === 'touchend' && e.changedTouches[0].clientX - x > innerWidth / 3;
+  esw = null;
+  v.style.transition = back ? 'none' : '';
+  v.style.transform = '';
+  if (back) chatBack();
 });
