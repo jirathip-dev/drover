@@ -7,6 +7,7 @@ mod cli;
 pub mod cloud;
 pub mod conductor;
 pub mod config;
+pub mod design;
 pub mod devices;
 pub mod doctor;
 pub mod drive;
@@ -345,6 +346,11 @@ pub fn answer(
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
     }
+    // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
+    let design = crate::design::is_ask(ask);
+    if design {
+        crate::design::decide(ctx, cfg, r, ask, text, by)?;
+    }
     let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     let why = via.map_or("answer", |_| "board");
@@ -359,6 +365,9 @@ pub fn answer(
         let q = ask.str("question").unwrap_or_default();
         conductor::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
+    }
+    if design {
+        return Ok(writeln!(out, "{fleet} {id}: {text}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
         let merged = events::closed(&events, ask) == Some("closed: merged");

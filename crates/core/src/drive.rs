@@ -556,6 +556,10 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    // #412: a design lane done with its pushed design hands it to the owner.
+    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design" && !fast) {
+        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
+    }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
@@ -952,7 +956,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         .take_while(|_| start)
     {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
+        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
+        let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        let c = if design {
+            ["spawn", fleet, &n, "design", "--supersede"]
+        } else {
+            ["spawn", fleet, &n, f.flow().start(), ""]
+        };
+        let code = act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)])?;
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")

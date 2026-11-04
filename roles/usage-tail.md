@@ -6,6 +6,7 @@ Decide routine things yourself and say what you decided in the PR body. `herdsma
 ## Issue states
 
 queued → impl → review(n) → fix(n) → ready → merged; plus blocked, needs-human
+An issue queued `--design` first goes queued → design → design-review: its design ask's `approve` lets impl start, `revise` (or a free-text note) redoes the design, `reject` reverts it (needs-human).
 
 ## Refusal codes (exit 3, `REFUSED <CODE>: why`)
 

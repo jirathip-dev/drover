@@ -29,6 +29,9 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 
 - Run routine herdsman verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
   `answer` lane asks, and the other routine verbs.
+- Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
+  drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
+  Redo a design by hand by spawning its `design` role with `--supersede`.
 - Never edit fleet.toml or harness config (roles, models, gates, land mode, serial groups, hosts, accounts)
   yourself. Copy fleet.toml into your folder, edit the copy, then `herdsman config propose <thread> <copy>`: the owner
   gets its diff with [apply] [discard], and a `system` line tells you how it settled.
