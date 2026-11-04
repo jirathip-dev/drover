@@ -959,7 +959,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "{}", crate::conductor::new(ctx, &cfg, &repo, &title)?)?;
                     }
                     ThreadCmd::Handoff { from, to, title, text } => {
-                        let to = crate::conductor::handoff(ctx, &cfg, r, &from, &to, (&title, &text))?;
+                        let to = crate::conductor::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
                         writeln!(out, "{to}")?;
                     }
                     ThreadCmd::Say { id, text, by } => {

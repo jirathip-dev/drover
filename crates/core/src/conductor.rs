@@ -49,14 +49,7 @@ pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
 
 /// #413: `herdsman thread handoff <from> <repo|thread> <title> <text>`: a new thread in `to` (a repo or `all`), or thread
 /// `to` itself; logs `thread-handoff`, then types `text` into its conductor as from `from`. The new thread's id.
-pub fn handoff(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    from: &str,
-    to: &str,
-    (title, text): (&str, &str),
-) -> Result<String> {
+pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = read(&ctx.state)?;
     let t = find(&events, from)?;
