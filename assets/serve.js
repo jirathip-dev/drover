@@ -37,7 +37,8 @@ function loading(on) { $('#ld').hidden = !on; }
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
 // A form POST of `data` (an object or FormData) to `path`.
 const post = (path, data) => wait(fetch(R + path, { method: 'POST', body: new URLSearchParams(data) }));
-$$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); });
+// #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
+$$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
 const DBG = new URLSearchParams(location.search), want = DBG.get('issue');
 tab(document.documentElement.dataset.tab || 'queue');
@@ -569,7 +570,7 @@ function connect() {
   if (DEMO) return;
   if (es) es.close();
   P = {};
-  try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live?tab=' + document.documentElement.dataset.tab + (seq ? '&since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));

@@ -124,6 +124,10 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
   about 180 KB a host. Each row on a card has a 24 h sparkline; a tap opens a 1 h / 6 h / 24 h chart with the limit
   dashed and the lane count as a step line. Downsampling keeps the worst row of each bucket (the max; free space the
   min), so a peak is never hidden.
+- Watched sampling (#352): only while a board has the Host tab open (its `/live?tab=host` stream stamps
+  `<state dir>/host-watch.at`; seen in the last 2 min) does the main host's row also carry `procs`: the MB `ps` sees
+  in five fixed groups (lanes, CI/Colima, browsers, herdsman, other), never per PID. With nobody watching the fast
+  step never walks the process table. The file is also capped at 1,600 rows a host on rewrite.
 - Each lane card, and each horse in the Herd, shows its host name.
 
 ## Health (#235)

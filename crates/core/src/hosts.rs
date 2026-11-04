@@ -211,7 +211,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
             // #234: a remote host's top memory users and its history row come from this 5-minute look (no extra SSH).
             if let Some(ag) = a.as_ref().filter(|_| h.machine.is_some()) {
                 s.top = host::top(&on, ag);
-                rows.push(row(ctx.now, name, s, lanes_on(cfg, &events, name).len()));
+                rows.push(row(ctx.now, name, s, (lanes_on(cfg, &events, name).len(), None)));
                 import(ctx, cfg, &on, name, &s.home);
             }
         }
@@ -693,6 +693,9 @@ pub struct Row {
     pub mem_free_gb: Option<f64>,
     pub disk_free_gb: Option<f64>,
     pub lanes: usize,
+    /// #352: MB per `host::groups` group, only while `/live?tab=host` was seen in the last 2 min (else no `ps` walk).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub procs: Option<[u64; 5]>,
 }
 
 impl Row {
@@ -710,7 +713,7 @@ impl Row {
 }
 
 const DAY: u64 = 86_400;
-/// #234: the history's size bound per host: 1,600 rows of up to 200 B (a row is about 130 B), so 25 h fit.
+/// #234: the history's size bound per host: 1,600 rows (#352: also its row cap) of up to 200 B, so 25 h fit.
 pub const BOUND: usize = 320_000;
 
 fn history_file(ctx: &Ctx) -> PathBuf {
@@ -723,8 +726,7 @@ pub fn history(ctx: &Ctx) -> Vec<Row> {
 }
 
 /// #234: append `rows`; once the oldest row is over 25 h old or the file over `BOUND` for each of `hosts`, it is
-/// rewritten to the last 24 h, newest first within 9/10 of the bound (the headroom keeps an oversize file from being
-/// rewritten every minute). So it is rewritten at most once an hour.
+/// rewritten to the last 24 h and 1,600 rows each (#352), newest first within 9/10 of the bound: once an hour at most.
 pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
     let (p, bound) = (history_file(ctx), BOUND * hosts.max(1));
     let new: String = rows
@@ -734,18 +736,17 @@ pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
     let ts = |l: &str| serde_json::from_str::<Row>(l).map_or(0, |r| r.ts);
     let first = std::fs::File::open(&p)
         .ok()
-        .and_then(|f| std::io::BufRead::lines(std::io::BufReader::new(f)).next());
+        .and_then(|f| std::io::BufRead::lines(std::io::BufReader::new(f)).next())
+        .and_then(Result::ok);
     let len = std::fs::metadata(&p).map_or(0, |m| usize::try_from(m.len()).unwrap_or(usize::MAX)) + new.len();
-    if first
-        .and_then(Result::ok)
-        .is_none_or(|l| ts(&l) + DAY + 3600 >= ctx.now)
-        && len <= bound
-    {
+    let fresh = first.is_none_or(|l| ts(&l) + DAY + 3600 >= ctx.now);
+    if fresh && len <= bound {
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&p)?;
         return Ok(f.write_all(new.as_bytes())?);
     }
     let (text, mut size) = (std::fs::read_to_string(&p)? + &new, 0);
     let keep: Vec<&str> = (text.lines().rev().filter(|l| ts(l) + DAY >= ctx.now))
+        .take(1_600 * hosts.max(1))
         .take_while(|l| {
             size += l.len() + 1;
             size <= bound / 10 * 9
@@ -755,7 +756,7 @@ pub fn record(ctx: &Ctx, rows: &[Row], hosts: usize) -> Result<()> {
 }
 
 /// #234: a history row of `s` at `ts`, rounded so a row stays about 125 B.
-fn row(ts: u64, host: &str, s: &Seen, lanes: usize) -> Row {
+fn row(ts: u64, host: &str, s: &Seen, (lanes, procs): (usize, Option<[u64; 5]>)) -> Row {
     let q = |x: Option<f64>, m: f64| x.map(|x| (x * m).round() / m);
     Row {
         ts,
@@ -766,10 +767,11 @@ fn row(ts: u64, host: &str, s: &Seen, lanes: usize) -> Row {
         mem_free_gb: q(s.mem, 10.0),
         disk_free_gb: q(s.disk, 10.0),
         lanes,
+        procs,
     }
 }
 
-/// #234 the fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`).
+/// #234 the fast step: this host's history row, a minute apart (remote hosts' rows come from `survey`); #352: `procs`.
 pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
     let hs = host::sample(r);
     let s = Seen {
@@ -782,8 +784,10 @@ pub fn sample(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Resu
     };
     let cards = cards(cfg, r);
     let main = cards.iter().find(|c| c.1.is_none_or(|h| h.machine.is_none()));
+    let watch = std::fs::read_to_string(ctx.state.with_file_name("host-watch.at")).unwrap_or_default();
+    let procs = (watch.trim().parse::<u64>().is_ok_and(|t| t + 120 >= ctx.now)).then(|| host::groups(r));
     let rows: Vec<Row> = main
-        .map(|(n, _)| row(ctx.now, n, &s, lanes_on(cfg, events, n).len()))
+        .map(|(n, _)| row(ctx.now, n, &s, (lanes_on(cfg, events, n).len(), procs)))
         .into_iter()
         .collect();
     record(ctx, &rows, cards.len())
