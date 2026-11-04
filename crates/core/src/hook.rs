@@ -321,6 +321,17 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
+/// #298: the state a hook call reports to berth: `done` at a turn's end, `blocked` while the harness waits on a person,
+/// else `working`.
+pub fn reported(input: &Value) -> Option<&'static str> {
+    let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
+    Some(match dialects().find(|d| d.stop == ev || d.blocked == ev) {
+        Some(d) if d.stop == ev => "done",
+        Some(_) => "blocked",
+        None => "working",
+    })
+}
+
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).
 pub fn deny_json(input: &Value, reason: &str) -> Value {
     let d = dialects().find(|d| (d.sent)(input)).or_else(|| dialects().next());

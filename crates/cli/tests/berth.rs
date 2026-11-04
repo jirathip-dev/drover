@@ -1,0 +1,509 @@
+//! #298: the berth runtime, against a fake berth server on a real Unix socket (berth-proto JSON-RPC lines): every
+//! adapter call, a lane's spawn, the lane hook's state report, drive's event intake, ACP mode and `--on` hosts.
+mod common;
+use common::*;
+use herdsman::berth::proto::{ErrorCode, Request, Response, RpcError};
+use herdsman::berth::{self, Berth, Wire};
+use herdsman::herdr;
+use herdsman::hosts::On;
+use herdsman::runner::Runner;
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+
+type Terms = Arc<Mutex<BTreeMap<String, Value>>>;
+
+/// A fake berth server: every request it got (`method`, params), its terminals, and the events `events` streams.
+struct Server {
+    sock: PathBuf,
+    seen: Arc<Mutex<Vec<(String, Value)>>>,
+    terms: Terms,
+}
+
+impl Server {
+    fn new(version: &str, events: Vec<Value>) -> Server {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let sock = PathBuf::from(format!(
+            "/tmp/hsb-{}-{}.sock",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_file(&sock);
+        let l = UnixListener::bind(&sock).unwrap();
+        let (seen, terms) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(BTreeMap::new())));
+        let (s2, t2, v) = (seen.clone(), terms.clone(), version.to_string());
+        std::thread::spawn(move || {
+            for c in l.incoming().flatten() {
+                let (s, t, v, e) = (s2.clone(), t2.clone(), v.clone(), events.clone());
+                std::thread::spawn(move || conn(c, &s, &t, &v, &e));
+            }
+        });
+        Server { sock, seen, terms }
+    }
+    fn berth(&self) -> Berth {
+        Berth {
+            wire: Wire::Socket(self.sock.clone()),
+            acp: None,
+            policy: "ask".into(),
+        }
+    }
+    fn methods(&self) -> Vec<String> {
+        self.seen.lock().unwrap().iter().map(|s| s.0.clone()).collect()
+    }
+    fn last(&self, method: &str) -> Value {
+        let seen = self.seen.lock().unwrap();
+        seen.iter()
+            .rev()
+            .find(|s| s.0 == method)
+            .map(|s| s.1.clone())
+            .unwrap_or_default()
+    }
+    fn add(&self, name: &str, labels: Value) {
+        let t = json!({"name": name, "labels": labels, "cwd": "/w/issue-12", "cmd": ["sh"], "keep": true,
+            "state": "running", "exit": null, "pid": 7, "reported": {"state": "working"}});
+        self.terms.lock().unwrap().insert(name.into(), t);
+    }
+}
+
+fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, version: &str, events: &[Value]) {
+    let mut w = c.try_clone().unwrap();
+    for line in BufReader::new(c).lines().map_while(Result::ok) {
+        let q: Request = serde_json::from_str(&line).unwrap();
+        if q.method != "hello" {
+            seen.lock().unwrap().push((q.method.clone(), q.params.clone()));
+        }
+        let res = match q.method.as_str() {
+            "hello" => Ok(json!({"version": version})),
+            m => handle(m, &q.params, &mut terms.lock().unwrap()),
+        };
+        let id = q.id.unwrap();
+        let resp = res.map_or_else(|e| Response::err(id.clone(), e), |v| Response::ok(id.clone(), v));
+        writeln!(w, "{}", serde_json::to_string(&resp).unwrap()).unwrap();
+        if q.method == "events" {
+            events.iter().for_each(|e| drop(writeln!(w, "{e}")));
+            std::thread::sleep(std::time::Duration::from_secs(3)); // berth never closes the stream
+            return;
+        }
+    }
+}
+
+fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Value, RpcError> {
+    let name = p["name"].as_str().unwrap_or_default().to_string();
+    let gone = || RpcError::new(ErrorCode::NoSuchTerminal, &name);
+    match m {
+        "run" => {
+            let t = json!({"name": name, "labels": p["labels"], "cwd": p["cwd"], "cmd": p["cmd"], "keep": p["keep"],
+                "state": "running", "exit": null, "pid": 9});
+            terms.insert(name, t.clone());
+            Ok(t)
+        }
+        "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
+        "events" => Ok(json!({})),
+        _ if !terms.contains_key(&name) => Err(gone()),
+        "get" => Ok(terms[&name].clone()),
+        "read" => Ok(json!({"text": format!("screen of {name}")})),
+        "send" | "keys" => Ok(json!({})),
+        "wait" => {
+            let outcome = if name == "slow" { "timeout" } else { "matched" };
+            Ok(json!({"outcome": outcome, "terminal": terms[&name]}))
+        }
+        "kill" => {
+            terms.get_mut(&name).unwrap()["state"] = json!("exited");
+            Ok(terms[&name].clone())
+        }
+        "rm" => Ok(terms.remove(&name).unwrap()),
+        "state" => {
+            terms.get_mut(&name).unwrap()["reported"] = json!({"state": p["state"]});
+            Ok(terms[&name].clone())
+        }
+        _ => Err(RpcError::new(ErrorCode::MethodNotFound, m)),
+    }
+}
+
+fn lane_labels() -> Value {
+    json!({"fleet": "sendmeter", "issue": "12", "role": "impl", "harness": "claude"})
+}
+
+#[test]
+fn every_adapter_call_is_a_berth_request() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    b.add("scratch", json!({})); // no `fleet` label: no lane
+    let f = Fake::default();
+    let r = berth::With(&f, b.berth());
+    let lane = "sendmeter-impl-12";
+
+    assert_eq!(herdr::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
+    assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
+    herdr::recent(&r, lane, "200").unwrap();
+    assert_eq!(b.last("read"), json!({"name": lane, "lines": 200, "history": true}));
+    herdr::keys(&r, lane, "Escape").unwrap();
+    assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
+    // The page's reply: the text, then Enter (dsh types it, others prompt the agent by name).
+    herdr::reply(&r, false, lane, lane, "go on").unwrap();
+    assert_eq!(b.last("send"), json!({"name": lane, "text": "go on"}));
+    assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["Enter"]}));
+    herdr::reply(&r, true, lane, lane, "typed").unwrap();
+    assert_eq!(b.last("send"), json!({"name": lane, "text": "typed"}));
+    assert!(herdr::landed(&r, lane, lane, "x"));
+    assert_eq!(
+        b.last("wait"),
+        json!({"name": lane, "until": ["working", "blocked"], "timeout": 20.0})
+    );
+    let pane = herdr::harness_in(&r, lane).unwrap();
+    assert_eq!(
+        (pane["agent"].as_str(), pane["pane_id"].as_str()),
+        (Some("claude"), Some(lane))
+    );
+    herdr::rename(&r, lane, lane).unwrap();
+    let o = herdr::exec(&r, &herdr::wait_output_argv(lane, "❯", "60000")).unwrap();
+    assert_eq!(o.code, 0);
+    assert_eq!(
+        b.last("wait"),
+        json!({"name": lane, "until": [], "output": "❯", "timeout": 60.0})
+    );
+    herdr::ok(&r, &herdr::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
+    assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
+    // list: berth's lanes (running, `fleet`-labelled) beside herdr's, which is absent here.
+    let a = herdr::agents(&r).unwrap();
+    assert_eq!(a.len(), 1, "{a:?}");
+    assert_eq!(
+        (a[0]["name"].as_str(), a[0]["agent_status"].as_str()),
+        (Some(lane), Some("working"))
+    );
+    assert_eq!(herdr::list(&r, "agent").unwrap()["result"]["agents"], json!(a));
+    // close: kill, then rm (so the next lane may take the name); a gone terminal is closed already.
+    herdr::close(&r, lane).unwrap();
+    assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
+    assert!(herdr::agents(&r).unwrap().is_empty());
+    herdr::close(&r, lane).unwrap();
+    let o = herdr::exec(&r, &herdr::read_argv(lane)).unwrap();
+    assert!(herdr::failed_with(&o, "pane_not_found"), "{o:?}");
+    // herdr's own panes (`ws:pane`) and workspaces never go to berth.
+    assert!(herdr::read(&r, "w1:p1").is_err());
+    assert!(f.called("herdr pane read w1:p1"));
+    assert!(f.called("herdr agent list"));
+}
+
+#[test]
+fn a_wait_that_times_out_answers_as_herdr() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    b.add("slow", lane_labels());
+    let f = Fake::default();
+    let r = berth::With(&f, b.berth());
+    let o = herdr::exec(&r, &herdr::wait_working_argv("slow", "20000")).unwrap();
+    assert!(o.code != 0 && herdr::failed_with(&o, "timeout"), "{o:?}");
+}
+
+#[test]
+fn another_berth_version_is_refused() {
+    let b = Server::new("9.9.9", vec![]);
+    let e = berth::call(&Fake::default(), &b.berth().wire, berth::proto::Method::Ls, json!({})).unwrap_err();
+    assert!(format!("{e:#}").starts_with("BERTH_VERSION"), "{e:#}");
+}
+
+#[test]
+fn another_host_is_reached_through_berth_connect_over_ssh() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    let hello = json!(Response::ok(json!(0), json!({"version": berth::proto::VERSION})));
+    let read = json!(Response::ok(json!(1), json!({"text": "remote screen"})));
+    let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
+    let base = berth::With(&f, b.berth());
+    let on = On::new(&base, Some("box"));
+    assert_eq!(herdr::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
+    let calls = f.calls.borrow();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'berth' 'connect' '--autostart'")),
+        "{calls:?}"
+    );
+    assert!(b.methods().is_empty(), "nothing went to this host's server");
+}
+
+fn berth_config(sock: &std::path::Path, extra: &str) -> String {
+    let cfg = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
+    format!(
+        "{cfg}\n[runtime]\nkind = \"berth\"\nsocket = \"{}\"\n{extra}",
+        sock.display()
+    )
+}
+
+/// A berth host's spawn: no herdr there (its agent list fails), the branch missing locally.
+fn spawn_fake() -> Fake {
+    Fake::default()
+        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("git -C", "")
+}
+
+#[test]
+fn a_lane_spawns_on_berth() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    let d = tmpdir("berth-spawn");
+    let c = ctx(&d, &berth_config(&b.sock, ""));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let settings = std::fs::read_to_string(c.config.parent().unwrap().join("claude/fleet-impl/settings.json")).unwrap();
+    let s: Value = serde_json::from_str(&settings).unwrap();
+    assert!(
+        s["hooks"]["UserPromptSubmit"].is_array() && s["hooks"]["Notification"].is_array(),
+        "{s}"
+    );
+
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let plan: Value = serde_json::from_str(&out).unwrap();
+    let cmds = plan["commands"].as_array().unwrap();
+    assert_eq!(
+        cmds[1].as_array().unwrap()[3..6],
+        [json!("worktree"), json!("add"), json!("-b")]
+    );
+    assert_eq!((cmds[2][0].as_str(), cmds[2][1].as_str()), (Some("berth"), Some("run")));
+    assert!(b.methods().is_empty(), "a dry run calls nothing");
+
+    let f = spawn_fake();
+    let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    assert!(f.called(&format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree add -b issue-12 {} origin/staging",
+        wt.display()
+    )));
+    assert!(
+        !f.called("herdr agent start") && !f.called("herdr worktree"),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let run_p = b.last("run");
+    assert_eq!(run_p["name"], "sendmeter-impl-12");
+    assert_eq!(run_p["labels"], lane_labels());
+    assert_eq!(
+        (run_p["cwd"].as_str(), run_p["keep"].as_bool()),
+        (wt.to_str(), Some(true))
+    );
+    assert_eq!(
+        run_p["cmd"],
+        json!(["sh", "-c", "exec \"${SHELL:-sh}\" -l"]),
+        "no secret in the terminal's argv"
+    );
+    // The lane's exports, then the harness, typed into its shell; the kick waits for its reported state.
+    let sends: Vec<String> = b
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|s| s.0 == "send")
+        .map(|s| s.1["text"].as_str().unwrap().into())
+        .collect();
+    assert!(
+        sends[0].starts_with("export HERDSMAN_LANE='sendmeter:12:impl'") && sends[0].ends_with('\r'),
+        "{sends:?}"
+    );
+    assert!(
+        sends[1].starts_with("exec 'claude' '--dangerously-skip-permissions'"),
+        "{sends:?}"
+    );
+    assert_eq!(b.last("wait")["until"], json!(["working", "blocked"]));
+    let ev = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "spawn")
+        .unwrap();
+    assert_eq!(
+        (ev.str("runtime"), ev.str("pane"), ev.str("workspace")),
+        (Some("berth"), Some("sendmeter-impl-12"), Some(""))
+    );
+    assert_eq!(ev.data["confirmed"], true);
+    assert!(std::fs::read_to_string(wt.join(".brief.md"))
+        .unwrap()
+        .contains("AC: it works"));
+
+    // The live lane is seen: a second spawn is refused LANE_LIVE.
+    let (code, out) = run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("LANE_LIVE"), "{out}");
+}
+
+#[test]
+fn an_acp_lane_starts_and_is_prompted_through_berths_cli() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels()); // berth's CLI made it (the Fake runs no berth)
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let d = tmpdir("berth-acp");
+    let c = ctx(
+        &d,
+        &berth_config(&b.sock, "acp = \"claude-acp\"\nacp_policy = \"allow\"\n"),
+    );
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let f = spawn_fake().reply("berth run", "").reply("berth send", "");
+    let (code, out) = run(&c, &Cli(&f, b.terms.clone()), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let calls = f.calls.borrow();
+    let start = calls.iter().find(|c| c.starts_with("berth run")).unwrap();
+    assert!(
+        start.starts_with("berth run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd "),
+        "{start}"
+    );
+    assert!(start.ends_with("--label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude"));
+    let kick = calls.iter().find(|c| c.starts_with("berth send")).unwrap();
+    assert!(
+        kick.starts_with("berth send sendmeter-impl-12 Read ") && kick.ends_with(".brief.md and execute it fully.")
+    );
+    // The exited terminal of the lane before was removed first; nothing typed into a shell; ready, then the turn.
+    let m = b.methods();
+    assert_eq!(m.iter().filter(|m| *m == "rm").count(), 1, "{m:?}");
+    assert!(
+        !m.contains(&"send".to_string()) && !m.contains(&"run".to_string()),
+        "{m:?}"
+    );
+    assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
+    drop(calls);
+    // A reply is framed by berth's CLI too, with no Enter after it.
+    let r = berth::With(
+        &f,
+        Berth {
+            acp: Some("claude-acp".into()),
+            ..b.berth()
+        },
+    );
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("running");
+    herdr::reply(&r, false, "sendmeter-impl-12", "sendmeter-impl-12", "go on").unwrap();
+    assert!(f.called("berth send sendmeter-impl-12 go on"));
+    assert!(!b.methods().contains(&"keys".to_string()));
+}
+
+/// berth's CLI as the fake server sees it: `berth run --acp` makes a running terminal of that name.
+struct Cli<'a>(&'a Fake, Terms);
+
+impl Runner for Cli<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "berth" && args[0] == "run" {
+            let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
+            let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["berth"], "keep": false,
+                "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
+            self.1.lock().unwrap().insert(name.clone(), t);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// `herdsman hook` in a berth terminal (`$BERTH`) on `event`.
+fn hook(sock: &std::path::Path, event: &str) {
+    let d = tmpdir("berth-hook");
+    std::fs::write(d.join("fleet.toml"), berth_config(sock, "")).unwrap();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        .args(["hook", "--role", "impl"])
+        .env("HERDSMAN_LANE", "sendmeter:-:impl") // no issue number: a turn's end kicks no real drive here
+        .env("BERTH", "sendmeter-impl-12")
+        .env("FLEET_CONFIG", d.join("fleet.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = json!({"hook_event_name": event, "session_id": "s"}).to_string();
+    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+}
+
+#[test]
+fn the_lane_hook_reports_its_state_to_berth() {
+    let b = Server::new(berth::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    for (event, state) in [
+        ("UserPromptSubmit", "working"),
+        ("Notification", "blocked"),
+        ("Stop", "done"),
+    ] {
+        hook(&b.sock, event);
+        assert_eq!(
+            b.last("state"),
+            json!({"name": "sendmeter-impl-12", "state": state}),
+            "{event}"
+        );
+    }
+}
+
+#[test]
+fn drive_logs_berths_state_changes_since_its_last_pass() {
+    let ev = |seq: u64, name: &str, labels: Value, kind: Value| {
+        let mut e = json!({"seq": seq, "name": name, "labels": labels});
+        e.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
+        e
+    };
+    let events = vec![
+        ev(
+            4,
+            "sendmeter-impl-12",
+            lane_labels(),
+            json!({"event": "state", "state": "done", "note": "end_turn"}),
+        ),
+        ev(5, "scratch", json!({}), json!({"event": "state", "state": "working"})),
+        ev(
+            6,
+            "sendmeter-impl-12",
+            lane_labels(),
+            json!({"event": "resources", "rss_mb": 900, "cpu_pct": 50}),
+        ),
+        ev(
+            7,
+            "sendmeter-impl-12",
+            lane_labels(),
+            json!({"event": "exited", "code": 0}),
+        ),
+    ];
+    let b = Server::new(berth::proto::VERSION, events);
+    let d = tmpdir("berth-drive");
+    let c = ctx(&d, &berth_config(&b.sock, ""));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert_eq!(berth::intake(&c, &cfg, &b.berth().wire).unwrap(), 2);
+    assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
+    let logged: Vec<_> = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "lane-state")
+        .collect();
+    let states: Vec<_> = logged
+        .iter()
+        .map(|e| (e.issue, e.str("state"), e.str("agent")))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (Some(12), Some("done"), Some("sendmeter-impl-12")),
+            (Some(12), Some("exited"), Some("sendmeter-impl-12"))
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(c.state.with_file_name("berth.seq")).unwrap(),
+        "7"
+    );
+    berth::intake(&c, &cfg, &b.berth().wire).unwrap();
+    assert_eq!(
+        b.last("events")["since"],
+        7,
+        "the next pass asks only for what it has not seen"
+    );
+    // No server: an error for drive to print; the polled agent list still covers every lane.
+    let none = Wire::Socket(d.join("none.sock"));
+    assert!(berth::intake(&c, &cfg, &none).is_err());
+}
+
+#[test]
+fn the_default_runtime_is_herdr() {
+    let cfg = herdsman::config::Config::parse(CONFIG).unwrap();
+    assert!(cfg.runtime.berth().is_none());
+    assert!(Fake::default().berth().is_none());
+    let bad = format!("{CONFIG}\n[runtime]\nkind = \"tmux\"\n");
+    assert!(herdsman::config::Config::parse(&bad).is_err());
+}

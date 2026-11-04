@@ -118,6 +118,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "berth-proto"
+version = "0.0.0"
+source = "git+https://github.com/jirathip-dev/berth?rev=498c9f0d5e5602d845e854cde46a45e0f817f546#498c9f0d5e5602d845e854cde46a45e0f817f546"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -403,6 +412,7 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "base64",
+ "berth-proto",
  "clap",
  "hkdf",
  "p256",

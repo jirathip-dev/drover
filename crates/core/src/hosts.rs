@@ -116,6 +116,16 @@ impl Runner for On<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
+    /// #298: berth on another host is its own server there, through `berth connect` over ssh.
+    fn berth(&self) -> Option<crate::berth::Berth> {
+        let b = self.r.berth()?;
+        let wire = if self.machine.is_some() {
+            crate::berth::Wire::Connect
+        } else {
+            b.wire
+        };
+        Some(crate::berth::Berth { wire, ..b })
+    }
 }
 
 /// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability,
