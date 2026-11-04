@@ -195,7 +195,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
                 writeln!(out, "clean: {e:#}")?;
             }
         }
-        drive::drive(ctx, cfg, r, out, None, false, false)
+        let driven = drive::drive(ctx, cfg, r, out, None, false, false);
+        crate::lesson::weekly(ctx, cfg, r, out)?; // #419
+        driven
     });
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {

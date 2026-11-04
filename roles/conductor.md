@@ -29,6 +29,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 
 - Run routine herdsman verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
   `answer` lane asks, and the other routine verbs.
+- When the owner says "correct", run `herdsman lesson <fleet>`: it files this week's lessons issue and spawns its
+  `lesson` lane, which turns the fleet's repeated mistakes into checks (only conductors and the owner may).
 - Never edit fleet.toml or harness config (roles, models, gates, land mode, serial groups, hosts, accounts)
   yourself. Copy fleet.toml into your folder, edit the copy, then `herdsman config propose <thread> <copy>`: the owner
   gets its diff with [apply] [discard], and a `system` line tells you how it settled.

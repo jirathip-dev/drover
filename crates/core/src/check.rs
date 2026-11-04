@@ -1051,10 +1051,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
             file = l.strip_prefix("+++ b/").unwrap_or(file);
         } else if let Some(a) = l.strip_prefix('+').filter(|_| hit.is_none()) {
             // Mask every secret on the line, not only the first.
-            let mut m = a.trim().to_owned();
-            while let Some(v) = crate::lanes::secret(&m) {
-                m = m.replace(v, "•••");
-            }
+            let m = crate::lanes::redact(a.trim());
             if m != a.trim() {
                 hit = Some(format!("{file}:{n}: {m}"));
             }

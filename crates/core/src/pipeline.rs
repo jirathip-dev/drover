@@ -155,7 +155,12 @@ impl Pipeline {
 
     /// The stage a role's spawn enters: `role` names a stage or a role.
     pub fn stage_of<'a>(&'a self, role: &'a str) -> &'a str {
-        self.get(role).or(self.of_role(role)).map_or(role, |s| s.name.as_str())
+        // #419: a lesson lane builds as the start stage: its PR is reviewed and fixed like any other.
+        let lesson = (role == "lesson").then(|| self.stage.first()).flatten();
+        self.get(role)
+            .or(self.of_role(role))
+            .or(lesson)
+            .map_or(role, |s| s.name.as_str())
     }
 
     /// Edges as (from, outcome, target without `:update`).

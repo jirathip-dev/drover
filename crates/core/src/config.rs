@@ -284,6 +284,8 @@ pub struct Fleet {
     pub premerge: Option<Vec<Premerge>>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
+    pub lessons: Option<String>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -756,8 +758,16 @@ impl Fleet {
     }
     pub fn role(&self, role: &str) -> Result<&Role> {
         self.role
-            .get(role)
+            .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
+    }
+    /// #419: the configured role a lane runs as: a lesson lane is impl's unless `[fleet.<n>.role.lesson]` is set.
+    pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
+        if role == "lesson" && !self.role.contains_key(role) {
+            "impl"
+        } else {
+            role
+        }
     }
     pub fn local_path(&self) -> PathBuf {
         expand(&self.local)
