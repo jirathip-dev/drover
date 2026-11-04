@@ -692,10 +692,44 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             }
         }
     }
+    trim_builds(cfg, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+/// #438: over `build_budget_gb`, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
+/// `.cargo-lock` no cargo holds go, until it is under; a building one stays. Bytes freed.
+pub fn trim_builds(cfg: &Config, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    let root = crate::config::expand(&cfg.limits.build_root);
+    if cfg.limits.build_root.is_empty() || !root.is_dir() {
+        return Ok(0);
+    }
+    let (mut total, mut freed) = (du(&root), 0);
+    let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
+    let profiles: Vec<_> = ls(&root)
+        .flat_map(|r| ls(&r))
+        .filter(|p| p.join(".cargo-lock").is_file())
+        .collect();
+    for dir in profiles {
+        if gb(total) <= cfg.limits.build_budget_gb {
+            break;
+        }
+        // Cargo flocks the profile's `.cargo-lock` while it builds there.
+        let lock = std::fs::File::open(dir.join(".cargo-lock"))?;
+        if lock.try_lock().is_err() {
+            writeln!(out, "keep {}: cargo is building", dir.display())?;
+            continue;
+        }
+        let size = du(&dir);
+        let verb = if dry { "would trim" } else { "trimmed" };
+        if dry || std::fs::remove_dir_all(&dir).is_ok() {
+            writeln!(out, "builds: {verb} {} ({:.2} GB)", dir.display(), gb(size))?;
+            (total, freed) = (total.saturating_sub(size), freed + size);
+        }
+    }
+    Ok(freed)
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
@@ -722,6 +756,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
+    total += trim_builds(cfg, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {

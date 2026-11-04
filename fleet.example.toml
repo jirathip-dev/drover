@@ -33,10 +33,9 @@ profile = "lane-rev"
 repo = "<owner>/herdsman"
 local = "~/Projects/herdsman"
 integration = "staging"
-# exported into every lane: one shared cargo build cache per fleet, not one target/ per lane
-env = { CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman" }
-# or, opt-in (#361): the same, under its own key. New lanes skip full rebuilds; lanes
-# building at once queue on cargo's lock on the shared dir (docs/lanes.md).
+# #438: lanes already share one cargo build folder per host and repo, `[limits] build_root`'s
+# `herdsman` (~/.cache/herdsman/target/herdsman); `env` or `shared_cache` (#361) setting
+# CARGO_TARGET_DIR replaces it. Lanes building at once queue on cargo's lock (docs/lanes.md).
 # shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/herdsman/target" }
 
 [fleet.herdsman.role.impl]
@@ -144,6 +143,8 @@ load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
+build_root = "~/.cache/herdsman/target"   # lanes' CARGO_TARGET_DIR is <build_root>/<repo> ("" = one per worktree)
+build_budget_gb = 20      # over it drive (and `reclaim`) removes the shared folder's profiles no cargo is building in
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
 # deny_commands = ["docker", "supabase start", { cmd = "git push --force", why = "REFUSED NO_FORCE: ask the owner" }]

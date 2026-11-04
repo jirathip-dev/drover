@@ -277,7 +277,10 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         kick,
         lane,
         account,
-        env: f.env.clone().into_iter().chain(f.shared_cache.clone()).collect(),
+        env: shared_target(cfg, f)
+            .chain(f.env.clone())
+            .chain(f.shared_cache.clone())
+            .collect(),
         port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
@@ -286,6 +289,13 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         resting,
         session: None,
     })
+}
+
+/// #438: one Cargo build folder per host and repo, `[limits] build_root`'s `<repo>`; a fleet's own setting replaces it.
+fn shared_target(cfg: &Config, f: &Fleet) -> impl Iterator<Item = (String, String)> {
+    let root = cfg.limits.build_root.trim_end_matches('/');
+    let d = format!("{root}/{}", f.repo_name());
+    (!root.is_empty()).then(|| ("CARGO_TARGET_DIR".into(), d)).into_iter()
 }
 
 /// #92: a fix round may dispute a finding; the next, fresh reviewer decides.
