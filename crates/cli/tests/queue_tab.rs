@@ -1,5 +1,5 @@
 //! #367: the Queue tab one repo at a time. serve.js's pure queue part, run under node: the group order (needs you, in
-//! progress, queued) for every state word a row shows, the time `in impl 1h 47m`, and a collapsed chain's line; the
+//! progress, queued) for every state word a row shows, the time `in impl 1h 47m`, and a collapsed chain's third line; the
 //! server gives each row its age in seconds for it. (Chips, chain and `+ N more` in a browser: gate 2's `queue-repos`
 //! and `queue-chain` views, docs/ui.md.)
 mod common;
@@ -64,20 +64,24 @@ fn time_is_one_unit_style_naming_its_phase() {
     );
 }
 
+/// #391: the chain row's third line names its first and last step and the one it waits on next, with that one's state.
 #[test]
-fn a_chain_collapses_to_one_line() {
-    let steps = "[{n: '265', title: 'decoupling', b: '266'}, {n: '270', title: 'x', b: '265'}, {n: '344', b: '270'}, \
-                 {n: '345', b: '344'}, {n: '355', b: '345'}, {n: '356', b: '355'}]";
+fn a_chain_names_first_to_last_and_the_next_steps_state() {
+    let steps = "[{n: '267', b: '266'}, {n: '268', b: '267'}, {n: '344', b: '268'}, {n: '270', b: '267'}, \
+                 {n: '345', b: '344'}, {n: '356', b: '345'}]";
     let js = format!(
-        "[qsum({steps}).join(''), qsum({steps}), qsum([{{n: '7', title: 'two steps'}}, {{n: '8', title: '', b: '7'}}]).join('')]"
+        "[qsum({steps}, 'impl'), qsum({steps}, 'review(2)'), qsum({steps}, '⏸ waiting: decision'), qsum({steps}, ''), \
+         qsum([{{n: '7'}}, {{n: '8', b: '7'}}], 'queued')]"
     );
     let Some(got) = node(&js) else { return };
     assert_eq!(
         got,
         json!([
-            "#265 → #270 · decoupling (6 steps) · next: #266",
-            ["#265 → #270 · ", "decoupling", " (6 steps) · next: #266"],
-            "#7 → #8 · two steps (2 steps) · next: #7"
+            "#267 → #356 · next: #266 (in impl)",
+            "#267 → #356 · next: #266 (in review)",
+            "#267 → #356 · next: #266 (waiting)",
+            "#267 → #356 · next: #266",
+            "#7 → #8 · next: #7 (queued)"
         ])
     );
 }

@@ -53,10 +53,15 @@ fn live_pushes_one_frag_per_changed_section() {
     let mut s = subscribe(addr, &addr.to_string());
     let hello = drain(&mut s, 1_500);
     assert!(
-        hello.starts_with("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n") && hello.ends_with(": ping\n\n"),
+        hello.starts_with("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n")
+            && hello.contains(": ping\n\nevent: build\ndata: "),
         "{hello}"
     );
-    assert!(!hello.contains("event:"), "nothing changed yet: {hello}");
+    assert_eq!(
+        hello.matches("event:").count(),
+        1,
+        "nothing changed yet, the build alone (#391): {hello}"
+    );
     let quiet = drain(&mut s, 2_500);
     assert!(
         quiet.lines().all(|l| l.is_empty() || l == ": ping"),
@@ -591,7 +596,11 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         assert_eq!(back.matches(&format!("\"seq\":{n},")).count(), 1, "{back}");
     }
     assert_eq!(reconnect(addr, "?since=4").matches("event: ev").count(), 1);
-    assert!(!reconnect(addr, "?since=5").contains("event:"));
+    assert_eq!(
+        reconnect(addr, "?since=5").matches("event:").count(),
+        1,
+        "the build alone (#391)"
+    );
     // Every missed Events row is on the tab once.
     let tab = String::from_utf8_lossy(
         &Server::new(&c, &Fake::default(), None)

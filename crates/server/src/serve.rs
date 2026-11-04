@@ -788,9 +788,9 @@ impl<'a> Server<'a> {
                 )
                 .map(|d| d.hash),
             ));
-            let mut msg =
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\n"
-                    .to_string();
+            let mut msg = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
+            );
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
