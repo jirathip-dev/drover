@@ -85,7 +85,15 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
 - **At 1000 px and up** the list is a 400 px column with the open thread beside it.
 - **Not a paired owner device:** the thread reads the same; the choice rows, `[+ thread]` and the composer are off.
 - **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
-  `read`) from a paired device, 10 a minute.
+  `read`, `retry`) from a paired device, 10 a minute. #403: `new` and `say` answer once the thread or message is
+  logged; starting or resuming the conductor and typing the line run after the reply. A failed delivery is a red
+  system line with `[retry]` (`retry` types the same line again, logging no copy). No chat post shows the loading
+  overlay.
+- **On a phone (#403):** `[send]` clears the box at once and shows the message `sending…`, then `✓`; failed, red
+  with `[retry]` and the text (and file) back in the box. The box grows to 6 lines, then scrolls; with the keyboard
+  up the tab bar hides. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
+  returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
+  above the box.
 
 **Push** (a `webpush` notifier, default `on`): a conductor's reply is `<repo> · <thread title>: <its first line>`, a
 choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The owner's messages, commands and system

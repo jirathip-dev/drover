@@ -168,7 +168,11 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
         let s = |k| e.str(k).unwrap_or_default();
         let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
         h += &match (e.kind.as_str(), s("from")) {
-            ("thread-msg", "system") => format!("<p class=\"qs note\">{lk}{}{}</p>", esc(s("text")), signin(cfg, e, dis)),
+            ("thread-msg", "system") => {
+                let rt = format!(" <button type=button class=rty data-n={}{dis}>retry</button>", e.seq);
+                let (r, rt) = if e.str("line").is_some() { (" r", rt) } else { ("", String::new()) };
+                format!("<p class=\"qs note{r}\">{lk}{}{}{rt}</p>", esc(s("text")), signin(cfg, e, dis))
+            }
             ("thread-msg", _) if s("text").starts_with("DECISION ") => String::new(),
             ("thread-handoff", _) => format!("<p class=qs>{lk}· {}</p>", esc(s("title"))),
             ("thread-msg", f) => {
@@ -205,7 +209,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     let st = state(events, id, agents);
     let live = match st {
         "choose" => "<b>●</b> waiting for your answer · sleeps after 30 min idle",
-        "working" => "<b>✻</b> working",
+        "working" => "<i class=tld aria-hidden=true></i> working", // #403: serve.js puts the theme's loading art in
         "asleep" => "☾ asleep · a message wakes it with this conversation",
         "new" => "a message starts the conductor",
         _ => "<b class=g>●</b> awake · sleeps after 30 min idle",
@@ -342,8 +346,14 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
 
 /// `POST /thread` from a paired owner device: `new` (start a thread and its conductor), `say` (with an attached
 /// file, base64 `data`), `answer` (a choice row or the "other" box), #387's `config` ([apply]/[discard]) and `secret`
-/// ([save] with `value`, or [dismiss]), or `read`.
-pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<String> {
+/// ([save] with `value`, or [dismiss]), `read`, or #403's `retry` (a red system line's [retry], its event `n`).
+/// #403: `new`, `say` and `retry` only log; `later` gets the line `deliver` types once the reply is out.
+pub fn post(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &BTreeMap<String, String>,
+    later: &mut Vec<(Event, String)>,
+) -> Result<String> {
     let cfg = Config::load(&ctx.config)?;
     let events = crate::events::read(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
@@ -352,7 +362,7 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
         "new" => {
             conductor::role(&cfg, g("repo"))?;
             let id = conductor::new(ctx, &cfg, g("repo"), g("title"))?;
-            conductor::say(ctx, &cfg, r, (&id, g("title"), &[]), ("owner", false))?;
+            later.push(conductor::post(ctx, &cfg, (&id, g("title"), &[]), ("owner", false))?);
             Ok(format!("{id} started"))
         }
         "say" => {
@@ -372,8 +382,14 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
                 files.push(json!({"name": name, "path": path, "size": bytes.len()}));
             }
             let text = or(g("text").trim().is_empty(), g("name"), g("text"));
-            let agent = conductor::say(ctx, &cfg, r, (id, text, &files), ("owner", false))?;
-            Ok(format!("sent to {agent}"))
+            later.push(conductor::post(ctx, &cfg, (id, text, &files), ("owner", false))?);
+            Ok("sent".into())
+        }
+        "retry" => {
+            let e = of(&events, id).find(|e| e.seq.to_string() == g("n"));
+            let line = e.and_then(|e| e.str("line")).context("nothing to retry")?;
+            later.push((conductor::find(&events, id)?.clone(), line.into()));
+            Ok("retrying".into())
         }
         "answer" => {
             let (choice, by) = (
@@ -390,5 +406,20 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
             Ok(String::new())
         }
         op => bail!("unknown thread op `{op}`"),
+    }
+}
+
+/// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose
+/// [retry] types it again.
+pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
+    let Ok(cfg) = Config::load(&ctx.config) else { return };
+    if let Err(e) = conductor::deliver(ctx, &cfg, r, t, line) {
+        let text = format!("✗ not delivered: {e:#}");
+        let d = json!({"thread": t.str("thread"), "from": "system", "text": text, "line": line});
+        drop(crate::events::emit(
+            &ctx.state,
+            &cfg,
+            Event::new(ctx.now, &t.fleet, None, "thread-msg", d),
+        ));
     }
 }

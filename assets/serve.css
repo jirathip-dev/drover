@@ -617,3 +617,15 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
 .att img{width:calc(var(--hit) + var(--s3));height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
 .att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #403: the box grows with its text to 6 lines, then scrolls inside; with the keyboard up (the box focused) a phone
+   hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
+   delivery's system line is red too. A working thread's mark is the loading overlay's art (#ld), 24 px, inline. */
+.tw textarea{max-height:calc(6lh + 2 * var(--s2) + 2px);overflow-y:auto}
+@media (max-width:999px){html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp .tw{bottom:0;margin-bottom:0}}
+.snt .md p{white-space:pre-line}.blk>summary .sk{flex:none;font-weight:400;color:var(--g)}
+.blk.snt.bad{--k:var(--r)}.snt.bad>summary .ct{color:var(--r)}.qs.note.r{border-left-color:var(--r);color:var(--r)}
+.tld{display:inline-grid;place-items:center;min-width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);vertical-align:middle;font-style:normal}
+.tld .lds{width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);image-rendering:pixelated;shape-rendering:crispEdges;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+.tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
+html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
+@media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}
