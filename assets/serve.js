@@ -1815,9 +1815,9 @@ const ivUp = e => {
   if (!PT.delete(e.pointerId)) return;
   if (PT.size) return void (ivg = { z: ivz, p: [...PT.values()], moved: true }); // one finger of a pinch lifted: it pans on
   IV.classList.remove('dr');
-  if (ivg.z.s === 1 && ivz.s === 1) {
-    if (ivz.y > 80) return void (IV.hidden = true);
-    if (Math.abs(ivz.x) > 60) return ivShow(ivn + (ivz.x < 0 ? 1 : -1));
+  if (ivz.s === 1) { // fitted again: a swipe from fitted closes or turns; any other ends centred (a pinch back out too)
+    if (ivg.z.s === 1 && ivz.y > 80) return void (IV.hidden = true);
+    if (ivg.z.s === 1 && Math.abs(ivz.x) > 60) return ivShow(ivn + (ivz.x < 0 ? 1 : -1));
     ivz = { s: 1, x: 0, y: 0 };
     ivDraw();
   }

@@ -140,10 +140,11 @@
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
     // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
     // several images (the thread's two, on the second).
-    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it.)
-    'chat-viewer': () => { tab('chat'); chatOpen('t4'); $('#chat .cvp[data-t="t4"] .im img').click(); },
-    'chat-viewer-zoom': () => { tab('chat'); chatOpen('t4'); $('#chat .cvp[data-t="t4"] .im img').click(); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
-    'chat-viewer-multi': () => { tab('chat'); chatOpen('t4'); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
+    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it. The thread is scrolled to
+    // the top first, as chat-thread: a scrolled view shoots blank, the viewer over it too.)
+    'chat-viewer': () => { VIEWS['chat-thread'](); $('#chat .cvp[data-t="t4"] .im img').click(); },
+    'chat-viewer-zoom': () => { VIEWS['chat-viewer'](); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
+    'chat-viewer-multi': () => { VIEWS['chat-thread'](); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
