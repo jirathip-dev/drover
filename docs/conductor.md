@@ -51,9 +51,10 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
 
 - **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
   images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is
-  refused: copy it in first), and the board serves only those. A file the owner attaches on the board is saved in the
-  conductor's folder under `uploads/` and its path is typed in with the message (`(attached: <path>)`), so the
-  conductor can read it.
+  refused: copy it in first), and the board serves only those. Files the owner attaches on the board (#405: several, up to 10 a message,
+  each at most 10 MB; picked at once or added with `[+]`, waiting above the box as thumbnails with `[×]`) or with
+  `herdsman thread say <thread> "<text>" --file <path>` (repeatable) are saved in the conductor's folder under
+  `uploads/` and each path is typed in with the message (`(attached: <path>)`), so the conductor can read them.
 - **Handoff (#413):** `herdsman thread handoff <from> <repo|thread> <title> <text>` starts a thread titled `<title>`
   in a repo (or `all`), or reuses an existing thread (`t6`; `<title>` is the handoff row's subject). It logs
   `thread-handoff` `{from, to, title, text}`, then types `[<to>] <from>: <text>` into the target's conductor (started or
@@ -71,9 +72,15 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
 [events]`, reading `[chat·N]` with N the threads where a choice waits.
 
 - **The list:** "all repos", then each fleet by name, a card each with its 3 newest threads (the rest fold under
-  "N older threads") and `[+ thread]`, which takes a title and starts the thread and its conductor (the title is the
-  first message). A row has the unread dot, the title, the age, then `! choose`, `✻ working` or `☾ asleep` and the
-  last message.
+  "N older threads") and `[+ thread]`, which opens an empty thread (#405): nothing is logged until its first message,
+  which starts the thread (titled with that message's first line, cut to one row) and its conductor, and is the only
+  thing the conductor gets. After its first reply the conductor retitles it once with a short summary
+  (`herdsman thread title <thread> "<title>"`, logged `thread-title`). A row has the unread dot, the title, the age,
+  then `! choose`, `✻ working` or `☾ asleep` and the last message.
+- **Archive (#405):** a row swiped left shows `[archive]`: the thread's conductor stops (its pane closes; the folder,
+  uploads and log stay) and the thread folds under "N archived" at the bottom of its card, where `[restore]` brings
+  it back; its next message resumes the same session. CLI: `herdsman thread archive|restore <thread>` (logged
+  `thread-archive` / `thread-restore`). Nothing is deleted.
 - **A thread** is the lane sheet's chat blocks: your messages in the accent colour, the conductor's purple, its
   commands as closed tool rows, system lines (resumed, asleep, account switch), images and file rows
   (`GET /thread/<thread>/<name>`), plain links. An open ask shows its choice rows (recommended first) and an "other"

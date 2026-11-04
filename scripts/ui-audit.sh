@@ -29,7 +29,7 @@ run() { # url, extra args
 fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
 # #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
-# mini's load/cpu chart open.
+# mini's load/cpu chart open. #267: the chart and the busy and healthy fixtures at 1440 too.
 # #367: `queue/queue-repos` and `queue/queue-chain` (also @1440): the Queue fixture's chips, groups, chain and `+ N more`.
 # #370: every tab at 1440 in farm, kitchen and terminal; `row-loop` (a row sprite's two frames, the same node across a
 # patch), `moment-row` (a moment on its row, once, resumed after a patch), each `-still` under reduced motion; `empty`.
@@ -37,12 +37,15 @@ fail=0
 # #406: `chat-viewer`, `chat-viewer-zoom`, `chat-viewer-multi`: the image viewer fitted, zoomed and on the second of two.
 # #403: `chat-send`, `chat-long`, `chat-kb`, `chat-back` and `chat-wait` (its themes, ascii and still): the phone composer.
 # #408: `chat-older` and `chat-mid` (also @1440): a long thread's older page loaded, then scrolled half way, its header pinned.
+# #405: `chat-new`, `chat-archive`, `chat-archived`, `chat-thumbs`: the empty new thread, a row swiped left to [archive],
+# the archived fold and three images waiting above the box.
 # #365: `queue/queue-backlog`: acme-api's 100-issue backlog searched, filtered and ticked.
-for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-send chat-long chat-kb chat-back chat-older chat-mid chat-mid@1440 chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait \
-  queue-rows events-rows queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still loading@1440 loading~kitchen@1440 loading~terminal@1440 \
+for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet hosts/host-chart@1440 busy/host-ranked@1440 healthy/host-ranked@1440 events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-send chat-long chat-kb chat-back chat-older chat-mid chat-mid@1440 chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs \
+  queue-rows events-rows events@1440 events-rows@1440 events-open events-open@1440 events-all queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still loading@1440 loading~kitchen@1440 loading~terminal@1440 \
   $(for v in queue lanes host events loading; do echo "ascii-$v ascii-$v~kitchen"; done) ascii-queue~terminal ascii-lanes~terminal \
   $(for v in queue lanes host events; do echo "$v@1440 $v~kitchen@1440 $v~terminal@1440"; done) row-loop row-loop~kitchen row-loop-still moment-row moment-row~kitchen moment-row-still empty empty~kitchen empty~terminal \
   $(for s in github-dark solarized-dark gruvbox nord dracula paper farm kitchen; do echo "queue^$s busy/host-ranked^$s"; done); do
+  [ -n "${UI_AUDIT_VIEWS:-}" ] && [[ " $UI_AUDIT_VIEWS " != *" $v "* ]] && continue # #266: only these views (space-separated)
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png. #244: `<view>^<scheme>`
   # in that colour scheme (`?scheme=`), shot as <view>-scheme-<scheme>.png: the contact sheet, from the real CSS.
   # #337: `<view>@1440` at the desktop width (1440×900, DPR 2), shot as <view>-1440.png.
@@ -57,7 +60,7 @@ for v in queue queue-open queue-lanes queue-change queue-drive queue-result conf
   case $v in moment-still|herd-kitchen-still|herd-nav|loading-still|chat-wait-still|row-loop-still|moment-row-still) flags=(--force-prefers-reduced-motion) ;; esac # #241, #239, #291, #305, #370
   run "$url" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1
   run "$url&check=1" --dump-dom ${flags[@]+"${flags[@]}"} > "$shots/$v.html" || fail=1
-  if ! python3 - "$shots/$v.html" "$v" "$shots/$v.png" <<'EOF'
+  if ! python3 - "$shots/$v.html" "$v" "$shots/$v.png" "$dpr" <<'EOF'
 import html, json, re, struct, sys, zlib
 m = re.search(r'<pre id="audit">(.*?)</pre>', open(sys.argv[1]).read(), re.S)
 r = json.loads(html.unescape(m.group(1))) if m else {"outliers": ["no audit output"]}
@@ -82,11 +85,11 @@ def png(path):  # 8-bit RGB(A), non-interlaced: Chrome's screenshots
 # #281: a row sprite's pixels are crisp: an art pixel is 4.5 device px (1.5 css px at DPR 3), so no device pixel inside its
 # box is a blend of its two neighbours (smoothing paints those along every edge).
 if r.get("sprites"):
-    px, blend = png(sys.argv[3]), 0
+    px, blend, d = png(sys.argv[3]), 0, int(sys.argv[4])  # d: device px per css px (#266: 2 at 1440)
     mid = lambda a, p, b: a != b and p not in (a, b) and all(min(x, z) <= y <= max(x, z) for x, y, z in zip(a, p, b))
     for x0, y0, w, h in r["sprites"]:
-        for y in range(round(y0 * 3) + 1, round((y0 + h) * 3) - 1):
-            for x in range(round(x0 * 3) + 1, round((x0 + w) * 3) - 1):
+        for y in range(round(y0 * d) + 1, round((y0 + h) * d) - 1):
+            for x in range(round(x0 * d) + 1, round((x0 + w) * d) - 1):
                 blend += mid(px[y][x - 1], px[y][x], px[y][x + 1]) or mid(px[y - 1][x], px[y][x], px[y + 1][x])
     print(f"{sys.argv[2]}: {len(r['sprites'])} row sprites, {blend} smoothed pixels")
     if blend: r["outliers"].append(f"{blend} smoothed pixels in the row sprites")

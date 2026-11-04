@@ -822,19 +822,21 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "<section id=events>",
         "#60: Events loads on tab open"
     );
-    // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red.
-    let ev = get(&s, "/frag?id=events");
-    let rows: Vec<&str> = ev.split("<details class=\"er").skip(1).collect();
-    assert!(rows
-        .iter()
-        .filter(|r| r.contains("alert failed"))
-        .all(|r| r.contains("t-r\" data-act=blocked>✗") && !r.contains("clean")));
-    assert!(ev.contains("alert failed") && !ev.contains("clean ×"), "{ev}");
-    let all = get(&s, "/?all=1");
-    assert!(
-        all.matches("<details class=\"er").count() > 2 * 50,
-        "unfolded, unlimited"
-    );
+    // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red (#266: the
+    // board's tab, from API v1).
+    if let Some(ev) = events_tab(&s, ADDR, 1_000_000, "{ f: { k: 'all', fl: [] } }") {
+        let rows: Vec<&str> = ev.split("<details class=\"er").skip(1).collect();
+        assert!(rows
+            .iter()
+            .filter(|r| r.contains("alert failed"))
+            .all(|r| r.contains("t-r\" data-act=blocked>✗") && !r.contains("clean")));
+        assert!(ev.contains("alert failed") && !ev.contains("clean ×"), "{ev}");
+        let all = events_tab(&s, ADDR, 1_000_000, "{ all: true }").unwrap();
+        assert!(
+            all.matches("<details class=\"er").count() > 2 * 50,
+            "unfolded, unlimited"
+        );
+    }
 }
 
 /// #57: a request never samples the host (serve's 10 s thread does); the page links its scripts,
@@ -960,7 +962,7 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
         ))
         .into_owned()
     };
-    for path in ["/frag?id=events", "/frag?id=config&fleet=sendmeter"] {
+    for path in ["/frag?id=config&fleet=sendmeter"] {
         assert!(send(path, "").starts_with("HTTP/1.1 200 OK"), "{path}");
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",

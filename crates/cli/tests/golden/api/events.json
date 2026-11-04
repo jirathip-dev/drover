@@ -1,6 +1,8 @@
 {
   "list": [
     {
+      "act": "idle",
+      "coat": "",
       "data": {
         "issues": [
           12,
@@ -9,13 +11,22 @@
         "op": "add"
       },
       "fleet": "sendmeter",
+      "glyph": "·",
+      "imp": false,
       "issue": null,
       "k": null,
+      "plain": "sendmeter queue add #12 #17",
+      "pr": null,
+      "run": null,
       "seq": 1,
+      "text": "queue · add #12 #17",
+      "tone": "m",
       "ts": 1000000,
       "type": "queue"
     },
     {
+      "act": "idle",
+      "coat": "",
       "data": {
         "issues": [
           17
@@ -24,26 +35,44 @@
         "op": "block"
       },
       "fleet": "sendmeter",
+      "glyph": "·",
+      "imp": false,
       "issue": null,
       "k": null,
+      "plain": "sendmeter queue block #17",
+      "pr": null,
+      "run": null,
       "seq": 2,
+      "text": "queue · block #17",
+      "tone": "m",
       "ts": 1000000,
       "type": "queue"
     },
     {
+      "act": "impl",
+      "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",
       "data": {
         "agent": "sendmeter-impl-12",
         "harness": "claude",
         "role": "impl"
       },
       "fleet": "sendmeter",
+      "glyph": "▸",
+      "imp": false,
       "issue": 12,
       "k": null,
+      "plain": "sendmeter #12 spawn",
+      "pr": null,
+      "run": null,
       "seq": 3,
+      "text": "impl started",
+      "tone": "l",
       "ts": 900100,
       "type": "spawn"
     },
     {
+      "act": "blocked",
+      "coat": "",
       "data": {
         "id": "q7",
         "options": [
@@ -54,21 +83,37 @@
         "recommend": 1
       },
       "fleet": "sendmeter",
+      "glyph": "!",
+      "imp": true,
       "issue": 9,
       "k": "needs-you",
+      "plain": "sendmeter #9 needs you (? asks q7): Which DB?\n  1) sqlite (recommended)\n  2) postgres\n  herdsman answer sendmeter q7 <n|\"text\">",
+      "pr": null,
+      "run": null,
       "seq": 4,
+      "text": "asks you (q7) · Which DB?",
+      "tone": "r",
       "ts": 900200,
       "type": "needs-decision"
     },
     {
+      "act": "done",
+      "coat": "",
       "data": {
         "into": "staging",
         "pr": 40
       },
       "fleet": "sendmeter",
+      "glyph": "✓",
+      "imp": true,
       "issue": 12,
       "k": "merged",
+      "plain": "sendmeter #12 merged → staging ? (PR #?)",
+      "pr": 40,
+      "run": null,
       "seq": 5,
+      "text": "merged into staging · PR #",
+      "tone": "g",
       "ts": 900300,
       "type": "merged"
     }

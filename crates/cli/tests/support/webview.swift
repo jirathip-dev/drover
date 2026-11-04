@@ -23,6 +23,8 @@ let env = ProcessInfo.processInfo.environment
 let width = CGFloat(Double(a[2])!)
 let (tab, mode, png, extra) = (a[3], a[4], a.count > 5 ? a[5] : nil, a.count > 6 ? a[6] : "")
 let close = a.count > 7 ? a[7] : nil
+// #266: overlay scrollbars, as on a phone (and CI's Macs): a Mac with a mouse otherwise takes 17 px off the width.
+UserDefaults.standard.setVolatileDomain(["AppleShowScrollBars": "WhenScrolling"], forName: UserDefaults.argumentDomain)
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let conf = WKWebViewConfiguration()

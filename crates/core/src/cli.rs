@@ -377,7 +377,16 @@ enum ThreadCmd {
         /// Who wrote it, as the thread shows it
         #[arg(long, default_value = "owner")]
         by: String,
+        /// A file or image to send with it (repeatable, at most 10)
+        #[arg(long)]
+        file: Vec<PathBuf>,
     },
+    /// Retitle a thread: the conductor's short summary, once after its first reply
+    Title { id: String, title: String },
+    /// Fold a thread into its repo's archived list; its conductor stops, nothing is deleted
+    Archive { id: String },
+    /// Bring an archived thread back; its next message resumes the same session
+    Restore { id: String },
     /// The conductor's reply to the owner
     Reply {
         id: String,
@@ -539,8 +548,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`).
-pub const HELP_AGENT_MAX: usize = 264;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`).
+pub const HELP_AGENT_MAX: usize = 274;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -961,10 +970,19 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let to = crate::conductor::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
                         writeln!(out, "{to}")?;
                     }
-                    ThreadCmd::Say { id, text, by } => {
-                        let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &[]), (&by, false))?;
+                    ThreadCmd::Say { id, text, by, file } => {
+                        let name = |p: &PathBuf| p.file_name().map_or(String::new(), |n| n.to_string_lossy().into());
+                        let load =
+                            |p: &PathBuf| Ok((name(p), std::fs::read(p).with_context(|| p.display().to_string())?));
+                        let files = file.iter().map(load).collect::<Result<Vec<_>>>()?;
+                        crate::conductor::find(&read(&ctx.state)?, &id)?;
+                        let files = crate::conductor::upload(ctx, &cfg, &id, &files)?;
+                        let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &files), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
                     }
+                    ThreadCmd::Title { id, title } => crate::conductor::retitle(ctx, &cfg, &id, &title)?,
+                    ThreadCmd::Archive { id } => crate::conductor::archive(ctx, &cfg, r, &id, true)?,
+                    ThreadCmd::Restore { id } => crate::conductor::archive(ctx, &cfg, r, &id, false)?,
                     ThreadCmd::Reply { id, text, file } => crate::conductor::reply(ctx, &cfg, &id, &text, &file)?,
                     ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
                     ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,

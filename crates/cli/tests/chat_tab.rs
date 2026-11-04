@@ -63,7 +63,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "t2 was read"
     );
     assert!(at("data-t=\"t4\"><i") < at("data-t=\"t2\"><i"), "newest first");
-    assert!(chat.contains("<span class=btns><button type=button class=ntb>+ thread</button></span>"));
+    assert!(chat.contains("<span class=btns><button type=button class=ntb data-repo=\"all\">+ thread</button></span>"));
     // The thread: you, a tool row (closed), the conductor, an answered choice, an image, a file, a system line, the open choice.
     let t4 = &chat[at("<div class=cvp data-t=\"t4\">")..];
     let t4 = &t4[..t4.find("</form></div>").unwrap()];
@@ -84,7 +84,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "<small>(recommended)</small>",
         "placeholder=\"other: type an answer\"",
         "<p class=tlv><b>●</b> waiting for your answer",
-        "<form class=tw data-t=\"t4\"><input type=file hidden>",
+        "<form class=tw data-t=\"t4\"><input type=file multiple hidden>",
     ] {
         assert!(t4.contains(want), "{want} not in {t4}");
     }
@@ -129,12 +129,12 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     let r = live();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    // [+ thread] → [start]: the thread, then its conductor with the title as the first message.
+    // #405: the first message from [+ thread]'s empty thread starts the thread, then its conductor.
     let res = req(
         &s,
         "POST",
         "/thread",
-        "op=new&repo=sendmeter&title=Grill+%2312",
+        "op=new&repo=sendmeter&text=Grill+%2312",
         &cookie,
         T,
     );
@@ -776,5 +776,274 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
         m,
         [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
         "{out}"
+    );
+}
+
+fn log(c: &herdsman::Ctx) -> String {
+    std::fs::read_to_string(&c.state).unwrap_or_default()
+}
+
+/// #405: [+ thread] opens an empty thread that logs nothing; its first message starts the thread, titled with the
+/// message's first line, and only the message reaches the conductor. `thread title` retitles it, logged.
+#[test]
+fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it() {
+    let c = setup("chat-first");
+    let r = live();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let (chat, _) = frags(&s, &cookie, T);
+    assert!(
+        chat.contains("<div class=cvp data-t=\"new-sendmeter\">")
+            && chat.contains("<form class=tw data-t=\"new-sendmeter\" data-repo=\"sendmeter\">")
+            && chat.contains("<button type=button class=ntb data-repo=\"sendmeter\">+ thread</button>"),
+        "{chat}"
+    );
+    assert!(!chat.contains("name=title"), "no title form");
+    assert!(
+        !log(&c).contains("thread-"),
+        "an empty thread is never logged: {}",
+        log(&c)
+    );
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        "op=new&repo=sendmeter&text=Grill+me+on+%2312%0Athe+land+mode+part",
+        &cookie,
+        T,
+    );
+    assert_eq!(body(&res), "t1 started\n", "{res}");
+    let events = herdsman::events::read(&c.state).unwrap();
+    let new = events.iter().find(|e| e.kind == "thread-new").unwrap();
+    assert_eq!(new.str("title"), Some("Grill me on #12"));
+    let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
+    assert_eq!(msgs.len(), 1, "{}", log(&c));
+    assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
+    let thread = c.state.with_file_name("conductor").join("t1/.thread.md");
+    assert_eq!(
+        std::fs::read_to_string(thread).unwrap(),
+        "owner: Grill me on #12\nthe land mode part\n",
+        "the conductor gets the message only"
+    );
+    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
+    // The conductor's summary title, after its first reply.
+    let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
+    assert_eq!(code, 0, "{out}");
+    let t = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "thread-title")
+        .unwrap();
+    assert_eq!(
+        (t.str("thread"), t.str("title")),
+        (Some("t1"), Some("Land mode for #12"))
+    );
+    assert!(run(&c, &r, &["thread", "show", "t1"])
+        .1
+        .starts_with("t1 sendmeter: Land mode for #12\n"));
+    let (chat, _) = frags(&s, &cookie, T + 5);
+    assert!(chat.contains("<span class=tt>Land mode for #12</span>"), "{chat}");
+    assert!(chat.contains("<div><b>Land mode for #12</b>"), "{chat}");
+    for bad in ["two\nlines", " "] {
+        assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
+    }
+    // A long first line is cut to one row.
+    let long = "word ".repeat(30);
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        &format!("op=new&repo=sendmeter&text={}", long.replace(' ', "+")),
+        &cookie,
+        T + 9,
+    );
+    assert_eq!(body(&res), "t2 started\n", "{res}");
+    let t2 = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "thread-new")
+        .unwrap();
+    assert_eq!(t2.str("title").unwrap(), format!("{}…", &long[..60]));
+}
+
+/// #405: [archive] closes the conductor's pane and folds the thread; [restore] brings it back and its next message
+/// resumes the same session. Nothing under the thread's folder goes.
+#[test]
+fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
+    let c = setup("chat-archive");
+    let r = live().reply("herdr workspace close", "");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let png = url_enc(&B64.encode(b"\x89PNG one"));
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        &format!("op=new&repo=sendmeter&text=hi&name=a.png&data={png}"),
+        &cookie,
+        T,
+    );
+    assert_eq!(body(&res), "t1 started\n", "{res}");
+    let dir = c.state.with_file_name("conductor").join("t1");
+    let files = |d: &std::path::Path| {
+        let mut v = vec![];
+        let mut todo = vec![d.to_path_buf()];
+        while let Some(p) = todo.pop() {
+            for e in std::fs::read_dir(&p).unwrap().flatten() {
+                if e.path().is_dir() {
+                    todo.push(e.path());
+                } else {
+                    v.push(e.path());
+                }
+            }
+        }
+        v.sort();
+        v
+    };
+    let before = files(&dir);
+    assert!(
+        before.iter().any(|f| f.ends_with(format!("uploads/{T}-a.png"))),
+        "{before:?}"
+    );
+    let session = |c: &herdsman::Ctx| {
+        let s: Vec<_> = herdsman::events::read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "conductor-start")
+            .collect();
+        s.iter()
+            .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
+            .collect::<Vec<_>>()
+    };
+    let res = req(&s, "POST", "/thread", "op=archive&t=t1", &cookie, T + 10);
+    assert_eq!(body(&res), "t1 archived\n", "{res}");
+    assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
+    let sleep = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "conductor-sleep")
+        .unwrap();
+    assert_eq!(sleep.str("why"), Some("archived"));
+    let (chat, _) = frags(&s, &cookie, T + 11);
+    let fold = &chat[chat
+        .find("<details class=\"done arc\"><summary><span>1 archived</span>")
+        .unwrap_or_else(|| panic!("{chat}"))..];
+    assert!(fold.starts_with("<details class=\"done arc\"><summary><span>1 archived</span><i class=cv></i></summary><div class=sw><a class=\"tr"), "{fold}");
+    assert!(
+        fold.contains("<button type=button class=sb name=restore data-t=\"t1\">restore</button></div></details></div>"),
+        "{fold}"
+    );
+    assert!(
+        chat.contains("<b>sendmeter</b><span class=ds>no threads</span>"),
+        "{chat}"
+    );
+    let res = req(&s, "POST", "/thread", "op=restore&t=t1", &cookie, T + 20);
+    assert_eq!(body(&res), "t1 restored\n", "{res}");
+    let (chat, _) = frags(&s, &cookie, T + 21);
+    assert!(!chat.contains("class=\"done arc\""), "{chat}");
+    assert!(
+        chat.contains("<button type=button class=sb name=archive data-t=\"t1\">archive</button>"),
+        "{chat}"
+    );
+    let res = req(&s, "POST", "/thread", "op=say&t=t1&text=back+again", &cookie, T + 30);
+    assert_eq!(body(&res), "sent\n", "{res}");
+    let st = session(&c);
+    assert_eq!(st.len(), 2, "{st:?}");
+    assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");
+    // The CLI does the same, logged; nothing was removed from the folder.
+    assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
+    assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
+    let l = log(&c);
+    assert_eq!(
+        (
+            l.matches("\"thread-archive\"").count(),
+            l.matches("\"thread-restore\"").count()
+        ),
+        (2, 2),
+        "{l}"
+    );
+    let after = files(&dir);
+    assert!(before.iter().all(|f| after.contains(f)), "{before:?} vs {after:?}");
+}
+
+/// #405: a message carries several files: all of them saved and named in the line the conductor gets; 11 are
+/// refused at 10, and a refused first message starts no thread.
+#[test]
+fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
+    let c = setup("chat-multi");
+    let r = live();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let many = |n: usize| {
+        let names: Vec<String> = (0..n).map(|i| format!("IMG_{i}.PNG")).collect();
+        let data: Vec<String> = (0..n).map(|i| url_enc(&B64.encode(format!("png {i}")))).collect();
+        format!("name={}&data={}", names.join("%2F"), data.join("%2C"))
+    };
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        &format!("op=new&repo=sendmeter&text=x&{}", many(11)),
+        &cookie,
+        T,
+    );
+    assert!(body(&res).contains("at most 10 files a message"), "{res}");
+    assert!(!log(&c).contains("thread-new"), "no thread: {}", log(&c));
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0, "its conductor is up");
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        &format!("op=say&t=t1&text=x&{}", many(11)),
+        &cookie,
+        T,
+    );
+    assert!(body(&res).contains("at most 10 files a message"), "{res}");
+    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    assert_eq!(std::fs::read_dir(&up).map_or(0, |d| d.count()), 0, "nothing saved");
+    let res = req(
+        &s,
+        "POST",
+        "/thread",
+        &format!("op=say&t=t1&text=&{}", many(3)),
+        &cookie,
+        T + 1,
+    );
+    assert_eq!(body(&res), "sent\n", "{res}");
+    let saved: Vec<_> = (0..3).map(|i| up.join(format!("{}-IMG_{i}.PNG", T + 1))).collect();
+    for (i, p) in saved.iter().enumerate() {
+        assert_eq!(std::fs::read(p).unwrap(), format!("png {i}").as_bytes());
+    }
+    let att: String = saved.iter().map(|p| format!(" (attached: {})", p.display())).collect();
+    assert!(
+        r.called(&format!(
+            "herdr agent prompt conductor-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
+        )),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let (chat, _) = frags(&s, &cookie, T + 2);
+    for i in 0..3 {
+        assert!(
+            chat.contains(&format!("<img src=\"thread/t1/IMG%5F{i}%2EPNG\"")),
+            "{chat}"
+        );
+    }
+    // `thread say --file`, repeatable: copied into uploads/, a name repeated in one message kept apart.
+    let a = c.state.with_file_name("a.png");
+    std::fs::write(&a, b"A").unwrap();
+    let a = a.to_str().unwrap();
+    let (code, out) = run(&c, &r, &["thread", "say", "t1", "two", "--file", a, "--file", a]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        r.calls.borrow().iter().any(|l| l.contains("owner: two (attached: ")
+            && l.contains("-a.png) (attached: ")
+            && l.contains("-2-a.png)")),
+        "{:?}",
+        r.calls.borrow()
     );
 }
