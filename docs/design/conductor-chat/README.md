@@ -24,7 +24,7 @@ is the AC's live readback: a grill (3 choices, one answered from Telegram), a fi
 mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `../farm-v2/board-events-390.png`
 (a real board screenshot). `rate-limits-docs-390.png` is the conductor's "mockup", made from
 `fixtures/rate-limits-docs.html`. The account names, times and ids (`q31`, `c8`) are made up. The working directory
-`~/conductor/acme-api` is the decided one (Q6).
+`~/.local/state/herdsman/conductor/t3` is the decided one (Q6, #386: the state folder, per thread).
 
 ## The list
 
@@ -109,7 +109,8 @@ settled cards and older-threads rows ≥ 44 px, and every cut line ellipsised. F
    cards stay in its thread.
 4. **Answered choices fold** to the `✓` answer line.
 5. **The conductor's commands are shown**, as closed tool runs.
-6. **Working directory:** `~/conductor/<repo>`, and `~/conductor/all` for "all repos".
+6. **Working directory:** one per thread, `<state dir>/conductor/<thread>/` (#386; `[conductor] dir` overrides
+   the root), "all repos" threads too.
 7. **Push text:** `<repo> · <thread title>: <first line of the reply>`, and `… asks: <question>` for a choice. A tap
    opens the thread. No push for tool runs or system lines.
 8. **Left out of steps 1–2:** renaming or archiving a thread, search across threads, and the full-screen image

@@ -988,7 +988,7 @@ impl<'a> Server<'a> {
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
-                let at = read(&ctx.state).ok().and_then(|ev| chat::file(&ev, t, &name));
+                let at = read(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
                 match at.and_then(|p| std::fs::read(p).ok()) {
                     Some(b) => ("200 OK", ctype(&name), b),
                     None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
@@ -3078,12 +3078,12 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     // #386: the files threads carry, as `/thread/<t>/<name>` serves them.
     for e in events.iter().filter(|e| e.kind == "thread-msg") {
         for f in chat::files_of(e) {
-            let (to, name) = (
-                dir.join("thread").join(e.str("thread").unwrap_or_default()),
-                f["name"].as_str(),
+            let (t, name) = (
+                e.str("thread").unwrap_or_default(),
+                f["name"].as_str().unwrap_or_default(),
             );
-            let name = name.unwrap_or_default();
-            let b = f["path"].as_str().and_then(|p| std::fs::read(p).ok());
+            let to = dir.join("thread").join(t);
+            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| std::fs::read(p).ok());
             if let Some(b) = b.filter(|_| !name.contains('/')) {
                 std::fs::create_dir_all(&to)?;
                 std::fs::write(to.join(name), b)?;

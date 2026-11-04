@@ -596,7 +596,7 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
 .qid{font-size:var(--fs-meta);color:var(--mute)}
 /* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
-.cvp :is(.chq,.tw):has([disabled]){opacity:.6;pointer-events:none}
+.cvp :is(.chq,.tw):has([disabled]){opacity:.6}
 .cvp>.ns{margin:0;font-size:var(--fs-meta)}
 /* The live line and the composer are the sheet's (.live, .reply). */
 .tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -604,7 +604,7 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .tw{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .tw textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
 /* The composer, sticky above the tab bar: [+] attach, the text, [send]; a picked file waits above as a 56 px thumbnail. */
-.cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));margin-bottom:var(--hit);background:var(--bg);border-top:1px solid var(--line)}
 .att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
 .att img{width:calc(var(--hit) + var(--s3));height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
 .att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -250,7 +250,8 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert_eq!(&got[at..], &png[..]);
 
     // Out: the conductor's reply with a mockup PNG.
-    let mock = c.config.with_file_name("mockup-390.png");
+    let folder = c.state.with_file_name("conductor").join("t1");
+    let mock = folder.join("mockup-390.png");
     std::fs::write(&mock, b"\x89PNG mock").unwrap();
     let (code, out) = run(
         &c,
@@ -268,6 +269,26 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(res.starts_with("HTTP/1.1 404"), "{res}");
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", "/no/such.png"]);
     assert_ne!(code, 0, "{out}");
+    // A file outside the thread's folder is never attached, nor served when a log line names it.
+    let toml = c.config.to_str().unwrap();
+    let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", toml]);
+    assert_ne!(code, 0, "{out}");
+    assert!(
+        !std::fs::read_to_string(&c.state).unwrap().contains(toml),
+        "never logged"
+    );
+    std::os::unix::fs::symlink(&c.config, folder.join("link.toml")).unwrap();
+    let line = |n: &str, p: &str| {
+        format!("{{\"ts\":{T},\"fleet\":\"sendmeter\",\"type\":\"thread-msg\",\"thread\":\"t1\",\"from\":\"conductor\",\"text\":\"x\",\"files\":[{{\"name\":\"{n}\",\"path\":\"{p}\",\"size\":1}}]}}\n")
+    };
+    let mut log = std::fs::read_to_string(&c.state).unwrap();
+    log += &line("keys.toml", toml);
+    log += &line("link.toml", folder.join("link.toml").to_str().unwrap());
+    std::fs::write(&c.state, log).unwrap();
+    for n in ["keys.toml", "link.toml"] {
+        let res = req(&s, "GET", &format!("/thread/t1/{n}"), "", "", T + 5);
+        assert!(res.starts_with("HTTP/1.1 404"), "{n}: {res}");
+    }
 }
 
 fn url_enc(s: &str) -> String {

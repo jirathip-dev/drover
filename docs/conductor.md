@@ -44,8 +44,10 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
 
 - **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
-  images inline, any other file as a row. A file the owner attaches on the board is saved in the conductor's folder
-  under `uploads/` and its path is typed in with the message (`(attached: <path>)`), so the conductor can read it.
+  images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is
+  refused: copy it in first), and the board serves only those. A file the owner attaches on the board is saved in the
+  conductor's folder under `uploads/` and its path is typed in with the message (`(attached: <path>)`), so the
+  conductor can read it.
 - **Commands:** the lane hook logs each `herdsman` or `gh` command the conductor runs (`thread-cmd`, not `thread
   reply`); the board shows them as closed tool rows.
 

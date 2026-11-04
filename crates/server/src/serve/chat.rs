@@ -163,7 +163,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     let home = crate::config::home().display().to_string();
     let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
     let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
-    let mut h = format!("<p class=qs>thread started · {at} · conductor in {dir}</p>");
+    let mut h = format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>");
     for e in of(events, id) {
         let s = |k| e.str(k).unwrap_or_default();
         h += &match (e.kind.as_str(), s("from")) {
@@ -279,10 +279,16 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
     format!("<div class=clp>{list}</div>{views}")
 }
 
-/// The newest file named `name` a message in thread `id` carries (the owner's upload or the conductor's reply).
-pub fn file(events: &[Event], id: &str, name: &str) -> Option<std::path::PathBuf> {
+/// The newest file named `name` a message in thread `id` carries (the owner's upload or the conductor's reply), if
+/// it lies in the thread's conductor folder; `demo` (the demo export) also takes the repo's relative fixtures.
+pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Option<std::path::PathBuf> {
     let f = of(events, id).rev().flat_map(files_of).find(|f| f["name"] == name);
-    f.and_then(|f| f["path"].as_str()).map(Into::into)
+    let p = std::path::Path::new(f.and_then(|f| f["path"].as_str())?);
+    let fixture = p.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+    if demo && fixture {
+        return Some(p.into());
+    }
+    conductor::inside(ctx, &Config::load(&ctx.config).ok()?, id, p)
 }
 
 /// `POST /thread` from a paired owner device: `new` (start a thread and its conductor), `say` (with an attached

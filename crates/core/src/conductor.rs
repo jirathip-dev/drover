@@ -69,9 +69,18 @@ pub fn dir(ctx: &Ctx, cfg: &Config, id: &str) -> std::path::PathBuf {
     root.unwrap_or_else(|| ctx.state.with_file_name("conductor")).join(id)
 }
 
-/// A file a message carries, as the thread logs it: its name, absolute path and size.
-pub fn file(p: &std::path::Path) -> Result<Value> {
-    let p = std::path::absolute(p)?;
+/// `p` resolved, if it lies in thread `id`'s conductor folder: the only files a thread shows or serves (#386).
+pub fn inside(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Option<std::path::PathBuf> {
+    let root = dir(ctx, cfg, id).canonicalize().ok()?;
+    p.canonicalize().ok().filter(|p| p.starts_with(root))
+}
+
+/// A file a message carries, as the thread logs it: its name, path in the conductor's folder and size.
+pub fn file(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Result<Value> {
+    let Some(p) = inside(ctx, cfg, id, p) else {
+        let d = dir(ctx, cfg, id).display().to_string();
+        bail!("{}: not in the thread's folder {d}; copy it there first", p.display());
+    };
     let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
     Ok(json!({"name": name, "path": p, "size": size}))
@@ -80,7 +89,10 @@ pub fn file(p: &std::path::Path) -> Result<Value> {
 /// `herdsman thread reply [--file <path>]…`: the conductor's message to the owner, its files shown inline.
 pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::PathBuf]) -> Result<()> {
     text_ok(text)?;
-    let files = files.iter().map(|p| file(p)).collect::<Result<Vec<_>>>()?;
+    let files = files
+        .iter()
+        .map(|p| file(ctx, cfg, id, p))
+        .collect::<Result<Vec<_>>>()?;
     log(ctx, cfg, find(&read(&ctx.state)?, id)?, "conductor", (text, &files))
 }
 
