@@ -1750,7 +1750,9 @@ chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
-  if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
+  const lk = t.closest('#chat .lk'); // #413: a linked row's chip opens the other thread
+  if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); }
+  else if (row) { e.preventDefault(); chatOpen(row.dataset.t); }
   else if (t.closest('#chat .bk')) chatOpen('');
   else if (t.closest('#chat .ntb')) { const f = t.closest('.fc').querySelector('.nt'); NT.has(f.dataset.repo) ? NT.delete(f.dataset.repo) : NT.add(f.dataset.repo); chatPaint(); f.hidden || f.elements.title.focus(); }
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
