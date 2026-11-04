@@ -155,9 +155,10 @@ function theme(name) {
     B.classList.add('hz');
     TT = T;
     TM = T.modes || ['scene', 'ascii'];
-    mode(B.dataset.mode);
+    mode(get('mode'));
     rows(document);
     groups();
+    if (lopen()) lsheet(); // #335: an open look sheet shows STYLE only for a theme with ascii
   });
 }
 
