@@ -846,15 +846,8 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     };
     let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
-        gh::pr(
-            ctx,
-            r,
-            f,
-            (&e.fleet, n),
-            &crate::gate::branch_of(st.as_ref(), n),
-            ctx.now,
-        )
-        .ok()
+        let b = crate::gate::branch_of(st.as_ref(), n);
+        gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
     });
     let pr = pr
         .filter(|p| p["state"] == "OPEN")

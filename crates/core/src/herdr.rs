@@ -200,17 +200,8 @@ pub fn start_argv(agent: &str, kind: &str, pane: &str, args: Vec<String>) -> Vec
 
 /// `herdr agent wait` until the kick shows as working or blocked.
 pub fn wait_working_argv(agent: &str, ms: &str) -> Vec<String> {
-    argv(&[
-        "agent",
-        "wait",
-        agent,
-        "--until",
-        "working",
-        "--until",
-        "blocked",
-        "--timeout",
-        ms,
-    ])
+    let a = format!("agent wait {agent} --until working --until blocked --timeout {ms}");
+    argv(&a.split(' ').collect::<Vec<_>>())
 }
 
 pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {

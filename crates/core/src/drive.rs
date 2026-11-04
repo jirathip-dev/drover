@@ -947,15 +947,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
             .filter(merged)
             .any(|e| left(&e))
     {
-        act(
-            ctx,
-            cfg,
-            r,
-            out,
-            &events,
-            (fleet, None, "clean"),
-            &["clean", fleet, "--yes"],
-        )?;
+        let c = (fleet, None, "clean");
+        act(ctx, cfg, r, out, &events, c, &["clean", fleet, "--yes"])?;
     }
     Ok(go)
 }

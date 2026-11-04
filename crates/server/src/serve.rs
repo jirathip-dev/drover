@@ -193,16 +193,7 @@ impl Runner for Memo<'_> {
             )
         });
         cache().insert(key, (t, out.clone()));
-        Ok(out.map_or(
-            Out {
-                code: 1,
-                ..Out::default()
-            },
-            |stdout| Out {
-                stdout,
-                ..Out::default()
-            },
-        ))
+        Ok(crate::snapshot::out(out))
     }
 }
 
@@ -3341,14 +3332,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if [
-            "stall",
-            "orphan-lane",
-            "conflict-predicted",
-            "heads-up",
-            "ready-unmerged",
-        ]
-        .contains(&k)
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged"
+            .split(' ')
+            .any(|x| x == k)
             || k.starts_with("orch-") =>
         {
             ("!", "a", format!("{k}{r}"), false)

@@ -147,23 +147,17 @@ pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> 
     let q = ISSUES_QUERY.replace("STATES", if since.is_some() { "[OPEN,CLOSED]" } else { "OPEN" });
     let (owner, name) = f.repo.split_once('/').unwrap_or_default();
     let v = [format!("owner={owner}"), format!("name={name}"), format!("query={q}")];
-    let mut a = vec!["api", "graphql", "--paginate", "--jq", ISSUES_JQ];
-    for x in v.iter().chain(&since) {
-        a.extend(["-f", x]);
-    }
+    let mut a = ["api", "graphql", "--paginate", "--jq", ISSUES_JQ]
+        .map(String::from)
+        .to_vec();
+    a.extend(v.into_iter().chain(since).flat_map(|x| ["-f".into(), x]));
     let out = ok(r, "gh", &a)?;
     for i in out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
-        if i["updated"].as_str() > c["since"].as_str() {
-            c["since"] = i["updated"].clone();
-        }
+        c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
         let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
-        m.map(|m| {
-            if i["state"] == "OPEN" {
-                m.insert(n, i)
-            } else {
-                m.remove(&n)
-            }
-        });
+        let m = m.ok_or_else(|| anyhow::anyhow!("bad backlog cache"))?;
+        m.remove(&n);
+        m.extend((i["state"] == "OPEN").then_some((n, i)));
     }
     c["ts"] = json!(ctx.now);
     store(&p, &c)

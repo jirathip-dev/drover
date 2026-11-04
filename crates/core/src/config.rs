@@ -751,12 +751,8 @@ pub fn home() -> PathBuf {
 
 /// Set `key = "val"` in `[fleet.<fleet>.role.<role>]`, touching only the value bytes (or adding one line).
 pub fn set_value(text: &str, fleet: &str, role: &str, key: &str, val: &str) -> Result<String> {
-    set_in(
-        text,
-        &format!("[fleet.{fleet}.role.{role}]"),
-        key,
-        &format!("\"{val}\""),
-    )
+    let h = format!("[fleet.{fleet}.role.{role}]");
+    set_in(text, &h, key, &format!("\"{val}\""))
 }
 
 /// Set `key = <lit>` (a TOML literal) in the table `header`, as `set_value` does.
