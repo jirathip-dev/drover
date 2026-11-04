@@ -125,7 +125,12 @@ impl Plan {
         let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
         let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
         let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
-        c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
+        // #387: `secret:<NAME>` is read from the keychain by the pane's shell, never by herdsman.
+        let fleet = self.lane.split(':').next().unwrap_or_default();
+        c.extend(self.env.iter().map(|(k, x)| match x.strip_prefix("secret:") {
+            Some(n) => format!("{k}={}", crate::secret::shell(fleet, n)),
+            None => format!("{k}='{}'", v(x)),
+        }));
         c.extend(
             self.account
                 .iter()

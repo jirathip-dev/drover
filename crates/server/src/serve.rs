@@ -159,6 +159,22 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
         });
+        // #387: the Telegram bridge's long-poll (off without `[telegram] chat`); it moves to Phase C (#345) later.
+        sc.spawn(move || loop {
+            let ctx = &Ctx {
+                now: crate::now(),
+                ..ctx.clone()
+            };
+            let on = Config::load(&ctx.config)
+                .ok()
+                .filter(|c| c.telegram.chat.is_some() && !read_only);
+            let wait = match on.map(|c| crate::telegram::tick(ctx, &c, r, 50)) {
+                Some(Ok(())) => 0,
+                Some(Err(e)) => (eprintln!("herdsman telegram: {e:#}"), 30).1,
+                None => 60,
+            };
+            std::thread::sleep(Duration::from_secs(wait));
+        });
         // #140: drive and the needs-human ops run here, one at a time; the board toasts the result.
         sc.spawn(move || {
             for (c, f, fleet) in rx {

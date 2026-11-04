@@ -595,10 +595,15 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .chq .oth{display:flex;gap:var(--s4);align-items:center;margin-top:var(--s1)}
 .chq .oth input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
 .blk:has(>.md+.chq){--k:var(--a)}
+/* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
+.df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
+:is(.chc,.chs){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
+.chs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.blk:has(>.md+:is(.chc,.chs)){--k:var(--a)}
 .ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
 .qid{font-size:var(--fs-meta);color:var(--mute)}
 /* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
-.cvp :is(.chq,.tw):has([disabled]){opacity:.6}
+.cvp :is(.chq,.chc,.tw):has([disabled]){opacity:.6}
 .cvp>.ns{margin:0;font-size:var(--fs-meta)}
 /* The live line and the composer are the sheet's (.live, .reply). */
 .tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
