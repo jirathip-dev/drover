@@ -599,7 +599,7 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let get = |s: &herdsman::serve::Server| {
         let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
-        String::from_utf8_lossy(&res).into_owned()
+        with_queue(&String::from_utf8_lossy(&res), s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
     };
     let page = get(&s);
     assert!(
@@ -686,8 +686,8 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         out
     };
     let get = |path: &str, extra: &str| send(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{extra}\r\n"));
-    let page = get("/", &cookie);
-    let i = page.find("name=mtime value=").unwrap() + 17;
+    let page = get("/api/v1/state", &cookie); // #268: the Queue tab's forms send `State.mtime`
+    let i = page.find("\"mtime\":\"").unwrap() + 9;
     let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=drive&fleet=sendmeter&mtime={mtime}");
     let post = || {

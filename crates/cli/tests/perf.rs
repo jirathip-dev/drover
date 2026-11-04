@@ -202,7 +202,8 @@ fn the_page_and_frags_carry_one_tab() {
         String::from_utf8_lossy(&res).into_owned()
     };
     let page = body("/", "");
-    assert!(page.contains("<section id=lanes></section>") && !page.contains("<section id=queue></section>"));
+    // #268: the Queue tab is the TypeScript board's (API v1's `queue`): the page never carries it.
+    assert!(page.contains("<section id=lanes></section>") && page.contains("<section id=queue></section>"));
     let page = body("/", "Cookie: tab=lanes\r\n");
     assert!(page.contains("sendmeter-impl-20") && page.contains("<section id=queue></section>"));
     let j: serde_json::Value =
