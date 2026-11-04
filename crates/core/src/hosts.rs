@@ -308,9 +308,7 @@ pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
 
 /// Admission on one host, in order `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
-    let min = cfg.limits.min_free_gb;
-    if let Some(gb) = host::free_gb(on).filter(|g| *g < min) {
-        let why = format!("{gb:.1} GB free < {min}; `herdsman clean --yes`");
+    if let Some(why) = disk_low(ctx, cfg, on) {
         return (Host::default(), Some(("DISK_LOW", why)));
     }
     let mut hs = host::sample(on);
@@ -324,6 +322,36 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
     }
     let busy = host::admit(&hs, &cfg.limits).err().map(|w| ("HOST_BUSY", w));
     (hs, busy)
+}
+
+/// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there (the worktrees of done
+/// issues' lanes on it), else `reclaim`.
+pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
+    let min = cfg.limits.min_free_gb;
+    let gb = host::free_gb(on).filter(|g| *g < min)?;
+    let (events, mut wts) = (read(&ctx.state).unwrap_or_default(), vec![]);
+    let st = fold(&events);
+    let done = |e: &Event| {
+        e.issue
+            .is_some_and(|n| st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done))
+    };
+    for e in events
+        .iter()
+        .filter(|e| crate::check::lane_of(e) && e.str("machine") == on.machine && done(e))
+    {
+        wts.extend(e.str("worktree").filter(|w| !wts.contains(w)));
+    }
+    wts.retain(|w| on.exists(Path::new(w)));
+    let names: Vec<&str> = wts.iter().map(|w| w.rsplit('/').next().unwrap_or(w)).collect();
+    let more = if names.len() > 5 { ", …" } else { "" };
+    let free = match names.len() {
+        0 => "nothing for `herdsman clean --yes` there; `herdsman reclaim` frees idle build folders".into(),
+        n => format!(
+            "`herdsman clean --yes` frees {n} done lane worktree(s) there: {}{more}",
+            names[..n.min(5)].join(", ")
+        ),
+    };
+    Some(format!("{gb:.1} GB free < {min}; {free}"))
 }
 
 /// Where a lane goes: its host's name and machine, the worktree root and repo checkout there, the remote `$HOME`, and the
