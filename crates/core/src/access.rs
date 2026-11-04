@@ -150,6 +150,13 @@ pub fn civil_month_day(days: u64) -> (u64, u64) {
     ((mp + 2) % 12 + 1, doy - (153 * mp + 2) / 5 + 1)
 }
 
+/// #343: the year of a day number since 1970-01-01 (as `civil_month_day`).
+pub fn civil_year(days: u64) -> u64 {
+    let (z, (m, _)) = (days + 719_468, civil_month_day(days));
+    let doe = z % 146_097;
+    z / 146_097 * 400 + (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365 + u64::from(m <= 2)
+}
+
 /// The host's UTC offset in seconds (`date +%z`; UTC if unreadable).
 fn local_offset(r: &dyn Runner, now: u64) -> i64 {
     let z = usage::date(r, now, "+%z").parse::<i64>().unwrap_or(0);

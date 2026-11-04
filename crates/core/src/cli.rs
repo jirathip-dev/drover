@@ -1,6 +1,6 @@
 //! The clap CLI, `herdsman help --agent` and dispatch to the modules.
 use crate::config::{home, Config};
-use crate::events::{emit, fold, read, status_line, Event};
+use crate::events::{emit, read, status_line, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
@@ -578,8 +578,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::LaneEvent { kind, data } => lane_event(ctx, r, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
-            let events = read(&ctx.state)?;
-            let all = fold(&events);
+            let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
                 .values()
                 .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
@@ -748,7 +747,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             fleet,
             cmd: QueueCmd::Ls { json },
         } => {
-            let rows = queue::ls_json(&read(&ctx.state)?, &fleet);
+            let rows = queue::ls_json(&read(&ctx.state)?, &crate::events::states(&ctx.state)?, &fleet);
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
