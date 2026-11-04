@@ -60,6 +60,12 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
+/// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
+pub fn reviewed_head(t: &str) -> Option<&str> {
+    let l = t.lines().find(|l| l.contains("Reviewed head"))?;
+    l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40)
+}
+
 /// Pure: the issue's wait reason. `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
@@ -390,10 +396,12 @@ pub fn scan(
         let path = spawn
             .and_then(|e| e.str("worktree"))
             .map(|wt| format!("{wt}/verdict.md"));
+        // #376: an adopted orphan's verdict counts from its `spawn-started` (none logged: any).
+        let since = spawn.map_or(0, |e| e.data.get("since").and_then(Value::as_u64).unwrap_or(e.ts));
         let fresh = |p: &String| {
             std::fs::metadata(p)
                 .and_then(|m| m.modified())
-                .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(spawn.map_or(0, |e| e.ts)))
+                .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(since))
         };
         // #157: on another host the rev spawn removed any older verdict.md, so one there is this round's.
         let there = crate::hosts::On::of(r, spawn);
@@ -418,8 +426,7 @@ pub fn scan(
             .or_else(|| kept.and_then(|e| e.str("verdict")).map(String::from));
         let named = text
             .as_deref()
-            .and_then(|t| t.lines().find(|l| l.contains("Reviewed head")))
-            .and_then(|l| l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40))
+            .and_then(reviewed_head)
             .or_else(|| kept.and_then(|e| e.str("sha")));
         // In review, `head` is the sha verdict.md names (#293), or the rev spawn head (#92; else its worktree's).
         let at = spawn

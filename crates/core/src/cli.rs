@@ -833,7 +833,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     role,
                     pane,
                 } => {
-                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane)?;
+                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
                 }
                 Cmd::Ask {
                     fleet,
