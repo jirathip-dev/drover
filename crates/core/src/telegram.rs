@@ -58,14 +58,14 @@ fn topic_of(events: &[Event], id: &str) -> Option<i64> {
     let m = events
         .iter()
         .rfind(|e| e.kind == "telegram-topic" && e.str("thread") == Some(id));
-    m.and_then(|e| e.data["topic"].as_i64())
+    m.and_then(|e| e.data.get("topic")?.as_i64())
 }
 
 /// Topic `topic`'s thread.
 fn thread_of(events: &[Event], topic: i64) -> Option<String> {
     let m = events
         .iter()
-        .rfind(|e| e.kind == "telegram-topic" && e.data["topic"] == topic);
+        .rfind(|e| e.kind == "telegram-topic" && e.data.get("topic") == Some(&topic.into()));
     m.and_then(|e| e.str("thread")).map(String::from)
 }
 
@@ -74,6 +74,11 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, wait: u64) -> Result<()> {
     let Some(chat) = cfg.telegram.chat else {
         return Ok(());
     };
+    // Fail closed: without `owner` every group member would count as the owner.
+    let owner = cfg
+        .telegram
+        .owner
+        .context("[telegram] chat is set but owner is not: the bridge stays off")?;
     let api = cfg
         .telegram
         .api
@@ -90,12 +95,12 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, wait: u64) -> Result<()> {
     let get = json!({"offset": cur.offset, "timeout": wait, "allowed_updates": ["message", "callback_query"]});
     for u in bot.json("getUpdates", &get)?.as_array().into_iter().flatten() {
         cur.offset = cur.offset.max(u["update_id"].as_i64().unwrap_or(0) + 1);
-        let owner = |from: &Value| cfg.telegram.owner.is_none_or(|o| from["id"] == o);
+        let owner = |from: &Value| from["id"] == owner;
         if let Some(m) = u
             .get("message")
             .filter(|m| m["chat"]["id"] == chat && owner(&m["from"]))
         {
-            inbound(ctx, cfg, &bot, m).unwrap_or_else(|e| eprintln!("herdsman telegram: {e:#}"));
+            logged(inbound(ctx, cfg, &bot, m));
         }
         if let Some(c) = u.get("callback_query").filter(|c| owner(&c["from"])) {
             let (f, id, n) = {
@@ -109,18 +114,24 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, wait: u64) -> Result<()> {
             let by = ("owner", Some("telegram"));
             let res = crate::answer(ctx, cfg, r, &mut vec![], (f, id), n, by);
             let text = res.map_or_else(|e| format!("{e:#}"), |()| format!("answered {id}"));
-            bot.json(
-                "answerCallbackQuery",
-                &json!({"callback_query_id": c["id"], "text": text}),
-            )?;
+            let ack = json!({"callback_query_id": c["id"], "text": text});
+            logged(bot.json("answerCallbackQuery", &ack));
         }
     }
+    // Each update and event is handled once: a failing call is logged and skipped, never retried every pass.
+    crate::devices::save(&path, &cur)?;
     let events = read(&ctx.state)?;
     for e in &events[cur.sent.unwrap_or(events.len()).min(events.len())..] {
-        outbound(ctx, cfg, &bot, &events, e)?;
+        logged(outbound(ctx, cfg, &bot, &events, e));
     }
-    cur.sent = Some(read(&ctx.state)?.len());
+    cur.sent = Some(events.len());
     crate::devices::save(&path, &cur)
+}
+
+fn logged<T>(r: Result<T>) {
+    if let Err(e) = r {
+        eprintln!("herdsman telegram: {e:#}");
+    }
 }
 
 /// An owner message in a topic: its thread (a new topic starts one under `all`, or under the repo its name starts
@@ -142,7 +153,8 @@ fn inbound(ctx: &Ctx, cfg: &Config, bot: &Bot, m: &Value) -> Result<()> {
         let repo = cfg
             .fleet
             .keys()
-            .find(|f| name.starts_with(f.as_str()))
+            .filter(|f| name.starts_with(f.as_str()))
+            .max_by_key(|f| f.len())
             .map_or("all", String::as_str);
         let mut out = vec![];
         conductor::new(ctx, cfg, &mut out, repo, &name)?;
@@ -214,7 +226,7 @@ fn outbound(ctx: &Ctx, cfg: &Config, bot: &Bot, events: &[Event], e: &Event) -> 
                 &[format!("⚙ {text}"), text.into()][usize::from(from == "conductor")],
                 &json!({}),
             )?;
-            for f in e.data["files"].as_array().into_iter().flatten() {
+            for f in e.data.get("files").and_then(Value::as_array).into_iter().flatten() {
                 let name = f["name"].as_str().unwrap_or_default();
                 let ext = name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
                 let (method, field) = if ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext.as_str()) {
@@ -232,8 +244,14 @@ fn outbound(ctx: &Ctx, cfg: &Config, bot: &Bot, events: &[Event], e: &Event) -> 
             }
         }
         ("needs-decision", _) => {
-            let rec = e.data["recommend"].as_u64();
-            let opts = e.data["options"].as_array().into_iter().flatten().zip(1u64..);
+            let rec = e.data.get("recommend").and_then(Value::as_u64);
+            let opts = e
+                .data
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .zip(1u64..);
             let rows: Vec<Value> = opts
                 .map(|(o, n)| {
                     let mark = if Some(n) == rec { " (recommended)" } else { "" };

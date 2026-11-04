@@ -313,6 +313,8 @@ struct Bot {
     herdr: Fake,
     updates: Shared<Vec<Value>>,
     sent: Shared<Vec<String>>,
+    /// A method the fake Bot API refuses (`ok: false`).
+    fail: Shared<&'static str>,
 }
 
 impl Runner for Bot {
@@ -332,7 +334,25 @@ impl Runner for Bot {
         let url = input.lines().next().unwrap();
         let method = url.trim_end_matches('"').rsplit('/').next().unwrap();
         let result = match method {
-            "getUpdates" => Value::Array(std::mem::take(&mut *self.updates.borrow_mut())),
+            // Like Telegram: every update from `offset` on, until a later offset confirms it.
+            "getUpdates" => {
+                let at = input.split(r#"\"offset\":"#).nth(1).unwrap();
+                let offset: i64 = at[..at.find(',').unwrap()].parse().unwrap();
+                let ups = self.updates.borrow().clone();
+                Value::Array(
+                    ups.into_iter()
+                        .filter(|u| u["update_id"].as_i64() >= Some(offset))
+                        .collect(),
+                )
+            }
+            m if m == *self.fail.borrow() => {
+                let no = json!({"ok": false, "description": "Too Many Requests"});
+                return Ok(Out {
+                    code: 0,
+                    stdout: no.to_string(),
+                    stderr: String::new(),
+                });
+            }
             "getFile" => json!({"file_path": "photos/file_1.jpg"}),
             "createForumTopic" => json!({"message_thread_id": 77}),
             "file_1.jpg" => {
@@ -368,6 +388,7 @@ fn telegram_maps_topics_to_threads_choices_to_buttons_and_images_both_ways() {
         herdr: herdr(&live()).reply("curl", ""),
         updates: Shared::default(),
         sent: Shared::default(),
+        fail: Shared::default(),
     };
     let at = |n: u64| herdsman::Ctx {
         now: T + n,
@@ -486,4 +507,66 @@ fn telegram_maps_topics_to_threads_choices_to_buttons_and_images_both_ways() {
     let cur: Value =
         serde_json::from_str(&std::fs::read_to_string(c.state.with_file_name("telegram.json")).unwrap()).unwrap();
     assert_eq!(cur["offset"], json!(6));
+}
+
+#[test]
+fn telegram_handles_each_update_and_event_once_even_when_a_call_fails() {
+    let c = setup(
+        "cards-telegram-fail",
+        "",
+        "[telegram]\nchat = -100\nowner = 42\napi = \"https://bot.test\"\n",
+    );
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let r = Bot {
+        herdr: herdr(&live()).reply("curl", ""),
+        updates: Shared::default(),
+        sent: Shared::default(),
+        fail: Shared::default(),
+    };
+    let at = |n: u64| herdsman::Ctx {
+        now: T + n,
+        ..c.clone()
+    };
+    *r.updates.borrow_mut() =
+        vec![json!({"update_id": 1, "message": msg(5, 42, json!({"forum_topic_created": {"name": "ideas"}}))})];
+    herdsman::telegram::tick(&at(0), &cfg, &r, 0).unwrap();
+    let img = c.state.with_file_name("conductor").join("t2/gone.png");
+    std::fs::create_dir_all(img.parent().unwrap()).unwrap();
+    std::fs::write(&img, b"PNG").unwrap();
+    run(
+        &at(10),
+        &Fake::default(),
+        &["thread", "reply", "t2", "Here.", "--file", img.to_str().unwrap()],
+    );
+    run(&at(11), &Fake::default(), &["thread", "reply", "t2", "After."]);
+    r.updates
+        .borrow_mut()
+        .push(json!({"update_id": 2, "message": msg(5, 42, json!({"text": "hello"}))}));
+    *r.fail.borrow_mut() = "sendPhoto";
+    // The failed photo is logged and skipped: the pass goes on and saves its cursor.
+    herdsman::telegram::tick(&at(20), &cfg, &r, 0).unwrap();
+    herdsman::telegram::tick(&at(30), &cfg, &r, 0).unwrap();
+    herdsman::telegram::tick(&at(40), &cfg, &r, 0).unwrap();
+    let hellos = kinds(&c, "thread-msg")
+        .iter()
+        .filter(|e| e.str("text") == Some("hello"))
+        .count();
+    assert_eq!(hellos, 1, "the owner's message is typed in once");
+    let sent = r.sent.borrow().clone();
+    let count = |part: &str| sent.iter().filter(|s| s.contains(part)).count();
+    assert_eq!(count(r#"\"text\":\"Here.\""#), 1, "{sent:?}");
+    assert_eq!(count("/sendPhoto\""), 1, "{sent:?}");
+    assert_eq!(
+        count(r#"\"text\":\"After.\""#),
+        1,
+        "the event after the failure still goes: {sent:?}"
+    );
+
+    // Without `owner` the bridge refuses to run rather than let every group member count as the owner.
+    let open = setup("cards-telegram-open", "", "[telegram]\nchat = -100\n");
+    let cfg = herdsman::config::Config::load(&open.config).unwrap();
+    r.sent.borrow_mut().clear();
+    let err = herdsman::telegram::tick(&open, &cfg, &r, 0).unwrap_err();
+    assert!(format!("{err:#}").contains("owner is not"), "{err:#}");
+    assert!(r.sent.borrow().is_empty(), "no Bot API call");
 }

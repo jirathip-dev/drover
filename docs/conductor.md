@@ -85,7 +85,8 @@ account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `c
 validated like fleet.toml itself, and its diff shows in the thread as a card with **[apply] [discard]**. Only the
 owner applies it: a tap on a paired device, or `herdsman config apply|discard <id>` outside a lane (the lane hook
 refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
-new one and runs `doctor`. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
+new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
+to restore. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
 thread's system line, e.g. `config c1 applied by owner, backup kept, doctor ✓` (the conductor gets it too).
 
 ## Accounts (#387)
@@ -117,7 +118,7 @@ gets it on stdin only.
 ```toml
 [telegram]
 chat = -100123     # a forum supergroup the bot administers (topics on)
-owner = 4242          # your Telegram user id: only your messages and taps count
+owner = 4242          # your Telegram user id: only your messages and taps count (required: without it the bridge stays off)
 # api = "https://api.telegram.org"
 ```
 
