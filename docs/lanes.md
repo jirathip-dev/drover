@@ -212,7 +212,9 @@ someone made is final (`ALREADY_ANSWERED`).
 ## Check and notifiers
 
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
-pane, gets one `lane-dead` and never a `stall`), `ready-unmerged` and
+pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
+checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
+no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
 `account-capped`. It is idempotent and exits 0, so it can run from cron:
 
 ```cron

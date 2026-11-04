@@ -27,8 +27,16 @@ fn config(extra: &str) -> String {
     )
 }
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
-    String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned()
+    let res =
+        String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
+    with_queue(&res, s, ADDR, T)
+}
+
+/// #268: a fleet's [config] sheet as the board draws it from API v1's `queue`.
+fn sheet(s: &Server, fleet: &str) -> String {
+    queue_js(s, ADDR, T, &format!("sheet(d, {fleet:?})"))
 }
 
 fn fixture(name: &str) -> herdsman::Ctx {
@@ -145,8 +153,7 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     let c = fixture("fc-config");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let res = get(&s, "/frag?id=config&fleet=alpha");
-    assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
+    let res = sheet(&s, "alpha");
     for g in [
         "<h3>General<span>edit fleet.toml</span></h3>",
         "<h3>Limits<span>edit fleet.toml</span></h3>",
@@ -198,10 +205,7 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     // No `models`: the model picker is disabled with the fix, so a set never sends it.
     let d = tmpdir("fc-config-nomodels");
     let c = ctx(&d, &config("").replace("models = [\"opus\", \"sonnet\"]\n", ""));
-    let res = get(
-        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
-        "/frag?id=config&fleet=alpha",
-    );
+    let res = sheet(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "alpha");
     assert!(
         res.contains("<select name=model aria-label=model disabled data-off>"),
         "{res}"

@@ -386,6 +386,7 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
+    pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
     /// Pages swapped out per 2 s sample.
@@ -459,6 +460,7 @@ impl Default for Limits {
             review_rounds: 3,
             update_rounds: 3,
             stall_minutes: 30,
+            ci_start_minutes: 10,
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
@@ -525,6 +527,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "stall",
     "lane-dead",
     "ready-unmerged",
+    "ci-missing",
     "merged",
     "needs-decision",
     "needs-human",

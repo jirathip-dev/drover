@@ -343,6 +343,196 @@ pub struct Paired {
     pub used: u64,
 }
 
+/// #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
+/// unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
+pub struct QueueTab {
+    pub now: u64,
+    pub rw: bool,
+    pub live: bool,
+    pub mtime: String,
+    pub error: Option<String>,
+    pub fleets: Vec<QueueCard>,
+}
+
+/// #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's
+/// line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of
+/// `done_n`), the backlog and the [config] sheet.
+pub struct QueueCard {
+    pub name: String,
+    pub k: String,
+    pub serial: Vec<String>,
+    pub paths: Vec<String>,
+    pub need: usize,
+    pub paused: Option<String>,
+    pub drive: Drive,
+    pub notes: Vec<String>,
+    pub rows: Vec<QueueRow>,
+    pub done: Vec<DoneRow>,
+    pub done_n: usize,
+    pub backlog: Option<Backlog>,
+    pub config: ConfigSheet,
+}
+
+/// #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
+/// ran, so none is `nothing was due`).
+pub struct Drive {
+    pub tone: String,
+    pub line: String,
+    pub meta: Vec<String>,
+    pub pass: bool,
+    pub acts: Vec<DriveAct>,
+}
+
+/// A pass's action: its issue (`#N`) or step, in words, its raw `code` on tap.
+pub struct DriveAct {
+    pub who: String,
+    pub words: String,
+    pub code: String,
+}
+
+/// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act` and
+/// `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
+/// pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
+/// answer not delivered), the decision taken by default
+/// (and its ask to change it), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+#[allow(clippy::struct_excessive_bools)] // flags the row's markup reads, one each
+pub struct QueueRow {
+    pub issue: u64,
+    pub state: String,
+    pub tone: String,
+    pub age: String,
+    pub t: u64,
+    pub act: String,
+    pub coat: String,
+    pub queued: bool,
+    pub check: bool,
+    pub groups: Vec<String>,
+    pub blocked_by: Option<u64>,
+    pub title: Option<String>,
+    pub stage: Vec<Stage>,
+    pub lane: String,
+    pub live: bool,
+    pub pr: PrLine,
+    pub dead: bool,
+    pub notes: Vec<String>,
+    pub decided: Option<String>,
+    pub ask: Option<Ask>,
+    pub mv: bool,
+    pub up: Option<u64>,
+    pub down: Option<u64>,
+    pub lanes: Vec<QueueLane>,
+}
+
+/// #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
+/// issue is, a check's PASS at the PR head `ok`.
+pub struct Stage {
+    pub name: String,
+    pub k: String,
+    pub g: String,
+    pub at: i8,
+    pub ok: bool,
+}
+
+/// #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last
+/// verdict in `vtone` and its round, `form` the form-only rounds used.
+pub struct PrLine {
+    pub pr: Option<u64>,
+    pub run: Option<String>,
+    pub ci: Option<String>,
+    pub verdict: Option<String>,
+    pub vtone: String,
+    pub rounds: u32,
+    pub form: Option<String>,
+}
+
+/// #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live`
+/// opens its Lanes sheet, `gone` its stored transcript, empty none.
+pub struct QueueLane {
+    pub name: String,
+    pub state: String,
+    pub tone: String,
+    pub ago: String,
+    pub link: String,
+}
+
+/// A row of `done today`: its land note (else state), age and merged PR.
+pub struct DoneRow {
+    pub issue: u64,
+    pub note: String,
+    pub age: String,
+    pub pr: Option<String>,
+}
+
+/// #365: the open issues not queued and with no lane, by number, as last read `ago`.
+pub struct Backlog {
+    pub issues: BTreeMap<String, BacklogIssue>,
+    pub ago: String,
+}
+
+/// #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`),
+/// LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
+pub struct ConfigSheet {
+    pub path: String,
+    pub file: String,
+    pub repo: String,
+    pub local: String,
+    pub integration: String,
+    pub effort: Option<String>,
+    pub color_set: bool,
+    pub env: Vec<String>,
+    pub node_modules: bool,
+    pub builtin: bool,
+    pub review_rounds: u32,
+    pub update_rounds: u32,
+    pub stall_minutes: u64,
+    pub ask_minutes: u64,
+    pub max_impl: Option<usize>,
+    pub max_rev: Option<usize>,
+    pub line_cap: Option<i64>,
+    pub serial: Vec<String>,
+    pub deny: Vec<String>,
+    pub required: Vec<String>,
+    pub merge_label: Option<String>,
+    pub notify: Vec<String>,
+    pub global: Vec<String>,
+    pub pipe: Value,
+    pub models: Vec<String>,
+    pub harnesses: Vec<Harness>,
+    pub roles: Vec<RoleRow>,
+    pub conductor: Option<Conductor>,
+}
+
+pub struct Harness {
+    pub name: String,
+    pub efforts: Vec<String>,
+}
+
+/// A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`,
+/// `effort_default`).
+pub struct RoleRow {
+    pub name: String,
+    pub profile: String,
+    pub harness: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub efforts: Vec<String>,
+    pub model_default: String,
+    pub effort_default: String,
+    pub accounts: Vec<String>,
+    pub mcp: Vec<String>,
+}
+
+/// #401: the fleet's conductor (`default`: impl's), its choices: models the fleet's roles name.
+pub struct Conductor {
+    pub default: bool,
+    pub profile: String,
+    pub harness: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub efforts: Vec<String>,
+    pub models: Vec<String>,
+}
+
 /// #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
 pub struct Events {
     pub seq: u64,

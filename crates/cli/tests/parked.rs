@@ -59,7 +59,7 @@ fn lane<'a>(page: &'a str, agent: &str) -> &'a str {
 fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     let (c, r) = fixture("parked-sheet", true);
     let s = Server::new(&c, &r, None);
-    let page = get(&s, "/?all=1");
+    let page = get(&s, "/?all=1") + &queue_tab(&s, "", NOW); // #268: the board's Queue tab
     let safe = lane(&page, SAFE);
     assert!(
         safe.contains("data-role=impl data-gone>"),

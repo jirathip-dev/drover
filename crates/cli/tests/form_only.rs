@@ -211,8 +211,7 @@ fn the_card_says_not_counted_in_amber() {
         .reply("herdr agent list", NO_AGENTS)
         .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#);
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
-    let page = String::from_utf8_lossy(&res);
+    let page = queue_tab(&s, "127.0.0.1:7777", c.now); // #268: the board's Queue tab
     assert!(
         page.contains("rev <span class=a>FAIL (form-only)</span> r1 · <span class=a>not counted · form 1/3</span>"),
         "{page}"

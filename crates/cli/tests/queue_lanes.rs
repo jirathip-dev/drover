@@ -36,8 +36,8 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
             ("rev-3-r3", "done", "/x", "w1:p2"),
         ]),
     );
-    let page =
-        String::from_utf8_lossy(&Server::new(&c, &r, None).respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)).into_owned();
+    // #268: the Queue tab as the board draws it from API v1's `queue`.
+    let page = queue_tab(&Server::new(&c, &r, None), "", T);
     let card = &page[page.find("<div class=qls>").expect("lanes list")..];
     let card = &card[..card.find("</div>").unwrap()];
     let at = |a: &str| card.find(&format!(">{a}<")).unwrap_or_else(|| panic!("no {a}: {card}"));
@@ -67,8 +67,7 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
     let log = herdsman::lanes::log(&c.state, "rev-3-r2").unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  out\n").unwrap();
-    let page2 =
-        String::from_utf8_lossy(&Server::new(&c, &r, None).respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)).into_owned();
+    let page2 = queue_tab(&Server::new(&c, &r, None), "", T);
     assert!(
         page2.contains("<a href=#lanes class=\"ql nw el\" data-agent=\"rev-3-r2\" data-gone><span class=m>○</span>"),
         "{page2}"
@@ -80,8 +79,6 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         "{page}"
     );
     // A current lane herdr no longer lists stays plain text.
-    let page =
-        String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET /?all=1 HTTP/1.1\r\n\r\n", T))
-            .into_owned();
+    let page = queue_tab(&Server::new(&c, &Fake::default(), None), "", T);
     assert!(page.contains("<p>impl-3-u1</p>"), "{page}");
 }

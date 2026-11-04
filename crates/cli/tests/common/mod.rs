@@ -410,3 +410,49 @@ pub fn host_html(json: &str) -> String {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8(o.stdout).unwrap()
 }
+
+/// #268: `expr` (JS, over API v1 `queue` data `d`: `tab(d)`, `sheet(d, fleet)`) from web/src/queue.ts under node, from
+/// `s`'s `/api/v1/queue` at `now` (`host` the request's Host: a read-only server takes an empty one).
+pub fn queue_js(s: &herdsman::serve::Server, host: &str, now: u64, expr: &str) -> String {
+    let r = s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
+    let r = String::from_utf8_lossy(&r).into_owned();
+    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/queue: {r}");
+    queue_html(&r[r.find("\r\n\r\n").unwrap() + 4..], expr)
+}
+
+/// #268: the Queue tab as the TypeScript board draws it (`queue_js`'s `tab(d)`).
+pub fn queue_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+    queue_js(s, host, now, "tab(d)")
+}
+
+/// #268: `expr` over API v1 `queue` data `json` in web/src/queue.ts, under node.
+pub fn queue_html(json: &str, expr: &str) -> String {
+    let d = tmpdir("queue-ts");
+    std::fs::write(d.join("queue.json"), json).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/queue.ts");
+    let js = format!(
+        "import {{ tab, sheet }} from {src:?}; import fs from 'node:fs';\n\
+         const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(String({expr}));",
+        d.join("queue.json")
+    );
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/queue.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout).unwrap()
+}
+
+/// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`
+/// the request's Host, else an empty one: a read-only server's).
+pub fn with_queue(res: &str, s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+    let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
+    let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
+    let q = queue_tab(s, if ok { host } else { "" }, now);
+    res.replacen(
+        "<section id=queue></section>",
+        &format!("<section id=queue>{q}</section>"),
+        1,
+    )
+}
