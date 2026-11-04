@@ -6,6 +6,7 @@ use crate::{gh, Ctx};
 use serde::Serialize;
 use serde_json::Value;
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Waiting {
     pub fleet: String,
