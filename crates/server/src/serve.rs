@@ -1325,11 +1325,7 @@ impl<'a> Server<'a> {
         let parts: [(&'static str, &dyn Fn() -> String); 5] = [
             ("needs", &|| self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired)),
             ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
-            ("lanes", &|| {
-                "<p class=lh><button id=mode type=button aria-label=\"lane display mode\">scene</button></p>"
-                    .to_string()
-                    + &self.lanes_tab(ctx, cfg, ev, st, paired)
-            }),
+            ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
             ("host", &|| self.host_tab(ctx, cfg, ev)),
             ("events", &|| events_tab(ctx, self.r, cfg, ev, all)),
         ];
@@ -2652,7 +2648,10 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 })
         })
     };
-    let maps: [(&str, &[&str], Check, &str); 9] = [
+    // #335: a row figure is one line of 3 (its 24 px box), the Host miniature's load one line of 5.
+    let line = |x: &Value, n| narrow(x) && x.as_str().is_some_and(|t| !t.contains('\n') && t.chars().count() <= n);
+    let (row, load) = (|x: &Value| line(x, 3), |x: &Value| line(x, 5));
+    let maps: [(&str, &[&str], Check, &str); 11] = [
         ("poses", &["working", "idle", "done", "blocked"], &id, "a sprite id"),
         ("glyphs", &[], &id, "a string"),
         ("words", &[], &id, "a string"),
@@ -2672,6 +2671,13 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             "icon-180.png, icon-192.png or icon-512.png",
         ),
         ("ascii", &acts, &narrow, "at most 3 lines of 8 narrow characters"),
+        ("ascii_rows", &acts, &row, "one line of at most 3 narrow characters"),
+        (
+            "ascii_load",
+            &["calm", "busy", "held"],
+            &load,
+            "one line of at most 5 narrow characters",
+        ),
     ];
     for (k, keys, ok, want) in maps {
         let m = match o.get(k) {
@@ -2716,7 +2722,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             !a.is_empty() && m.len() == a.len()
         })
     };
-    let rules: [(&str, Check, &str); 5] = [
+    let rules: [(&str, Check, &str); 6] = [
         ("scene", &Value::is_object, "an object"),
         ("scheme", &Value::is_string, "a colour scheme's name"),
         (
@@ -2730,6 +2736,11 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             "{\"kind\": weather|heat|none, \"levels\": {calm, busy, held}}",
         ),
         ("modes", &modes, "a list of scene, ascii, glyph, each at most once"),
+        (
+            "ascii_loading",
+            &narrow,
+            "at most 3 lines (frames) of 8 narrow characters",
+        ),
     ];
     match rules.iter().find(|r| o.get(r.0).is_some_and(|x| !r.1(x))) {
         Some((k, _, want)) => Err(format!("`{k}` must be {want}")),

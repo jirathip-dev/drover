@@ -1,4 +1,4 @@
-// Tabs, lane display mode (both kept in localStorage), the live board (SSE `/live`, sync dot, ↻,
+// Tabs, lane display mode (the look sheet's style; both kept in localStorage), the live board (SSE `/live`, sync dot, ↻,
 // pull to refresh), SW, the Lanes bottom sheet: card, Stop/Kill/Clean (`/act`), transcript per turn
 // (5 s poll, load more), reply box with a `/` menu, Pair this phone, and blocked agents' menu buttons.
 const B = document.body, $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
@@ -46,17 +46,24 @@ const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { se
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
-// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone, no button); TT is
-// the theme herd.js loaded (docs/themes.md). The button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
+// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
+// herd.js loaded (docs/themes.md). #335: the look sheet's STYLE picks it (pixel: scene, ascii: ascii), no Lanes button. In
+// ascii the loading overlay runs the theme's `ascii_loading` frames: built once, then CSS swaps them (no node replaced).
 let TT = null, TM = ['scene', 'ascii'];
 function mode(m) {
+  if (TM.includes(m)) put('mode', m); // a theme without it (terminal) keeps the pick for the next one
   B.dataset.mode = m = TM.includes(m) ? m : TM[0];
-  const b = $('#mode span') || $('#mode');
-  if (b) { b.textContent = m; b.closest('.lh').hidden = TM.length < 2; }
-  put('mode', m);
+  const fs = ((TT && TT.ascii_loading) || '').split('\n').filter(Boolean), ld = $('#ld');
+  let a = ld.querySelector('.lda');
+  if (!a) ld.append(a = Object.assign(document.createElement('span'), { className: 'asc lda' }));
+  if (a.dataset.f !== fs.join()) {
+    a.dataset.f = fs.join();
+    a.replaceChildren(...fs.map(f => Object.assign(document.createElement('b'), { textContent: f })));
+    a.classList.toggle('run', fs.length > 1);
+  }
+  ld.classList.toggle('la', m === 'ascii' && fs.length > 0);
 }
 mode(get('mode'));
-document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
 // #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
 // { "label", "color-scheme": "dark" | "light", "tokens": { "--bg": "#rrggbb", … } } (docs/themes.md, docs/design/schemes).
 // gate() is every check it must pass, with what failed; a refused one is named on the Host tab and never shown.
@@ -205,7 +212,12 @@ function lsheet(kb) {
   const sw = s => { const i = el('i', 'lsw'); i.append(Object.assign(el('b', 'aa', 'Aa'), { style: `background:${s.tokens['--bg']};color:${s.tokens['--fg']}` }), ...['--g', '--a', '--r'].map(t => Object.assign(el('b'), { style: `background:${s.tokens[t]}` }))); return i; };
   const ok = Object.keys(SD.s).filter(n => !fails(SD.s[n]).length), no = Object.keys(SD.s).length - ok.length;
   const sc = ok.map(n => lrow('s', n, n === h.dataset.scheme, sw(SD.s[n]), n === choose(SD.s, null, SD.t[h.dataset.theme])));
-  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc),
+  // #335: STYLE, pixel (sprites) or ascii (the theme's ASCII figures); a theme without ascii (terminal) has none.
+  const px = el('i', 'lka'), as = el('i', 'lka');
+  lsprite(h.dataset.theme).then(x => { px.innerHTML = x; });
+  as.append(el('b', 'asc', TT && TT.ascii_rows && TT.ascii_rows.impl));
+  const st = TM.includes('ascii') ? [grp('style', 'style', 'rows, lanes, host, loading', [lrow('y', 'pixel', B.dataset.mode !== 'ascii', px), lrow('y', 'ascii', B.dataset.mode === 'ascii', as)])] : [];
+  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
     el('p', 'lkn', 'this phone only · the home-screen icon keeps its install-time look'));
   if (key) $(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
   else if (!re) {
@@ -213,9 +225,16 @@ function lsheet(kb) {
     if (kb) $('.lko[aria-selected=true]').focus({ preventScroll: true }); // opened from the keyboard: on the current theme
   }
 }
+// #335: STYLE applies in place: pixel is the scene mode, ascii the ascii mode, on every tab.
+function style(y) {
+  mode(y === 'ascii' ? 'ascii' : 'scene');
+  rows(document);
+  groups();
+}
 function lpick(o) {
   const h = document.documentElement;
-  if (o.dataset.t) {
+  if (o.dataset.y) style(o.dataset.y);
+  else if (o.dataset.t) {
     h.dataset.theme = o.dataset.t;
     put('theme', o.dataset.t);
     theme(o.dataset.t);
@@ -229,7 +248,7 @@ document.addEventListener('click', e => {
   const o = e.target.closest('.look .lko');
   if (o) lpick(o);
 });
-// Keyboard: ↑/↓ (Home/End) move within a list, Tab between the two lists, Enter or Space applies, Esc closes.
+// Keyboard: ↑/↓ (Home/End) move within a list, Tab between the lists, Enter or Space applies, Esc closes.
 document.addEventListener('keydown', e => {
   const o = e.target.closest && e.target.closest('.look .lko');
   if (!o) return;
@@ -256,7 +275,11 @@ function rows(root) {
     g.title = word;
     g.setAttribute('role', 'img');
     g.setAttribute('aria-label', word);
-    g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`;
+    // #335: ascii style: the theme's 3-character figure in the sprite's 24 px box (the same 28 px slot).
+    const f = B.dataset.mode === 'ascii' && TT.ascii_rows && TT.ascii_rows[act];
+    if (!f) return void (g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`);
+    g.replaceChildren(el('i', 'rsp rsa', f));
+    g.firstChild.setAttribute('aria-hidden', true);
   };
   root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
   root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
@@ -283,8 +306,9 @@ function mini(g) {
   const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
   s.querySelector('.lsc')?.remove();
   if (!ls || !MINI[ls.kind]) return;
-  const word = esc('load: ' + ((ls.levels || {})[l] || l));
-  s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
+  const word = esc('load: ' + ((ls.levels || {})[l] || l)), f = B.dataset.mode === 'ascii' && TT.ascii_load && TT.ascii_load[l];
+  s.querySelector('.dt').insertAdjacentHTML('afterend', f ? `<i class="lsc lsa" role=img aria-label="${word}" title="${word}">${esc(f)}</i>` // #335
+    : `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
 }
 // #241: a moment (`ev` on /live with a `k`: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
 function moment(k) {
@@ -357,7 +381,6 @@ function frag(id, html) {
   sput('c:' + id, html);
   alerts();
   badge();
-  if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
