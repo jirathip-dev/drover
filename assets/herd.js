@@ -97,8 +97,8 @@ const heat = () => T.load_scene?.kind === 'heat';
 // #292: nh() spreads a page's lanes over the looks (`l.look`), so neighbours don't wear the same hat.
 const look = l => { const L = T.looks || []; return L.length ? Object.entries(L[l.look ?? hash(l.name) % L.length]).map(e => e.join(':')).join(';') : l.coat; };
 const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
-// The sprite symbols theme() builds (poses hp1..hp4 for the Herd, actions ha-*, row sprites hr-*, the rail, moments hm-*),
-// next to the scene's gradients.
+// The sprite symbols theme() builds (poses hp1..hp4 for the Herd, actions ha-*, row sprites hr-*, the rail, moments hm-*,
+// the Host load minis hl-*), next to the scene's gradients.
 const defs = document.createElementNS(NS, 'svg');
 defs.setAttribute('class', 'hdefs');
 defs.innerHTML = '<defs><linearGradient id=hgr gradientUnits=userSpaceOnUse x1=0 y1=250 x2=0 y2=640><stop offset=0 stop-color="#bcc17b"/><stop offset=".5" stop-color="#8e9c58"/><stop offset=1 stop-color="#485e3b"/></linearGradient>' +
@@ -117,11 +117,11 @@ function theme(name) {
     defs.querySelectorAll('symbol').forEach(s => s.remove());
     // A symbol `id` of sprite `want` (else farm's `alt`): legs rotate by the inherited `--gait`, manes skew by `--mane`
     // (storm), so instances need no per-leaf DOM.
-    const sym = (id, want, alt) => {
+    const sym = (id, want, alt, box = '0 0 132 100') => {
       const g = (sprite(own, want) || sprite(farm, want) || sprite(farm, alt))?.cloneNode(true), s = document.createElementNS(NS, 'symbol');
       if (!g) return;
       s.id = id;
-      s.setAttribute('viewBox', '0 0 132 100');
+      s.setAttribute('viewBox', box);
       g.removeAttribute('id');
       s.append(g);
       s.querySelectorAll('.leg').forEach(l => {
@@ -133,6 +133,8 @@ function theme(name) {
     };
     ['working', 'idle', 'done', 'blocked'].forEach((p, k) => sym('hp' + (k + 1), (tj.poses || {})[p], fj.poses?.[p]));
     Object.entries(T.actions || {}).forEach(([a, id]) => { sym('ha-' + a, id, fj.actions?.[a]); if (T.row_sprites) sym('hr-' + a, T.row_sprites[a], fj.actions?.[a]); });
+    if (T.row_sprites) ['queued', 'needs', 'merged', 'fail'].forEach(k => sym('hr-' + k, T.row_sprites[k])); // #370: rows by kind
+    ['calm', 'busy', 'held'].forEach(l => sym('hl-' + l, T.load_scene?.minis?.[l], null, '0 0 48 16')); // #370: the Host card's load
     sym('hrail', T.rail?.item, fj.rail?.item);
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));

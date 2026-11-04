@@ -134,6 +134,8 @@ fn serde_json_fits_the_types() {
         seq: 4,
         ts: 5,
         k: Some("merged".into()),
+        f: "api".into(),
+        n: Some(7),
     };
     checks.extend([
         ("HostRow", json!(row)),
