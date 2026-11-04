@@ -30,6 +30,11 @@ harness = "dsh"
 harness = "claude"
 model = "opus"
 
+# #386: the conductor that talks the [chat] tab's acme-api and all-repos threads through.
+[fleet.acme-api.role.conductor]
+harness = "claude"
+model = "opus"
+
 [fleet.docs]
 repo = "acme-example/docs"
 local = "/srv/acme/docs"

@@ -1,13 +1,13 @@
 # The phone page
 
 `herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
-`last update hh:mm` line) with Queue · Lanes · Host · Events tabs. `--read-only` serves GET only.
+`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
 Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
 slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
-every 15 s, for ages) it re-renders the needs-you cards and the four tabs and pushes only
+every 15 s, for ages) it re-renders the needs-you cards and the five tabs and pushes only
 the changed ones as `event: frag` (`{id, html}`) the first time on a stream, then (#351) only as `event: patch`
 (`{id, n, p, set}`: the part cut before each `<d`, its new piece count, the common prefix and the changed pieces by index;
 a piece past the prefix not in `set` is the old one shifted by the count change; serve.js rebuilds the HTML and swaps it
@@ -160,7 +160,7 @@ Sends pass the same Host/Origin checks, are limited to 10 a minute per device, a
 chars, or a control character other than newline). Removing a device also needs a paired cookie. Each send logs `{"type":"prompt","via":"web","agent","device","chars"}`, never the
 text. Secure cookies need https (`tailscale serve`) or localhost.
 
-Open asks (`herdsman ask`) show as a red **needs you** card above every tab: the question, option
+Open asks (`herdsman ask`, but a conductor's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
 buttons (recommended first) and a free-text box, tagged `routine · defaults to 2 in 24m` or `owner · waits
 for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`herdsman answer … --by owner`,
 logged `"via":"web"`) under the same Host/Origin checks and needs a paired device (401 otherwise). In the
