@@ -1,5 +1,5 @@
 //! #36: Queue rows carry the issue + PR titles from the caches only (page and `?frag=all`);
-//! the lane display mode button lives in the Lanes tab; sw.js never caches a non-200 page.
+//! no lane display mode button (#335: the look sheet's style); sw.js never caches a non-200 page.
 mod common;
 use common::*;
 use herdsman::serve::Server;
@@ -89,21 +89,16 @@ fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     );
 }
 
+/// #335: the look sheet's style picks the Lanes mode; no mode button on any tab or in the header.
 #[test]
-fn mode_button_only_in_the_lanes_tab() {
+fn no_lanes_mode_button() {
     let c = queued("mode");
     let r = Fake::default();
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = get(&s, "/?all=1");
-    let section = |id: &str| {
-        let i = page.find(&format!("<section id={id}>")).unwrap();
-        page[i..i + page[i..].find("</section>").unwrap()].to_string()
-    };
-    assert!(section("lanes").contains("id=mode"));
-    for id in ["queue", "host", "events"] {
-        assert!(!section(id).contains("id=mode"), "{id}");
-    }
-    assert_eq!(page.matches("id=mode").count(), 1, "not in the global header either");
+    let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/?all=1");
+    assert!(
+        page.contains("<section id=lanes>") && !page.contains("id=mode"),
+        "{page}"
+    );
 }
 
 /// sw.js `/` (#57: stale-while-revalidate): no copy yet, the network answer as is (a non-200 is never

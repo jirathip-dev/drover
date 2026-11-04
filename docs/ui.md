@@ -77,7 +77,7 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    its ticket; `herd-kitchen-still` is held under reduced motion and fails if `#herd` still animates.
    #241: on Queue, Lanes, Host and Events, and again in kitchen and terminal (`<view>~<theme>`, `?theme=`), it fails
    unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 24 px
-   sprite per Queue/Events glyph, a load scene per Host group and offer `[scene] [ascii]`. #281: each row sprite is
+   sprite per Queue/Events glyph and a load scene per Host group; no theme shows a Lanes mode button (#335). #281: each row sprite is
    24×24 in a 28 px slot, its row at most 4 px taller than with the glyph (no wrap), and no screenshot pixel inside it
    is a blend of its neighbours (crisp, never smoothed). `theme-switch` picks
    terminal then kitchen in place and fails on a reload, a kept sprite or a favicon not swapped; `moment-still` runs
@@ -87,6 +87,11 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    covers the header, or is not the theme's 96×96 `loading` sprite centred near the top of the content (terminal: a
    spinning ↻); the shot holds a strip of its first four frames. `loading-still` runs with reduced motion forced and
    fails unless it is one still frame.
+   #335: `ascii-queue`, `ascii-lanes`, `ascii-host`, `ascii-events` (and `~kitchen`; `ascii-queue~terminal`,
+   `ascii-lanes~terminal`) are those views in the look sheet's ascii style: they fail on any sprite (rows, Host
+   miniature, Lanes avatar), a row figure not in the 24 px box of the same 28 px slot, or, in terminal, anything but
+   glyphs. `ascii-loading` (and `~kitchen`) fails unless the overlay runs the theme's two ascii frames by CSS alone (no
+   node or text change while it shows) with `[↻]` the plain ↻. `look` also picks ascii, then pixel, in place.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).

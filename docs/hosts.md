@@ -72,8 +72,9 @@ A lane needs the union of three lists:
 
 Admission runs per host: `DISK_LOW`, `MEM_LOW`, then `HOST_BUSY`. A host that fails admission (or is unreachable) is
 skipped. When every fitting host fails, the spawn is refused with the least-busy host's reason. When no host fits at
-all, it is refused with `REFUSED NO_HOST: no host has docker`, or `no enabled host has docker` when only hosts that are
-off fit. drive retries on its next pass.
+all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_HOST: no host with docker`, plus
+` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
+retries on its next pass.
 
 The `spawn` event records the lane's `host` and `machine`. From then on, every herdr call for that lane carries
 `--machine` (pane reads, prompts, stop, kill, close), and its worktree work runs over ssh on that host:
@@ -185,8 +186,10 @@ overflow_after_minutes = 10  # the default
   `<config>/recipes/boat.toml` to change them.
 - **The provider key** is read on the main host from the environment, else from `[accounts].accounts_env`. Each
   command gets it on stdin and exports it. It never appears in argv, fleet.toml or the event log.
-- **Start on demand.** Placement uses a stopped cloud host in two cases: every local host has been refused (busy, low
-  memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has. A respawn on a lane's
+- **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
+  refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:
+  local Macs first, even when the cloud host is idle). The `spawn` event's `why` says which (`overflow: every local host
+  busy 12 min`, `needs docker: no local host has it`), and `herdsman status` shows it as `on <host>: <why>`. A respawn on a lane's
   own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
   It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
   (`~/.ssh/config.d/herdsman-<name>.known`) from `address`, and then spawns. A dry run never starts a host. Add

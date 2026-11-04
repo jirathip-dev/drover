@@ -12,7 +12,9 @@ file by file.
 ## Picking one
 
 Each phone picks its own in the **look** sheet: the header's `[◐]`, on every tab, opens the board's own bottom sheet
-with two lists, THEME (each theme's row sprite, else its icon) and COLOURS (below), the current row of each ticked (#290).
+with three lists, THEME (each theme's row sprite, else its icon), COLOURS (below) and STYLE (#335: `pixel`, the sprites,
+or `ascii`, the theme's ASCII figures on the Lanes scene, the Queue and Events rows, the Host miniature and the loading
+overlay; default `pixel`, hidden for a theme without `ascii` in `modes`, like terminal), the current row of each ticked (#290).
 A tap, or Enter on a focused row (↑/↓ move), applies it in place, no reload, and the sheet stays open. The pick is kept
 in localStorage and applied before the first paint like the tab, so there is no flash; a switch swaps the favicon. A
 phone that never picked gets `[serve] theme = "<name>"` (default `farm`). The Host tab's `theme` row shows the board's
@@ -34,8 +36,11 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `row_sprites` | sprite id per action for the Queue and Events row sprite (16 × 12 art drawn at 24 px, 1.5× with crisp pixels, #281; its title and label is the plain state word). `false`: rows keep their state glyph | the action's sprite |
 | `loading` | the sprite id the loading overlay runs while a load, refresh or action takes over 300 ms (#337): 96 px, centred near the top of the content, ~8 fps via `steps()` (a horse's trot by its `.leg`s, the `.kf1`/`.kf2` frames with the flame); reduced motion: one still frame | the spinning `↻` (not farm's) |
 | `icons` | `180`, `192`, `512`, `favicon`: one of `icon-180.png`, `icon-192.png`, `icon-512.png` in the folder | the same names; a file the folder lacks is the board's icon |
-| `ascii` | per action, the Lanes `[ascii]` mode's words: at most 3 lines of 8 narrow characters (no CJK, emoji or control characters) | farm's ASCII horses |
-| `modes` | the Lanes modes offered, from `scene`, `ascii`, `glyph`; one mode hides the button | `["scene", "ascii"]` |
+| `ascii` | per action, the Lanes ascii style's words: at most 3 lines of 8 narrow characters (no CJK, emoji or control characters) | farm's ASCII horses |
+| `modes` | the Lanes modes offered, from `scene`, `ascii`, `glyph`: with `ascii` the look sheet offers STYLE (`pixel` is `scene`); there is no Lanes mode button (#335) | `["scene", "ascii"]` |
+| `ascii_rows` | per action, the ascii style's Queue and Events row figure in the sprite's slot: one line of at most 3 narrow characters (farm `~h=`, kitchen `c~@`); its title and label is the state word | farm's |
+| `ascii_load` | `{"calm", "busy", "held"}`: the ascii style's Host miniature, one line of at most 5 narrow characters (farm `\O/` `~~~` `///`, kitchen's flame) | farm's |
+| `ascii_loading` | the ascii style's loading overlay: two frames, one per line, swapped by CSS (farm `~h~` / `>h<`) | farm's |
 | `scheme` | the colour scheme a phone gets until it picks one (below) | `github-dark` |
 | `glyphs`, `words`, `scene` | the Herd's label marks per lane state, label words (`{"horses": "chefs"}`; also a band's name, `queued` … `blocked/dead`, and a working lane's word by action, `impl` … `update`), and `scene.weather: false` / `scene.line: true` (each fleet's page shows every fleet's `scene.svg` side by side, its own in the middle) / `scene.palette` (CSS custom properties on the Herd; herd.css reads `--done` for the done sprites' dimming, `--qw` for a queued slot's width, `--flutter` for a needs-you rail item's animation) | farm's, key by key |
 
@@ -58,7 +63,7 @@ demo `?nopose=<pose>`.
 
 ## Terminal
 
-`terminal` is the board before themes: state glyphs on every row, the Lanes tab in glyph mode only (no mode button),
+`terminal` is the board before themes: state glyphs on every row, the Lanes tab in glyph mode only (no STYLE in the look sheet),
 no scene miniature, no moments, the load as text; its icon is a green `>_` on the dark tile:
 
 ```json

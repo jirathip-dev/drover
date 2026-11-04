@@ -83,6 +83,11 @@ fn farm_fills_the_whole_contract() {
     // sprites, the three moments.
     for a in ACTS {
         assert!(f["row_sprites"][a].is_string() && f["ascii"][a].is_string(), "farm {a}");
+        assert_eq!(
+            f["ascii_rows"][a].as_str().map(|r| r.chars().count()),
+            Some(3),
+            "#335 farm {a}"
+        );
         assert_ne!(f["row_sprites"][a], f["actions"][a], "farm row sprite {a}");
     }
     assert!(f["rail"]["item"].is_string() && f["rail"]["needs"].is_string());
@@ -134,6 +139,15 @@ fn kitchen_draws_every_action_itself() {
         (&json!("heat"), 8)
     );
     assert_eq!(k["ascii"]["fix"], "♨\nchop");
+    // #335: the ascii style's own figures (3 characters per row), heat words and loading frames, none of them farm's.
+    for a in ACTS {
+        assert_eq!(k["ascii_rows"][a].as_str().unwrap().chars().count(), 3, "{a}");
+        assert_ne!(k["ascii_rows"][a], farm()["ascii_rows"][a], "{a}");
+    }
+    assert_eq!(
+        (&k["ascii_load"]["held"], &k["ascii_loading"]),
+        (&json!("^^^^^"), &json!("c~@\nc~o"))
+    );
     // The scene's three heat layers.
     for l in ["h-calm", "h-busy", "h-held", "ksmoke", "kglow"] {
         assert!(KITCHEN_SCENE.contains(l), "{l}");
@@ -281,6 +295,17 @@ fn schema_validation_names_the_problem() {
         (r#"{"ascii": {"impl": "a\nb\nc\nd"}}"#, "`ascii.impl`"),
         (r#"{"ascii": {"impl": "鍋"}}"#, "`ascii.impl`"),
         (r#"{"ascii": {"impl": "🔥"}}"#, "`ascii.impl`"),
+        (
+            r#"{"ascii_rows": {"impl": "~h~~"}}"#,
+            "`ascii_rows.impl` must be one line of at most 3 narrow characters",
+        ),
+        (r#"{"ascii_rows": {"impl": "h\nh"}}"#, "`ascii_rows.impl`"),
+        (r#"{"ascii_load": {"hot": "~"}}"#, "`ascii_load.hot`"),
+        (r#"{"ascii_load": {"calm": "\\O/ \\O/"}}"#, "`ascii_load.calm`"),
+        (
+            r#"{"ascii_loading": "a\nb\nc\nd"}"#,
+            "`ascii_loading` must be at most 3 lines",
+        ),
         (r#"{"scene": 1}"#, "`scene` must be an object"),
         (
             r#"{"looks": [{"c": "red"}]}"#,
