@@ -16,11 +16,12 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn get(s: &Server, path: &str) -> String {
-    String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned()
+/// `CONFIG` (impl: hermes, opus; no conductor role) with rev on sonnet: the fleet's roles use opus and sonnet.
+/// #268: sendmeter's [config] sheet as the board draws it from API v1's `queue`.
+fn config_sheet(s: &Server) -> String {
+    queue_js(s, ADDR, T, "sheet(d, 'sendmeter')")
 }
 
-/// `CONFIG` (impl: hermes, opus; no conductor role) with rev on sonnet: the fleet's roles use opus and sonnet.
 fn setup(name: &str) -> herdsman::Ctx {
     let text = CONFIG.replace(
         "profile = \"fleet-rev\"\n",
@@ -86,7 +87,7 @@ fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_sta
     let orig = std::fs::read_to_string(&c.config).unwrap();
     let r = host();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let sheet = get(&s, "/frag?id=config&fleet=sendmeter");
+    let sheet = config_sheet(&s);
     assert!(
         sheet.contains("<h3>Conductor<span>default: impl</span></h3>"),
         "{sheet}"
@@ -125,7 +126,7 @@ fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_sta
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("conductor"), Some("model"), Some("sonnet"))
     );
-    let sheet = get(&s, "/frag?id=config&fleet=sendmeter");
+    let sheet = config_sheet(&s);
     assert!(sheet.contains("<h3>Conductor<span>set</span></h3>"), "{sheet}");
     // The next conductor start runs on the new model.
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
@@ -141,7 +142,7 @@ fn a_conductor_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone()
     let r = host();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let sheet = get(&s, "/frag?id=config&fleet=sendmeter");
+    let sheet = config_sheet(&s);
     let i = sheet.find("name=mtime value=").unwrap() + 17;
     let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
     // claude is not on this host's PATH: doctor gains `✗ harness — claude on PATH`.

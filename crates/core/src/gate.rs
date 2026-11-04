@@ -287,7 +287,7 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
 
 /// #418: each finding (a `-`/`*`/`1.` item saying `blocking`, or not when `non-blocking`) with the lines under it,
 /// up to the next finding, heading or unindented prose line (#249: these end it as none); fenced lines never are.
-fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
+pub(crate) fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
     let (mut out, mut fence) = (Vec::<(bool, Vec<&str>)>::new(), false);
     for l in body.lines().skip(1) {
         let (t, lc) = (l.trim_start(), l.to_lowercase());

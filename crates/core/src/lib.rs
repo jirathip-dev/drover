@@ -20,6 +20,7 @@ pub mod host;
 pub mod hosts;
 pub mod land;
 pub mod lanes;
+pub mod lesson;
 pub mod outbox;
 pub mod overlap;
 pub mod pipeline;

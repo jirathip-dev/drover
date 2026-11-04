@@ -18,6 +18,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "conductor" => include_str!("../roles/conductor.md"),
+        "lesson" => include_str!("../roles/lesson.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -28,7 +29,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
         f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
             std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
         });
-    let base = role_prompt(f.family(role));
+    let base = role_prompt(if role == "lesson" { role } else { f.family(role) });
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
 }
 
@@ -267,7 +268,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         stage: f.flow().stage_of(role).into(),
         family: f.family(role),
         harness: r.harness.clone(),
-        profile: r.profile_or(role),
+        profile: r.profile_or(f.role_key(role)),
         model: r.model.clone(),
         effort: r.effort_or(&cfg.limits),
         branch,
@@ -293,7 +294,14 @@ const PUSHBACK: &str = "If a finding is wrong or out of scope, say so in your re
 that is not a fix. The next reviewer decides.";
 
 /// The issue lane's `.brief.md` (`roles/brief*.md` templates).
-fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&str>) -> String {
+fn brief(
+    f: &Fleet,
+    issue: u64,
+    p: &Plan,
+    title: &str,
+    body: &str,
+    (fix, rules): (Option<&str>, Option<&str>),
+) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
         "rev" => format!(
@@ -316,6 +324,10 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
     };
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
+    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    let rules = rules.map_or(String::new(), |r| {
+        format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
+    });
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
@@ -325,6 +337,7 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
         title = title,
         body = body,
         fix = fix,
+        rules = rules,
         contract = contract.trim_end()
     )
 }
@@ -734,7 +747,14 @@ pub fn spawn(
             .map(|t| format!("\n\n{t}"));
         (
             created,
-            brief(f, issue, &p, title, &decided.fold(body.to_string(), |b, d| b + &d), fix),
+            brief(
+                f,
+                issue,
+                &p,
+                title,
+                &decided.fold(body.to_string(), |b, d| b + &d),
+                (fix, on.read(&p.worktree.join(".herdsman/rules.md")).as_deref()),
+            ),
         )
     };
     let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);

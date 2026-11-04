@@ -1,6 +1,7 @@
 //! Cached GitHub reads: the issue spec (re-fetched when `updatedAt` moved) and PR/CI views fresh for 60 s, all of a
 //! fleet's open PRs read in one GraphQL call (#246).
-use crate::config::Fleet;
+use crate::config::{Config, Fleet};
+use crate::events::Event;
 use crate::runner::{json, ok, Runner};
 use crate::usage::load;
 use crate::Ctx;
@@ -428,4 +429,31 @@ pub fn wait(
         t += s;
         delay = (delay * 2).min(300);
     }
+}
+
+/// #388: an open PR head with no checks `ci_start_minutes` after its first event: CI broken (a jobless run) or missing.
+pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &[Event], pr: &Value) -> Option<String> {
+    let ((fleet, issue), g, f) = (k, c.limits.ci_start_minutes * 60, c.fleet(k.0).ok()?);
+    let head = pr["headRefOid"].as_str().filter(|_| pr["state"] == "OPEN")?;
+    let named = |e: &&Event| e.fleet == fleet && e.issue == Some(issue) && e.str("sha").or(e.str("to")) == Some(head);
+    let since = e.iter().filter(named).map(|e| e.ts).min()?;
+    let labelled = f.merge_label.as_deref().is_none_or(|l| has_label(pr, l));
+    (labelled && x.now >= since + g && pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty)).then_some(())?;
+    let p = cache_path(x, "runs", fleet, issue);
+    let api = format!("repos/{}/actions/runs", f.repo);
+    let c = load::<Value>(&p).filter(|c| c["head"] == head);
+    let broken = match r.filter(|_| c.as_ref().is_none_or(|c| c["broken"].is_null() && !fresh(c, x.now))) {
+        Some(r) => {
+            let jq = ".workflow_runs[] | select(.conclusion==\"failure\") | \"\\(.id) \\(.path|split(\"/\")|last)\"";
+            let runs = ok(r, "gh", &["api", &format!("{api}?head_sha={head}"), "--jq", jq]).unwrap_or_default();
+            let zero = |id: &str| ok(r, "gh", &["api", &format!("{api}/{id}/jobs"), "--jq", ".total_count"]);
+            let mut b = runs.lines().filter_map(|l| l.split_once(' '));
+            let b = b.find(|(id, _)| zero(id).is_ok_and(|n| n.trim() == "0"));
+            let _ = store(&p, &json!({"ts": x.now, "head": head, "broken": b.map(|b| b.1)}));
+            b.map(|b| b.1.to_string())
+        }
+        None => c.and_then(|c| c["broken"].as_str().map(String::from)),
+    };
+    let missing = || format!("CI missing (no checks {} after push)", crate::events::age(g));
+    Some(broken.map_or_else(missing, |w| format!("CI broken: {w} did not start")))
 }

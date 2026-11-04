@@ -1,7 +1,7 @@
 // #391: the live page in headless Chrome (DevTools over --remote-debugging-pipe, no dependency): node live.mjs <chrome>
-// <url> <events.jsonl> <line1> <line2>. Loads the page, appends line1 (the stream's first copy of the queue, a `frag`)
-// then line2 (a `patch`), a `build` of another build, then the page again carrying the Lanes tab only. Prints one JSON
-// object: the backlog as drawn at each step, the patches seen, the reloads, the page's uncaught errors.
+// <url> <events.jsonl> <line1> <line2>. Loads the page, appends line1 then line2 (#268: each a `queue` on the stream, the
+// Queue tab's data the TypeScript board draws), a `build` of another build, then the page again carrying the Lanes tab
+// only. Prints one JSON object: the backlog as drawn at each step, the `queue`s seen, the reloads, the page's uncaught errors.
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,12 +41,12 @@ try {
   await cmd('Runtime.enable');
   await load(url);
   out.fresh = await backlog();
-  await js(`window.__patches = 0; es.addEventListener('patch', () => window.__patches++); 1`);
+  await js(`window.__qs = 0; es.addEventListener('queue', () => window.__qs++); 1`);
   appendFileSync(events, line1 + '\n');
-  out.frag = await until(`P.queue && document.querySelector('#queue').textContent.includes('#${JSON.parse(line1).issues[0]}')`);
+  out.frag = await until(`window.__qs > 0 && document.querySelector('#queue').textContent.includes('#${JSON.parse(line1).issues[0]}')`);
   appendFileSync(events, line2 + '\n');
-  out.patched = await until(`window.__patches > 0 && document.querySelector('#queue').textContent.includes('#${JSON.parse(line2).issues[0]}')`);
-  out.patches = await js('window.__patches');
+  out.patched = await until(`window.__qs > 1 && document.querySelector('#queue').textContent.includes('#${JSON.parse(line2).issues[0]}')`);
+  out.patches = await js('window.__qs');
   out.after_patch = await backlog();
   // A build event: this page's own build reloads nothing; another build reloads once, and not again in this session.
   const own = await js(`document.querySelector('script[src*="serve.js"]').getAttribute('src').match(/([0-9a-f]{8})\\/serve\\.js/)[1]`);

@@ -58,6 +58,7 @@ integration = "staging"
 # merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves past it (a pure merge of integration keeps it)
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `herdsman cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
+# lessons = "off"   # #419: `herdsman tick` runs `herdsman lesson` weekly per fleet (default "weekly"); "off" opts out
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
 # notify_global = true   # also send this fleet's events to the global [[notify]]
@@ -133,6 +134,7 @@ update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart f
 #                   # a fleet's own `form_categories` / `form_rounds` replace these
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
 stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
+ci_start_minutes = 10   # a PR head with no checks this long after its push is CI missing/broken: ci-missing alert, fix round
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
 done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
