@@ -290,8 +290,8 @@ logged, printed or served; the page gets only the public key and each device's l
 
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
-client), and ts-rs as a dev-dependency only (#265: it writes web/src/api.ts in a test, never linked into the
-binary). CI's deps gate fails on any other direct dependency.
+client), and ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build). CI's deps
+gate fails on any other direct dependency.
 
 ## JSON API v1 (#265)
 
@@ -311,10 +311,9 @@ Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPA
 choice (localStorage), as on the HTML board: `state.theme` is the board's default, and no route writes it. The service worker
 never caches `api/`. A breaking change is `/api/v2/`.
 
-The types are defined once, in `crates/server/src/serve/api.rs`; `web/src/api.ts` is generated from them by ts-rs (a
-dev-dependency, smaller than schemars plus a JSON-Schema-to-TypeScript tool). The test
-`crates/server/gen/api_ts.rs` fails when the committed file is stale; `BLESS=1 cargo test -p herdsman-server`
-rewrites it. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`.
+The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
+`assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
+`crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`.
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
 `dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev

@@ -1,136 +1,10 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`,
-//! `lane/<agent>` and a POST per form op. The types are defined once here; web/src/api.ts is generated from them
-//! (`crates/server/gen/api_ts.rs`, a test that fails when the committed file is stale). A breaking change is `/v2`.
+//! `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the board's. A
+//! breaking change is `/v2`.
 use super::{board, moment, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
+use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
 use serde::Serialize;
-
-/// Every API type: serde's JSON and, in the tests, ts-rs's TypeScript (`decls`, the order web/src/api.ts has).
-macro_rules! api {
-    ($($(#[$m:meta])* pub struct $n:ident { $($(#[$fm:meta])* pub $f:ident: $t:ty,)* })*) => {
-        $(
-            #[derive(Serialize, Default)]
-            #[cfg_attr(test, derive(ts_rs::TS))]
-            $(#[$m])*
-            pub struct $n { $($(#[$fm])* pub $f: $t,)* }
-        )*
-        #[cfg(test)]
-        fn decls(cfg: &ts_rs::Config) -> Vec<String> {
-            vec![$(<$n as ts_rs::TS>::decl(cfg)),*]
-        }
-    };
-}
-
-api! {
-    /// The board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
-    /// `mtime` a POST sends back (STALE when fleet.toml changed since).
-    pub struct State {
-        pub seq: u64,
-        pub age: Option<u64>,
-        pub mtime: String,
-        pub theme: String,
-        pub fleets: Vec<Fleet>,
-        pub queue: Vec<Queued>,
-        pub lanes: Vec<Lane>,
-        pub asks: Vec<Ask>,
-        pub hosts: Vec<Row>,
-        pub services: Vec<Row>,
-        pub alerts: Vec<Row>,
-    }
-
-    pub struct Fleet {
-        pub name: String,
-        pub color: String,
-        pub paused: bool,
-    }
-
-    pub struct Queued {
-        pub fleet: String,
-        pub issue: u64,
-        pub title: Option<String>,
-        pub state: String,
-        pub blocked_by: Option<u64>,
-    }
-
-    /// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
-    pub struct Lane {
-        pub name: String,
-        pub fleet: Option<String>,
-        pub issue: Option<u64>,
-        pub title: Option<String>,
-        pub role: String,
-        pub harness: String,
-        pub model: Option<String>,
-        pub state: String,
-        pub shown: String,
-        pub tone: String,
-        pub since: u64,
-    }
-
-    pub struct Ask {
-        pub id: String,
-        pub fleet: String,
-        pub issue: Option<u64>,
-        pub question: String,
-        pub options: Vec<String>,
-        pub recommend: Option<u64>,
-        pub ts: u64,
-    }
-
-    /// A Host tab row: HOSTS' (`detail`: its state in words), SERVICES' and ALERTS' (push); `fix` clears a red or amber one.
-    pub struct Row {
-        pub name: String,
-        pub tone: String,
-        pub detail: String,
-        pub fix: String,
-    }
-
-    /// #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
-    pub struct Events {
-        pub seq: u64,
-        pub refresh: bool,
-        pub list: Vec<Ev>,
-    }
-
-    /// One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
-    pub struct Ev {
-        pub seq: u64,
-        pub ts: u64,
-        pub fleet: String,
-        pub issue: Option<u64>,
-        #[serde(rename = "type")]
-        pub kind: String,
-        pub data: serde_json::Map<String, serde_json::Value>,
-        pub k: Option<String>,
-    }
-
-    /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
-    pub struct Reply {
-        pub ok: bool,
-        pub code: String,
-        pub message: String,
-    }
-
-    /// A lane's transcript page, the sheet's `/lane` JSON too (`transcript`); a lane with no pane: no live block.
-    pub struct Transcript {
-        pub harness: String,
-        pub lines: Vec<String>,
-        pub live: usize,
-        pub before: usize,
-        pub more: bool,
-        pub acts: Vec<String>,
-        pub pane: Option<String>,
-        pub status: Option<String>,
-        pub said: Option<Vec<serde_json::Value>>,
-        pub older: bool,
-        pub notices: Vec<Notice>,
-    }
-
-    pub struct Notice {
-        pub at: u64,
-        pub text: String,
-    }
-}
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -307,7 +181,3 @@ fn ev_of(e: &Event) -> Ev {
         k: moment(e).map(String::from),
     }
 }
-
-#[cfg(test)]
-#[path = "../../gen/api_ts.rs"]
-mod gen;
