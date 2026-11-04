@@ -73,7 +73,7 @@ nav a.on{box-shadow:inset 0 2px var(--l)}
 nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
 #stale{color:var(--r);font-size:var(--fs-meta)}
-.tl{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl,.cst{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
@@ -120,7 +120,7 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 .rsa{display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-meta);line-height:1;font-style:normal;white-space:pre}
 .lsa{width:auto;font-size:var(--fs-meta);line-height:var(--s4);font-style:normal;white-space:pre;color:var(--mute)}
 #ld .lda{display:none;font-size:var(--fs-code);line-height:1;white-space:pre;color:var(--fg)}#ld.la .lda{display:grid}#ld.la :is(.lds,i){display:none}
-details.q:has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
+:is(details.q,.qc):has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
 details.er:has(>summary>.rsg)>summary{grid-template-columns:calc(var(--s4) + var(--s3)) var(--s2) 6ch minmax(0,1fr) auto}
 details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * var(--s2))}
 #mo{position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);width:calc(3 * var(--s4));height:calc(2 * var(--s4) + var(--s1));pointer-events:none;animation:.8s ease-in-out 3 hop}
@@ -245,14 +245,14 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
    so the graph has no gaps at line height 1.5. A clamped row (depth > 3) keeps its dashed ┆─ glyph alone. --d is the drawn
    depth (0-3), the gutter 2·d+1 columns (≤ 6 + the dot); --y is the node line's middle. The row separator starts at the
    #n column, so it never crosses the graph. The card is a box beside the gutter; a hanging row's title wraps. */
-details.q{position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1ch);--y:calc(var(--s1) + var(--fs) * .75);
+:is(details.q,.qc){position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1ch);--y:calc(var(--s1) + var(--fs) * .75);
   background:linear-gradient(var(--line),var(--line)) no-repeat calc(var(--gw) + var(--s2)) 100%/100% 1px}
 .d0{--d:0}.d1{--d:1}.d2{--d:2}
-details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
+:is(details.q,.qc)>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 /* #367: titles start in one column at every depth: past the depth-2 gutter (--gm), so no graph line crosses one. */
-details.q{--gm:5ch}details.q:has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
-details.q .tl{grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
-details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
+:is(details.q,.qc){--gm:5ch}:is(details.q,.qc):has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
+:is(details.q,.qc) :is(.tl,.cst){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc)>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
@@ -533,9 +533,8 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 #queue{touch-action:pan-y}
 .qch{padding-left:0;padding-right:0}.qch .r{margin-left:.6ch}
 .qg>h3{margin:var(--s3) 0 0}
-.qc>summary{grid-template-columns:1ch auto minmax(0,1fr) auto;align-items:start;padding:var(--s1) 0}.qc>summary>span:first-of-type{margin-right:calc(-1 * var(--s2))}
-/* Its title ellipsises on the first line; `(6 steps) · next: #n` is the second, as a row's title line is. */
-.qct{display:flex;flex-wrap:wrap;min-width:0;white-space:pre}.qct>span{flex:none}.qct>.el{flex:1 1 0;min-width:0}.qct>:last-child{flex-basis:100%;color:var(--mute);font-size:var(--fs-meta)}
+/* #391: the chain row is a row (serve.js `qfold`); its third line names the steps and opens them in place. */
+.cst::before{content:"▸ "}.qc[open]>summary>.cst::before{content:"▾ "}
 .qx{border-bottom:0}.qx>summary{display:flex;white-space:pre;color:var(--link)}.qx>summary>:last-child{flex:1}
 .fc.qa>:not(.fh,summary,.qg[data-g=need]){display:none}
 /* #365: the backlog under a repo's queue: search, quick filters, rows to tick; [queue N] sits right above the tab bar. */
@@ -584,8 +583,16 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .blk>summary .ct{flex:none;color:var(--mute)}
 /* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
 .im{margin:var(--s2) 0 0}
-.im img{display:block;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.im img{display:block;cursor:zoom-in;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
 .im figcaption{margin-top:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+/* #406: the image viewer: black in every scheme (a photo's backdrop), the image fitted (the page's gestures off: pinch
+   and swipe are its own); [×], the count and [save] in a bar over its top. `.dr`: a finger is down, the image follows it without easing. */
+#iv{position:fixed;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden;background:black;touch-action:none;-webkit-user-select:none;user-select:none}
+#iv>img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .2s;-webkit-user-drag:none}
+#iv.dr>img{transition:none}
+.ivb{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;min-height:var(--hit);padding:env(safe-area-inset-top) var(--s3) 0;background:color-mix(in srgb,black 50%,transparent);color:white}
+.ivb button{color:white}
+.ivn{font-size:var(--fs-meta)}
 .tf{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin-top:var(--s2);padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;color:var(--fg);text-decoration:none}
 .tf>span:first-of-type{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tf .m{font-size:var(--fs-meta)}
@@ -615,3 +622,15 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
 .att img{width:calc(var(--hit) + var(--s3));height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
 .att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #403: the box grows with its text to 6 lines, then scrolls inside; with the keyboard up (the box focused) a phone
+   hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
+   delivery's system line is red too. A working thread's mark is the loading overlay's art (#ld), 24 px, inline. */
+.tw textarea{max-height:calc(6lh + 2 * var(--s2) + 2px);overflow-y:auto}
+@media (max-width:999px){html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp .tw{bottom:0;margin-bottom:0}}
+.snt .md p{white-space:pre-line}.blk>summary .sk{flex:none;font-weight:400;color:var(--g)}
+.blk.snt.bad{--k:var(--r)}.snt.bad>summary .ct{color:var(--r)}.qs.note.r{border-left-color:var(--r);color:var(--r)}
+.tld{display:inline-grid;place-items:center;min-width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);vertical-align:middle;font-style:normal}
+.tld .lds{width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);image-rendering:pixelated;shape-rendering:crispEdges;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+.tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
+html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
+@media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}

@@ -71,9 +71,12 @@ siblings.
 One repo at a time (#367): chips on top, `[repo n]` with a red dot when it needs you, and `[all]` for every repo's
 needs-you rows. A tap, a sideways swipe or ←/→ switches; the pick is kept per phone. A repo's rows are grouped (needs
 you, in progress, queued), each tree drawn inside its group. A running row's time reads `in impl 1h 47m`, a needs-you row's `1h 47m`. Queued rows
-show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row,
-`#265 → #270 · <root's title> (6 steps) · next: #266` (next: the root's open blocker, else the root), and `▾` opens
-its steps. Titles start in one column at every depth.
+show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row laid
+out as a queued row (#391): the root's number, `chain · 6` as its state, its place and the root's title, then
+`▸ #265 → #356 · next: #266 (in impl)` (first → last step; next: the root's open blocker, else the root, with its state
+when it is on the board); a tap opens its steps. A page of an older build (the service worker's copy) loads again on
+`/live`'s first `build` event. `queue add` reads an added issue's title right away; a row queued from the backlog shows
+the backlog read's title until then. Titles start in one column at every depth.
 
 Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
 queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
