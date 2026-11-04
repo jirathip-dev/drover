@@ -1785,7 +1785,9 @@ chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
-  if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
+  const lk = t.closest('#chat .lc'); // #413: a linked row's chip opens the other thread
+  if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
+  else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });

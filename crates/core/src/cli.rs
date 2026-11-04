@@ -361,8 +361,15 @@ struct Scope {
 
 #[derive(Subcommand)]
 enum ThreadCmd {
-    /// Start a thread for a fleet's repo (or `all`); prints its id
+    /// Start a thread for a fleet's repo (or `all`); prints its id. A conductor uses `thread handoff`
     New { repo: String, title: String },
+    /// A conductor hands off: a new thread in <to> (a repo or `all`) or thread <to>, linked both ways; <text> wakes its conductor as from <from>
+    Handoff {
+        from: String,
+        to: String,
+        title: String,
+        text: String,
+    },
     /// The owner's message: logged, then typed into the thread's conductor (started or resumed first)
     Say {
         id: String,
@@ -532,8 +539,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`).
-pub const HELP_AGENT_MAX: usize = 261;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`).
+pub const HELP_AGENT_MAX: usize = 264;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -943,7 +950,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
-                    ThreadCmd::New { repo, title } => crate::conductor::new(ctx, &cfg, out, &repo, &title)?,
+                    // #413: every thread a conductor starts is logged with its source.
+                    ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
+                        gate::refused("USE_HANDOFF", "a conductor starts threads with `thread handoff`")?;
+                    }
+                    ThreadCmd::New { repo, title } => {
+                        writeln!(out, "{}", crate::conductor::new(ctx, &cfg, &repo, &title)?)?;
+                    }
+                    ThreadCmd::Handoff { from, to, title, text } => {
+                        let to = crate::conductor::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
+                        writeln!(out, "{to}")?;
+                    }
                     ThreadCmd::Say { id, text, by } => {
                         let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &[]), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
@@ -1226,6 +1243,13 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let mut it = lane.split(':');
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
             crate::drive::kick(ctx, r, f, n, why);
+        }
+    }
+    // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
+    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+    if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::conductor::flow(ctx, &cfg, &thread, &text)) {
+            eprintln!("herdsman hook: {e:#}");
         }
     }
     if hook::after(&input) {

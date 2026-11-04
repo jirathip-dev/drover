@@ -170,15 +170,21 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     let mut h = format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>");
     for e in of(events, id) {
         let s = |k| e.str(k).unwrap_or_default();
+        let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
         h += &match (e.kind.as_str(), s("from")) {
             ("thread-msg", "system") => {
                 let rt = format!(" <button type=button class=rty data-n={}{dis}>retry</button>", e.seq);
                 let (r, rt) = if e.str("line").is_some() { (" r", rt) } else { ("", String::new()) };
-                format!("<p class=\"qs note{r}\">{}{}{rt}</p>", esc(s("text")), signin(cfg, e, dis))
+                format!("<p class=\"qs note{r}\">{lk}{}{}{rt}</p>", esc(s("text")), signin(cfg, e, dis))
             }
             ("thread-msg", _) if s("text").starts_with("DECISION ") => String::new(),
+            ("thread-handoff", _) => format!("<p class=qs>{lk}· {}</p>", esc(s("title"))),
             ("thread-msg", f) => {
-                let (k, who) = if f == "conductor" { ("ai", "conductor") } else { ("me", "you") };
+                let (k, who) = match f {
+                    "conductor" => ("ai", "conductor"),
+                    _ if !lk.is_empty() => ("ai", lk.trim_end()),
+                    _ => ("me", "you"),
+                };
                 let body = format!("<div class=md>{}</div>{}", prose(s("text")), files(id, e));
                 block(ctx.now, k, who, s("text"), &body, e.ts)
             }
@@ -229,6 +235,11 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     )
 }
 
+/// #413: a linked row's chip (`from t5`, `continued in t6`); a tap opens that thread (serve.js).
+fn chip((w, t): (&str, &str)) -> String {
+    format!("<span class=lc data-go=\"{}\">{w} {}</span>", esc(t), esc(t))
+}
+
 /// #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
 fn signin(cfg: &Config, e: &Event, dis: &str) -> String {
     let Some(name) = e.str("signin") else {
@@ -269,8 +280,13 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
         ago(ctx.now, at),
         esc(line.lines().next().unwrap_or_default()),
     );
+    // #413: the threads it is linked to (not its flow-back lines), once each.
+    let lk: std::collections::BTreeSet<_> = of(events, id)
+        .filter_map(|e| conductor::link(e).filter(|_| e.str("from") != Some("system")))
+        .collect();
+    let lk: String = lk.into_iter().map(|l| chip(l) + " ").collect();
     let html = format!(
-        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{st}{line}</span></a>"
+        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{lk}{st}{line}</span></a>"
     );
     (at, html)
 }
@@ -346,8 +362,7 @@ pub fn post(
     match g("op") {
         "new" => {
             conductor::role(&cfg, g("repo"))?;
-            conductor::new(ctx, &cfg, &mut out, g("repo"), g("title"))?;
-            let id = String::from_utf8_lossy(&out).trim().to_string();
+            let id = conductor::new(ctx, &cfg, g("repo"), g("title"))?;
             later.push(conductor::post(ctx, &cfg, (&id, g("title"), &[]), ("owner", false))?);
             Ok(format!("{id} started"))
         }

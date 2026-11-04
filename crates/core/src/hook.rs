@@ -438,6 +438,25 @@ pub fn fleet_cmd(input: &Value) -> Option<&str> {
         .then_some(cmd)
 }
 
+/// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
+pub fn issue_filed(input: &Value) -> Option<String> {
+    let cmd = fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let title = [" -t ", " --title ", " --title="].iter().find_map(|f| {
+        let rest = &cmd[cmd.find(f)? + f.len()..];
+        let q = rest.chars().next().filter(|c| matches!(c, '"' | '\''));
+        let rest = q.map_or(rest, |q| &rest[q.len_utf8()..]);
+        let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
+        Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
+    });
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let n = res.split("/issues/").nth(1).and_then(|r| {
+        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
+        d.parse().ok()
+    });
+    let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
+    title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
+}
+
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
     const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];
