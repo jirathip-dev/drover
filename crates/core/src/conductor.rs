@@ -105,6 +105,17 @@ pub fn say(
     (id, text, files): (&str, &str, &[Value]),
     (from, raw): (&str, bool),
 ) -> Result<String> {
+    let (t, line) = post(ctx, cfg, (id, text, files), (from, raw))?;
+    deliver(ctx, cfg, r, &t, &line)
+}
+
+/// #403: `say`'s first half: log the message; the thread and the line `deliver` types.
+pub fn post(
+    ctx: &Ctx,
+    cfg: &Config,
+    (id, text, files): (&str, &str, &[Value]),
+    (from, raw): (&str, bool),
+) -> Result<(Event, String)> {
     text_ok(text)?;
     let t = find(&read(&ctx.state)?, id)?.clone();
     log(ctx, cfg, &t, from, (text, files))?;
@@ -115,12 +126,18 @@ pub fn say(
     } else {
         format!("[{id}] {from}: {text}{paths}")
     };
+    Ok((t, line))
+}
+
+/// #403: `say`'s second half: type `line` into thread `t`'s conductor, starting or resuming it first.
+pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
+    let id = t.str("thread").unwrap_or_default();
     let events = read(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;
     let awake = last.filter(|s| s.kind == "conductor-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
     let Some(s) = awake else {
-        return start(ctx, cfg, r, &t, &events, &line);
+        return start(ctx, cfg, r, t, &events, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
     herdr::reply(

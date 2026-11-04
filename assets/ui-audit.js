@@ -54,6 +54,13 @@
     if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
     g.scrollIntoView();
   };
+  // #403: thread t3 open, its composer as a paired phone has it (the demo's is inert).
+  const composer = () => {
+    tab('chat'); chatOpen('t3'); $('.lall')?.click();
+    const f = $('#chat .tw[data-t=t3]');
+    f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+    return f;
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
@@ -138,6 +145,104 @@
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #403 gate 2: [send] clears the box before the POST answers and shows the message `sending…` (no #ld overlay, ever);
+    // ✓ once accepted; failed, red with [retry] and the text back in the box. The shot: ✓, sending… and failed in t3.
+    'chat-send': async () => {
+      const f = composer(), box = f.elements.text, ld = new MutationObserver(() => { if (!$('#ld').hidden) early.push('the #ld overlay showed on a chat post'); });
+      ld.observe($('#ld'), { attributes: true });
+      const sent = () => [...$$('#chat .cvp[data-t=t3] .snt')].map(b => b.querySelector('.ct').textContent);
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      const say = t => { box.value = t; f.requestSubmit(); };
+      say('ship the notes on Friday, with the 429 change\nand the OpenAPI link');
+      if (box.value || !hold.length || sent().join() !== 'sending…') early.push(`after [send]: box "${box.value}", ${hold.length} POSTs, marks ${sent()}`);
+      await wait();
+      if (sent().join() !== 'sending…') early.push(`300 ms on, unanswered: ${sent()}`);
+      hold[0](new Response('sent\n'));
+      await wait();
+      if (sent().join() !== '✓') early.push(`accepted: ${sent()}, not ✓`);
+      say('and tag the release');
+      say('this one fails');
+      hold[2](new Response('error: herdr agent list failed: exit 1', { status: 409 }));
+      await wait();
+      const bad = $('#chat .snt.bad');
+      if (sent().join() !== '✓,sending…,✗ not sent' || !bad?.querySelector('.rt') || box.value !== 'this one fails') early.push(`failed: marks ${sent()}, [retry] ${!!bad?.querySelector('.rt')}, box "${box.value}"`);
+      if (getComputedStyle(bad.querySelector('.ct')).color !== getComputedStyle(B.appendChild(el('i', 'r'))).color) early.push('the failed mark is not red');
+      $$('body>i.r').forEach(i => i.remove());
+      ld.disconnect();
+      if (!DBG.get('check')) { $$('#chat .cvp[data-t=t3] .tc>:not(.snt)').forEach(e => { e.hidden = true; }); $('.msg.r')?.remove(); }
+    },
+    // #403 gate 2: a long draft grows the box to 6 lines, then it scrolls inside; a send shrinks it back to one.
+    'chat-long': async () => {
+      const f = composer(), box = f.elements.text, h = () => box.getBoundingClientRect().height, lh = parseFloat(getComputedStyle(box).lineHeight);
+      const type = t => { box.value = t; box.dispatchEvent(new Event('input', { bubbles: true })); return h(); };
+      const one = type(''), three = type('one\ntwo\nthree'), long = type('Rate limits: return 429 with Retry-After on /v1/search, per API key, 600 a minute with a burst of 100. '.repeat(6));
+      const cs = getComputedStyle(box), pad = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + parseFloat(cs[k]), 0);
+      if (one > 44 || Math.abs(three - 3 * lh - pad) > 1 || Math.abs(long - 6 * lh - pad) > 1 || box.scrollHeight <= box.clientHeight) early.push(`box heights: empty ${one}, 3 lines ${three}, long ${long} (${box.scrollHeight} of text), not 3 and 6 lines of ${lh} + ${pad}`);
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(() => {}) : F(u, o);
+      if (DBG.get('check')) { f.requestSubmit(); if (h() !== one) early.push(`after [send] the box is ${h()} px, not ${one}`); }
+      else $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    // #403 gate 2: the keyboard up (the box focused): no tab bar on a phone, the composer at the bottom.
+    'chat-kb': async () => {
+      const box = composer().elements.text;
+      box.focus();
+      box.value = 'grill me on the land mode';
+      await wait();
+      if (document.activeElement !== box || seen($('nav'))) early.push(`box focused ${document.activeElement === box}, tab bar shown ${seen($('nav'))}`);
+    },
+    // #403 gate 2: opening a thread pushes a history entry, so back returns to the list; so does [‹], and a swipe
+    // right from the left edge past a third of the width (it follows the finger); a short, mid-screen or downward one does not.
+    'chat-back': async () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const row = () => $('#chat .tr[data-t=t3]'), open = () => THR === 't3' && !seen($('#chat .clp'));
+      const popped = () => new Promise(r => addEventListener('popstate', () => setTimeout(r), { once: true }));
+      row().click();
+      if (!open() || history.state?.thr !== 't3') early.push(`row tap: thread ${THR}, history ${JSON.stringify(history.state)}`);
+      const p = popped(); history.back(); await p;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`back: thread "${THR}", not the list`);
+      row().click();
+      const q = popped(); $('#chat .cvp[data-t=t3] .bk').click(); await q;
+      if (THR !== '') early.push(`[‹]: thread "${THR}", not the list`);
+      const v = $('#chat .cvp[data-t=t3]'), swipe = (x0, y0, x1, y1, mid) => {
+        const t = (x, y) => new Touch({ identifier: 1, target: v, clientX: x, clientY: y });
+        v.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [t(x0, y0)], changedTouches: [t(x0, y0)] }));
+        v.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [t((x0 + x1) / 2, (y0 + y1) / 2)], changedTouches: [t((x0 + x1) / 2, (y0 + y1) / 2)] }));
+        if (mid) mid();
+        v.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [t(x1, y1)] }));
+      };
+      for (const [what, x0, y0, x1, y1] of [['a short edge swipe', 4, 400, 100, 400], ['a swipe from mid-screen', 120, 400, 380, 400], ['a downward drag from the edge', 4, 300, 60, 600]]) {
+        row().click();
+        swipe(x0, y0, x1, y1);
+        if (!open()) early.push(`${what} left the thread`);
+        if (v.style.transform) early.push(`${what}: the thread did not snap back (${v.style.transform})`);
+        const r = popped(); history.back(); await r;
+      }
+      row().click();
+      const s = popped();
+      swipe(4, 400, 300, 400, () => { if (v.style.transform !== 'translateX(148px)') early.push(`mid-swipe the thread is at "${v.style.transform}", not under the finger (148px)`); });
+      await s;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`an edge swipe: thread "${THR}", not the list`);
+    },
+    // #403 gate 2: a working thread (its live line as serve.rs renders it): the overlay's art, small, above the box —
+    // the theme's sprite (pixel), its ascii_loading frames (ascii, `ascii-chat-wait`), the glyph (terminal); a still
+    // frame with reduced motion (`chat-wait-still`); never the #ld overlay.
+    'chat-wait': () => {
+      tab('chat'); chatOpen('t3'); $('.lall')?.click();
+      const c = $('#chat').cloneNode(true);
+      c.querySelector('.cvp[data-t=t3] .tlv').innerHTML = '<i class=tld aria-hidden=true></i> working';
+      frag('chat', c.innerHTML);
+      const i = $('#chat .cvp[data-t=t3] .tld'), t = document.documentElement.dataset.theme, asc = B.dataset.mode === 'ascii';
+      const want = asc ? '.lda' : t === 'terminal' ? 'i' : '.lds', shown = [...i.children].filter(seen), r = i.getBoundingClientRect();
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches, a = shown[0] && getComputedStyle(asc ? shown[0].lastChild : shown[0]).animationName;
+      if (shown.length !== 1 || !shown[0].matches(want)) early.push(`${t}${asc ? ' ascii' : ''}: the mark shows ${shown.map(e => e.outerHTML.slice(0, 30))}, not ${want}`);
+      if (r.height > 24 || r.bottom > $('#chat .tw[data-t=t3]').getBoundingClientRect().top) early.push(`the mark ${r.height} px tall, or not above the box`);
+      if (V.endsWith('still') ? a !== 'none' : a === 'none') early.push(`the mark's animation: ${a}`);
+      if (seen($('#ld'))) early.push('the #ld overlay shows');
+      if (!DBG.get('check')) $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    'chat-wait-still': () => VIEWS['chat-wait'](),
+    'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word

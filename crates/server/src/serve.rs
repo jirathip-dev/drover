@@ -345,6 +345,8 @@ pub struct Server<'a> {
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
     snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
+    /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
+    later: Mutex<Vec<(Ctx, (Event, String))>>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -734,6 +736,7 @@ impl<'a> Server<'a> {
             running: Mutex::default(),
             export: None,
             snap: Mutex::default(),
+            later: Mutex::default(),
         }
     }
 
@@ -838,7 +841,19 @@ impl<'a> Server<'a> {
             return Ok(());
         }
         drop(clients);
-        s.write_all(&self.respond(&req, crate::now()))
+        s.write_all(&self.reply(&req, crate::now()))?;
+        drop(s);
+        self.deliver();
+        Ok(())
+    }
+
+    /// #403: type in the lines `POST /thread` logged (`chat::deliver`).
+    fn deliver(&self) {
+        let jobs = std::mem::take(&mut *lock(&self.later));
+        for (c, job) in jobs {
+            chat::deliver(&c, self.r, &job);
+            self.kick.store(true, Relaxed);
+        }
     }
 
     /// The watcher's 1 s tick (docs/serve.md): on a change, re-render per audience and push only the changed fragments.
@@ -936,8 +951,14 @@ impl<'a> Server<'a> {
         s.clone()
     }
 
-    /// The full HTTP response to one request.
+    /// The full HTTP response to one request, its conductor deliveries done (the socket's `handle` sends it first).
     pub fn respond(&self, req: &str, now: u64) -> Vec<u8> {
+        let res = self.reply(req, now);
+        self.deliver();
+        res
+    }
+
+    fn reply(&self, req: &str, now: u64) -> Vec<u8> {
         let (head, body) = req.split_once("\r\n\r\n").unwrap_or((req, ""));
         let mut w = head.split_whitespace();
         let (method, target) = (w.next().unwrap_or_default(), w.next().unwrap_or_default());
@@ -1119,7 +1140,10 @@ impl<'a> Server<'a> {
         times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
         let res = if path == "/thread" {
-            chat::post(ctx, self.r, f)
+            let mut later = vec![];
+            let res = chat::post(ctx, self.r, f, &mut later);
+            lock(&self.later).extend(later.into_iter().map(|l| (ctx.clone(), l)));
+            res
         } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
             Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
