@@ -1,4 +1,4 @@
-// Tabs, lane display mode (both kept in localStorage), the live board (SSE `/live`, sync dot, ↻,
+// Tabs, lane display mode (the look sheet's style; both kept in localStorage), the live board (SSE `/live`, sync dot, ↻,
 // pull to refresh), SW, the Lanes bottom sheet: card, Stop/Kill/Clean (`/act`), transcript per turn
 // (5 s poll, load more), reply box with a `/` menu, Pair this phone, and blocked agents' menu buttons.
 const B = document.body, $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
@@ -46,17 +46,24 @@ const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { se
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 $$('details.q').forEach(d => { if (want && d.querySelector('summary>span').textContent === '#' + want) { d.open = true; d.scrollIntoView(); } });
-// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone, no button); TT is
-// the theme herd.js loaded (docs/themes.md). The button sits in the Lanes tab (swapped with it): delegated, relabelled after each swap.
+// #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
+// herd.js loaded (docs/themes.md). #335: the look sheet's STYLE picks it (pixel: scene, ascii: ascii), no Lanes button. In
+// ascii the loading overlay runs the theme's `ascii_loading` frames: built once, then CSS swaps them (no node replaced).
 let TT = null, TM = ['scene', 'ascii'];
 function mode(m) {
+  if (TM.includes(m)) put('mode', m); // a theme without it (terminal) keeps the pick for the next one
   B.dataset.mode = m = TM.includes(m) ? m : TM[0];
-  const b = $('#mode span') || $('#mode');
-  if (b) { b.textContent = m; b.closest('.lh').hidden = TM.length < 2; }
-  put('mode', m);
+  const fs = ((TT && TT.ascii_loading) || '').split('\n').filter(Boolean), ld = $('#ld');
+  let a = ld.querySelector('.lda');
+  if (!a) ld.append(a = Object.assign(document.createElement('span'), { className: 'asc lda' }));
+  if (a.dataset.f !== fs.join()) {
+    a.dataset.f = fs.join();
+    a.replaceChildren(...fs.map(f => Object.assign(document.createElement('b'), { textContent: f })));
+    a.classList.toggle('run', fs.length > 1);
+  }
+  ld.classList.toggle('la', m === 'ascii' && fs.length > 0);
 }
 mode(get('mode'));
-document.addEventListener('click', e => { if (e.target.closest('#mode')) mode(TM[(TM.indexOf(B.dataset.mode) + 1) % TM.length]); });
 // #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
 // { "label", "color-scheme": "dark" | "light", "tokens": { "--bg": "#rrggbb", … } } (docs/themes.md, docs/design/schemes).
 // gate() is every check it must pass, with what failed; a refused one is named on the Host tab and never shown.
@@ -205,7 +212,12 @@ function lsheet(kb) {
   const sw = s => { const i = el('i', 'lsw'); i.append(Object.assign(el('b', 'aa', 'Aa'), { style: `background:${s.tokens['--bg']};color:${s.tokens['--fg']}` }), ...['--g', '--a', '--r'].map(t => Object.assign(el('b'), { style: `background:${s.tokens[t]}` }))); return i; };
   const ok = Object.keys(SD.s).filter(n => !fails(SD.s[n]).length), no = Object.keys(SD.s).length - ok.length;
   const sc = ok.map(n => lrow('s', n, n === h.dataset.scheme, sw(SD.s[n]), n === choose(SD.s, null, SD.t[h.dataset.theme])));
-  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc),
+  // #335: STYLE, pixel (sprites) or ascii (the theme's ASCII figures); a theme without ascii (terminal) has none.
+  const px = el('i', 'lka'), as = el('i', 'lka');
+  lsprite(h.dataset.theme).then(x => { px.innerHTML = x; });
+  as.append(el('b', 'asc', TT && TT.ascii_rows && TT.ascii_rows.impl));
+  const st = TM.includes('ascii') ? [grp('style', 'style', 'rows, lanes, host, loading', [lrow('y', 'pixel', B.dataset.mode !== 'ascii', px), lrow('y', 'ascii', B.dataset.mode === 'ascii', as)])] : [];
+  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
     el('p', 'lkn', 'this phone only · the home-screen icon keeps its install-time look'));
   if (key) $(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
   else if (!re) {
@@ -213,9 +225,16 @@ function lsheet(kb) {
     if (kb) $('.lko[aria-selected=true]').focus({ preventScroll: true }); // opened from the keyboard: on the current theme
   }
 }
+// #335: STYLE applies in place: pixel is the scene mode, ascii the ascii mode, on every tab.
+function style(y) {
+  mode(y === 'ascii' ? 'ascii' : 'scene');
+  rows(document);
+  groups();
+}
 function lpick(o) {
   const h = document.documentElement;
-  if (o.dataset.t) {
+  if (o.dataset.y) style(o.dataset.y);
+  else if (o.dataset.t) {
     h.dataset.theme = o.dataset.t;
     put('theme', o.dataset.t);
     theme(o.dataset.t);
@@ -229,7 +248,7 @@ document.addEventListener('click', e => {
   const o = e.target.closest('.look .lko');
   if (o) lpick(o);
 });
-// Keyboard: ↑/↓ (Home/End) move within a list, Tab between the two lists, Enter or Space applies, Esc closes.
+// Keyboard: ↑/↓ (Home/End) move within a list, Tab between the lists, Enter or Space applies, Esc closes.
 document.addEventListener('keydown', e => {
   const o = e.target.closest && e.target.closest('.look .lko');
   if (!o) return;
@@ -256,7 +275,11 @@ function rows(root) {
     g.title = word;
     g.setAttribute('role', 'img');
     g.setAttribute('aria-label', word);
-    g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`;
+    // #335: ascii style: the theme's 3-character figure in the sprite's 24 px box (the same 28 px slot).
+    const f = B.dataset.mode === 'ascii' && TT.ascii_rows && TT.ascii_rows[act];
+    if (!f) return void (g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`);
+    g.replaceChildren(el('i', 'rsp rsa', f));
+    g.firstChild.setAttribute('aria-hidden', true);
   };
   root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
   root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
@@ -283,8 +306,9 @@ function mini(g) {
   const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
   s.querySelector('.lsc')?.remove();
   if (!ls || !MINI[ls.kind]) return;
-  const word = esc('load: ' + ((ls.levels || {})[l] || l));
-  s.querySelector('.dt').insertAdjacentHTML('afterend', `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
+  const word = esc('load: ' + ((ls.levels || {})[l] || l)), f = B.dataset.mode === 'ascii' && TT.ascii_load && TT.ascii_load[l];
+  s.querySelector('.dt').insertAdjacentHTML('afterend', f ? `<i class="lsc lsa" role=img aria-label="${word}" title="${word}">${esc(f)}</i>` // #335
+    : `<svg class=lsc viewBox="0 0 16 16" role=img aria-label="${word}"><title>${word}</title>${MINI[ls.kind][k]}</svg>`);
 }
 // #241: a moment (`ev` on /live with a `k`: merged, fail, needs-you) plays the theme's sprite for 2.4 s, silent; reduced motion: a still frame.
 function moment(k) {
@@ -300,7 +324,7 @@ function moment(k) {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, P = {}, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -347,6 +371,7 @@ function frag(id, html) {
   const rows = e => new Map([...e.querySelectorAll('details,.lane')].map(r => [key(r), r]));
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
+  if (id === 'events') olds(nu);
   tidy(nu);
   morph(el, nu);
   nows();
@@ -357,7 +382,6 @@ function frag(id, html) {
   sput('c:' + id, html);
   alerts();
   badge();
-  if (id === 'lanes') mode(B.dataset.mode);
   if (id === 'needs') fold();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
@@ -544,13 +568,23 @@ async function refresh() {
 function connect() {
   if (DEMO) return;
   if (es) es.close();
+  P = {};
   try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
   // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
+  // #351: after a part's first copy on this stream, only its changed pieces (`patch`, cut before each `<d` as serve.rs
+  // cuts them): the pieces at or past `p` not in `set` are the old ones, shifted by the length change.
+  const got = (id, ps) => { P[id] = ps; frag(id, ps.join('')); sync('g'); pulse(); claim(); };
+  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); got(j.id, j.html.split(/(?=<d)/)); });
+  es.addEventListener('patch', e => {
+    at(e);
+    const j = JSON.parse(e.data), o = P[j.id];
+    if (!o) return refresh();
+    got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
+  });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
   es.addEventListener('refresh', e => (at(e), refresh()));
@@ -706,6 +740,26 @@ document.addEventListener('click', e => {
   if (!b) return;
   if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
   put('events:filter', JSON.stringify(EF));
+  evf(document);
+});
+// #351: Events opens with 100 rows a view; [older] loads the next 100 under them (`frag?id=events&skip=`), kept across
+// live swaps: EO holds each view's loaded pages (marked .pg), put back in place of the first page's [older].
+const EO = {};
+function olds(root) {
+  for (const v in EO) { const b = root.querySelector(`[data-v=${v}]>.eo:not(.pg)`); if (b) b.outerHTML = EO[v]; }
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.eo'), d = b && b.parentNode;
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const t = document.createElement('div'), v = d.dataset.v;
+  t.innerHTML = (await part('frag?id=events&skip=' + b.dataset.skip)) || '';
+  const ns = [...t.querySelectorAll(`[data-v=${v}]>.eg, [data-v=${v}]>.eo`)];
+  if (!ns.length) return (b.disabled = false);
+  ns.forEach(n => n.classList.add('pg'));
+  b.replaceWith(...ns);
+  tidy(d);
+  EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
   evf(document);
 });
 function tidy(root) {
@@ -887,10 +941,11 @@ function matters(lines, said, notices, harness) {
 // The longest suffix of a that is a prefix of b (as text): two reads' overlap.
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
-const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200' + q);
+// #351: a chat opens with its last 10 turns (~64 KB at most, the server's cap); scrolling to the top loads 10 more.
+const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200&turns=' + turns + q);
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
-let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [];
+let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [], turns = 10;
 // #260 [full conversation]: every tool run and output (the pane view), else what matters; remembered per phone.
 let full = false;
 try { full = localStorage.getItem('chat:full') === '1'; } catch (e) {}
@@ -944,7 +999,7 @@ async function poll() {
     if (!r.ok) return now.replaceChildren(el('p', 'm', (await r.text()).trim()));
     const j = await r.json(), done = j.lines.slice(0, j.lines.length - j.live), k = overlap(hist, done);
     opane = j.pane;
-    if (!hist.length) more.hidden = !j.more;
+    if (!hist.length) more.hidden = !(j.more || j.older);
     hist = k || !hist.length || !done.length ? hist.concat(done.slice(k)) : done;
     [tail, nlive, harness, spin, said, notes] = [j.lines.slice(done.length), j.live, j.harness, !!j.status, j.said, j.notices];
     $('.live').hidden = !j.status;
@@ -954,14 +1009,19 @@ async function poll() {
 }
 // Older lines from the rolling transcript, joined above the seen ones by their overlap.
 more.onclick = async () => {
-  const r = await lane('&before=' + Math.max(0, hist.length + nlive - 20));
-  if (!r.ok) return;
+  more.disabled = true;
+  turns += 10;
+  const r = await lane('&before=' + Math.max(0, hist.length + nlive - 20)).catch(() => null);
+  more.disabled = false;
+  if (!r || !r.ok) return;
   const j = await r.json(), h = chat.scrollHeight;
   hist = j.lines.slice(0, j.lines.length - overlap(j.lines, hist)).concat(hist);
-  more.hidden = !j.more;
+  said = j.said || said;
+  more.hidden = !(j.more || j.older);
   paint();
   chat.scrollTop += chat.scrollHeight - h;
 };
+chat.addEventListener('scroll', () => { if (chat.scrollTop < 40 && !more.hidden && !more.disabled) more.onclick(); }, { passive: true });
 chat.addEventListener('toggle', e => {
   const k = e.target.dataset && e.target.dataset.k, s = store();
   if (!k) return;
@@ -1022,7 +1082,7 @@ function open(e) {
   $('[data-op=close]').hidden = !other || nopair;
   $$('.pairf, .cf, .cmds').forEach(x => x.hidden = true);
   now.replaceChildren();
-  hist = []; tail = []; said = null; notes = [];
+  hist = []; tail = []; said = null; notes = []; turns = 10;
   $('.live').hidden = true;
   say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other || spane ? null : true);
   sh.className = 'sh';

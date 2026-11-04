@@ -648,6 +648,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             let skip = queue::skipped(&events, &all, &s.fleet, s.issue, ctx.now);
                             skip.map(|(c, why)| format!("skipped this pass: {c} ({why})"))
                         })
+                        .or_else(|| {
+                            let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
+                            Some(format!("on {}: {}", e.str("host")?, e.str("why")?))
+                        })
                         .unwrap_or_else(|| "-".into());
                     writeln!(out, "{:<pad$}{} {w}", status_line(s, ctx.now), host(s))?;
                 }
@@ -1141,12 +1145,17 @@ fn lane_event(ctx: &Ctx, r: &dyn Runner, kind: &str, mut d: serde_json::Value) {
     }
 }
 
-/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown).
+/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top.
 fn deny_list(ctx: &Ctx) -> Vec<crate::config::Deny> {
     let cfg = Config::load(&ctx.config).unwrap_or_default();
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let f = cfg.fleet.get(lane.split(':').next().unwrap_or_default());
-    f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits))
+    let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
+    let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
+    match cfg.hosts.get(&host) {
+        Some(h) => h.deny(d),
+        None => d,
+    }
 }
 
 /// main, master, staging and every fleet's integration branch.

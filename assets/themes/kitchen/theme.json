@@ -169,6 +169,21 @@
   "scene",
   "ascii"
  ],
+ "ascii_rows": {
+  "impl": "c~@",
+  "fix": "c/#",
+  "rev": "c-o",
+  "update": "c=]",
+  "idle": "c..",
+  "done": "c>=",
+  "blocked": "c!^"
+ },
+ "ascii_load": {
+  "calm": ".^.",
+  "busy": "^^^",
+  "held": "^^^^^"
+ },
+ "ascii_loading": "c~@\nc~o",
  "glyphs": {
   "working": "♨",
   "idle": "·",

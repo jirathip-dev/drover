@@ -43,6 +43,21 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was
   produced at. Refresh it after every push (`gh pr edit --body`) so it never lags the head.
 
+## Write tests that would fail without your change
+
+Review FAILs proof that relies on tests that:
+
+- re-implement production logic instead of exercising it;
+- have no meaningful assertion, or assert only mock calls or values their own mocks supplied;
+- claim behaviour their setup never exercises (e.g. a fixture that bypasses the real server path);
+- claim pixel or interaction coverage from static markup;
+- check persistence at a path the code never writes;
+- assert a capability flag instead of delivery or acknowledgement;
+- pass a negative case without hitting the real rejection path;
+- wait on real time or networks instead of fake clocks.
+
+Production code added only for tests counts against the change too.
+
 ## Standing answers (decide, don't ask)
 
 - An issue's line budget is a guide, not a gate. Never ask about it. State `src/ net +N (budget +M)`

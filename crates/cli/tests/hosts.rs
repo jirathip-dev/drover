@@ -143,7 +143,7 @@ fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
     assert!(ls.contains("#12    queued  needs docker"), "{ls}");
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "set", "12", "needs", "gpu"]).0, 0);
     let e = placed(&c, &r, 12, "impl", None).unwrap_err();
-    assert_eq!(e, "REFUSED NO_HOST: no host has gpu");
+    assert_eq!(e, "REFUSED NO_HOST: no host with gpu");
     // A hand tag in fleet.toml covers it.
     let c2 = setup("hosts-needs-hand", "tags = [\"gpu\"]", true, 0);
     run(&c2, &r, &["queue", "sendmeter", "add", "12", "--needs", "gpu"]);
@@ -156,7 +156,7 @@ fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
     std::fs::write(&c.config, text).unwrap();
     run(&c, &r, &["queue", "sendmeter", "set", "12", "needs", "docker"]);
     let e = placed(&c, &r, 12, "impl", None).unwrap_err();
-    assert_eq!(e, "REFUSED NO_HOST: no host has docker, xcode");
+    assert_eq!(e, "REFUSED NO_HOST: no host with docker, xcode");
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     run(&c, &r, &["queue", "sendmeter", "add", "14", "--needs", "docker"]);
     assert_eq!(
         placed(&c, &r, 14, "impl", None).unwrap_err(),
-        "REFUSED NO_HOST: no enabled host has docker"
+        "REFUSED NO_HOST: no host with docker"
     );
     // Its running lane still gets its review and fix rounds there.
     remote_spawn(&c, NOW - 60);

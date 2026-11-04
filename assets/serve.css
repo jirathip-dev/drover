@@ -72,7 +72,6 @@ nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
 #stale{color:var(--r);font-size:var(--fs-meta)}
 .tl{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lh{text-align:right}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
@@ -107,13 +106,18 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 /* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
 [data-mode=glyph] .av .gl,[data-mode=scene]:not(.hz) .av .gl,[data-mode=scene].hz .av .px{display:block}
 [data-mode=ascii] .av .asc{display:grid}
-/* #241 terminal (docs/themes.md): today's glyph board from the first paint, before herd.js loads it: glyph avatars, no mode button. */
-[data-theme=terminal] .av>*{display:none!important}[data-theme=terminal] .av .gl{display:block!important}[data-theme=terminal] .lh{display:none}
+/* #241 terminal (docs/themes.md): today's glyph board from the first paint, before herd.js loads it: glyph avatars. */
+[data-theme=terminal] .av>*{display:none!important}[data-theme=terminal] .av .gl{display:block!important}
 /* #241: a row's 16 px action sprite in its glyph's place, a Host group's load scene, a moment (silent; reduced motion: still). */
 .rsp,.lsc{display:inline-block;flex:none;width:var(--s4);height:var(--s4);vertical-align:middle}
 /* #281: the row sprite is 24 px (the 16 px art at 1.5×, never smoothed) in a fixed 28 px slot; its -4 px block margin keeps
    the line box (and the row) its height. */
 .rsp{width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2));margin:calc(-1 * var(--s1)) calc(var(--s1) / 2);image-rendering:crisp-edges;image-rendering:pixelated;shape-rendering:crispEdges}
+/* #335 ascii style: a row's 3-character figure in the sprite's box (so the slot stays 28 px), a Host group's load as text,
+   the loading overlay's frames (two: .run swaps them, no node replaced; reduced motion: the first). */
+.rsa{display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-meta);line-height:1;font-style:normal;white-space:pre}
+.lsa{width:auto;font-size:var(--fs-meta);line-height:var(--s4);font-style:normal;white-space:pre;color:var(--mute)}
+#ld .lda{display:none;font-size:var(--fs-code);line-height:1;white-space:pre;color:var(--fg)}#ld.la .lda{display:grid}#ld.la :is(.lds,i){display:none}
 details.q:has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
 details.er:has(>summary>.rsg)>summary{grid-template-columns:calc(var(--s4) + var(--s3)) var(--s2) 6ch minmax(0,1fr) auto}
 details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * var(--s2))}
@@ -514,6 +518,7 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .lka,.lsw{display:flex;flex:none;gap:calc(var(--s1) / 2);width:calc(5 * var(--s4));height:calc(var(--s4) + var(--s2))}
 .lka>*{width:calc(var(--s4) + var(--s2));height:100%;border:1px solid var(--edge);border-radius:5px;background:var(--card)}
 .lka>svg{shape-rendering:crispEdges;image-rendering:pixelated}
+.lka>.asc{display:flex;align-items:center;justify-content:center;font-size:var(--fs-meta);font-weight:400;font-style:normal}
 .lsw>b{flex:1;border-radius:3px}
 .lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
 .lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
