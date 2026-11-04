@@ -294,8 +294,9 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
 }
 
 #[test]
-fn a_thread_needs_a_conductor_role_and_spawn_never_starts_one() {
-    let c = ctx(&tmpdir("conductor-none"), CONFIG);
+fn a_thread_needs_a_conductor_or_impl_role_and_spawn_never_starts_one() {
+    let no_impl = CONFIG.replace("[fleet.sendmeter.role.impl]", "[fleet.sendmeter.role.build]");
+    let c = ctx(&tmpdir("conductor-none"), &no_impl);
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "all", "Cross-repo"]).0, 0);
     let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "hi"]);
     assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");
