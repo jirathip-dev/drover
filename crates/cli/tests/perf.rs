@@ -76,6 +76,8 @@ fn fixture() -> (herdsman::Ctx, Slow) {
         .reply("herdr pane read", "⏺ Working on it\n\n❯ \n")
         .reply("herdr --machine bazzite pane read", "⏺ Working on it\n\n❯ \n")
         .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600))
+        // #389: no lane has queued anything for the main host.
+        .reply("ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' '[ -s", "")
         .reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
     (c, Slow(f, Mutex::default(), AtomicUsize::new(0)))
 }

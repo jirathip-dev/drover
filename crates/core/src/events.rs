@@ -465,6 +465,7 @@ pub const PASSIVE: &[&str] = &[
     "form-rounds-exhausted",
     "stale-marker",
     "spawn-held",
+    "outbox",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.

@@ -456,6 +456,10 @@ pub fn drive(
         }
     }
     let grew = log();
+    // #389: remote lanes' commands that found no route here, as the look read them.
+    if fast {
+        crate::outbox::drain(ctx, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
+    }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
     for name in &fleets {
