@@ -131,9 +131,9 @@ details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * 
    own first line; an Events kind's word in the row's tone; an empty tab's theme line over the plain one; the loading word */
 .pw{color:var(--mute);font-size:var(--fs-meta);font-weight:400;white-space:nowrap}h2 .pw,.tsub .pw{text-transform:none;letter-spacing:0}
 .tsub{margin:var(--s2) 0 0;padding:0 var(--s1);font-weight:600}
-.tw.ev{font-weight:600}details.er:has(.t-g) .tw.ev{color:var(--g)}details.er:has(.t-r) .tw.ev{color:var(--r)}details.er:has(.t-l) .tw.ev{color:var(--l)}
+.thw.ev{font-weight:600}details.er:has(.t-g) .thw.ev{color:var(--g)}details.er:has(.t-r) .thw.ev{color:var(--r)}details.er:has(.t-l) .thw.ev{color:var(--l)}
 p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.empty .pw{white-space:normal}
-#ld .ldw{position:absolute;top:calc(var(--s4) * 9 + var(--s2));margin:0;padding:0 var(--s2);border-radius:var(--s1);background:var(--bg);font-size:var(--fs-meta)}#ld .ldw:empty{display:none}
+#ld .ldw{position:absolute;top:calc(var(--s4) * 9 + var(--s2));margin:0;padding:0 var(--s2);border-radius:var(--s1);background:var(--bg);font-size:var(--fs-meta)}#ld .ldw:empty,.tld .ldw{display:none}
 /* the Host card's load: its 48 × 16 mini at 1.5×, two frames, and the level word */
 .lsm{display:inline-flex;align-items:center;gap:var(--s1);margin-left:auto;padding-left:var(--s2);font-size:var(--fs-meta)}
 .lsm svg{width:calc(var(--s4) * 3);height:var(--s4);image-rendering:pixelated;shape-rendering:crispEdges;animation:kfr 1.2s infinite}

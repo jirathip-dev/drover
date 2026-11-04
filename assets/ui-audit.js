@@ -545,7 +545,7 @@
       tab('queue');
       for (const [t, k] of [['queue', 'empty-queue'], ['lanes', 'empty-lanes'], ['events', 'empty-events']]) {
         const p = $(`#${t} p.m:not(.es)`), w = TW()[k];
-        if (!p || (w ? p.querySelector('.tw')?.textContent !== w || !p.querySelector('.pw') : p.innerHTML !== p.textContent)) early.push(`${t}: empty line "${p && p.innerHTML}"`);
+        if (!p || (w ? p.querySelector('.thw')?.textContent !== w || !p.querySelector('.pw') : p.innerHTML !== p.textContent)) early.push(`${t}: empty line "${p && p.innerHTML}"`);
       }
     },
     // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
@@ -852,16 +852,16 @@
     if (!TT) return [`theme ${t} never loaded`];
     if (t === 'terminal') {
       if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
-      if ($$('.tw, .pw, .tsub, .lsm, [data-mo]').length) bad.push('terminal shows theme words'); // #370
+      if ($$('.thw, .pw, .tsub, .lsm, [data-mo]').length) bad.push('terminal shows theme words'); // #370
       if (B.dataset.mode !== 'glyph' || $$('#mode').length || on('.av .px, .av .asc, .rsa, .lsa').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
       return bad;
     }
     if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
     // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
     // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
-    if (!on(`#${tb}>.tsub>.tw`).length) bad.push(`${tb}: no theme line`);
+    if (!on(`#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
     const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
-    for (const e of on(LBL)) if (!e.querySelector('.tw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
+    for (const e of on(LBL)) if (!e.querySelector('.thw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
     const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
     const under = e => { for (; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0) return c[3] < 1 ? over(c.slice(0, 3), rgb(getComputedStyle(B).backgroundColor), c[3]) : c.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
     for (const e of on('.pw')) { const x = ratio(rgb(getComputedStyle(e).color).slice(0, 3), under(e)); if (x < 4.5) bad.push(`plain word "${e.textContent}" ${x.toFixed(2)}:1, under 4.5`); }

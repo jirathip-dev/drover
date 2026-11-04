@@ -326,13 +326,13 @@ function moment(k) {
   clearTimeout(o.t);
   o.t = setTimeout(() => { o.hidden = true; }, 2400);
 }
-// #370: the theme's words on every tab, `<b class=tw>on the line</b><small class=pw> · working</small>` (the plain word
+// #370: the theme's words on every tab, `<b class=thw>on the line</b><small class=pw> · working</small>` (the plain word
 // muted); a word the theme lacks is the plain word alone, so terminal (no words) is today's board. A label keeps its
 // plain text in data-p, so a theme switch re-pairs it from the original.
 const PW = { needs: 'needs you', working: 'working', idle: 'idle', done: 'done', queued: 'queued', parked: 'parked', dead: 'dead',
   impl: 'build', fix: 'fix', rev: 'review', update: 'catch up', merged: 'merged', fail: 'FAIL' };
 const TW = () => (TT && TT.words) || {};
-const tw = (k, plain, rest = '') => TW()[k] ? `<b class=tw>${esc(TW()[k])}</b><small class=pw> · ${esc(plain + rest)}</small>` : esc(plain + rest);
+const tw = (k, plain, rest = '') => TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw> · ${esc(plain + rest)}</small>` : esc(plain + rest);
 function relabel(n, k, plain, rest = '') {
   if (!n) return;
   if (n.dataset.p == null) n.dataset.p = n.textContent;
@@ -382,7 +382,7 @@ function words(root) {
   root.querySelectorAll('details.er').forEach(d => {
     const sm = d.querySelector('.sm'), k = EVK(d);
     if (sm.dataset.p == null) sm.dataset.p = sm.innerHTML;
-    const h = k && TW()[k] ? `<b class="tw ev">${esc(TW()[k])}</b> ${sm.dataset.p}` : sm.dataset.p;
+    const h = k && TW()[k] ? `<b class="thw ev">${esc(TW()[k])}</b> ${sm.dataset.p}` : sm.dataset.p;
     if (sm.innerHTML !== h) sm.innerHTML = h;
     use(d.querySelector('.kg'), k);
   });
@@ -392,7 +392,7 @@ function words(root) {
     if (!k) return;
     p.dataset.p = t;
     p.classList.toggle('empty', !!TW()[k]);
-    const h = TW()[k] ? `<b class=tw>${esc(TW()[k])}</b><small class=pw>${esc(t)}</small>` : esc(t);
+    const h = TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw>${esc(t)}</small>` : esc(t);
     if (p.innerHTML !== h) p.innerHTML = h;
   });
   const ld = $('#ld');
@@ -407,7 +407,7 @@ function words(root) {
     const l = x >= 1 ? 'held' : x >= 0.5 ? 'busy' : 'calm', w = (ls.levels || {})[l] || l;
     if (had && had.dataset.l === l + w) return;
     had?.remove();
-    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 48 16" aria-hidden=true><use href="#hl-${l}"/></svg><b class=tw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
+    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 48 16" aria-hidden=true><use href="#hl-${l}"/></svg><b class=thw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
   });
   pushwords();
 }
