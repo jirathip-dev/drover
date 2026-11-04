@@ -12,7 +12,7 @@ use crate::{gh, herdr};
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::{BufRead, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Head sha of an open PR that passes every merge gate, if any.
@@ -589,10 +589,8 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
             continue;
         }
         let size = du(&dir);
-        if dry {
-            writeln!(out, "  would remove {} ({:.2} GB)", dir.display(), gb(size))?;
-            freed += size;
-        } else if std::fs::remove_dir_all(&dir).is_ok() {
+        let _ = dry.then(|| writeln!(out, "  would remove {} ({:.2} GB)", dir.display(), gb(size)));
+        if dry || std::fs::remove_dir_all(&dir).is_ok() {
             freed += size;
         }
     }
@@ -686,11 +684,10 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
-/// #361: build folders of worktrees idle 7 days (no live lane or process there, HEAD and changes untouched),
-/// previewed; removed with `yes` or a `y` on stdin.
+/// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
-    let (mut seen, mut idle, mut total) = (std::collections::BTreeSet::new(), vec![], 0);
+    let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
         let wt = Path::new(e.str("worktree").unwrap_or_default());
         if e.str("machine").is_some() || !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
@@ -703,39 +700,31 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             Some(a) => format!("touched {} ago", age(a)),
             None => "HEAD or status unreadable".into(),
         };
-        if !why.is_empty() {
+        if why.is_empty() {
+            writeln!(o, "{}:", wt.display())?;
+            total += purge(r, cfg, &e.fleet, o, wt, !yes)?;
+        } else {
             writeln!(o, "skip {}: {why}", wt.display())?;
-            continue;
-        }
-        writeln!(o, "{}:", wt.display())?;
-        let bytes = purge(r, cfg, &e.fleet, o, wt, true)?;
-        total += bytes;
-        idle.extend((bytes > 0).then_some((&e.fleet, wt)));
-    }
-    writeln!(o, "{:.2} GB reclaimable {NOTE}", gb(total))?;
-    if !yes && !idle.is_empty() {
-        write!(o, "apply? [y/N] ")?;
-        let mut line = String::new();
-        let _ = std::io::BufReader::new(i).read_line(&mut line);
-        if line.trim() != "y" {
-            return Ok(writeln!(o, "preview: nothing changed; pass --apply to remove")?);
         }
     }
-    let mut freed = 0;
-    for (fleet, wt) in idle {
-        freed += purge(r, cfg, fleet, o, wt, false)?;
+    let done = if yes { "freed" } else { "reclaimable" };
+    writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
+    if yes {
+        return Ok(());
     }
-    Ok(writeln!(o, "freed {:.2} GB {NOTE}", gb(freed))?)
+    let mut b = [0];
+    if total > 0 && write!(o, "apply? [y/N] ").is_ok() && i.read(&mut b).is_ok() && b == *b"y" {
+        return reclaim(ctx, cfg, r, o, i, true);
+    }
+    Ok(writeln!(o, "preview: nothing changed; pass --apply to remove")?)
 }
 
-/// #361: the latest of HEAD's last move and the mtimes of the worktree's changed, deleted or untracked files.
+/// #361: the latest of HEAD's last move and the mtimes of changed, deleted (nearest folder) or untracked files.
 fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
-    let w = wt.to_string_lossy();
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*w][..], a].concat()).ok();
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*wt.to_string_lossy()][..], a].concat()).ok();
     let head = git(&["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"])?;
     let mut t: u64 = head.trim().strip_prefix("HEAD@{")?.strip_suffix('}')?.parse().ok()?;
     for f in git(&["status", "--porcelain", "-z", "--untracked-files=all"])?.split_terminator('\0') {
-        // `XY path`, or a rename's bare source path; a deleted file's mtime is its nearest folder's
         let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
         let m = wt.join(f).ancestors().find_map(|a| a.metadata().ok());
         t = t.max(m.map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs()));

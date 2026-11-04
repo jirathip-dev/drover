@@ -128,5 +128,5 @@ fn busy_or_recent_worktrees_are_skipped() {
         assert!(out.contains(&format!("skip {}: {why}", w.display())), "{out}");
         assert_eq!(gone(w), [false; 5], "{}", w.display());
     }
-    assert!(out.contains("0.00 GB reclaimable"), "{out}");
+    assert!(out.contains("0.00 GB freed"), "{out}");
 }
