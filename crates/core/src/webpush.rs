@@ -223,15 +223,14 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let mut url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
     // #130: needs-human says who and why in the title; the body adds the last verdict's first finding.
     let n = ev.issue.filter(|_| ev.kind == "needs-human");
-    let thread = ev
-        .str("thread")
-        .filter(|_| ["thread-msg", "needs-decision"].contains(&ev.kind.as_str()));
+    let kinds = ["thread-msg", "needs-decision"];
+    let thread = ev.str("thread").filter(|_| kinds.contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
-    let evs = n
-        .or(thread.map(|_| 0))
-        .map(|_| read(log))
-        .transpose()?
-        .unwrap_or_default();
+    let evs = if n.is_some() || thread.is_some() {
+        read(log)?
+    } else {
+        vec![]
+    };
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
     let (title, mut body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),

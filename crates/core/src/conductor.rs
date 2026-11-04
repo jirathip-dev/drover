@@ -6,7 +6,7 @@ use crate::gate::refused;
 use crate::runner::Runner;
 use crate::spawn::Plan;
 use crate::{harness, herdr, Ctx};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
@@ -72,9 +72,7 @@ pub fn dir(ctx: &Ctx, cfg: &Config, id: &str) -> std::path::PathBuf {
 /// A file a message carries, as the thread logs it: its name, absolute path and size.
 pub fn file(p: &std::path::Path) -> Result<Value> {
     let p = std::path::absolute(p)?;
-    let size = std::fs::metadata(&p)
-        .map_err(|e| anyhow::anyhow!("{}: {e}", p.display()))?
-        .len();
+    let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
     Ok(json!({"name": name, "path": p, "size": size}))
 }
@@ -98,10 +96,8 @@ pub fn say(
     text_ok(text)?;
     let t = find(&read(&ctx.state)?, id)?.clone();
     log(ctx, cfg, &t, from, (text, files))?;
-    let paths: String = files
-        .iter()
-        .map(|f| format!(" (attached: {})", f["path"].as_str().unwrap_or_default()))
-        .collect();
+    let path = |f: &Value| format!(" (attached: {})", f["path"].as_str().unwrap_or_default());
+    let paths: String = files.iter().map(path).collect();
     let line = if raw {
         text.into()
     } else {
@@ -342,14 +338,11 @@ pub fn unread(events: &[Event], id: &str) -> bool {
 /// Log `thread-read` for thread `t` if the conductor spoke since the owner last read or wrote (`thread show`, the board).
 pub fn mark_read(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event) -> Result<()> {
     let id = t.str("thread").unwrap_or_default();
-    if !unread(events, id) {
-        return Ok(());
+    let read = Event::new(ctx.now, &t.fleet, None, "thread-read", json!({"thread": id}));
+    if unread(events, id) {
+        emit(&ctx.state, cfg, read)?;
     }
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "thread-read", json!({"thread": id})),
-    )
+    Ok(())
 }
 
 /// `herdsman thread show <id>`: the conversation; marks it read.

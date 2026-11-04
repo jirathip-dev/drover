@@ -11,6 +11,21 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+/// `a` if `c`, else `b`.
+fn or<'a>(c: bool, a: &'a str, b: &'a str) -> &'a str {
+    [b, a][usize::from(c)]
+}
+
+/// The files a message carries.
+pub fn files_of(e: &Event) -> impl Iterator<Item = &Value> {
+    e.data.get("files").and_then(Value::as_array).into_iter().flatten()
+}
+
+/// A file name's extension, lower case.
+pub fn ext(name: &str) -> String {
+    name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase()
+}
+
 /// The thread's events, in order.
 fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &'a Event> {
     events.iter().filter(move |e| e.str("thread") == Some(id))
@@ -36,11 +51,9 @@ fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
 
 /// `[chat·N]`: the threads where a choice waits for the owner.
 pub fn choosing(events: &[Event]) -> usize {
-    let ids = events
-        .iter()
-        .filter(|e| e.kind == "thread-new")
-        .filter_map(|t| t.str("thread"));
-    ids.filter(|id| open_ask(events, id).is_some()).count()
+    let ids = events.iter().filter(|e| e.kind == "thread-new");
+    ids.filter(|t| open_ask(events, t.str("thread").unwrap_or_default()).is_some())
+        .count()
 }
 
 /// Escaped prose: paragraphs at blank lines, `code`, and plain links.
@@ -55,19 +68,10 @@ fn prose(text: &str) -> String {
     };
     let para = |p: &str| {
         let p = esc(p.trim());
-        let code = p.split('`').enumerate().map(|(i, s)| {
-            if i % 2 == 1 {
-                format!("<code>{s}</code>")
-            } else {
-                s.into()
-            }
-        });
-        let p: String = code
-            .collect::<String>()
-            .split(' ')
-            .map(link)
-            .collect::<Vec<_>>()
-            .join(" ");
+        let code = |(i, s): (usize, &str)| or(i % 2 == 1, &format!("<code>{s}</code>"), s).to_string();
+        let p: String = p.split('`').enumerate().map(code).collect();
+        let p: Vec<String> = p.split(' ').map(link).collect();
+        let p = p.join(" ");
         format!("<p>{}</p>", p.replace('\n', "<br>"))
     };
     text.split("\n\n").filter(|p| !p.trim().is_empty()).map(para).collect()
@@ -85,28 +89,21 @@ fn size(n: u64) -> String {
 fn files(id: &str, e: &Event) -> String {
     let each = |f: &Value| {
         let name = f["name"].as_str().unwrap_or_default();
-        let (url, cap) = (
+        let (url, n) = (
             format!("thread/{id}/{}", enc(name)),
-            format!("{} · {}", esc(name), size(f["size"].as_u64().unwrap_or(0))),
+            size(f["size"].as_u64().unwrap_or(0)),
         );
-        let ext = name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
-        if ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext.as_str()) {
+        let cap = format!("{} · {n}", esc(name));
+        if ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext(name).as_str()) {
             format!("<figure class=im><a href=\"{url}\"><img src=\"{url}\" alt=\"{}\" loading=lazy></a><figcaption>{cap}</figcaption></figure>", esc(name))
         } else {
-            let s = size(f["size"].as_u64().unwrap_or(0));
             format!(
-                "<a class=tf href=\"{url}\"><span>▤ {}</span><span class=m>{s}</span></a>",
+                "<a class=tf href=\"{url}\"><span>▤ {}</span><span class=m>{n}</span></a>",
                 esc(name)
             )
         }
     };
-    e.data
-        .get("files")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(each)
-        .collect()
+    files_of(e).map(each).collect()
 }
 
 /// A block's time: the age, which serve.js turns into the local clock time.
@@ -123,57 +120,36 @@ fn block(now: u64, k: &str, who: &str, pv: &str, body: &str, ts: u64) -> String 
 /// An ask: its question, then the choice rows (recommended first) and an "other" box; answered, the ✓ line.
 fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
     let s = |k| a.str(k).unwrap_or_default();
-    let kind = if s("kind") == "routine" { " · routine" } else { "" };
-    let mut body = format!(
-        "<div class=md><p class=qid>{}{kind}</p>{}</div>",
-        esc(s("id")),
-        prose(s("question"))
-    );
-    let opts: Vec<&str> = a.data["options"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    let d = events
-        .iter()
-        .rfind(|e| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id"));
+    let (kind, q) = (or(s("kind") == "routine", " · routine", ""), prose(s("question")));
+    let mut body = format!("<div class=md><p class=qid>{}{kind}</p>{q}</div>", esc(s("id")));
+    let opts = a.data["options"].as_array().into_iter().flatten();
+    let opts: Vec<&str> = opts.filter_map(Value::as_str).collect();
+    let is = |e: &&Event| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id");
+    let d = events.iter().rfind(is);
     if let Some(d) = d {
         let c = d.str("choice").unwrap_or_default();
         let n = opts.iter().position(|o| *o == c);
-        let what = n.map_or_else(
-            || format!("other: \"{}\"", esc(c)),
-            |n| format!("{}. {}", n + 1, esc(c)),
-        );
+        let other = || format!("other: \"{}\"", esc(c));
+        let what = n.map_or_else(other, |n| format!("{}. {}", n + 1, esc(c)));
         let who = match d.str("by") {
             Some("default") => "by: default".to_string(),
             Some("owner") | None => "you".into(),
             Some(b) => esc(b),
         };
-        body += &format!(
-            "<p class=ans>✓ {what} <span class=m>· {who} · {}</span></p>",
-            tm(ctx.now, d.ts)
-        );
+        let at = tm(ctx.now, d.ts);
+        body += &format!("<p class=ans>✓ {what} <span class=m>· {who} · {at}</span></p>");
     } else if closed(events, a).is_none() {
         let rec = a.data["recommend"].as_u64();
         let mut rows: Vec<_> = opts.iter().zip(1u64..).collect();
         rows.sort_by_key(|o| Some(o.1) != rec);
         let btn = |(o, n): (&&str, u64)| {
-            let r = if Some(n) == rec {
-                " <small>(recommended)</small>"
-            } else {
-                ""
-            };
-            format!(
-                "<button type=button name=choice value={n}{dis}><span>{n}. {}{r}</span></button>",
-                esc(o)
-            )
+            let (r, o) = (or(Some(n) == rec, " <small>(recommended)</small>", ""), esc(o));
+            format!("<button type=button name=choice value={n}{dis}><span>{n}. {o}{r}</span></button>")
         };
         let rows: String = rows.into_iter().map(btn).collect();
+        let (q, f) = (esc(s("id")), esc(&a.fleet));
         body += &format!(
-            "<form class=chq data-id=\"{}\" data-fleet=\"{}\">{rows}<div class=oth><input name=text aria-label=\"other answer\" placeholder=\"other: type an answer\"{dis}><button{dis}>send</button></div></form>",
-            esc(s("id")),
-            esc(&a.fleet)
+            "<form class=chq data-id=\"{q}\" data-fleet=\"{f}\">{rows}<div class=oth><input name=text aria-label=\"other answer\" placeholder=\"other: type an answer\"{dis}><button{dis}>send</button></div></form>"
         );
     }
     block(ctx.now, "ai", "conductor", s("question"), &body, a.ts)
@@ -182,15 +158,12 @@ fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
 /// One thread: the bar, its blocks, the live line and the composer (inert on a device that is not a paired owner's).
 fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
     let id = t.str("thread").unwrap_or_default();
-    let dis = if rw { "" } else { " disabled" };
+    let dis = or(rw, "", " disabled");
     let dir = conductor::dir(ctx, cfg, id).display().to_string();
     let home = crate::config::home().display().to_string();
     let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
-    let mut h = format!(
-        "<p class=qs>thread started · {} · conductor in {}</p>",
-        tm(ctx.now, t.ts),
-        esc(&dir)
-    );
+    let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
+    let mut h = format!("<p class=qs>thread started · {at} · conductor in {dir}</p>");
     for e in of(events, id) {
         let s = |k| e.str(k).unwrap_or_default();
         h += &match (e.kind.as_str(), s("from")) {
@@ -219,33 +192,19 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
         _ => "<b class=g>●</b> awake · sleeps after 30 min idle",
     };
     let role = conductor::role(cfg, &t.fleet).ok().map(|r| r.1);
-    let ds = [
-        t.fleet.as_str(),
+    let (h2, model) = (
         role.map_or("", |r| r.harness.as_str()),
-        role.and_then(|r| r.model.as_deref()).unwrap_or_default(),
-        match st {
-            "new" => "",
-            "choose" => "awake",
-            s => s,
-        },
-    ];
-    let ds = super::join(&ds.map(str::trim));
-    let dot = if matches!(st, "asleep" | "new") {
-        ""
-    } else {
-        "<i class=dt></i>"
-    };
-    let guest = if rw {
-        ""
-    } else {
-        "<p class=\"ns m\">pair this phone to answer or write</p>"
-    };
+        role.and_then(|r| r.model.as_deref()),
+    );
+    let shown = or(st == "choose", "awake", or(st == "new", "", st));
+    let ds = esc(&super::join(&[t.fleet.as_str(), h2, model.unwrap_or_default(), shown]));
+    let title = esc(t.str("title").unwrap_or_default());
+    let dot = or(matches!(st, "asleep" | "new"), "", "<i class=dt></i>");
+    let guest = or(rw, "", "<p class=\"ns m\">pair this phone to answer or write</p>");
     format!(
-        "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{}</b><span class=ds>{dot}{}</span></div></div>\
+        "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span></div></div>\
          <div class=tc>{h}</div><p class=tlv>{live}</p>{guest}<form class=tw data-t=\"{id}\"><input type=file hidden{dis}><button type=button class=add aria-label=\"attach an image or file\"{dis}>+</button>\
-         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button{dis}>send</button></form></div>",
-        esc(t.str("title").unwrap_or_default()),
-        esc(&ds)
+         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button{dis}>send</button></form></div>"
     )
 }
 
@@ -256,11 +215,7 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
     let last = msgs.rfind(|e| e.str("from") != Some("system"));
     let at = last.map_or(t.ts, |e| e.ts);
     let line = last.map_or(String::new(), |e| {
-        let who = if e.str("from") == Some("owner") {
-            "you"
-        } else {
-            "conductor"
-        };
+        let who = or(e.str("from") == Some("owner"), "you", "conductor");
         format!("{who}: {}", e.str("text").or(e.str("question")).unwrap_or_default())
     });
     let st = match state(events, id, agents) {
@@ -269,16 +224,15 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
         "asleep" => "<b class=m>☾ asleep</b>",
         _ => "",
     };
-    let (rd, dot) = if conductor::unread(events, id) {
-        ("", "●")
-    } else {
-        (" rd", "")
-    };
-    let html = format!(
-        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{}</span><span class=ta>{}</span><span class=tp>{st}{}</span></a>",
+    let un = conductor::unread(events, id);
+    let (rd, dot) = (or(un, "", " rd"), or(un, "●", ""));
+    let (title, age, line) = (
         esc(t.str("title").unwrap_or_default()),
         ago(ctx.now, at),
-        esc(line.lines().next().unwrap_or_default())
+        esc(line.lines().next().unwrap_or_default()),
+    );
+    let html = format!(
+        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{st}{line}</span></a>"
     );
     (at, html)
 }
@@ -293,61 +247,42 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
     let mut list = String::new();
     for (repo, k) in repos {
-        let mut rows: Vec<_> = threads
-            .iter()
-            .filter(|t| t.fleet == repo)
-            .map(|t| row(ctx, events, t, agents))
-            .collect();
+        let mine = threads.iter().filter(|t| t.fleet == repo);
+        let mut rows: Vec<_> = mine.map(|t| row(ctx, events, t, agents)).collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         let n = rows.len();
-        let count = match n {
-            0 => "no threads".to_string(),
-            1 => "1 thread".into(),
-            n => format!("{n} threads"),
-        };
-        let name = if repo == "all" { "all repos" } else { repo };
+        let count = or(n == 0, "no threads", &format!("{n} thread{}", or(n == 1, "", "s"))).to_string();
+        let name = or(repo == "all", "all repos", repo);
         let older: String = rows.iter().skip(3).map(|r| r.1.as_str()).collect();
         let older = if n > 3 {
-            format!("<details class=done><summary><span>{} older thread{}</span><i class=cv></i></summary>{older}</details>", n - 3, if n == 4 { "" } else { "s" })
+            format!("<details class=done><summary><span>{} older thread{}</span><i class=cv></i></summary>{older}</details>", n - 3, or(n == 4, "", "s"))
         } else {
             String::new()
         };
-        let new = if rw {
-            format!(
-                "<form class=nt data-repo=\"{}\" hidden><input name=title aria-label=\"thread title\" placeholder=\"title, e.g. dark-mode contrast pass\"><button>start</button><p class=ns>a conductor starts for {} with your [conductor] profile; it sleeps after 30 min idle</p></form>",
-                esc(repo),
-                esc(name)
-            )
-        } else {
-            String::new()
-        };
-        let add = if rw {
-            "<span class=btns><button type=button class=ntb>+ thread</button></span>"
-        } else {
-            ""
-        };
+        let (r, nm) = (esc(repo), esc(name));
+        let new = rw.then(|| format!(
+                "<form class=nt data-repo=\"{r}\" hidden><input name=title aria-label=\"thread title\" placeholder=\"title, e.g. dark-mode contrast pass\"><button>start</button><p class=ns>a conductor starts for {nm} with your [conductor] profile; it sleeps after 30 min idle</p></form>"
+            ));
+        let new = new.unwrap_or_default();
+        let add = or(
+            rw,
+            "<span class=btns><button type=button class=ntb>+ thread</button></span>",
+            "",
+        );
+        let top: String = rows.iter().take(3).map(|r| r.1.as_str()).collect();
         list += &format!(
-            "<div class=\"fc k-{k}\"><div class=fh><span class=fn><b>{}</b><span class=ds>{count}</span></span>{add}</div>{new}{}{older}</div>",
-            esc(name),
-            rows.iter().take(3).map(|r| r.1.as_str()).collect::<String>()
+            "<div class=\"fc k-{k}\"><div class=fh><span class=fn><b>{nm}</b><span class=ds>{count}</span></span>{add}</div>{new}{top}{older}</div>"
         );
     }
-    let views: String = threads
-        .iter()
-        .map(|t| thread(ctx, cfg, events, t, (agents, rw)))
-        .collect();
+    let view = |t: &&Event| thread(ctx, cfg, events, t, (agents, rw));
+    let views: String = threads.iter().map(view).collect();
     format!("<div class=clp>{list}</div>{views}")
 }
 
 /// The newest file named `name` a message in thread `id` carries (the owner's upload or the conductor's reply).
 pub fn file(events: &[Event], id: &str, name: &str) -> Option<std::path::PathBuf> {
-    let all = of(events, id)
-        .rev()
-        .flat_map(|e| e.data.get("files").and_then(Value::as_array).into_iter().flatten());
-    all.into_iter()
-        .find(|f| f["name"] == name)
-        .and_then(|f| f["path"].as_str())
-        .map(Into::into)
+    let f = of(events, id).rev().flat_map(files_of).find(|f| f["name"] == name);
+    f.and_then(|f| f["path"].as_str()).map(Into::into)
 }
 
 /// `POST /thread` from a paired owner device: `new` (start a thread and its conductor), `say` (with an attached
@@ -369,13 +304,8 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
             conductor::find(&events, id)?;
             let mut files = vec![];
             if !g("data").is_empty() {
-                let name: String = g("name")
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .chars()
-                    .filter(|c| !c.is_control())
-                    .collect();
+                let base = g("name").rsplit('/').next().unwrap_or_default();
+                let name = base.replace(char::is_control, "");
                 let bytes = B64.decode(g("data")).context("the file is not base64")?;
                 if name.trim_start_matches('.').is_empty() || bytes.len() > 10 << 20 {
                     return crate::gate::refused("BAD_VALUE", "a file has a name and is at most 10 MB");
@@ -386,25 +316,16 @@ pub fn post(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> Result<S
                 std::fs::write(&path, &bytes)?;
                 files.push(json!({"name": name, "path": path, "size": bytes.len()}));
             }
-            let text = if g("text").trim().is_empty() {
-                g("name")
-            } else {
-                g("text")
-            };
+            let text = or(g("text").trim().is_empty(), g("name"), g("text"));
             let agent = conductor::say(ctx, &cfg, r, (id, text, &files), ("owner", false))?;
             Ok(format!("sent to {agent}"))
         }
         "answer" => {
-            let choice = if g("choice").is_empty() { g("text") } else { g("choice") };
-            crate::answer(
-                ctx,
-                &cfg,
-                r,
-                &mut out,
-                (g("fleet"), g("id")),
-                choice,
+            let (choice, by) = (
+                or(g("choice").is_empty(), g("text"), g("choice")),
                 ("owner", Some("web")),
-            )?;
+            );
+            crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
             Ok(format!("answered {}", g("id")))
         }
         "read" => {

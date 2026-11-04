@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
 macro_rules! th {
@@ -40,6 +41,9 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     ("herd.css", "text/css", include_bytes!("../assets/herd.css")),
     ("serve.js", "text/javascript", include_bytes!("../assets/serve.js")),
     ("herd.js", "text/javascript", include_bytes!("../assets/herd.js")),
+    // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
+    ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
+    ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
     // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
     th!("farm/sprites.svg", SVG),
     th!("farm/theme.json", JSON),
@@ -457,13 +461,7 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, meta: &[String]) -> Stri
 
 /// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
-    match name
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    match chat::ext(name).as_str() {
         "png" => PNG,
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -603,6 +601,12 @@ fn row_coat(lane: &str) -> String {
     }
 }
 
+/// The Services board row: this board's uptime and version.
+fn board(ctx: &Ctx) -> String {
+    let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
+    format!("up {up} · v{}", env!("CARGO_PKG_VERSION"))
+}
+
 /// `age` since `t`, or nothing when `t` is unknown (0).
 fn ago(now: u64, t: u64) -> String {
     if t > 0 {
@@ -722,18 +726,16 @@ impl<'a> Server<'a> {
         // #386: a thread's message carries an attached file (base64, at most 10 MB): its POST may be that long.
         let (mut buf, mut chunk, mut want) = (vec![], vec![0u8; 1 << 16], None);
         loop {
-            if let Some(i) = want
-                .is_none()
-                .then(|| buf.windows(4).position(|w| w == b"\r\n\r\n"))
-                .flatten()
-            {
+            let end = buf.windows(4).position(|w| w == b"\r\n\r\n");
+            if let Some(i) = end.filter(|_| want.is_none()) {
                 let h = String::from_utf8_lossy(&buf[..i]);
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
-                want = Some((i + 4 + n).min(if h.starts_with("POST /thread ") {
+                let most = if h.starts_with("POST /thread ") {
                     24 << 20
                 } else {
                     32_768
-                }));
+                };
+                want = Some((i + 4 + n).min(most));
             }
             if want.map_or(buf.len() >= 32_768, |w| buf.len() >= w) {
                 break;
@@ -955,6 +957,7 @@ impl<'a> Server<'a> {
         let loopback =
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
+            (_, p) if p.starts_with("/api/") => self.api(ctx, head, method, p, query, body),
             ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some(), form(query).get("tab").map(String::as_str)).map_or_else(fail, |f| {
                 ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
             }),
@@ -1000,14 +1003,7 @@ impl<'a> Server<'a> {
                 ("401 Unauthorized", "text/plain", text("only a paired device may unpair, answer or drive\n"))
             }
             ("POST", "/") => {
-                // #140: an op that can spawn or merge runs on `serve_on`'s job thread; the reply is at once.
-                let f = form(body.trim());
-                let [op, fleet] = ["op", "fleet"].map(|k| f.get(k).cloned().unwrap_or_default());
-                let msg = match self.jobs.as_ref().filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str())) {
-                    Some(_) if !lock(&self.running).insert(fleet.clone()) => format!("REFUSED DRIVE_RUNNING: {fleet} has a {op} running"),
-                    Some(tx) => (format!("{op} started for {fleet}"), drop(tx.send((ctx.clone(), f, fleet)))).0,
-                    None => self.write(ctx, &f).unwrap_or_else(|e| shown(&e)),
-                };
+                let msg = self.op(ctx, form(body.trim())).unwrap_or_else(|e| shown(&e));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
@@ -1426,10 +1422,8 @@ impl<'a> Server<'a> {
         let events = read(&ctx.state)?;
         let (cfg, st) = (Config::load(&ctx.config).ok(), fold(&events));
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
-        let agents = || {
-            self.herdr_json(ctx.now, "agent")
-                .and_then(|j| j["result"]["agents"].as_array().cloned())
-        };
+        let agents = || self.herdr_json(ctx.now, "agent").map(|j| j["result"]["agents"].clone());
+        let agents = || agents().and_then(|a| a.as_array().cloned()).unwrap_or_default();
         let parts: [(&'static str, &dyn Fn() -> String); 6] = [
             ("needs", &|| {
                 let n = chat::choosing(ev);
@@ -1438,13 +1432,7 @@ impl<'a> Server<'a> {
             ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
             ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
             ("chat", &|| {
-                chat::tab(
-                    ctx,
-                    cfg,
-                    ev,
-                    &agents().unwrap_or_default(),
-                    paired && self.addr.is_some(),
-                )
+                chat::tab(ctx, cfg, ev, &agents(), paired && self.addr.is_some())
             }),
             ("host", &|| self.host_tab(ctx, cfg, ev)),
             ("events", &|| events_tab(ctx, self.r, cfg, ev, all, 0)),
@@ -2308,9 +2296,7 @@ impl<'a> Server<'a> {
     fn host_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> String {
         let (hs, r, dl) = (self.sample(), &self.cached(ctx.now, 60), Limits::default());
         let lim = cfg.map_or(&dl, |c| &c.limits);
-        let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
-        let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
-        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
+        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
         let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
         let dc = Config::default();
         let hosts = self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs);
@@ -3091,23 +3077,14 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     }
     // #386: the files threads carry, as `/thread/<t>/<name>` serves them.
     for e in events.iter().filter(|e| e.kind == "thread-msg") {
-        for f in e
-            .data
-            .get("files")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let (t, name) = (
-                e.str("thread").unwrap_or_default(),
-                f["name"].as_str().unwrap_or_default(),
+        for f in chat::files_of(e) {
+            let (to, name) = (
+                dir.join("thread").join(e.str("thread").unwrap_or_default()),
+                f["name"].as_str(),
             );
-            let to = dir.join("thread").join(t);
-            if let Some(b) = f["path"]
-                .as_str()
-                .and_then(|p| std::fs::read(p).ok())
-                .filter(|_| !name.contains('/'))
-            {
+            let name = name.unwrap_or_default();
+            let b = f["path"].as_str().and_then(|p| std::fs::read(p).ok());
+            if let Some(b) = b.filter(|_| !name.contains('/')) {
                 std::fs::create_dir_all(&to)?;
                 std::fs::write(to.join(name), b)?;
             }
