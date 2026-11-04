@@ -60,6 +60,43 @@ export type Act = { agent: string, op: string, confirm: string, };
  */
 export type Setup = { host: string, name: string, };
 
+/**
+ * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
+ * `mtime` a POST sends back (STALE when fleet.toml changed since).
+ */
+export type State = { seq: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+
+export type Fleet = { name: string, color: string, paused: boolean, };
+
+export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, };
+
+/**
+ * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
+ */
+export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, shown: string, tone: string, since: number, };
+
+export type Ask = { id: string, fleet: string, issue?: number | null, question: string, options: Array<string>, recommend?: number | null, ts: number, };
+
+/**
+ * A Host tab row: HOSTS' (`detail`: its state in words), SERVICES' and ALERTS' (push); `fix` clears a red or amber one.
+ */
+export type Row = { name: string, tone: string, detail: string, fix: string, };
+
+/**
+ * #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+ */
+export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
+
+/**
+ * One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+ */
+export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, };
+
+/**
+ * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
+ */
+export type Reply = { ok: boolean, code: string, message: string, };
+
 export type Event = { 
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
