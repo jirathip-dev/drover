@@ -201,7 +201,7 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     s.fetch();
     let reads = lock(&s.reads).clone();
     let text = serde_json::to_string(&Snapshot { ts: ctx.now, reads }).unwrap_or_default();
-    let tmp = file(ctx).with_extension("tmp");
+    let tmp = crate::devices::tmp_name(&file(ctx));
     let _ = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file(ctx)));
     Snap { miss: Miss::Live, ..s }
 }
