@@ -9,6 +9,8 @@ use serde_json::json;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 /// #59: a `code` is a phone's open pairing request (from `ip`, 10 min from `created`): its cookie works once `serve approve` clears it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -34,8 +36,7 @@ pub(crate) fn save(p: &Path, v: &impl Serialize) -> Result<()> {
 /// Replace `p` with `b`, mode 0600, atomically (#122): a temp file renamed over `p`; on any error `p` is left intact.
 pub(crate) fn write0600(p: &Path, b: &[u8]) -> Result<()> {
     std::fs::create_dir_all(p.parent().unwrap_or(p))?;
-    let tmp = PathBuf::from(format!("{}.tmp-{}", p.display(), std::process::id()));
-    let _ = std::fs::remove_file(&tmp);
+    let tmp = tmp_name(p);
     let r = (|| {
         let mut o = std::fs::OpenOptions::new();
         let mut f = o.write(true).create_new(true).mode(0o600).open(&tmp)?;
@@ -46,6 +47,23 @@ pub(crate) fn write0600(p: &Path, b: &[u8]) -> Result<()> {
         Ok::<_, io::Error>(())
     })();
     Ok(r.inspect_err(|_| drop(std::fs::remove_file(&tmp)))?)
+}
+
+/// #342: a temp name unique per call (pid + a process-wide counter): serve's threads write concurrently.
+pub(crate) fn tmp_name(p: &Path) -> PathBuf {
+    static N: AtomicU64 = AtomicU64::new(0);
+    PathBuf::from(format!(
+        "{}.tmp-{}-{}",
+        p.display(),
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// #342: hold across a devices.json load → change → store, so concurrent updates don't overwrite each other.
+pub fn lock() -> MutexGuard<'static, ()> {
+    static L: Mutex<()> = Mutex::new(());
+    L.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub(crate) fn random(n: usize) -> Result<Vec<u8>> {
@@ -86,6 +104,7 @@ pub fn pending(ctx: &Ctx) -> Vec<Device> {
 
 /// A pairing request: (its code, unique among the open ones; the `hd=` token for the asking browser alone); None while 4 are open (#199: two phones behind one proxy), 2 from `ip`, or on a code clash.
 pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, String)>> {
+    let _g = lock();
     let (mut all, b, token) = (
         load(ctx),
         random(4)?,
@@ -121,6 +140,7 @@ pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, Strin
 
 /// `serve approve <code>`: pair the request's browser (single use); its device label. Logged without code or token.
 pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
+    let _g = lock();
     let mut all = load(ctx);
     let Some(d) = all
         .iter_mut()
@@ -160,6 +180,7 @@ fn token(cookie: &str) -> Option<String> {
 
 /// #199: drop this browser's open pairing request (its `hd=` cookie), on a Pair re-tap or `[cancel]`; a paired device stays.
 pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
+    let _g = lock();
     let (Some(tok), mut all) = (token(cookie), load(ctx)) else {
         return Ok(());
     };
@@ -175,6 +196,7 @@ pub const YEAR: u64 = 365 * 86_400;
 /// The paired (approved) device whose token the `Cookie` header carries (`hd=`), used within a `YEAR` (#288); marks it used at most hourly (#122).
 pub fn find(ctx: &Ctx, cookie: &str) -> Option<Device> {
     let tok = token(cookie)?;
+    let _g = lock();
     let mut all = load(ctx);
     let ok = |d: &Device| d.code.is_none() && d.used + YEAR > ctx.now && same(&d.hash, &tok);
     let i = all.iter().position(ok)?;
