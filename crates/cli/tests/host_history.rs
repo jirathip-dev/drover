@@ -46,6 +46,7 @@ fn row(ts: u64, host: &str, load: f64) -> Row {
         mem_free_gb: Some(9.4),
         disk_free_gb: Some(123.4),
         lanes: 3,
+        procs: None,
     }
 }
 
@@ -194,4 +195,74 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
         parts[0].split(';').nth(2).unwrap().ends_with("3.10") && parts[3].ends_with('0'),
         "{chart}"
     );
+}
+
+/// #352: `ps` lines with every group, the claude one's command line `len` bytes long.
+fn watched_fake(len: usize) -> Fake {
+    let ps = format!(
+        "204800 /usr/local/bin/claude --settings {}\n102400 /opt/homebrew/bin/qemu-system-aarch64\n51200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n10240 herdsman drive --fast\n20480 /bin/zsh\n",
+        "x".repeat(len)
+    );
+    fake().reply("ps -axo rss=,command=", &ps)
+}
+
+#[test]
+fn no_process_table_walk_while_nobody_watches() {
+    let c = two_hosts("history-idle");
+    let r = watched_fake(10);
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count("ps -axo rss=,command="), 0, "{:?}", r.calls.borrow());
+    let rows = history(&c);
+    assert!(rows.len() == 1 && rows[0].procs.is_none(), "{rows:?}");
+    // A Host tab seen 3 min ago no longer counts.
+    std::fs::write(c.state.with_file_name("host-watch.at"), (NOW - 180).to_string()).unwrap();
+    run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(r.count("ps -axo rss=,command="), 0);
+}
+
+#[test]
+fn sampling_resumes_once_the_host_tab_is_open() {
+    let mut c = two_hosts("history-watch");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &Fake::default(), l, false));
+    let live = |q: &str| {
+        use std::io::Write;
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        write!(s, "GET /live{q} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        s
+    };
+    let watch = c.state.with_file_name("host-watch.at");
+    let _queue = live("?tab=queue");
+    assert!(!watch.exists(), "another tab is not watching the host");
+    let _host = live("?tab=host");
+    let at: u64 = std::fs::read_to_string(&watch).unwrap().parse().unwrap();
+    // The next fast step (each minute) walks `ps` once and keeps the groups, not the PIDs.
+    c.now = at + 60;
+    let r = watched_fake(10);
+    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(r.count("ps -axo rss=,command="), 1);
+    assert_eq!(history(&c)[0].procs, Some([200, 100, 50, 10, 20]));
+}
+
+#[test]
+fn the_byte_bound_holds_with_long_command_lines() {
+    let mut c = two_hosts("history-long");
+    let (r, cfg) = (watched_fake(64 * 1024), Config::load(&c.config).unwrap());
+    for i in 0..1_700 {
+        c.now = NOW + i * 60;
+        std::fs::write(c.state.with_file_name("host-watch.at"), c.now.to_string()).unwrap();
+        herdsman::hosts::sample(&c, &cfg, &r, &[]).unwrap();
+    }
+    let size = std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
+        .unwrap()
+        .len() as usize;
+    assert!(size <= 2 * BOUND, "{size} B over {} B", 2 * BOUND);
+    let rows = history(&c);
+    assert!(rows.len() <= 2 * 1_600 && rows.len() >= 1_440, "{} rows", rows.len());
+    assert!(rows.iter().all(|r| r.procs == Some([200, 100, 50, 10, 20])));
 }
