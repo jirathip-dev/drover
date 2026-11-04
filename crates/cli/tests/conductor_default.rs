@@ -65,7 +65,7 @@ fn a_fleet_without_a_conductor_role_starts_one_on_its_impl_role_from_the_board()
     let r = host();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&title=Grill+%2312", &cookie);
+    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill+%2312", &cookie);
     assert!(res.ends_with("\r\n\r\nt1 started\n"), "{res}");
     let st = &starts(&c)[0];
     assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), Some("opus")));
@@ -128,7 +128,7 @@ fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_sta
     let sheet = get(&s, "/frag?id=config&fleet=sendmeter");
     assert!(sheet.contains("<h3>Conductor<span>set</span></h3>"), "{sheet}");
     // The next conductor start runs on the new model.
-    let res = req(&s, "/thread", "op=new&repo=sendmeter&title=Next", &cookie);
+    let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));
     assert!(start_line(&r).contains("-p lane-conductor"));

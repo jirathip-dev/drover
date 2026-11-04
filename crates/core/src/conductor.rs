@@ -37,14 +37,100 @@ pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
     if repo != "all" {
         cfg.fleet(repo)?;
     }
-    if title.trim().is_empty() || title.chars().any(char::is_control) {
-        return refused("BAD_VALUE", "a thread starts with a one-line title");
-    }
+    title_ok(title)?;
     let events = read(&ctx.state)?;
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
     let d = json!({"thread": id, "title": title});
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
     Ok(id)
+}
+
+fn title_ok(title: &str) -> Result<()> {
+    if title.trim().is_empty() || title.chars().any(char::is_control) {
+        return refused("BAD_VALUE", "a thread has a one-line title");
+    }
+    Ok(())
+}
+
+/// #405: the thread's title: its last `thread title`, else the one it started with.
+pub fn title<'a>(events: &'a [Event], id: &str) -> &'a str {
+    let t = events
+        .iter()
+        .rfind(|e| matches!(e.kind.as_str(), "thread-new" | "thread-title") && e.str("thread") == Some(id));
+    t.and_then(|e| e.str("title")).unwrap_or_default()
+}
+
+/// #405: `herdsman thread title <id> <title>`: the conductor's short summary title, once after its first reply.
+pub fn retitle(ctx: &Ctx, cfg: &Config, id: &str, title: &str) -> Result<()> {
+    title_ok(title)?;
+    let t = find(&read(&ctx.state)?, id)?.clone();
+    let d = json!({"thread": id, "title": title});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-title", d))
+}
+
+/// #405: the thread is archived (its last archive or restore an archive).
+pub fn archived(events: &[Event], id: &str) -> bool {
+    let a = of(events, id).rfind(|e| matches!(e.kind.as_str(), "thread-archive" | "thread-restore"));
+    a.is_some_and(|e| e.kind == "thread-archive")
+}
+
+/// #405: `thread archive` (`on`) closes the thread's live conductor (`conductor-sleep`; its folder, uploads and log
+/// stay) and folds the thread; `thread restore` unfolds it, and its next message resumes the same session.
+pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let t = find(&events, id)?;
+    let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    if let Some(s) = last.filter(|s| on && s.kind == "conductor-start") {
+        if herdr::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
+            herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
+        }
+        let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &t.fleet, None, "conductor-sleep", d),
+        )?;
+    }
+    let kind = ["thread-restore", "thread-archive"][usize::from(on)];
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, kind, json!({"thread": id})),
+    )
+}
+
+pub fn files_ok(files: &[(String, Vec<u8>)]) -> Result<()> {
+    if files.len() > 10 {
+        return refused("BAD_VALUE", "at most 10 files a message");
+    }
+    if files
+        .iter()
+        .any(|(n, b)| n.trim_start_matches('.').is_empty() || b.len() > 10 << 20)
+    {
+        return refused("BAD_VALUE", "a file has a name and is at most 10 MB");
+    }
+    Ok(())
+}
+
+/// #405: a message's files (name, bytes) into thread `id`'s `uploads/`, as the thread logs them: at most 10, each
+/// named and at most 10 MB (checked before any is written); a name repeated in the message gets its place in front.
+pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) -> Result<Vec<Value>> {
+    files_ok(files)?;
+    let dir = dir(ctx, cfg, id).join("uploads");
+    std::fs::create_dir_all(&dir)?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = vec![];
+    for (i, (name, bytes)) in files.iter().enumerate() {
+        let name = if seen.insert(name) {
+            name.clone()
+        } else {
+            format!("{}-{name}", i + 1)
+        };
+        let path = dir.join(format!("{}-{name}", ctx.now));
+        std::fs::write(&path, bytes)?;
+        out.push(json!({"name": name, "path": path, "size": bytes.len()}));
+    }
+    Ok(out)
 }
 
 /// #413: `thread handoff`: a new thread in `to` (a repo or `all`) or thread `to`, linked; wakes its conductor as `from`.
@@ -98,7 +184,7 @@ pub fn link(e: &Event) -> Option<(&'static str, &str)> {
     }
 }
 
-fn text_ok(text: &str) -> Result<()> {
+pub fn text_ok(text: &str) -> Result<()> {
     if text.trim().is_empty() || text.chars().count() > 20_000 {
         return refused("BAD_VALUE", "a message is non-empty text, at most 20,000 chars");
     }
@@ -510,10 +596,10 @@ pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: boo
     let items = items(&events, id);
     mark_read(ctx, cfg, &events, t)?;
     if as_json {
-        let v = json!({"thread": id, "repo": t.fleet, "title": t.str("title"), "items": items});
+        let v = json!({"thread": id, "repo": t.fleet, "title": title(&events, id), "items": items});
         return Ok(writeln!(out, "{}", serde_json::to_string_pretty(&v)?)?);
     }
-    writeln!(out, "{id} {}: {}", t.fleet, t.str("title").unwrap_or_default())?;
+    writeln!(out, "{id} {}: {}", t.fleet, title(&events, id))?;
     Ok(write!(out, "{}", render(&items))?)
 }
 
@@ -532,7 +618,7 @@ pub fn ls(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool) ->
         let lane = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
         let state = lane.map_or("none", |e| if e.kind == "conductor-start" { "awake" } else { "asleep" });
         rows.push(
-            json!({"thread": id, "repo": t.fleet, "title": t.str("title"), "last": last,
+            json!({"thread": id, "repo": t.fleet, "title": title(&events, id), "last": last,
             "at": items.last().map_or(t.ts, |i| i["ts"].as_u64().unwrap_or(t.ts)), "unread": unread(&events, id),
             "conductor": state}),
         );

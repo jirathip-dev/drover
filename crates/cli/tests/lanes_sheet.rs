@@ -241,8 +241,9 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     // An unpaired page has the Pair button; a request sets a short-lived HttpOnly cookie and shows a 6-digit code.
     let page = req(&s, "GET", "/?all=1", "", "", T);
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
+    let host = host_tab(&s, ADDR, T);
     assert!(
-        page.contains("`herdsman serve approve &lt;code&gt;` here") && !page.contains("<code>"),
+        host.contains("`herdsman serve approve &lt;code&gt;` here") && !(page.clone() + &host).contains("<code>"),
         "the hint is text, never an open tag"
     );
     let res = req(
@@ -278,9 +279,9 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         rc == 0 && out.starts_with("paired iPhone Safari ") && out.len() == 26,
         "{out}"
     );
-    // The live stream's unpaired Events frag carries the approval: the waiting page claims on it.
+    // The approval is logged: the Events tab (#266: API v1's events, an `ev` on the live stream) shows it.
     assert!(
-        req(&s, "GET", "/frags", "", "", T + 60).contains("pair-approve"),
+        req(&s, "GET", "/api/v1/events?since=0", "", "", T + 60).contains("pair-approve"),
         "the Events tab shows the approval"
     );
     let (_, _, other) = ask_pair(&s, "10.0.0.3", T + 60);
@@ -477,13 +478,12 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
     assert!(r.called("herdr agent prompt sendmeter-impl-12 --wait\nline two"));
     // The Host tab lists the device; Remove unpairs it and its next send is 401.
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let host = section(&page, "host");
+    let host = host_tab(&s, ADDR, T);
     assert!(
         host.contains(&format!("<span>{label} <span class=m>paired ")) && host.contains("<button>Remove</button>"),
         "{host}"
     );
-    let mt = &page[page.find("name=mtime value=").unwrap() + 17..];
+    let mt = &host[host.find("name=mtime value=").unwrap() + 17..];
     let mt: String = mt.chars().take_while(char::is_ascii_digit).collect();
     let hash = herdsman::devices::sha256(tok.as_bytes());
     let unpair = format!("op=unpair&fleet=&hash={hash}&mtime={mt}");
@@ -543,12 +543,11 @@ fn page_has_no_dash_placeholders() {
     let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/?all=1", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
-    // #60: and the parts the page loads on demand ([config] sheet, Events).
+    // #60: and the parts the page loads on demand ([config] sheet; #266: the board's Events).
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    for part in ["/frag?id=config&fleet=sendmeter", "/frag?id=events"] {
-        let p = req(&s, "GET", part, "", "", T);
-        html += &p[p.find("\r\n\r\n").unwrap()..];
-    }
+    let p = req(&s, "GET", "/frag?id=config&fleet=sendmeter", "", "", T);
+    html += &p[p.find("\r\n\r\n").unwrap()..];
+    html += &events_tab(&s, ADDR, T, "{}").unwrap_or_default();
     assert!(
         !html.contains(" - ") && !html.contains(">-<") && !html.contains(" · -") && !html.contains('—'),
         "{html}"

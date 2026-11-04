@@ -54,12 +54,14 @@ shows `as of HH:MM` in the header until fresh data lands. A load, refresh or act
 no taps, the header stays clear, `[↻]` spins its plain ↻ meanwhile, and it goes as soon as the data paints. Animations
 pause while the app is in the background. `GET /` also leaves out what the first paint does not show. A fleet's `roles` row is empty
 until opened; opening it reads `GET /frag?id=roles&fleet=<fleet>` (the model/effort forms; kept across
-live swaps, re-read on ↻). The Events tab body is read from `GET /frag?id=events` when the tab opens
-(`/?all=1` still renders it in the page; `/frags` and the live stream still carry it). #351: each Events view opens with its
-last 100 rows; its **older** button reads the next 100 (`GET /frag?id=events&skip=100`, …) under them, kept across live
-swaps. No compression:
+live swaps, re-read on ↻). #266: the Events tab is the TypeScript board's (`web/src/events.ts`): on load it reads
+`/api/v1/state` and the newest 500 events (`events?since=&until=`), then the next 500 back while the open view has no
+more rows than it shows; each `ev` on the live stream reads the new ones (`events?since=`), ↻ reads it all again. #351:
+each Events view opens with its last 100 rows; its **older** button shows the next 100. `/?all=1` reads the whole log,
+unfolded. No compression:
 a repeat visit downloads the page HTML only, the assets come from the service worker's cache. A
-`serve --export` inlines both, so the static demo needs no `/frag`.
+`serve --export` inlines both, so the static demo needs no `/frag`; it writes `api/v1/state`, `api/v1/events` (every
+event) and `api/v1/host` (#267) as files for the board.
 
 Queue tab (#115): each fleet's rows are a `git log --graph` tree in queue order. A row blocked by another row in
 view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and an `on #b` tag), a blocker out of view is a red
@@ -97,7 +99,9 @@ Lanes are grouped like Corral: state sections blocked → working → idle → d
 split into fleet subgroups (alphabetical, Others last), newest-changed first. A lane the log has open
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
-when work is at risk. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
+when work is at risk. #422: a thread's conductor (`conductor-<thread>`) is a lane of the thread's repo (an
+`all` thread's in `all repos`), role `conductor`, first in its subgroup, named `<thread title> · <thread>`; once
+its pane closed it stays, dimmed, as `asleep`, and its row opens the thread in the chat tab. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
 PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
 56 px handle, or from the conversation's top; snaps to 50 %, 78 % or full by position and flick; below 50 %, a
@@ -141,8 +145,8 @@ The sheet's reply box sends text to that agent (`herdr agent prompt` + Enter; ds
 phone** (header, blocked cards, the sheet) POSTs `/pair/request`, which shows a 6-digit code and sets
 an HttpOnly, Secure, SameSite=Strict `hd=` cookie with a random token for 10 minutes. The token pairs
 nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
-use; `serve pending` lists requests). The approval is logged, so the waiting page's live Events frag
-changes (or the page's 2 s claim poll, #288) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
+use; `serve pending` lists requests). The approval is logged, so the waiting page's live stream
+sends its `ev` (and the page's 2 s claim poll, #288, sees it) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
 each page load claims again, renewing it, and a device unused for a year (365 days) no longer counts as paired
 (`herdsman serve devices` lists each paired device's days left). Opened on the host itself (a loopback peer whose
 `Host` is `127.0.0.1`/`localhost`, no `X-Forwarded-For` or `Tailscale-User-Login`), the panel also shows the
@@ -310,8 +314,9 @@ transcript, and the paired ops: answer, drive, override, extend, park, unpair, o
 
 | route | answer |
 |---|---|
-| `GET state` | the board in one read: `seq` (newest event), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets`, `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
-| `GET events?since=N` | #259's contract: the events after `N` in `list`; over 500, `refresh: true` and none (read `state` again) |
+| `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
+| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
+| `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
 | `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |
 
@@ -344,6 +349,8 @@ Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %
 floor (`min_free_mem_gb`, `min_free_gb`). The words
 come from one table in `crates/server/src/serve.rs` (`WORDS`, golden-tested in crates/cli/tests/host_words.rs). The tab bar is
 `[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
+#267: the tab is the TypeScript board's (`web/src/host.ts`), drawn from API v1's `host` on load and ↻; when its data
+changes the live stream sends it as `event: host` (the JSON itself, to every device), and the board draws it again.
 
 ## Static export and the public demo
 

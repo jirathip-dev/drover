@@ -22,7 +22,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     .into_owned()
 }
 
-/// The audited page (two lanes, one blocked on a menu, a queue, the fleet's config and the events spliced in) and the Herd's data.
+/// The audited page (two lanes, one blocked on a menu, a queue, the fleet's config, Events and Host spliced in) and the Herd's data.
 fn fixture() -> (String, String) {
     let cfg = format!("models = [\"opus\", \"sonnet\", \"claude-haiku-4-5-20251001\"]\n\n{CONFIG}");
     let c = ctx(&tmpdir("ui-audit"), &cfg);
@@ -65,8 +65,17 @@ fn fixture() -> (String, String) {
         )
         .replace(
             "<section id=events></section>",
-            &format!("<section id=events>{}</section>", part("/frag?id=events")),
+            // #266: the board's Events as it draws them, without the board (it would read this file's base server).
+            &format!(
+                "<section id=events>{}</section>",
+                events_tab(&s, ADDR, T, "{}").unwrap_or_default()
+            ),
+        )
+        .replace(
+            "<section id=host></section>",
+            &format!("<section id=host>{}</section>", host_tab(&s, ADDR, T)), // #267: and its Host tab
         );
+    let html = html[..html.find("<script type=module").unwrap()].to_string() + "</body></html>\n";
     assert!(
         html.contains("▲ up") && html.contains("class=pick") && html.contains("<select name=model"),
         "fixture has arrows, a menu and pickers"

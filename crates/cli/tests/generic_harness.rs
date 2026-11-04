@@ -86,6 +86,7 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(res.contains("no menu on") && !r.called("herdr pane send-keys"), "{res}");
     // Memory: the codex lane's pane tree in a row of its own, none under Claude.
+    let page = host_tab(&s, ADDR, T);
     assert!(!page.contains("<span class=k>claude</span>"), "{page}");
     assert!(
         page.contains("<span class=k>codex</span>")
