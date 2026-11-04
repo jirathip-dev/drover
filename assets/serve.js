@@ -511,7 +511,6 @@ function frag(id, html) {
   const rows = e => new Map([...e.querySelectorAll('details,.lane')].map(r => [key(r), r]));
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
-  if (id === 'events') olds(nu);
   if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
@@ -707,6 +706,7 @@ async function refresh(quiet) {
     have.clear();
     have.add(t);
     for (const id in j) frag(id, j[id]);
+    dispatchEvent(new Event('herd-refresh')); // #266: the TypeScript board's tabs read the API again
     herdPull();
     busy = false;
     sync(live() ? 'g' : 'a');
@@ -737,7 +737,7 @@ function connect() {
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
-  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
@@ -869,50 +869,6 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
-// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
-let EF = null;
-try { EF = JSON.parse(get('events:filter')); } catch (e) {}
-if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
-function evf(root) {
-  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
-  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
-  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
-  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
-  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
-  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
-  root.querySelectorAll('.eg').forEach(g => {
-    const n = g.querySelectorAll('.er:not([hidden])').length;
-    g.hidden = !n;
-    g.querySelector('h3>span+span').textContent = n;
-  });
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
-  if (!b) return;
-  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
-  put('events:filter', JSON.stringify(EF));
-  evf(document);
-});
-// #351: Events opens with 100 rows a view; [older] loads the next 100 under them (`frag?id=events&skip=`), kept across
-// live swaps: EO holds each view's loaded pages (marked .pg), put back in place of the first page's [older].
-const EO = {};
-function olds(root) {
-  for (const v in EO) { const b = root.querySelector(`[data-v=${v}]>.eo:not(.pg)`); if (b) b.outerHTML = EO[v]; }
-}
-document.addEventListener('click', async e => {
-  const b = e.target.closest('.eo'), d = b && b.parentNode;
-  if (!b || b.disabled) return;
-  b.disabled = true;
-  const t = document.createElement('div'), v = d.dataset.v;
-  t.innerHTML = (await part('frag?id=events&skip=' + b.dataset.skip)) || '';
-  const ns = [...t.querySelectorAll(`[data-v=${v}]>.eg, [data-v=${v}]>.eo`)];
-  if (!ns.length) return (b.disabled = false);
-  ns.forEach(n => n.classList.add('pg'));
-  b.replaceWith(...ns);
-  tidy(d);
-  EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
-  evf(document);
-});
 // #367 queue: pure from here to `queue:end` (tests/queue_tab.rs runs it under node). A row's group: needs you, in
 // progress, queued (the rest); its time in one unit style, naming the phase it measures; a blocked chain's one line.
 const QG = { need: 'needs you', prog: 'in progress', queue: 'queued' };
@@ -1087,7 +1043,6 @@ function tidy(root) {
   qfold(root);
   qchips(root);
   rows(root);
-  evf(root);
   hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
@@ -1721,7 +1676,7 @@ $('.reply').onsubmit = async e => {
   if (r.ok) { e.target.text.value = ''; setTimeout(poll, 1500); }
 };
 // #59: Pair this phone (header, blocked cards, the sheet): POST `pair/request` shows a code; its 10 min HttpOnly cookie is this
-// browser's alone. The Mac approves it (`serve approve`, logged: the live Events frag arrives, or ↻), then `pair/claim` keeps it a year.
+// browser's alone. The Mac approves it (`serve approve`, logged: its `ev` arrives on `/live`, or ↻), then `pair/claim` keeps it a year.
 // The panel flows under the header (or the sheet's Pair button), never over a card; a tap closes it; it expires with the code.
 B.insertAdjacentHTML('beforeend', '<div id=pairp class=pairp hidden></div>');
 const pp = $('#pairp');
