@@ -89,6 +89,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let d = json!({"key": since, "reason": why});
         fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
     }
+    // #424: an answer that never reached its lane alerts once per ask (drive keeps retrying it); a day on, never.
+    let undelivered = cfg.fleet.keys().flat_map(|f| crate::undelivered(&events, f));
+    for u in undelivered.filter(|u| u.ts + 86_400 > ctx.now) {
+        let mut d = u.data.clone();
+        d.insert("key".into(), json!(u.str("id")));
+        let to = (u.fleet.as_str(), u.issue);
+        fire(ctx, cfg, out, &events, to, "answer-undelivered", d.into())?;
+    }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
@@ -119,8 +127,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 format!("{}:{lane}", s.last_ts)
             };
             // #248: a lane herdsman closed once its handoff was logged is not gone.
-            let mine = |e: &Event| e.kind == "lane-closed" && e.str("agent") == Some(lane);
-            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e) && e.ts >= sp.ts));
+            let mine = |e: &Event, sp| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
+            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e, sp)));
             if status.is_none() && !closed {
                 hits.push((
                     "lane-dead",
@@ -221,15 +229,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let lane = lane.filter(|l| l.2.is_some() && !tracked.contains_key(&(l.0.to_string(), l.1)));
         if let Some(l) = lane.filter(|_| last_spawn(&events, name).is_none()) {
             let why = format!("herdr agent {name} has no spawn event and matches no tracked issue");
-            fire(
-                ctx,
-                cfg,
-                out,
-                &events,
-                (l.0, Some(l.1)),
-                "orphan-lane",
-                json!({"key": name, "reason": why}),
-            )?;
+            let d = json!({"key": name, "reason": why});
+            fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
     let open = open_asks(&events);
@@ -271,15 +272,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             age(ctx.now.saturating_sub(a.ts)),
             a.str("question").unwrap_or("?")
         );
-        fire(
-            ctx,
-            cfg,
-            out,
-            &events,
-            (&a.fleet, a.issue),
-            "ask-waiting",
-            json!({"key": a.str("id"), "reason": why}),
-        )?;
+        let d = json!({"key": a.str("id"), "reason": why});
+        fire(ctx, cfg, out, &events, (&a.fleet, a.issue), "ask-waiting", d)?;
     }
     if let (sent, held @ 1..) = PUSHES.replace((0, 0)) {
         let d = json!({"key": ctx.now, "reason": format!("{} questions waiting — open the board", sent + held)});
