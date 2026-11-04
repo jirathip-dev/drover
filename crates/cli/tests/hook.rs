@@ -414,6 +414,11 @@ fn quoted_text_is_not_a_command() {
         "cat > f.md <<'EOF'\nx\nEOF\nherdsman spawn x 1 design",
         "sh -c 'herdsman spawn x 1 design'",
         "echo \"herdsman spawn x 1 design\" | herdsman spawn x 1 design",
+        // Substitutions still run inside double quotes and unquoted-delimiter heredocs.
+        "herdsman ask q \"$(herdsman spawn x 1 design)\"",
+        "herdsman thread reply t1 \"see `herdsman spawn x 1 design`\"",
+        "herdsman ask q --option \"a $(herdsman spawn x 1 \"design\")\"",
+        "cat > f.md <<EOF\n$(herdsman spawn x 1 design)\nEOF",
     ] {
         assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
     }

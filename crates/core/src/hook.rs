@@ -127,7 +127,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
 /// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
 /// bodies, and the quoted text of `herdsman thread reply|say` and `herdsman ask` (the question, each `--option`).
 fn unquote(cmd: &str) -> String {
-    let (mut out, mut cur, mut docs) = (String::new(), String::new(), Vec::<String>::new());
+    let (mut out, mut cur, mut docs) = (String::new(), String::new(), Vec::<(String, bool)>::new());
     // The current command's unquoted words so far.
     let mut words: Vec<String> = vec![];
     let mut cs = cmd.chars().peekable();
@@ -141,12 +141,16 @@ fn unquote(cmd: &str) -> String {
                 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
                 out.push(c);
+                let (mut span, mut live) = (String::new(), false);
                 while let Some(q) = cs.next().filter(|q| *q != c) {
                     let esc = (c == '"' && q == '\\').then(|| cs.next()).flatten();
-                    if !text {
-                        cur.extend(Some(q).into_iter().chain(esc));
-                        out.extend(Some(q).into_iter().chain(esc));
-                    }
+                    // `$(…)` and backticks still run inside double quotes.
+                    live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
+                    span.extend(Some(q).into_iter().chain(esc));
+                }
+                if !text || live {
+                    cur.push_str(&span);
+                    out.push_str(&span);
                 }
                 out.push(c);
             }
@@ -161,17 +165,19 @@ fn unquote(cmd: &str) -> String {
                     continue;
                 }
                 while cs.next_if(|n| matches!(n, '-' | ' ' | '\t')).is_some() {}
-                let mut delim = String::new();
+                let (mut delim, mut quoted) = (String::new(), false);
                 while let Some(n) = cs.next_if(|n| !n.is_whitespace() && !";|&()<>".contains(*n)) {
+                    quoted |= matches!(n, '\'' | '"' | '\\');
                     delim.extend((!matches!(n, '\'' | '"' | '\\')).then_some(n));
                 }
-                docs.push(delim);
+                docs.push((delim, quoted));
             }
             '\n' | ';' | '|' | '&' | '(' | ')' | '`' => {
                 out.push(c);
                 words.clear();
                 // A heredoc's body starts on the next line and ends at its delimiter's line.
-                for d in docs.drain(..).filter(|_| c == '\n') {
+                // An unquoted delimiter's body still runs `$(…)` and backticks, so those lines stay.
+                for (d, quoted) in docs.drain(..).filter(|_| c == '\n') {
                     let mut line = String::new();
                     for n in cs.by_ref() {
                         if n != '\n' {
@@ -179,6 +185,10 @@ fn unquote(cmd: &str) -> String {
                         } else if line.trim() == d {
                             break;
                         } else {
+                            if !quoted && (line.contains('`') || line.contains("$(")) {
+                                out.push_str(&line);
+                                out.push('\n');
+                            }
                             line.clear();
                         }
                     }
