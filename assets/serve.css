@@ -540,3 +540,11 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .qct{display:flex;flex-wrap:wrap;min-width:0;white-space:pre}.qct>span{flex:none}.qct>.el{flex:1 1 0;min-width:0}.qct>:last-child{flex-basis:100%;color:var(--mute);font-size:var(--fs-meta)}
 .qx{border-bottom:0}.qx>summary{display:flex;white-space:pre;color:var(--link)}.qx>summary>:last-child{flex:1}
 .fc.qa>:not(.fh,summary,.qg[data-g=need]){display:none}
+/* #365: the backlog under a repo's queue: search, quick filters, rows to tick; [queue N] sits right above the tab bar. */
+.bl>summary{display:flex;gap:var(--s2)}.bl>summary>span:first-of-type{flex:1}.bl>summary>.cv{order:1}
+.bs{display:flex;margin:var(--s2) 0}.bs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input)}
+.bi{display:grid;grid-template-columns:auto 6ch minmax(0,1fr);gap:0 var(--s2);align-items:center;min-height:var(--hit);border-bottom:1px solid var(--line)}
+.bi[hidden],.bbar[hidden]{display:none}
+.bi>.tl{grid-column:3;margin-top:0;color:var(--fg)}.bi>.m{grid-column:3;font-size:var(--fs-meta)}
+.bl:has(>.bbar:not([hidden])){padding-bottom:calc(var(--hit) + var(--s3))}
+.bbar{position:fixed;left:0;right:0;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;justify-content:flex-end;padding:var(--s2);background:var(--bg);border-top:1px solid var(--line)}

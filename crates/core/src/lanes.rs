@@ -5,6 +5,7 @@ use crate::harness;
 use crate::runner::{ok, Runner};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 #[derive(Debug, Default, Clone)]
@@ -490,13 +491,62 @@ pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
     harness::all().find_map(|h| h.1.pending_menu(screen))
 }
 
-/// #260: a file's last `n` bytes as text (a session transcript is tens of MB; a cut first line fails to parse, skipped).
-pub fn read_tail(p: &std::path::Path, n: u64) -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
-    let (mut f, mut b) = (std::fs::File::open(p).ok()?, vec![]);
-    let from = f.metadata().ok()?.len().saturating_sub(n);
-    f.seek(SeekFrom::Start(from)).and_then(|_| f.read_to_end(&mut b)).ok()?;
-    Some(String::from_utf8_lossy(&b).into_owned())
+/// #362: a transcript's cached tail: its inode, the offset read up to (past its last full line), the 64 bytes before
+/// it, and the text read (whole lines, its last 2 MB).
+#[derive(Default)]
+pub struct Tail {
+    ino: u64,
+    offset: u64,
+    last: Vec<u8>,
+    pub text: String,
+}
+
+impl Tail {
+    /// #362: bring the tail up to a file of inode `ino` and `len` bytes, reading only `[offset, len)` while the inode
+    /// holds, the file did not shrink and its 64 bytes before `offset` are unchanged; else its last 2 MB. Returns the
+    /// unfinished last line, read again next time.
+    pub fn read(&mut self, f: &mut (impl Read + Seek), ino: u64, len: u64) -> std::io::Result<String> {
+        let mut seen = vec![0; self.last.len()];
+        let at = SeekFrom::Start(self.offset - seen.len() as u64);
+        let same = self.ino == ino && len >= self.offset && f.seek(at).and_then(|_| f.read_exact(&mut seen)).is_ok();
+        if !same || seen != self.last {
+            (self.ino, self.offset, self.last, self.text) = (ino, len.saturating_sub(1 << 21), vec![], String::new());
+        }
+        let mut b = vec![];
+        f.seek(SeekFrom::Start(self.offset))?;
+        f.take(len - self.offset).read_to_end(&mut b)?;
+        let n = b.iter().rposition(|&c| c == b'\n').map_or(0, |i| i + 1);
+        self.offset += n as u64;
+        self.last.extend_from_slice(&b[..n]);
+        self.last.drain(..self.last.len().saturating_sub(64));
+        self.text.push_str(&String::from_utf8_lossy(&b[..n]));
+        self.text.drain(..line_from(&self.text, 1 << 21));
+        Ok(String::from_utf8_lossy(&b[n..]).into_owned())
+    }
+}
+
+/// Where the last `n` bytes of `s` start, moved up to a line start.
+fn line_from(s: &str, n: usize) -> usize {
+    match s.len().saturating_sub(n) {
+        0 => 0,
+        cut => (s.as_bytes()[cut - 1..].iter().position(|&c| c == b'\n')).map_or(s.len(), |j| cut + j),
+    }
+}
+
+/// #260: a file's last `n` (≤ 2 MB) bytes as text, whole lines (a session transcript is tens of MB). #362: read
+/// incrementally through a `Tail` per file, the 32 most recently read kept.
+pub fn read_tail(p: &Path, n: u64) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    static CACHE: std::sync::Mutex<Vec<(std::path::PathBuf, Tail)>> = std::sync::Mutex::new(vec![]);
+    let mut f = std::fs::File::open(p).ok()?;
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (i, m) = (cache.iter().position(|e| e.0 == p), f.metadata().ok()?);
+    let mut t = i.map_or_else(Tail::default, |i| cache.remove(i).1);
+    let part = t.read(&mut f, m.ino(), m.len()).ok()?;
+    let out = t.text[line_from(&t.text, usize::try_from(n).unwrap_or(usize::MAX))..].to_string() + &part;
+    cache.insert(0, (p.into(), t));
+    cache.truncate(32);
+    Some(out)
 }
 
 /// #260: a lane row's `now:` line: its session transcript's current tool call (in its last 256 KB), else the pane's.

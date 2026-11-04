@@ -75,7 +75,15 @@ show their place (`#1`…); after the first 5, `+ N more` opens the rest in plac
 `#265 → #270 · <root's title> (6 steps) · next: #266` (next: the root's open blocker, else the root), and `▾` opens
 its steps. Titles start in one column at every depth.
 
-Its only writes are ▲/▼ (`queue mv`), Pause/Resume and a role's model/effort (`set`, choices
+Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
+queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
+(every 5 min) reads the repo's open issues in one GraphQL call, then only those updated since (a closed one drops out);
+`[Drive now]` reads it again at once. The board renders the last read only, never GitHub. A search box and quick filters (`new`,
+`>30 days`, `>90 days`, `has AC`, `in a closed PR`, a label) narrow it on the phone. Ticking issues shows `[queue N]`
+above the tab bar: it queues them in tick order, each marked `needs-check` (its spec not checked yet). Picking an issue
+starts nothing; only queueing does.
+
+Its only writes are ▲/▼ (`queue mv`), `[queue N]` (`queue add`, paired), Pause/Resume and a role's model/effort (`set`, choices
 from `models = [...]`), each through the CLI's own code path, logged with `"via":"web"`.
 
 A POST must name the bind address (or a `[serve].allowed_hosts` name, e.g. the

@@ -553,6 +553,32 @@
       scrollTo({ top: 0, behavior: 'instant' }); // a scrolled view shoots blank: the shot is the top, the needs cards hidden
       if (!DBG.get('check')) $('#needs').hidden = true;
     },
+    // #365 gate 2 (the `queue` fixture: 100 open issues in acme-api's backlog): search, a quick filter and a label narrow
+    // the rows; three ticks show [queue 3] above the tab bar with the issues in tick order; no row is wider than the screen.
+    'queue-backlog': () => {
+      tab('queue');
+      $('.qch [data-qr="acme-api"]').click();
+      const b = $('#queue .fc:not([hidden]) .bl'), rows = () => [...b.querySelectorAll('.bi')].filter(seen), n = () => b.querySelector('summary>.m').textContent;
+      b.open = true;
+      const all = rows().length, q = b.querySelector('.bs input'), f = b.querySelector('.bbar'), nav = $('nav').getBoundingClientRect().top;
+      if (all !== 100 || n() !== '(100)') early.push(`backlog shows ${all} rows, ${n()}`);
+      Object.assign(q, { value: 'past one' }).dispatchEvent(new Event('input', { bubbles: true }));
+      if (!rows().length || rows().length === all || rows().some(r => !r.textContent.includes('past one')) || n() !== `(${rows().length} of 100)`) early.push(`search: ${rows().length} rows, ${n()}`);
+      Object.assign(q, { value: '' }).dispatchEvent(new Event('input', { bubbles: true }));
+      b.querySelector('[data-bf="90"]').click();
+      const is = JSON.parse(b.dataset.bl), old = Number(document.body.dataset.ts) - 90 * 86400;
+      if (!rows().length || rows().some(r => Date.parse(is[r.dataset.n].created) / 1000 > old + 86400) || b.querySelector('[data-bf="90"]').getAttribute('aria-pressed') !== 'true') early.push(`>90 days: ${rows().length} rows`);
+      b.querySelector('[data-bf="90"]').click();
+      const sel = b.querySelector('.bfs select');
+      Object.assign(sel, { value: 'phone' }).dispatchEvent(new Event('change', { bubbles: true }));
+      if (!rows().length || rows().some(r => !JSON.parse(b.dataset.bl)[r.dataset.n].labels.includes('phone')) || !sel.closest('.pk').textContent.startsWith('phone')) early.push(`label phone: ${rows().length} rows`);
+      Object.assign(sel, { value: '' }).dispatchEvent(new Event('change', { bubbles: true }));
+      const [x, y, z] = rows();
+      for (const r of [z, x, y]) r.querySelector('input').click();
+      const want = [z, x, y].map(r => r.dataset.n).join();
+      if (!seen(f) || f.elements.issues.value !== want || f.querySelector('button').textContent !== 'queue 3') early.push(`bar: ${seen(f)} "${f.elements.issues.value}" (want ${want}) "${f.querySelector('button').textContent}"`);
+      if (f.getBoundingClientRect().bottom > nav + 1) early.push(`[queue 3] ends at ${f.getBoundingClientRect().bottom}, under the tab bar at ${nav}`);
+    },
     'queue-scroll': () => { tab('queue'); $$('#queue details.q').forEach(d => { d.open = true; }); },
     // #66: a fixture ▲ POST (the redirect a live server sends), through the page's fetch-submit path;
     // #140: then [Drive now], which must toast too and never navigate.
