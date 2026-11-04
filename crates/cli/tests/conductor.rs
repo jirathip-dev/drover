@@ -109,6 +109,7 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
         "Thread: t1, Grill #12",
         "Grill before filing.",
         "The owner reads on a phone.",
+        "in a ``` fenced block, one block per command group",
     ] {
         assert!(brief.contains(want), "{want}: {brief}");
     }

@@ -1930,6 +1930,7 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
   else if (t.closest('#chat .att button')) { ATT.l.splice(+t.closest('button').value, 1); if (!ATT.l.length) ATT = null; chatPaint(); }
   else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+  else if (t.closest('#chat .cpy')) copyBox(t.closest('.cpy'));
   else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
 });
 // #405: a thread row swiped left shows its [archive] (one row at a time); swiped right, it hides again. The click that
@@ -2028,6 +2029,13 @@ document.addEventListener('change', e => {
   ATT.l.push(...fs.slice(0, room).map(f => ({ name: f.name, file: f, src: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' })));
   chatPaint();
 });
+// #409: a code box's [copy]: its exact text to the clipboard, then `copied` for 1.5 s; without the clipboard API
+// (plain http) the text is selected instead.
+function copyBox(b) {
+  const p = b.previousElementSibling, pick = () => getSelection().selectAllChildren(p);
+  if (!navigator.clipboard) return pick();
+  navigator.clipboard.writeText(p.textContent).then(() => { b.textContent = 'copied'; setTimeout(() => { b.textContent = 'copy'; }, 1500); }, pick);
+}
 // A file as base64, read when its message is sent.
 const b64 = f => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.readAsDataURL(f); });
 async function chatPost(d, f) {

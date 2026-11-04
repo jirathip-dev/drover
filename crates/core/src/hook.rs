@@ -313,6 +313,14 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
                 .into(),
         );
     }
+    // #425: a lane may hold its own issue (`queue <fleet> block --on N <issue>`), never another one.
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
+    let block = r.first() == Some(&"queue") && r.get(2) == Some(&"block") && own.is_some();
+    let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
+    if block && r.iter().enumerate().skip(3).any(other) {
+        return Some("REFUSED OWN_ISSUE: a lane may `queue block` only its own issue (#425)".into());
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }
