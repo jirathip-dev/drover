@@ -147,11 +147,12 @@
     // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
-    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // (#443: on a phone the messages scroll inside the thread, so those go to the top too.)
+    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; }); },
     // #409: t2's reply with a short and a long-line code box (the long one scrolls sideways inside its box), then
     // [copy] tapped on the short one: `copied` (the clipboard stubbed: headless Chrome's needs a permission).
     'chat-code': () => {
-      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' });
+      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; });
       const [a, b] = [...$$('#chat .cvp[data-t="t2"] .cb pre')];
       if (!b || a.scrollWidth > a.clientWidth || b.scrollWidth <= b.clientWidth || getComputedStyle(b).overflowX !== 'auto') early.push(`code boxes: ${a?.scrollWidth}/${a?.clientWidth}, ${b?.scrollWidth}/${b?.clientWidth}, not short whole and long scrolling`);
     },

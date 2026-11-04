@@ -98,7 +98,8 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
   overlay.
 - **On a phone (#403):** `[send]` clears the box at once and shows the message `sending…`, then `✓`; failed, red
   with `[retry]` and the text (and file) back in the box. The box grows to 6 lines, then scrolls; with the keyboard
-  up the tab bar hides. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
+  up the tab bar hides and (#443) the composer sits flush on the keyboard: the page never scrolls, only the
+  messages do, and the message just above the box stays there as the keyboard opens or closes or the box grows. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
   returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
   above the box.
 

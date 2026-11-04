@@ -1725,7 +1725,9 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing ? e.touches[0] : null;
+  // #443: not in a phone's open thread: it is fixed, and its messages scroll by themselves
+  const thr = innerWidth < 1000 && e.target.closest && e.target.closest('#chat .cvp');
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing && !thr ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
@@ -1839,14 +1841,38 @@ function pgraph(d) {
 // #405: ATT, the files picked for one thread's next message: { t, l: [{ name, file, src }] } (src: an image's object URL).
 var THR = DBG.get('thread') || sget('thread') || '', ATT = null;
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+// #443: `--kb`, the keyboard's height: the part of the layout viewport under the visual one (iOS never shrinks the
+// first); a phone's open thread ends there (serve.css). iOS scrolls the page to show a focused box: put back. A change
+// in the messages' height (the keyboard, the box growing, a turn) moves their scroll by as much, so the message just
+// above the box stays just above it.
+const kbFit = () => {
+  if (vv) document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) + 'px');
+  if (THR && document.documentElement.dataset.tab === 'chat' && innerWidth < 1000 && scrollY) scrollTo(0, 0);
+};
+if (vv) { vv.addEventListener('resize', kbFit); vv.addEventListener('scroll', kbFit); }
+addEventListener('resize', kbFit);
+// (Their bottom edge is kept, `end`: a scroll only moves it at the height last seen, so the browser clamping a grown
+// list's scroll is never counted.)
+const tcKeep = new ResizeObserver(es => es.forEach(({ target: c }) => {
+  const h = c.clientHeight;
+  if (c.kh && h) c.scrollTop = c.end - h;
+  c.kh = h;
+  c.end = c.scrollTop + h;
+}));
+document.addEventListener('scroll', e => { const c = e.target; if (c.kh && c.clientHeight === c.kh) c.end = c.scrollTop + c.kh; }, true);
+const chatEnd = () => {
+  scrollTo(0, document.body.scrollHeight);
+  const c = $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc`);
+  if (c) { tcKeep.observe(c); c.scrollTop = c.scrollHeight; c.end = c.scrollTop + c.clientHeight; }
+};
 function chatOpen(t) {
   THR = t;
   sput('thread', t);
   const q = CSS.escape(t);
-  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}html[data-tab=chat],html[data-tab=chat] body{height:100%;overflow:hidden}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
   if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
-  if (t) scrollTo(0, document.body.scrollHeight);
+  if (t) chatEnd();
 }
 // #403: back to the list: the history entry a thread's open pushed, else straight there.
 const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
@@ -2032,7 +2058,7 @@ async function chatSay(f) {
   grow(box);
   if (a) ATT = null;
   chatPaint();
-  scrollTo(0, document.body.scrollHeight);
+  chatEnd();
   const files = a ? { name: a.l.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.l.map(x => b64(x.file)))).join(',') } : {};
   const ok = await chatPost({ ...(repo ? { op: 'new', repo } : { op: 'say', t: p.t }), text, ...files });
   if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }

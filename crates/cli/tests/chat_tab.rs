@@ -1011,3 +1011,99 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         r.calls.borrow()
     );
 }
+
+/// #443: WebKit at 390 × 844, a long thread on a paired phone; the keyboard (a 336 px `visualViewport` shrink, as
+/// iOS reports it) opens with the box focused: the composer's bottom is the visual viewport's, the page never scrolls,
+/// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
+#[test]
+fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
+    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let c = setup("chat-kb");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
+        "t1\n"
+    );
+    for i in 0..30 {
+        let (code, out) = run(
+            &c,
+            &Fake::default(),
+            &["thread", "reply", "t1", &format!("Reply {i}: a line or two of prose.")],
+        );
+        assert_eq!(code, 0, "{out}");
+    }
+    let cookie = pair(
+        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        T,
+    );
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    let (c2, at) = (c.clone(), addr.clone());
+    std::thread::spawn(move || {
+        let r = Fake::default();
+        let s = Server::new(&c2, &r, Some(at));
+        for mut st in l.incoming().flatten() {
+            let mut buf = [0u8; 8192];
+            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
+            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
+        }
+    });
+    // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
+    // (1/0) and how far its top moved against the box's top.
+    let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
+          while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
+          chatOpen('t1'); \
+          const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); await frame(); \
+          const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
+          const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
+          const kb = h => { Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - h }); vv.dispatchEvent(new Event('resize')); }; \
+          const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
+          const look = (y = vv.offsetTop + vv.height) => { const [b, d] = above(); at.push(Math.abs(tw.getBoundingClientRect().bottom - y), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)); }; \
+          box.focus(); kb(336); await frame(); look(); \
+          box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await frame(); look(); \
+          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); kb(0); await frame(); look($('nav').getBoundingClientRect().top); \
+          box.focus(); kb(336); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await frame(); look(); \
+          at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
+    let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
+        std::path::Path::new(&p).join("chat-kb.png")
+    });
+    let o = swift()
+        .env("HERDSMAN_WAIT", "8")
+        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .args([
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
+            &format!("http://{addr}/"),
+            "390",
+            "chat",
+            "scene",
+            png.to_str().unwrap(),
+            js,
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+    assert_eq!(m.len(), 18, "{out}");
+    assert_eq!(m[0], 1.0, "the thread starts scrolled to its end: {out}");
+    for (i, s) in m[1..17].chunks(4).enumerate() {
+        let what = ["keyboard up", "box grown", "keyboard down", "keyboard up again"][i];
+        assert!(
+            s[0] <= 1.0,
+            "{what}: the composer is {} px off the keyboard or tab bar ({out})",
+            s[0]
+        );
+        assert_eq!(s[1], 0.0, "{what}: the page scrolled ({out})");
+        assert_eq!(s[2], 1.0, "{what}: another message above the box ({out})");
+        assert!(
+            s[3] <= 1.0,
+            "{what}: the message above the box moved {} px ({out})",
+            s[3]
+        );
+    }
+    assert_eq!(m[17], 0.0, "page errors: {out}");
+}
