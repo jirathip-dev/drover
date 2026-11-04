@@ -1,89 +1,62 @@
-//! #389: a lane on another host whose ssh forward to the main host fails queues the command in its worktree's
-//! outbox; drive's fast step reads every remote lane's outbox over main → host ssh and runs each line there as
-//! that lane (the #249 pattern).
+//! #389: a remote lane's command with no route to the main host waits in its worktree's outbox; drive runs it (#249).
 use crate::events::{append, fold, last_spawn, read, Event};
-use crate::runner::{argv, ok, Runner};
-use crate::Ctx;
+use crate::{hosts::On, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::{io::Write, path::PathBuf};
 
-pub const FILE: &str = ".herdsman/outbox.jsonl";
 pub const QUEUED: &str = "queued for the main host (no route): drive delivers it within 1 min\n";
 
 /// The lane's side: `args` as one line (`args`, `lane`, `ts` in ms) in the worktree holding the cwd.
 pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
-    let wt = cwd
-        .ancestors()
-        .find(|d| d.join(".git").exists())
-        .context("no worktree holds the cwd")?;
-    let p = wt.join(FILE);
-    std::fs::create_dir_all(wt.join(".herdsman"))?;
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis();
+    let wt = cwd.ancestors().find(|d| d.join(".git").exists());
+    let p = wt.context("no worktree holds the cwd")?.join(".herdsman/outbox.jsonl");
+    std::fs::create_dir_all(p.parent().context("no dir")?)?;
+    let ts = std::time::UNIX_EPOCH.elapsed()?.as_millis();
     let mut f = std::fs::File::options().create(true).append(true).open(&p)?;
     writeln!(f, "{}", json!({"args": args, "lane": lane, "ts": ts}))?;
     Ok(p)
 }
 
-/// The outbox moved aside (a leftover one first), then read; it is removed once every line was applied.
-const TAKE: &str =
-    "[ -s \"$1.draining\" ] || mv -f \"$1\" \"$1.draining\" 2>/dev/null; cat \"$1.draining\" 2>/dev/null; exit 0";
-
 /// Each remote lane of a live issue: its spawn, `HERDSMAN_LANE` and outbox path.
 fn boxes(events: &[Event]) -> Vec<(&Event, String, String)> {
     let live = fold(events).into_values().filter(|s| !s.done());
-    let spawns = live
-        .flat_map(|s| s.lanes.into_values())
-        .filter_map(|a| last_spawn(events, &a));
-    spawns
-        .filter(|sp| sp.str("machine").is_some())
-        .filter_map(|sp| {
-            let (wt, role) = (sp.str("worktree")?, sp.str("role")?);
-            let n = sp.issue.map_or("-".into(), |n| n.to_string());
-            Some((
-                sp,
-                format!("{}:{n}:{role}", sp.fleet),
-                Path::new(wt).join(FILE).display().to_string(),
-            ))
-        })
+    let spawns = live.flat_map(|s| s.lanes.into_values());
+    let remote = spawns.filter_map(|a| last_spawn(events, &a));
+    let remote = remote.filter(|sp| sp.str("machine").is_some());
+    let lane = |sp: &Event| Some(format!("{}:{}:{}", sp.fleet, sp.issue?, sp.str("role")?));
+    remote
+        .filter_map(|sp| Some((sp, lane(sp)?, format!("{}/.herdsman/outbox.jsonl", sp.str("worktree")?))))
         .collect()
 }
 
+/// The outbox moved aside (a leftover one first), then read; it is removed once every line was applied.
 fn take(r: &dyn Runner, sp: &Event, p: &str) -> Result<String> {
-    ok(&crate::hosts::On::of(r, Some(sp)), "sh", &argv(&["-c", TAKE, "sh", p]))
+    let sh = "d=\"$1.draining\"; [ -s \"$d\" ] || mv -f \"$1\" \"$d\" 2>/dev/null; cat \"$d\" 2>/dev/null; exit 0";
+    crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]))
 }
 
 /// #337: the step's look reads every outbox in its one call per host.
 pub fn look(r: &dyn Runner, events: &[Event]) {
     for (sp, _, p) in boxes(events) {
-        let _ = take(r, sp, &p);
+        drop(take(r, sp, &p));
     }
 }
 
-/// drive's side: each live remote lane's outbox of `fleets` (as the step's look `seen` read it), line by line, then
-/// cleared.
+/// drive's side: each live remote lane's outbox of `fleets` (as the look `seen` read it), line by line, then cleared.
 pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write, fleets: &[&str]) -> Result<()> {
     let events = read(&ctx.state)?;
-    for (sp, lane, p) in boxes(&events)
-        .into_iter()
-        .filter(|b| fleets.contains(&b.0.fleet.as_str()))
-    {
-        let text = match take(seen, sp, &p) {
-            Ok(t) => t,
-            Err(e) => {
-                writeln!(out, "outbox {lane}: {e:#}")?;
-                continue;
-            }
+    for (sp, lane, p) in boxes(&events) {
+        let text = fleets.contains(&sp.fleet.as_str()).then(|| take(seen, sp, &p));
+        let Some(Ok(text)) = text.map(|t| t.inspect_err(|e| drop(writeln!(out, "outbox {lane}: {e:#}")))) else {
+            continue;
         };
         for l in text.lines().filter(|l| !l.trim().is_empty()) {
             apply(ctx, r, out, sp, &lane, l)?;
         }
         if !text.trim().is_empty() {
-            crate::hosts::On::of(r, Some(sp)).remove(Path::new(&format!("{p}.draining")))?;
+            On::of(r, Some(sp)).remove(format!("{p}.draining").as_ref())?;
         }
     }
     Ok(())
@@ -92,8 +65,7 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
 /// One line, once per lane + ts: run as `lane` (from its spawn, never the line), or refused; logged `outbox` either way.
 fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
-    let ts = v["ts"].as_u64();
-    let events = read(&ctx.state)?;
+    let (ts, events) = (v["ts"].as_u64(), read(&ctx.state)?);
     let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.data["sent"].as_u64() == ts;
     if ts.is_some() && events.iter().any(seen) {
         return Ok(());
@@ -109,25 +81,12 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
         d["refused"] = json!(w);
         writeln!(out, "outbox {lane}: refused: {w}")?;
     } else {
-        let was = std::env::var("HERDSMAN_LANE");
-        std::env::set_var("HERDSMAN_LANE", lane);
-        let mut buf = vec![];
-        let words: Vec<&str> = args.iter().map(String::as_str).collect();
-        let res = crate::cli::run(&words, ctx, r, &mut buf);
-        match was {
-            Ok(w) => std::env::set_var("HERDSMAN_LANE", w),
-            Err(_) => std::env::remove_var("HERDSMAN_LANE"),
-        }
-        let res = res.map_err(|e| format!("{e:#}"));
+        writeln!(out, "outbox {lane}: {}", args[0])?;
+        std::env::set_var("HERDSMAN_LANE", lane); // drive runs with no `HERDSMAN_LANE` of its own
+        let res = crate::cli::run(&args.iter().map(String::as_str).collect::<Vec<_>>(), ctx, r, out);
+        std::env::remove_var("HERDSMAN_LANE");
         d["code"] = json!(res.as_ref().ok());
-        d["error"] = json!(res.as_ref().err());
-        let said = String::from_utf8_lossy(&buf);
-        writeln!(
-            out,
-            "outbox {lane}: {} → {}",
-            args[0],
-            said.lines().next().unwrap_or_default()
-        )?;
+        d["error"] = json!(res.err().map(|e| format!("{e:#}")));
     }
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
 }

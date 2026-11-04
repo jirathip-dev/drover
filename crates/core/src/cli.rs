@@ -645,12 +645,10 @@ pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Resu
     // #389: no route to the main host (ssh's own 255, or no ssh at all): a lane's own write waits in its outbox.
     let down = match &res {
         Ok(o) if o.code != 255 => return Some(res),
+        _ if !matches!(args[0].as_str(), "ask" | "done" | "answer" | "lane-event") => return Some(res),
         Ok(o) => o.stderr.trim().to_string(),
         Err(e) => format!("{e:#}"),
     };
-    if !matches!(args[0].as_str(), "ask" | "done" | "answer" | "lane-event") {
-        return Some(res);
-    }
     let queued = crate::outbox::queue(&lane, args).map(|p| runner::Out {
         code: 0,
         stdout: crate::outbox::QUEUED.into(),
@@ -659,28 +657,20 @@ pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Resu
     Some(queued.with_context(|| format!("{host} unreachable ({down}), and the outbox failed")))
 }
 
-/// #389: why a lane's outbox line is not its own to run (`None`: it is): only `ask`, `done`, `answer` for its issue
-/// and its events.
+/// #389: why a lane's outbox line is not its own to run (`None`: it is): `ask`, `done`, `answer` for its issue, events.
 pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
-    let mut it = lane.split(':');
-    let (fleet, issue) = (it.next().unwrap_or_default(), it.next().unwrap_or_default());
-    let cli = match Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().map(String::as_str))) {
-        Ok(c) => c,
+    let cli = Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().map(String::as_str)));
+    let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
+    let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
+    let (f, n) = match cli.map(|c| c.cmd) {
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
-    };
-    let (f, n) = match cli.cmd {
-        Cmd::LaneEvent { .. } => return None,
-        Cmd::Ask { fleet, issue, .. } => (fleet, issue),
-        Cmd::Done { fleet, issue, .. } => (fleet, issue.to_string()),
-        Cmd::Answer { fleet, id, .. } => {
-            let ask = events
-                .iter()
-                .find(|e| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(&id));
-            (fleet, ask.and_then(|e| e.issue).map_or("-".into(), |n| n.to_string()))
-        }
+        Ok(Cmd::LaneEvent { .. }) => return None,
+        Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
+        Ok(Cmd::Done { fleet, issue, .. }) => (fleet, issue.to_string()),
+        Ok(Cmd::Answer { fleet, id, .. }) => (fleet.clone(), asked(&fleet, &id).map_or("-".into(), |n| n.to_string())),
         _ => return Some(format!("`{}` is no lane's own verb", args[0])),
     };
-    (f != fleet || n != issue).then(|| format!("names {f}#{n}, not the lane's {fleet}#{issue}"))
+    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
 }
 
 /// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
