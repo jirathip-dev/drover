@@ -324,7 +324,7 @@ function moment(k) {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, P = {}, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -371,6 +371,7 @@ function frag(id, html) {
   const rows = e => new Map([...e.querySelectorAll('details,.lane')].map(r => [key(r), r]));
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
+  if (id === 'events') olds(nu);
   tidy(nu);
   morph(el, nu);
   nows();
@@ -567,13 +568,23 @@ async function refresh() {
 function connect() {
   if (DEMO) return;
   if (es) es.close();
+  P = {};
   try { es = new EventSource('live' + (seq ? '?since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
   // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); frag(j.id, j.html); sync('g'); pulse(); claim(); });
+  // #351: after a part's first copy on this stream, only its changed pieces (`patch`, cut before each `<d` as serve.rs
+  // cuts them): the pieces at or past `p` not in `set` are the old ones, shifted by the length change.
+  const got = (id, ps) => { P[id] = ps; frag(id, ps.join('')); sync('g'); pulse(); claim(); };
+  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); got(j.id, j.html.split(/(?=<d)/)); });
+  es.addEventListener('patch', e => {
+    at(e);
+    const j = JSON.parse(e.data), o = P[j.id];
+    if (!o) return refresh();
+    got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
+  });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
   es.addEventListener('refresh', e => (at(e), refresh()));
@@ -729,6 +740,26 @@ document.addEventListener('click', e => {
   if (!b) return;
   if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
   put('events:filter', JSON.stringify(EF));
+  evf(document);
+});
+// #351: Events opens with 100 rows a view; [older] loads the next 100 under them (`frag?id=events&skip=`), kept across
+// live swaps: EO holds each view's loaded pages (marked .pg), put back in place of the first page's [older].
+const EO = {};
+function olds(root) {
+  for (const v in EO) { const b = root.querySelector(`[data-v=${v}]>.eo:not(.pg)`); if (b) b.outerHTML = EO[v]; }
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.eo'), d = b && b.parentNode;
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const t = document.createElement('div'), v = d.dataset.v;
+  t.innerHTML = (await part('frag?id=events&skip=' + b.dataset.skip)) || '';
+  const ns = [...t.querySelectorAll(`[data-v=${v}]>.eg, [data-v=${v}]>.eo`)];
+  if (!ns.length) return (b.disabled = false);
+  ns.forEach(n => n.classList.add('pg'));
+  b.replaceWith(...ns);
+  tidy(d);
+  EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
   evf(document);
 });
 function tidy(root) {
@@ -910,10 +941,11 @@ function matters(lines, said, notices, harness) {
 // The longest suffix of a that is a prefix of b (as text): two reads' overlap.
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
-const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200' + q);
+// #351: a chat opens with its last 10 turns (~64 KB at most, the server's cap); scrolling to the top loads 10 more.
+const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200&turns=' + turns + q);
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
-let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [];
+let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [], turns = 10;
 // #260 [full conversation]: every tool run and output (the pane view), else what matters; remembered per phone.
 let full = false;
 try { full = localStorage.getItem('chat:full') === '1'; } catch (e) {}
@@ -967,7 +999,7 @@ async function poll() {
     if (!r.ok) return now.replaceChildren(el('p', 'm', (await r.text()).trim()));
     const j = await r.json(), done = j.lines.slice(0, j.lines.length - j.live), k = overlap(hist, done);
     opane = j.pane;
-    if (!hist.length) more.hidden = !j.more;
+    if (!hist.length) more.hidden = !(j.more || j.older);
     hist = k || !hist.length || !done.length ? hist.concat(done.slice(k)) : done;
     [tail, nlive, harness, spin, said, notes] = [j.lines.slice(done.length), j.live, j.harness, !!j.status, j.said, j.notices];
     $('.live').hidden = !j.status;
@@ -977,14 +1009,19 @@ async function poll() {
 }
 // Older lines from the rolling transcript, joined above the seen ones by their overlap.
 more.onclick = async () => {
-  const r = await lane('&before=' + Math.max(0, hist.length + nlive - 20));
-  if (!r.ok) return;
+  more.disabled = true;
+  turns += 10;
+  const r = await lane('&before=' + Math.max(0, hist.length + nlive - 20)).catch(() => null);
+  more.disabled = false;
+  if (!r || !r.ok) return;
   const j = await r.json(), h = chat.scrollHeight;
   hist = j.lines.slice(0, j.lines.length - overlap(j.lines, hist)).concat(hist);
-  more.hidden = !j.more;
+  said = j.said || said;
+  more.hidden = !(j.more || j.older);
   paint();
   chat.scrollTop += chat.scrollHeight - h;
 };
+chat.addEventListener('scroll', () => { if (chat.scrollTop < 40 && !more.hidden && !more.disabled) more.onclick(); }, { passive: true });
 chat.addEventListener('toggle', e => {
   const k = e.target.dataset && e.target.dataset.k, s = store();
   if (!k) return;
@@ -1045,7 +1082,7 @@ function open(e) {
   $('[data-op=close]').hidden = !other || nopair;
   $$('.pairf, .cf, .cmds').forEach(x => x.hidden = true);
   now.replaceChildren();
-  hist = []; tail = []; said = null; notes = [];
+  hist = []; tail = []; said = null; notes = []; turns = 10;
   $('.live').hidden = true;
   say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other || spane ? null : true);
   sh.className = 'sh';
