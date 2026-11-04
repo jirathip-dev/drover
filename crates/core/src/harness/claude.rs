@@ -169,6 +169,9 @@ impl Harness for Claude {
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         Some(("claude", "claude auth status", "claude auth login in a pane there"))
     }
+    fn startup_title(&self) -> Option<&'static str> {
+        Some("✳")
+    }
     fn process_names(&self) -> &'static [&'static str] {
         &["claude"]
     }

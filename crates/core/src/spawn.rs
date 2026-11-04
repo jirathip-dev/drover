@@ -6,7 +6,7 @@ use crate::gate::refused;
 use crate::harness::{self, hook_command};
 use crate::herdr;
 use crate::host;
-use crate::runner::{argv, ok, Runner};
+use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -699,30 +699,29 @@ pub fn spawn(
         herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
     }
-    // #275: on any host (under load, or over `--machine`) the name can be lost while the harness came up: retry only
-    // when none did; one that did is named below.
-    let lost = |s: &crate::runner::Out| herdr::failed_with(s, "agent_name_not_found");
-    if lost(&start) && herdr::harness_in(r, &pane).is_none() {
+    // #275/#359: under load (or over `--machine`) the start can give up (timeout, name lost, launch pending) while the
+    // harness still comes up: confirm the pane over a window; one that never confirms is closed and started once more.
+    let soft = |s: &Out| s.code != 0 && SOFT.iter().any(|c| herdr::failed_with(s, c));
+    let mut late = soft(&start) && confirm(r, h, &pane);
+    if soft(&start) && !late {
+        let _ = herdr::close(r, &pane);
+        pane = pick(&mut ws, Some(&pane))?;
+        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
         start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
+        late = soft(&start) && confirm(r, h, &pane);
     }
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
             return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
         }
-        // Under load herdr can time out while the harness still comes up: keep it as the lane.
-        // #182: any other failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
-        let why = if !herdr::failed_with(&start, "timeout") && !lost(&start) {
-            Some(format!("herdr agent start failed: {}", start.stderr.trim()))
-        } else if herdr::harness_in(r, &pane).is_none() {
-            Some(format!(
-                "herdr agent start failed and no harness came up: {}",
-                start.stderr.trim()
-            ))
+        // #182: any failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
+        let why = if late {
+            herdr::rename(r, &pane, &p.agent).err().map(|e| format!("{e:#}"))
+        } else if soft(&start) {
+            Some(format!("no harness came up in 120 s: {}", start.stderr.trim()))
         } else {
-            herdr::ok(r, &herdr::rename_argv(&pane, &p.agent))
-                .err()
-                .map(|e| format!("{e:#}"))
+            Some(format!("herdr agent start failed: {}", start.stderr.trim()))
         };
         if let Some(why) = why {
             // #302: a harness[:account] that failed to start twice in a row rests (`[limits] fallback_rest_minutes`).
@@ -748,6 +747,7 @@ pub fn spawn(
             let _ = herdr::close(r, &pane);
             bail!("{why}; closed pane {pane}");
         }
+        event("spawn-adopted", json!({"agent": p.agent, "pane": pane}))?;
     }
     // #185: a new lane's clone runs beside the kick and pane clean-up, once the lane has started; a failure is logged.
     let mut dirs: Vec<String> = f.clone_build.clone();
@@ -804,6 +804,33 @@ pub fn spawn(
         event("build-cloned", d)?;
     }
     res
+}
+
+/// #359: start failures after which the harness may still come up, and the states it reports once up.
+const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
+const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
+
+/// #359: whether the harness came up in `pane`: its process runs there and its startup title or a reported state has
+/// been seen. Reads it 5 s apart, never deciding from one read; any change restarts the window.
+fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
+    let (mut left, mut seen, mut titled, names) = (herdr::CONFIRM_SECS, String::new(), false, h.process_names());
+    loop {
+        let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
+        let agent = v["agent"].as_str().unwrap_or("");
+        let title = v["terminal_title"].as_str().unwrap_or("");
+        let state = v["agent_status"].as_str().unwrap_or("");
+        titled |= h.startup_title().is_some_and(|t| title.contains(t)) || REPORTED.contains(&state);
+        if titled && !agent.is_empty() && (names.is_empty() || names.contains(&agent)) {
+            return true;
+        }
+        let now = format!("{agent}\n{title}");
+        left = if now == seen { left } else { herdr::CONFIRM_SECS };
+        if left < 5 {
+            return false;
+        }
+        (left, seen) = (left - 5, now);
+        r.sleep(5);
+    }
 }
 
 /// #107: the pane of the lane's agent (its planned name, or `unnamed`) in its worktree that no `spawn` logged: adopt it.
@@ -873,7 +900,7 @@ pub fn adopt(
 ) -> Result<()> {
     let p = plan(ctx, cfg, fleet, issue, role)?;
     let info = herdr::harness_in(r, pane).with_context(|| format!("no harness running in pane {pane}"))?;
-    herdr::ok(r, &herdr::rename_argv(pane, &p.agent))?;
+    herdr::rename(r, pane, &p.agent)?;
     let ws = info["workspace_id"]
         .as_str()
         .or_else(|| pane.split(':').next())

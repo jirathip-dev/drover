@@ -134,6 +134,21 @@ pub fn rename_argv(pane: &str, agent: &str) -> Vec<String> {
     argv(&["agent", "rename", pane, agent])
 }
 
+/// #359: how long a lane's startup is waited for (confirm, rename).
+pub const CONFIRM_SECS: u64 = 120;
+
+/// #359: name the agent in `pane`; `agent_launch_pending` (startup not done) waits 5 s and tries again, up to 120 s.
+pub fn rename(r: &dyn Runner, pane: &str, agent: &str) -> Result<()> {
+    let (a, mut n) = (rename_argv(pane, agent), CONFIRM_SECS / 5);
+    let mut o = exec(r, &a)?;
+    while n > 0 && failed_with(&o, "agent_launch_pending") {
+        r.sleep(5);
+        (n, o) = (n - 1, exec(r, &a)?);
+    }
+    anyhow::ensure!(o.code == 0, "herdr agent rename {pane} failed: {}", o.stderr.trim());
+    Ok(())
+}
+
 pub fn pane_get_argv(pane: &str) -> Vec<String> {
     argv(&["pane", "get", pane])
 }
