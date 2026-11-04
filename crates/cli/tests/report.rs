@@ -193,6 +193,17 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
         "outlined, no box after one tap, the box after two, at the bottom, 16 px"
     );
     assert!(reports(&c).is_empty(), "nothing sent before Send");
+    // The toast is the way out: a fake clock fires the 4 s fade at once; the toast stays and a tap on it ends the mode.
+    let stays = "const T = setTimeout; window.setTimeout = (f, d) => (d >= 4000 ? (f(), 0) : T(f, d)); \
+         open(t); ta.value = '/re'; ta.oninput(); cmds.querySelector('li').click(); window.setTimeout = T; \
+         T(() => { const m = document.querySelector('.msg.g'), on = +document.body.classList.contains('rep'); \
+         m && m.click(); window.late = [+!!m, on, +document.body.classList.contains('rep')]; }, 600);";
+    let v = page(&url, &cookie, stays, &shots.join("ui-report-toast.png"));
+    assert_eq!(
+        v,
+        [1.0, 1.0, 0.0],
+        "the toast outlives its fade; a tap on it stops report mode"
+    );
     // Send: the bundle lands; its PNG is the row plus 24 px at the device's ratio.
     let send = tap(
         "const r = t.getBoundingClientRect(); f.requestSubmit(); \

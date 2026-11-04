@@ -606,15 +606,15 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { do
 addEventListener('online', () => { tries = 0; connect(); });
 addEventListener('offline', () => sync('r'));
 if (location.search) history.replaceState(null, '', location.pathname + (location.search.includes('all=1') ? '?all=1' : '') + location.hash);
-// #66: an action's result is a one-line toast under the header: ok fades after 4 s, an error stays; a tap dismisses it.
-function toast(text) {
+// #66: an action's result is a one-line toast under the header: ok fades after 4 s (report mode's stays), an error stays; a tap dismisses it.
+function toast(text, stay) {
   $$('.msg.g, .msg.r').forEach(m => m.remove());
   const m = document.createElement('p'), ok = !/^(REFUSED|error)/.test(text);
   m.className = 'msg ' + (ok ? 'g' : 'r');
   m.textContent = text;
   m.onclick = () => m.remove();
   $('header').after(m);
-  if (ok) setTimeout(() => { m.classList.add('out'); setTimeout(() => m.remove(), 400); }, 4000);
+  if (ok && !stay) setTimeout(() => { m.classList.add('out'); setTimeout(() => m.remove(), 400); }, 4000);
 }
 if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
@@ -1430,7 +1430,7 @@ cmds.onclick = e => { const li = e.target.closest('li'); if (li) pick(li.textCon
 const KEYS = ['display', 'position', 'width', 'height', 'margin', 'padding', 'border', 'border-radius', 'font-family', 'font-size',
   'font-weight', 'line-height', 'color', 'background-color', 'opacity', 'overflow', 'white-space', 'text-overflow', 'z-index'];
 let rep = null;
-function report() { close(); B.classList.add('rep'); toast('report: tap an element, then tap it again · tap here to stop'); }
+function report() { close(); B.classList.add('rep'); toast('report: tap an element, then tap it again · tap here to stop', true); }
 function unreport() { B.classList.remove('rep'); if (rep) rep.classList.remove('repo'); rep = null; $$('.repf').forEach(f => f.remove()); }
 document.addEventListener('click', e => {
   if (!B.classList.contains('rep') || e.target.closest('.repf')) return;
