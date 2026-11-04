@@ -113,20 +113,8 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
             }
             continue;
         }
-        ok(
-            r,
-            "gh",
-            &[
-                "pr",
-                "merge",
-                num,
-                "-R",
-                &f.repo,
-                "--merge",
-                "--match-head-commit",
-                head,
-            ],
-        )?;
+        let a = format!("pr merge {num} -R {} --merge --match-head-commit {head}", f.repo);
+        ok(r, "gh", &a.split(' ').collect::<Vec<_>>())?;
         let how =
             format!("Its landing was reverted by PR #{num}: bring the change back (revert that revert) with the fix.");
         reopen(ctx, cfg, r, out, (f, fleet), o, ("reverted", &how))?;

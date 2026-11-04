@@ -13,6 +13,8 @@ pub struct Item {
     pub serial: Vec<String>,
     /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
     pub needs: Vec<String>,
+    /// #365: queued from the board's backlog, its spec not checked yet (`needs-check`).
+    pub check: bool,
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | set (`needs`).
@@ -61,11 +63,13 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     blocked_by: None,
                     serial: serial.clone(),
                     needs: strs(&d["needs"]),
+                    check: d["check"] == true,
                 })
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blocked_by = old.blocked_by;
+                    m.check |= old.check;
                     m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
                     m.needs.dedup();
