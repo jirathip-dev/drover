@@ -1,0 +1,203 @@
+{
+ "fixture": {},
+ "today": {
+  "390": {
+   "pageHeight": 5040,
+   "rows": 71,
+   "firstRunningRowTop": 1322,
+   "viewport": 844
+  },
+  "390 bottom": {
+   "lastBottom": 760,
+   "navTop": 791,
+   "clear": 31
+  }
+ },
+ "next": {
+  "390 first screen": {
+   "repo": "herdsman",
+   "chip": "herdsman",
+   "rows": 15,
+   "pageHeight": 1301,
+   "inProgress": 8,
+   "inProgressBelowFold": [],
+   "sideways": false,
+   "pastRightEdge": [],
+   "titleColumns": [
+    88
+   ],
+   "more": "+ 32 more"
+  },
+  "390 chain open": {
+   "repo": "herdsman",
+   "chip": "herdsman",
+   "rows": 21,
+   "pageHeight": 1597,
+   "inProgress": 8,
+   "inProgressBelowFold": [
+    "359",
+    "357",
+    "340",
+    "350",
+    "298",
+    "351"
+   ],
+   "sideways": false,
+   "pastRightEdge": [],
+   "titleColumns": [
+    88
+   ],
+   "more": "+ 32 more",
+   "chainOpen": true,
+   "summary": "#265 → #270 · Decouple (6 steps) · next: #266"
+  },
+  "390 +N more open": {
+   "repo": "herdsman",
+   "chip": "herdsman",
+   "rows": 47,
+   "pageHeight": 3109,
+   "inProgress": 8,
+   "inProgressBelowFold": [],
+   "sideways": false,
+   "pastRightEdge": [],
+   "titleColumns": [
+    88
+   ],
+   "more": "+ 32 more",
+   "open": true,
+   "inPlace": true
+  },
+  "390 bottom": {
+   "lastBottom": 758,
+   "navTop": 791,
+   "clear": 34
+  },
+  "390 all": {
+   "repo": "*",
+   "chip": "*",
+   "rows": 4,
+   "pageHeight": 1107,
+   "inProgress": 0,
+   "inProgressBelowFold": [],
+   "sideways": false,
+   "pastRightEdge": [],
+   "titleColumns": [
+    88
+   ],
+   "more": null
+  },
+  "1440 first screen": {
+   "repo": "herdsman",
+   "chip": "herdsman",
+   "rows": 15,
+   "pageHeight": 1292,
+   "inProgress": 8,
+   "inProgressBelowFold": [],
+   "sideways": false,
+   "pastRightEdge": [],
+   "titleColumns": [
+    316
+   ],
+   "more": "+ 32 more"
+  }
+ },
+ "switch": {
+  "start": "herdsman",
+  "tap synergy": "synergy",
+  "swipe left": "berth",
+  "swipe right": "synergy",
+  "→": "berth",
+  "←": "synergy",
+  "tap all": "*",
+  "all rows": [
+   "herdsman #331",
+   "herdsman #300",
+   "synergy #88",
+   "synergy #90"
+  ],
+  "all: open row has its ask card": true,
+  "after reload": "*",
+  "1440 [›]": "synergy",
+  "1440 mouse drag right": "herdsman",
+  "1440 wheel": "synergy"
+ },
+ "contrast": {
+  "github-dark": {
+   "title": 6.15,
+   "todayTitle": 6.15,
+   "mute": 6.15
+  },
+  "solarized-dark": {
+   "title": 5.34,
+   "todayTitle": 5.34,
+   "mute": 5.34
+  },
+  "gruvbox": {
+   "title": 5.63,
+   "todayTitle": 5.63,
+   "mute": 5.63
+  },
+  "nord": {
+   "title": 5.78,
+   "todayTitle": 5.78,
+   "mute": 5.78
+  },
+  "dracula": {
+   "title": 6.75,
+   "todayTitle": 6.75,
+   "mute": 6.75
+  },
+  "paper": {
+   "title": 5.89,
+   "todayTitle": 5.89,
+   "mute": 5.89
+  },
+  "farm": {
+   "title": 7.12,
+   "todayTitle": 7.12,
+   "mute": 7.12
+  },
+  "kitchen": {
+   "title": 6.44,
+   "todayTitle": 6.44,
+   "mute": 6.44
+  }
+ },
+ "audit": {
+  "390": {
+   "controls": 20,
+   "outliers": [],
+   "rowsHiddenByDesign": 64,
+   "shownRowsWithoutOneLineTitle": []
+  },
+  "1440": {
+   "controls": 22,
+   "outliers": [],
+   "rowsHiddenByDesign": 64,
+   "shownRowsWithoutOneLineTitle": []
+  }
+ },
+ "tests": [
+  "ok   time 45 s",
+  "ok   time 6420 s",
+  "ok   time 7200 s",
+  "ok   time 36300 s",
+  "ok   time 3 d 4 h",
+  "ok   time 2 d",
+  "ok   phase: impl",
+  "ok   phase: review(1)",
+  "ok   phase: ready",
+  "ok   phase: queued has none",
+  "ok   needs you",
+  "ok   in progress: server order, a chain at its head",
+  "ok   queued: queue order",
+  "ok   chain summary",
+  "ok   chain steps all at level 1 (no staircase)",
+  "ok   branching chain: main line first, the side branch at level 2",
+  "ok   branching chain summary (no shared series: the first title)",
+  "ok   a running head with one queued step",
+  "ok   a blocker loop draws no chain",
+  "all passed"
+ ],
+ "errors": []
+}

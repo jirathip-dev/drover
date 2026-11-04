@@ -1,0 +1,66 @@
+/* #367: the Queue tab, one repo at a time. The chips stick under the header; [‹] [›] show on wide screens (a phone swipes). */
+.qchips{position:sticky;top:calc(var(--hit) + var(--s1) + 1px);z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s4);
+  padding:var(--s2) 0;background:var(--bg);border-bottom:1px solid var(--line)}
+.qcp{--fk:var(--fg);gap:.5ch;text-transform:none!important}
+.qcp>b{font-weight:400;color:var(--fk)}
+.qcp>.qn{font-size:var(--fs-meta);color:var(--mute)}
+.qcp[aria-selected=true]{background:var(--fk);color:var(--bg)}
+.qcp[aria-selected=true]>:is(b,.qn){color:var(--bg)}
+.qcp>.qd{position:absolute;top:calc(-1 * var(--s1) / 2);right:0;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--r);box-shadow:0 0 0 2px var(--bg)}
+.qcp[data-f="*"]>b{color:var(--fg)}
+.qnv{display:none!important}
+@media (min-width:720px){.qnv{display:inline-flex!important}.qnv[data-d="1"]{order:9;margin-left:auto}}
+/* A repo: its header and drive line, then the groups. `all` is the rows that need you, each titled with its repo. */
+.qall{--fk:var(--mute)}
+.qf{font-weight:400;color:var(--fk)}
+.qh{display:flex;align-items:baseline;gap:1ch;margin:var(--s3) 0 0;padding:0 0 var(--s1);border-bottom:1px solid var(--line);
+  font-size:var(--fs-meta);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.qh>span+span{font-weight:400;letter-spacing:0}
+.qg[data-g="0"]>.qh{color:var(--r)}
+/* Every row one grid: rail (4ch: a queued row's position, a chain step's elbow), its 28 px dot or sprite, #n, then the
+   state and its time; the title line starts at the #n column at every depth. */
+.qg details.q,.qg details.q:has(>summary .gt>.rsg){--gw:calc(4ch + var(--s4) + var(--s3))}
+.qg details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto}
+.qg .gt{display:flex;align-items:center;height:100%}
+.qg .gt>b{flex:none;display:inline-flex;justify-content:center;min-width:calc(var(--s4) + var(--s3))}
+.rl{flex:none;width:4ch;padding-right:1ch;box-sizing:border-box;text-align:right;font-style:normal;font-size:var(--fs-meta);color:var(--mute)}
+.qt{color:var(--mute)}
+.qg[data-g="2"] .qq{display:none}
+/* The title line stays --mute: 5.34:1 (solarized-dark) to 7.12:1 (farm) on the background in #244's eight schemes; shoot.mjs measures it. */
+.tl.qa{color:var(--fg)}
+/* ▲/▼ sit on the row (a 28 px box each, 44 px taps), not in its card. */
+.qmv{grid-area:1/4;display:flex;gap:var(--s4);min-width:max-content;padding-right:var(--s2)}
+.qmv form{gap:0}
+/* A chain: one row; open, its steps under it. The rail: a step at level 1 hangs off the trunk (1ch), a side branch's
+   step at level 2 off its own line (2.5ch); a solid 1 px line, so wrapped titles and open cards keep it unbroken. */
+.qch>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto auto}
+.qch>summary>.cv{grid-area:1/5;padding-right:var(--s2)}
+.qcl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The name gives way first; `(6 steps) · next: #266` (--tail wide) always shows. */
+.qcs>.qcn{display:inline-block;max-width:calc(100% - var(--tail));overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.qch[open]>summary{border-bottom:0}
+.qsteps>details.q{border:0;background:none}
+.qsteps>details.q::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4ch;pointer-events:none;--k:linear-gradient(var(--mute),var(--mute));
+  background:var(--k) no-repeat 1ch 0/1px 100%,var(--k) no-repeat 1ch var(--y)/3ch 1px}
+.qsteps>details.q .rl{visibility:hidden}
+.qsteps>details.st1.z::before{background:var(--k) no-repeat 1ch 0/1px var(--y),var(--k) no-repeat 1ch var(--y)/3ch 1px}
+.qsteps>details.st2::before{background:var(--k) no-repeat 1ch 0/1px 100%,var(--k) no-repeat 2.5ch 0/1px 100%,var(--k) no-repeat 2.5ch var(--y)/1.5ch 1px}
+.qsteps>details.st2.zz::before{background:var(--k) no-repeat 1ch 0/1px 100%,var(--k) no-repeat 2.5ch 0/1px var(--y),var(--k) no-repeat 2.5ch var(--y)/1.5ch 1px}
+.qsteps>details.st2.z::before{background:var(--k) no-repeat 2.5ch 0/1px 100%,var(--k) no-repeat 2.5ch var(--y)/1.5ch 1px}
+.qsteps>details.st2.z.zz::before{background:var(--k) no-repeat 2.5ch 0/1px var(--y),var(--k) no-repeat 2.5ch var(--y)/1.5ch 1px}
+/* `+ N more` opens in place; open, its line folds them again. */
+.qmore{border:0}
+.qmore>summary{display:flex;align-items:center;min-height:var(--hit);padding-left:calc(var(--gw, calc(4ch + 28px)) + var(--s2));color:var(--l)}
+.qmore>summary>span{flex:1}.qmore>summary .qml,.qmore[open]>summary .qmo{display:none}.qmore[open]>summary .qml{display:inline}
+.qmore>summary .qmo::after{content:" ▾"}.qmore>summary .qml::after{content:" ▴"}
+.qbl{border-bottom:0;border-top:1px solid var(--line);margin-top:var(--s3)}
+.qbl>summary{display:flex;gap:1ch;align-items:center;font-size:var(--fs-meta)}
+.qbl>summary>span:first-child{font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.qbl>summary>.m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The needs-you cards of the picked repo's rows sit in those rows; the stack above the tabs keeps the rest. */
+html[data-tab=queue] #needs>.ask.inq{display:none}
+.qg .cd>.ask{margin:var(--s2) 0}
+/* The last row clears the tab bar and the home indicator: the bar's height as drawn (queue.js measures it into --navh), plus 16 px. */
+html[data-tab=queue] body{padding-bottom:calc(var(--navh,calc(var(--hit) + var(--s2) + 1px + env(safe-area-inset-bottom))) + var(--s4))}
+/* Wide screens: one repo is one column, not a 1440 px line. */
+@media (min-width:1000px){#queue{max-width:960px;margin:0 auto}}
