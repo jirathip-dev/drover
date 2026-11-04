@@ -771,3 +771,99 @@ fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let last = st.verdicts.last().map(|v| v.0.as_str());
     assert_eq!((st.state.as_str(), last), ("ready", Some(x.as_str())), "{out}");
 }
+
+/// #429: under `warn_within` (default 500) lines of headroom cap-check warns and passes; over the cap it fails.
+#[test]
+fn cap_check_warns_within_reach_of_the_cap() {
+    let d = tmpdir("cap-warn");
+    let (c, r) = (ctx(&d, CONFIG), Fake::default());
+    let cap = |toml: &str| {
+        let p = d.join("cap.toml");
+        std::fs::write(&p, toml).unwrap();
+        run(&c, &r, &["cap-check", "--config", p.to_str().unwrap()])
+    };
+    let (_, out) = cap("[fleet.x]\nline_cap = 100000000\n");
+    let n: i64 = out
+        .split("formatted): ")
+        .nth(1)
+        .unwrap()
+        .split(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // As 24,100 and 24,500 lines against a cap of 24,500, then 24,600.
+    for (left, code, warn) in [(400, 0, true), (0, 0, true), (-100, 1, false)] {
+        let (got, out) = cap(&format!("[fleet.x]\nline_cap = {}\nwarn_within = 500\n", n + left));
+        assert_eq!(got, code, "{out}");
+        let line = format!("WARN: {left} lines of headroom (< 500)");
+        assert_eq!(out.contains(&line), warn, "{out}");
+    }
+    let (got, out) = cap(&format!("[fleet.x]\nline_cap = {}\n", n + 499));
+    assert!(
+        got == 0 && out.contains("WARN: 499 lines of headroom (< 500)"),
+        "default 500: {out}"
+    );
+    let (got, out) = cap(&format!("[fleet.x]\nline_cap = {}\n", n + 500));
+    assert!(got == 0 && !out.contains("WARN"), "{out}");
+    let (got, out) = cap(&format!("[fleet.x]\nline_cap = {}\nwarn_within = 10\n", n + 100));
+    assert!(got == 0 && !out.contains("WARN"), "warn_within read: {out}");
+}
+
+/// #429: `check` measures integration's head by git and emits `cap-near` once per integration sha, only under
+/// `warn_within`.
+#[test]
+fn check_emits_cap_near_once_per_integration_sha() {
+    let (_d, seed, c, cfg) = repos("cap-near");
+    let put = |files: &[(&str, &str)]| {
+        for (f, t) in files {
+            let p = seed.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        }
+        git(&seed, &["add", "."]);
+        git(&seed, &["commit", "-qm", "cap"]);
+        git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
+        git(&seed, &["rev-parse", "HEAD"])
+    };
+    let first = put(&[
+        ("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 504\n"),
+        ("src/a.rs", "1\n2\n\n"),
+        ("crates/x/src/m/b.rs", "1\n2"),
+        ("crates/x/tests/t.rs", "not\nsrc\n"),
+    ]);
+    let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
+    let near = || {
+        let ev = read(&c.state).unwrap();
+        ev.into_iter().filter(|e| e.kind == "cap-near").collect::<Vec<_>>()
+    };
+    for _ in 0..2 {
+        herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    }
+    let got = near();
+    assert_eq!(got.len(), 1, "once per sha, not per pass: {got:?}");
+    assert_eq!(got[0].str("key"), Some(first.as_str()));
+    let why = got[0].str("reason").unwrap();
+    assert!(
+        why.starts_with("499 lines of headroom (< 500)") && why.contains("5 / cap 504"),
+        "{why}"
+    );
+    let page = || {
+        let f = Fake::default();
+        let s = herdsman::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned()
+    };
+    assert!(
+        page().contains("<p class=r>cap-near: 499 lines of headroom on staging</p>"),
+        "board banner"
+    );
+    let second = put(&[("c.txt", "c\n")]);
+    herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    let got = near();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[1].str("key"), Some(second.as_str()));
+    put(&[("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 505\n")]);
+    herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    assert_eq!(near().len(), 2, "500 lines of headroom is not near");
+    assert!(!page().contains("cap-near"), "no banner after the raise");
+}

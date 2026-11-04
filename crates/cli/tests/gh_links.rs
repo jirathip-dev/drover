@@ -70,11 +70,13 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
 #[test]
 fn a_reviewer_event_links_the_prs_checks_not_its_own_branch() {
     let c = spawned("links-rev");
-    let page = get(
-        &Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
-        "/?all=1",
-    );
-    let ev = section(&page, "events");
+    let f = Fake::default();
+    let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+    let page = get(&s, "/?all=1");
+    // #266: the board's Events tab, from API v1.
+    let Some(ev) = events_tab(&s, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") else {
+        return;
+    };
     // #170: the reviewer's spawn (branch rev-12-r1) is the `rev started` row of the `[all]` view.
     let rev = ev
         .split("<details class=\"er")

@@ -20,7 +20,8 @@ function tab(t) {
   // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
-  if (!$('#' + t).childElementCount && sget('c:' + t)) frag(t, sget('c:' + t));
+  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined).
+  if (!$('#' + t).childElementCount && sget('c:' + t)) queueMicrotask(() => frag(t, sget('c:' + t)));
   wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
 }
 // #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
@@ -35,8 +36,9 @@ function wait(p) {
 function loading(on) { $('#ld').hidden = !on; }
 // #60: a part of the page read on demand (null when it cannot be read).
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
-// A form POST of `data` (an object or FormData) to `path`.
-const post = (path, data) => wait(fetch(R + path, { method: 'POST', body: new URLSearchParams(data) }));
+// A form POST of `data` (an object or FormData) to `path`; #403: `send` without the loading overlay (every chat post).
+const send = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
+const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
@@ -62,6 +64,7 @@ function mode(m) {
     a.classList.toggle('run', fs.length > 1);
   }
   ld.classList.toggle('la', m === 'ascii' && fs.length > 0);
+  chatPaint();
 }
 mode(get('mode'));
 // #244 schemes: pure from here to `schemes:end` (tests/schemes.rs runs it under node). A scheme is
@@ -281,7 +284,7 @@ function rows(root) {
     g.replaceChildren(el('i', 'rsp rsa', f));
     g.firstChild.setAttribute('aria-hidden', true);
   };
-  root.querySelectorAll('details.q').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('details.q, .qc').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
   root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
   const L = (TT && TT.looks) || [];
   root.querySelectorAll('.av[data-act]').forEach(v => {
@@ -295,6 +298,7 @@ function rows(root) {
     else a.innerHTML = a.dataset.o;
     px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
   });
+  words(root);
 }
 // #241: a Host group's load scene in miniature (its status: calm, busy or held): wind and clouds, or flame height.
 const MINI = {
@@ -321,6 +325,142 @@ function moment(k) {
   o.hidden = false;
   clearTimeout(o.t);
   o.t = setTimeout(() => { o.hidden = true; }, 2400);
+}
+// #370: the theme's words on every tab, `<b class=thw>on the line</b><small class=pw> · working</small>` (the plain word
+// muted); a word the theme lacks is the plain word alone, so terminal (no words) is today's board. A label keeps its
+// plain text in data-p, so a theme switch re-pairs it from the original.
+const PW = { needs: 'needs you', working: 'working', idle: 'idle', done: 'done', queued: 'queued', parked: 'parked', dead: 'dead',
+  impl: 'build', fix: 'fix', rev: 'review', update: 'catch up', merged: 'merged', fail: 'FAIL' };
+const TW = () => (TT && TT.words) || {};
+const tw = (k, plain, rest = '') => TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw> · ${esc(plain + rest)}</small>` : esc(plain + rest);
+function relabel(n, k, plain, rest = '') {
+  if (!n) return;
+  if (n.dataset.p == null) n.dataset.p = n.textContent;
+  const h = TW()[k] ? tw(k, plain, rest) : esc(n.dataset.p);
+  if (n.innerHTML !== h) n.innerHTML = h;
+}
+// A row sprite shows `hr-<k>` (a queued, needs-you, merged or FAIL row) while the theme has it, else its action's: the
+// same <use>, its href changed, never a new node (#334).
+function use(g, k) {
+  const u = g && g.querySelector('use');
+  if (!u) return;
+  if (u.dataset.a == null) u.dataset.a = u.getAttribute('href');
+  const h = k && document.getElementById('hr-' + k) ? '#hr-' + k : u.dataset.a;
+  if (u.getAttribute('href') !== h) u.setAttribute('href', h);
+}
+const QK = { need: 'needs', prog: 'working', queue: 'queued' }, ROLE = { impl: 'impl', review: 'rev', fix: 'fix', update: 'update' };
+const EVK = d => {
+  const k = d.dataset.k, a = d.querySelector('.kg')?.dataset.act;
+  return k === 'merged' ? 'merged' : k === 'verdict' ? (a === 'blocked' ? 'fail' : 'rev') : /^needs-(human|decision)$/.test(k) ? 'needs' : k === 'queue' ? 'queued' : k === 'spawn' ? a : null;
+};
+function words(root) {
+  if (!TT) return; // esc and the theme come later; herd.js's theme() runs rows(document) again
+  for (const t of ['queue', 'lanes', 'host', 'events']) { // each tab's own first line: `the rail · events`
+    const s = root.id === t ? root : root === document ? document.getElementById(t) : null;
+    if (!s) continue;
+    let p = s.querySelector(':scope>.tsub');
+    if (!TW()['tab-' + t]) { p?.remove(); continue; }
+    if (!p) s.prepend(p = el('p', 'tsub'));
+    p.innerHTML = tw('tab-' + t, t);
+  }
+  root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
+  root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
+  root.querySelectorAll('details.q').forEach(d => {
+    const o = d.querySelector('summary>span:nth-of-type(2)'), s = o && (o.querySelector(':scope>span') || o);
+    if (!s) return;
+    const p = s.dataset.p ?? s.textContent, m = p.match(/^(impl|review|fix|update)(.*)$/), k = m ? ROLE[m[1]]
+      : /^queued/.test(p) ? 'queued' : /needs-human|waiting/.test(p) ? 'needs' : p === 'dead' || p === 'parked' ? p : null;
+    if (k) relabel(s, k, m ? PW[k] : k === 'needs' ? p.replace(/^⏸ /, '').replace('needs-human', 'needs you') : p, m ? m[2] : '');
+    use(d.querySelector('summary .gt>b'), k === 'queued' || k === 'needs' ? k : null);
+  });
+  root.querySelectorAll('details.done>summary>span').forEach(s => relabel(s, 'done', s.dataset.p ?? s.textContent));
+  root.querySelectorAll('#lanes h2>span').forEach(s => {
+    const [, g, n] = (s.dataset.p ?? s.textContent).match(/^(\S+) (\(\d+\))$/) || [], k = g === 'blocked' ? 'needs' : g;
+    if (PW[k]) relabel(s, k, PW[k], ' ' + n);
+  });
+  // Events: the kind's theme word before the row's words, in the row's tone, and its sprite by kind.
+  root.querySelectorAll('details.er').forEach(d => {
+    const sm = d.querySelector('.sm'), k = EVK(d);
+    if (sm.dataset.p == null) sm.dataset.p = sm.innerHTML;
+    const h = k && TW()[k] ? `<b class="thw ev">${esc(TW()[k])}</b> ${sm.dataset.p}` : sm.dataset.p;
+    if (sm.innerHTML !== h) sm.innerHTML = h;
+    use(d.querySelector('.kg'), k);
+  });
+  root.querySelectorAll('[data-v]').forEach(v => { if (!v.querySelector('.er, .ne')) v.append(el('p', 'm ne', 'no events')); });
+  root.querySelectorAll('p.m').forEach(p => { // an empty tab: the theme line over the server's plain one
+    const t = p.dataset.p ?? p.textContent, k = { 'no open work': 'empty-queue', 'no agents': 'empty-lanes', 'no events': 'empty-events' }[t];
+    if (!k) return;
+    p.dataset.p = t;
+    p.classList.toggle('empty', !!TW()[k]);
+    const h = TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw>${esc(t)}</small>` : esc(t);
+    if (p.innerHTML !== h) p.innerHTML = h;
+  });
+  const ld = $('#ld');
+  let q = ld.querySelector('.ldw');
+  if (!q) ld.append(q = el('p', 'ldw'));
+  if (q.innerHTML !== (TW().loading ? tw('loading', 'loading') : '')) q.innerHTML = TW().loading ? tw('loading', 'loading') : '';
+  // A Host card's load: the theme's 48 × 16 mini (two frames) and its level word, `simmer · calm`; the same level keeps it.
+  root.querySelectorAll('article.hcd').forEach(c => {
+    const h = c.querySelector('.hhd .hnm'), had = h.querySelector('.lsm'), r = c.querySelector('details.rw[data-k=load]'), ls = TT.load_scene || {};
+    const x = r && +r.querySelector('summary .w b')?.textContent / +r.dataset.l;
+    if (!ls.minis || ls.kind === 'none' || !(x >= 0) || !document.getElementById('hl-calm')) return void had?.remove();
+    const l = x >= 1 ? 'held' : x >= 0.5 ? 'busy' : 'calm', w = (ls.levels || {})[l] || l;
+    if (had && had.dataset.l === l + w) return;
+    had?.remove();
+    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 48 16" aria-hidden=true><use href="#hl-${l}"/></svg><b class=thw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
+  });
+  pushwords();
+}
+// #370: a moment plays on its issue's row on the visible tab, once per seq, 2.4 s (else the #mo overlay, as before). A
+// swap that rebuilds the row mid-moment re-applies it with a negative delay: it resumes, never restarts.
+const MO = new Map(), PLAYED = new Set(), MK = { merged: 'merged', fail: 'fail', 'needs-you': 'needs' };
+function target(f, n, k) {
+  const t = document.documentElement.dataset.tab, hit = a => a && a.textContent === '#' + n;
+  if (t === 'queue') return [...$$('#queue details.q')].find(d => d.offsetParent && hit(d.querySelector('summary a')) && d.closest('.fc')?.querySelector('.fn>b')?.textContent === f);
+  if (t === 'events') {
+    const all = [...$$('#events details.er')].filter(d => d.dataset.f === f && d.offsetParent && hit(d.querySelector('summary .n')));
+    return all.find(d => EVK(d) === MK[k]) || all[0];
+  }
+  if (t === 'lanes') return [...$$('#lanes .lane')].find(l => (l.dataset.agent || '').startsWith(f + '-') && l.dataset.agent.endsWith('-' + n));
+}
+const msum = r => r.querySelector('summary') || r.querySelector('.lr') || r;
+function play(r, k, t0) {
+  const s = msum(r);
+  s.dataset.mo = k;
+  s.style.setProperty('--mo-d', `${t0 - Date.now()}ms`);
+  use(s.querySelector('.rsg, .kg'), MK[k]);
+  if (!s.querySelector('.mot') && TW()[MK[k]]) s.insertAdjacentHTML('beforeend', `<i class=mot>${esc(TW()[MK[k]])}${k === 'merged' ? '!' : ''}</i>`);
+}
+function rmoment(k, f, n, seq) {
+  if (PLAYED.has(seq)) return;
+  PLAYED.add(seq);
+  const r = n != null && TT && TT.moments && TT.moments[k] && target(f, n, k);
+  if (!r) return moment(k);
+  const m = { k, f, n, t0: Date.now() };
+  MO.set(seq, m);
+  play(r, k, m.t0);
+  setTimeout(() => {
+    MO.delete(seq);
+    const x = target(f, n, k), s = x && msum(x);
+    if (!s) return;
+    delete s.dataset.mo;
+    s.querySelector('.mot')?.remove();
+    words(x.parentNode);
+  }, 2400);
+}
+const again = () => MO.forEach(m => { const r = target(m.f, m.n, m.k); if (r && !msum(r).dataset.mo) play(r, m.k, m.t0); });
+// #370: the push words of this phone's theme go with its subscription (`Order up: #2957 merged`); a theme switch re-sends
+// them quietly (no test push). None: today's titles.
+const pw = () => ({ words: JSON.stringify(Object.fromEntries(['merged', 'needs'].filter(k => TW()[k]).map(k => [k, TW()[k][0].toUpperCase() + TW()[k].slice(1)]))) });
+let PWT = '';
+async function pushwords() {
+  const w = JSON.stringify(pw());
+  if (DEMO || PWT === w || (get('push:w') ?? JSON.stringify({ words: '{}' })) === w || !('serviceWorker' in navigator)) return;
+  PWT = w; // one try per page and theme
+  try {
+    const s = (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.toJSON();
+    if (s && (await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth, quiet: 1, ...pw() })).ok) put('push:w', w);
+  } catch (e) {}
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
@@ -371,14 +511,15 @@ function frag(id, html) {
   const rows = e => new Map([...e.querySelectorAll('details,.lane')].map(r => [key(r), r]));
   const old = new Map([...rows(el)].map(([k, r]) => [k, sig(r)])), nu = el.cloneNode(false), y = scrollY;
   nu.innerHTML = html;
-  if (id === 'events') olds(nu);
+  if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
+  again();
   bshow(el);
   nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
-  rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
+  if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
   last = Date.now();
   sput('c:' + id, html);
   alerts();
@@ -509,7 +650,12 @@ function groups() {
 }
 document.addEventListener('toggle', e => { if (e.target.matches('.grp')) sput(gname(e.target), e.target.dataset.t + +e.target.open); }, true);
 // #141: `[queue·N]`, N the needs-you cards above the tabs.
-function badge() { const n = $$('#needs .ask').length; $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : ''); }
+function badge() {
+  const n = $$('#needs .ask').length, c = +($('#chn')?.dataset.n || 0); // #386: `[chat·N]`, the threads where a choice waits
+  $('nav a[href="#queue"]>span').innerHTML = 'queue' + (n ? `<b class=n>·${n}</b>` : '');
+  const ch = $('nav a[href="#chat"]>span');
+  if (ch) ch.innerHTML = 'chat' + (c ? `<b class=n>·${c}</b>` : '');
+}
 // #68: buttons hold labels, never sentences: a control's runtime result is an 11 px `p.st` under it (red on error).
 function note(b, msg, ok) {
   let s = b.nextElementSibling;
@@ -540,25 +686,27 @@ document.addEventListener('click', async e => {
     const key = Uint8Array.from(atob(b.dataset.key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
     const reg = await navigator.serviceWorker.ready;
     const s = (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })).toJSON();
-    const r = await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth });
+    const r = await post('push/subscribe', { endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth, ...pw() });
+    if (r.ok) put('push:w', JSON.stringify(pw()));
     const msg = (await r.text()).trim();
     if (r.status === 401) return unpaired();
     note(b, msg, r.ok);
     if (r.ok) refresh();
   } catch (err) { note(b, 'alerts failed: ' + err.message, false); }
 });
-// Network only (the SW passes `frags` through); spins ↻ until done.
-async function refresh() {
+// Network only (the SW passes `frags` through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
+async function refresh(quiet) {
   dbg('refresh');
   if (DEMO) return herdPull();
   claim();
   busy = true;
   sync('a');
   try {
-    const t = document.documentElement.dataset.tab, j = await wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
+    const t = document.documentElement.dataset.tab, j = await (quiet ? x => x : wait)(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
     have.clear();
     have.add(t);
     for (const id in j) frag(id, j[id]);
+    dispatchEvent(new Event('herd-refresh')); // #266: the TypeScript board's tabs read the API again
     herdPull();
     busy = false;
     sync(live() ? 'g' : 'a');
@@ -586,8 +734,11 @@ function connect() {
     if (!o) return refresh();
     got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
   });
+  // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
+  es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
-  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); if (j.k && Date.now() / 1e3 - j.ts < 120) moment(j.k); });
+  es.addEventListener('host', e => (at(e), dispatchEvent(new CustomEvent('herd-host', { detail: JSON.parse(e.data) })))); // #267: the TypeScript board draws it
+  es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
   es.onerror = () => {
@@ -719,59 +870,15 @@ function tree(p, rows, end) {
   });
   walk(roots, [], 0);
 }
-// #170: the Events chips, kept per phone (`events:filter` → {"k":"imp","fl":["atlas"]}); [important], every fleet by default.
-let EF = null;
-try { EF = JSON.parse(get('events:filter')); } catch (e) {}
-if (!EF || !['all', 'imp'].includes(EF.k) || !Array.isArray(EF.fl)) EF = { k: 'imp', fl: [] };
-function evf(root) {
-  const fls = [...root.querySelectorAll('.chips [data-fl]')].map(b => b.dataset.fl);
-  if (fls.length) EF.fl = EF.fl.filter(f => fls.includes(f)); // a fleet gone from fleet.toml no longer hides every row
-  root.querySelectorAll('.chips [data-k]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === EF.k));
-  root.querySelectorAll('.chips [data-fl]').forEach(b => b.setAttribute('aria-pressed', EF.fl.includes(b.dataset.fl)));
-  root.querySelectorAll('[data-v]').forEach(v => v.hidden = v.dataset.v !== EF.k);
-  root.querySelectorAll('.er').forEach(r => r.hidden = EF.fl.length > 0 && !EF.fl.includes(r.dataset.f));
-  root.querySelectorAll('.eg').forEach(g => {
-    const n = g.querySelectorAll('.er:not([hidden])').length;
-    g.hidden = !n;
-    g.querySelector('h3>span+span').textContent = n;
-  });
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest('.chips button'), f = b && b.dataset.fl;
-  if (!b) return;
-  if (b.dataset.k) EF.k = b.dataset.k; else EF.fl = EF.fl.includes(f) ? EF.fl.filter(x => x !== f) : [...EF.fl, f];
-  put('events:filter', JSON.stringify(EF));
-  evf(document);
-});
-// #351: Events opens with 100 rows a view; [older] loads the next 100 under them (`frag?id=events&skip=`), kept across
-// live swaps: EO holds each view's loaded pages (marked .pg), put back in place of the first page's [older].
-const EO = {};
-function olds(root) {
-  for (const v in EO) { const b = root.querySelector(`[data-v=${v}]>.eo:not(.pg)`); if (b) b.outerHTML = EO[v]; }
-}
-document.addEventListener('click', async e => {
-  const b = e.target.closest('.eo'), d = b && b.parentNode;
-  if (!b || b.disabled) return;
-  b.disabled = true;
-  const t = document.createElement('div'), v = d.dataset.v;
-  t.innerHTML = (await part('frag?id=events&skip=' + b.dataset.skip)) || '';
-  const ns = [...t.querySelectorAll(`[data-v=${v}]>.eg, [data-v=${v}]>.eo`)];
-  if (!ns.length) return (b.disabled = false);
-  ns.forEach(n => n.classList.add('pg'));
-  b.replaceWith(...ns);
-  tidy(d);
-  EO[v] = [...d.querySelectorAll(':scope>.pg')].map(n => n.outerHTML).join('');
-  evf(document);
-});
 // #367 queue: pure from here to `queue:end` (tests/queue_tab.rs runs it under node). A row's group: needs you, in
 // progress, queued (the rest); its time in one unit style, naming the phase it measures; a blocked chain's one line.
 const QG = { need: 'needs you', prog: 'in progress', queue: 'queued' };
 const qgroup = s => /^(needs-human|⏸)/.test(s) ? 'need' : /^(impl|review|fix|ready|update|dead|parked)/.test(s) ? 'prog' : 'queue';
 const dur = t => t < 60 ? `${t}s` : t < 3600 ? `${Math.floor(t / 60)}m` : t < 86400 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h`;
-const inph = (s, t) => `in ${s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0]} ${dur(t)}`;
-// steps: [{n, title, b}] depth-first, the root first (b: its blocker). Head, title, tail: the tail names the step the
-// chain waits on next: the root's open blocker, else the root.
-const qsum = st => [`#${st[0].n} → #${st[1].n} · `, st[0].title, ` (${st.length} steps) · next: #${st[0].b || st[0].n}`];
+const qphase = s => s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0], inph = (s, t) => `in ${qphase(s)} ${dur(t)}`;
+// steps: [{n, title, b}] depth-first, the root first (b: its blocker); s: the state word of the step the chain waits on
+// next (the root's open blocker, else the root), '' when off the board. #391: the chain row's third line, first → last.
+const qsum = (st, s) => `#${st[0].n} → #${st.at(-1).n} · next: #${st[0].b || st[0].n}${s ? ` (${qgroup(s) === 'prog' ? 'in ' : ''}${qphase(s)})` : ''}`;
 // queue:end
 // #365 backlog: pure from here to `backlog:end` (tests/backlog.rs runs it under node). The server's last read {n: {title,
 // labels, created, updated, ac, pr}} as rows newest first, `stale` when untouched for 90 days; a row shows when it has
@@ -867,11 +974,17 @@ function qfold(root) {
       // A row's place in the queue; a chain's steps leave theirs to the chain row.
       [d, ...rest].forEach(x => { x.querySelector('summary>.m').textContent = rest.length ? '' : '#' + (i + 1); });
       if (!rest.length) return d;
-      const step = x => ({ n: x.querySelector('summary>span').textContent.slice(1), title: x.querySelector('summary>.tl')?.title || '', b: x.dataset.b });
-      const [h, t, tail] = qsum([d, ...rest].map(step)), at = h.indexOf('→') + 1, c = el('details', 'qc');
-      c.innerHTML = '<summary><i class=cv></i><span></span><span class=qct><span></span><span class=el></span><span></span></span><span class=m></span></summary>';
-      const [a, , x, y, z, m] = c.querySelectorAll('summary span');
-      [a.textContent, x.textContent, y.textContent, z.textContent, m.textContent, y.title] = [h.slice(0, at), h.slice(at), t, tail, '#' + (i + 1), t];
+      // #391: a normal row: the first step's avatar, number and title, `chain · N` as its state, its place, and a third
+      // line naming the steps and the one it waits on next, with that one's state when it is on the board.
+      const n = x => x.querySelector('summary>span').textContent, st = [d, ...rest].map(x => ({ n: n(x).slice(1), b: x.dataset.b }));
+      const nx = [...g.parentNode.querySelectorAll('details.q')].find(x => n(x) === '#' + (st[0].b || st[0].n));
+      const c = el('details', 'qc'), s = d.querySelector('summary').cloneNode(true);
+      s.querySelector('.gt>b')?.classList.remove('k');
+      s.querySelector(':scope>span:nth-of-type(2)').replaceChildren(el('span', 'a', `chain · ${st.length}`));
+      s.querySelector(':scope>.m').textContent = '#' + (i + 1);
+      s.append(el('span', 'cst', qsum(st, nx ? nx.querySelector('summary>span:nth-of-type(2)>span').textContent : '')));
+      c.dataset.act = d.dataset.act;
+      c.append(s);
       d.before(c);
       c.append(d, ...rest);
       return c;
@@ -931,7 +1044,6 @@ function tidy(root) {
   qfold(root);
   qchips(root);
   rows(root);
-  evf(root);
   hostrow(root);
   root.querySelectorAll('.lr>span:nth-of-type(3)').forEach(tip);
   root.querySelectorAll('select').forEach(s => {
@@ -1284,7 +1396,8 @@ document.addEventListener('click', async e => {
   x.innerHTML = '<div class=card><p class="nw el"></p></div>';
   x.querySelector('p').textContent = `sign in: ${b.dataset.su} on ${b.dataset.host}; closes when it exits or in 10 min`;
   Object.assign(x.dataset, { agent: 'sign in · ' + b.dataset.su, role: 'setup', setup: m });
-  b.closest('details').open = false;
+  const d = b.closest('details'); // a chat line's [sign in] has none
+  if (d) d.open = false;
   open(x);
 });
 // #218: a Queue card's lane opens by its name, not by a Lanes row (that tab may not list it): one transcript read
@@ -1549,6 +1662,9 @@ document.addEventListener('click', async e => {
   if (q) { e.preventDefault(); return byName(q); }
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
+  // #422: a conductor's row opens its thread in the chat tab (a message there wakes an asleep one).
+  const th = b.classList.contains('lr') && b.parentNode.dataset.thread;
+  if (th) { tab('chat'); if (es) connect(); chatOpen(th); return history.pushState({ thr: th }, ''); }
   if (b.classList.contains('lr')) return open(b.parentNode);
   const a = b.closest('.ask'), lane = laneOf(a.dataset.ask);
   if (b.classList.contains('rp')) return lane && open(lane);
@@ -1629,7 +1745,7 @@ $('.reply').onsubmit = async e => {
   if (r.ok) { e.target.text.value = ''; setTimeout(poll, 1500); }
 };
 // #59: Pair this phone (header, blocked cards, the sheet): POST `pair/request` shows a code; its 10 min HttpOnly cookie is this
-// browser's alone. The Mac approves it (`serve approve`, logged: the live Events frag arrives, or ↻), then `pair/claim` keeps it a year.
+// browser's alone. The Mac approves it (`serve approve`, logged: its `ev` arrives on `/live`, or ↻), then `pair/claim` keeps it a year.
 // The panel flows under the header (or the sheet's Pair button), never over a card; a tap closes it; it expires with the code.
 B.insertAdjacentHTML('beforeend', '<div id=pairp class=pairp hidden></div>');
 const pp = $('#pairp');
@@ -1785,3 +1901,250 @@ function pgraph(d) {
   const rep = spans.length ? ` repeat(${spans.length},2ch)` : '';
   return `<div class=pg role=img aria-label="${esc(d.fleet)} pipeline: ${esc(S.map(s => s.name).join(', '))}" style="grid-template-columns:2ch minmax(0,1fr)${rep};grid-template-rows:repeat(${row},var(--ln))">${h}</div>`;
 }
+// #386: the [chat] tab. The page carries every thread's view; one is open (sessionStorage, or a push's `?thread=`):
+// on a phone the list or that thread, from 1000 px both. #cht is the style that picks it, so a live swap keeps it.
+// `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
+// #405: ATT, the files picked for one thread's next message: { t, l: [{ name, file, src }] } (src: an image's object URL).
+var THR = DBG.get('thread') || sget('thread') || '', ATT = null;
+B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+function chatOpen(t) {
+  THR = t;
+  sput('thread', t);
+  const q = CSS.escape(t);
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+@media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
+  if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
+  if (t) scrollTo(0, document.body.scrollHeight);
+}
+// #403: back to the list: the history entry a thread's open pushed, else straight there.
+const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
+addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
+// Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
+// (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
+// working thread's mark is the loading overlay's art (#ld: the theme's sprite, ascii frames or the glyph), and each
+// message sent this session shows: `sending…`, then ✓ on the thread's copy; failed, red with [retry].
+const SENT = [];
+function chatPaint(root = $('#chat')) {
+  if (!root || ATT === undefined) return; // before the `var` line runs
+  root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
+  root.querySelectorAll('.ats').forEach(e => e.remove());
+  const tw = ATT && root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`);
+  if (tw) {
+    const row = tw.insertBefore(el('div', 'ats'), tw.firstChild);
+    ATT.l.forEach((a, i) => {
+      const im = a.src ? Object.assign(document.createElement('img'), { src: a.src, alt: a.name }) : el('span', '', a.name);
+      row.appendChild(el('div', 'att')).append(im, Object.assign(el('button', '', '×'), { type: 'button', ariaLabel: 'remove ' + a.name, value: i }));
+    });
+  }
+  root.querySelectorAll('.tw textarea').forEach(a => { a.style.height = $(`#chat .tw[data-t="${CSS.escape(a.form.dataset.t)}"] textarea`)?.style.height || ''; });
+  root.querySelectorAll('.tld').forEach(i => { i.innerHTML = $('#ld').innerHTML; });
+  root.querySelectorAll('.snt').forEach(e => e.remove());
+  for (const p of SENT) {
+    const tc = root.querySelector(`.cvp[data-t="${CSS.escape(p.t)}"] .tc`), mine = tc ? tc.querySelectorAll('.blk.me:not(.snt)') : [];
+    if (mine.length > p.n) { mine[p.n].querySelector('summary .ct').before(el('b', 'snt sk', '✓')); continue; }
+    if (!tc) continue;
+    const b = tc.appendChild(el('details', 'blk me snt' + (p.st === '✗' ? ' bad' : '')));
+    b.open = true;
+    b.innerHTML = '<summary><span class=k>you</span><span class=pv></span><span class=ct></span><i class=cv></i></summary><div class=md><p></p></div>';
+    b.querySelector('.pv').textContent = p.text.split('\n')[0];
+    b.querySelector('.ct').textContent = p.st === '✗' ? '✗ not sent' : p.st;
+    b.querySelector('.md p').textContent = p.text;
+    if (p.st === '✗') b.querySelector('.md').append(Object.assign(el('button', 'rt', 'retry'), { type: 'button' }));
+  }
+}
+// #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
+const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
+document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
+chatOpen(THR);
+chatPaint();
+document.addEventListener('click', async e => {
+  const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
+  const lk = t.closest('#chat .lc'); // #413: a linked row's chip opens the other thread
+  if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
+  else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
+  else if (t.closest('#chat .bk')) chatBack();
+  else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
+  else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
+  else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }
+  else if (t.closest('#chat .sb')) { const b = t.closest('.sb'); chatPost({ op: b.name, t: b.dataset.t }); }
+  else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
+  else if (t.closest('#chat .att button')) { ATT.l.splice(+t.closest('button').value, 1); if (!ATT.l.length) ATT = null; chatPaint(); }
+  else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+  else if (t.closest('#chat .cpy')) copyBox(t.closest('.cpy'));
+  else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
+});
+// #405: a thread row swiped left shows its [archive] (one row at a time); swiped right, it hides again. The click that
+// ends a swipe opens nothing.
+let rsw = null, rswiped = false;
+document.addEventListener('pointerdown', e => { const r = e.target.closest('#chat .sw>.tr'); rsw = r && { r, x: e.clientX, y: e.clientY }; rswiped = false; });
+document.addEventListener('pointerup', e => {
+  if (!rsw) return;
+  const dx = e.clientX - rsw.x, dy = e.clientY - rsw.y, sw = rsw.r.parentNode;
+  rsw = null;
+  if (Math.abs(dx) < 40 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+  rswiped = true;
+  $$('#chat .sw.op').forEach(o => { if (o !== sw) o.classList.remove('op'); });
+  sw.classList.toggle('op', dx < 0);
+});
+document.addEventListener('click', e => { if (rswiped && e.target.closest('#chat .sw>.tr')) { rswiped = false; e.preventDefault(); e.stopPropagation(); } }, true);
+// #406: an image tap opens the viewer over the page (the URL stays): black, the image fitted; pinch or double-tap to
+// zoom, drag to pan; swipe down or [×] to close; left/right through the message's images; [save] shares or downloads.
+const IV = B.appendChild(Object.assign(document.createElement('div'), { id: 'iv', hidden: true }));
+IV.innerHTML = '<img alt=""><div class=ivb><button type=button class=ivx aria-label=close>×</button><span class=ivn></span><button type=button class=ivs>save</button></div>';
+const IVI = IV.querySelector('img'), PT = new Map();
+let ivl = [], ivn = 0, ivz = { s: 1, x: 0, y: 0 }, ivg = null, ivt = -1e4;
+const ivDraw = () => { IVI.style.transform = `translate(${ivz.x}px,${ivz.y}px) scale(${ivz.s})`; };
+function ivShow(i) {
+  ivn = Math.max(0, Math.min(ivl.length - 1, i));
+  [IVI.src, IVI.alt] = ivl[ivn];
+  IV.querySelector('.ivn').textContent = ivl.length > 1 ? `${ivn + 1} / ${ivl.length}` : '';
+  ivz = { s: 1, x: 0, y: 0 };
+  ivDraw();
+}
+function iv(list, src) { ivl = list; ivShow(list.findIndex(l => l[0] === src)); IV.hidden = false; }
+// Pointer positions from the viewer's centre (the image's transform origin); their mean, their spread.
+const ivAt = ps => { const r = IV.getBoundingClientRect(); return [ps.reduce((a, p) => a + p[0], 0) / ps.length - r.width / 2, ps.reduce((a, p) => a + p[1], 0) / ps.length - r.height / 2]; };
+const ivSpan = ps => Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]);
+// A double tap zooms 2.5× on that point, or back to fitted.
+function ivTap(x, y) {
+  const [px, py] = ivAt([[x, y]]), s = ivz.s > 1 ? 1 : 2.5;
+  ivz = s > 1 ? { s, x: px * (1 - s), y: py * (1 - s) } : { s: 1, x: 0, y: 0 };
+  ivDraw();
+}
+IV.addEventListener('click', async e => {
+  if (e.target.closest('.ivx')) IV.hidden = true;
+  if (!e.target.closest('.ivs')) return;
+  const [src, name] = ivl[ivn], b = await fetch(src).then(r => r.blob()).catch(() => null);
+  if (!b) return toast('error: could not read ' + name);
+  const f = new File([b], name, { type: b.type });
+  if (navigator.canShare?.({ files: [f] })) return navigator.share({ files: [f] }).catch(() => {});
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(b), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1e3);
+});
+IV.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
+  PT.set(e.pointerId, [e.clientX, e.clientY]);
+  ivg = { z: ivz, p: [...PT.values()], moved: PT.size > 1 };
+  IV.classList.add('dr');
+});
+IV.addEventListener('pointermove', e => {
+  if (!PT.has(e.pointerId)) return;
+  PT.set(e.pointerId, [e.clientX, e.clientY]);
+  const p = [...PT.values()], [x0, y0] = ivAt(ivg.p), [x, y] = ivAt(p), dx = x - x0, dy = y - y0;
+  if (p.length > 1 && ivg.p.length > 1) {
+    const s = Math.min(6, Math.max(1, ivg.z.s * ivSpan(p) / ivSpan(ivg.p))), k = s / ivg.z.s;
+    ivz = { s, x: x - (x0 - ivg.z.x) * k, y: y - (y0 - ivg.z.y) * k };
+  } else if (ivg.z.s > 1) ivz = { s: ivg.z.s, x: ivg.z.x + dx, y: ivg.z.y + dy };
+  else ivz = Math.abs(dy) > Math.abs(dx) ? { s: 1, x: 0, y: Math.max(0, dy) } : { s: 1, x: dx, y: 0 };
+  ivg.moved ||= Math.hypot(dx, dy) > 10;
+  ivDraw();
+});
+const ivUp = e => {
+  if (!PT.delete(e.pointerId)) return;
+  if (PT.size) return void (ivg = { z: ivz, p: [...PT.values()], moved: true }); // one finger of a pinch lifted: it pans on
+  IV.classList.remove('dr');
+  if (ivz.s === 1) { // fitted again: a swipe from fitted closes or turns; any other ends centred (a pinch back out too)
+    if (ivg.z.s === 1 && ivz.y > 80) return void (IV.hidden = true);
+    if (ivg.z.s === 1 && Math.abs(ivz.x) > 60) return ivShow(ivn + (ivz.x < 0 ? 1 : -1));
+    ivz = { s: 1, x: 0, y: 0 };
+    ivDraw();
+  }
+  if (ivg.moved) return;
+  const now = performance.now();
+  if (now - ivt < 300) { ivt = -1e4; ivTap(e.clientX, e.clientY); } else ivt = now;
+};
+IV.addEventListener('pointerup', ivUp);
+IV.addEventListener('pointercancel', ivUp);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') IV.hidden = true; });
+// #405: the picker multi-selects and [+] adds more, up to 10 a message (the rest are dropped with a toast).
+document.addEventListener('change', e => {
+  const i = e.target;
+  if (!i.matches('#chat .tw input[type=file]') || !i.files.length) return;
+  const t = i.closest('.tw').dataset.t, fs = [...i.files];
+  i.value = '';
+  if (!ATT || ATT.t !== t) ATT = { t, l: [] };
+  const room = 10 - ATT.l.length;
+  if (fs.length > room) toast(`at most 10 files a message: ${fs.length - room} left out`);
+  ATT.l.push(...fs.slice(0, room).map(f => ({ name: f.name, file: f, src: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' })));
+  chatPaint();
+});
+// #409: a code box's [copy]: its exact text to the clipboard, then `copied` for 1.5 s; without the clipboard API
+// (plain http) the text is selected instead.
+function copyBox(b) {
+  const p = b.previousElementSibling, pick = () => getSelection().selectAllChildren(p);
+  if (!navigator.clipboard) return pick();
+  navigator.clipboard.writeText(p.textContent).then(() => { b.textContent = 'copied'; setTimeout(() => { b.textContent = 'copy'; }, 1500); }, pick);
+}
+// A file as base64, read when its message is sent.
+const b64 = f => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.readAsDataURL(f); });
+async function chatPost(d, f) {
+  try {
+    const r = await send('thread', d), m = (await r.text()).trim();
+    if (r.status === 401) unpaired();
+    if (m && !(r.ok && ['say', 'new'].includes(d.op))) toast(m);
+    if (r.ok) { if (f) f.reset(); refresh(true); }
+    return r.ok && (m || true);
+  } catch (err) { toast('error: ' + err.message); }
+}
+// #403: [send] clears the box at once and shows the message `sending…`; ✓ once the server logged it; failed, red with
+// [retry], the text (and file) back in the box.
+// #405: in an empty thread (`new-<repo>`, from [+ thread]) the first message starts it: `new`, then its thread opens.
+async function chatSay(f) {
+  const a = ATT && ATT.t === f.dataset.t ? ATT : null, box = f.elements.text, text = box.value, repo = f.dataset.repo;
+  if (!text.trim() && !a) return;
+  const names = a ? a.l.map(x => x.name).join(', ') : '';
+  const p = { t: f.dataset.t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
+  SENT.push(p);
+  f.reset();
+  grow(box);
+  if (a) ATT = null;
+  chatPaint();
+  scrollTo(0, document.body.scrollHeight);
+  const files = a ? { name: a.l.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.l.map(x => b64(x.file)))).join(',') } : {};
+  const ok = await chatPost({ ...(repo ? { op: 'new', repo } : { op: 'say', t: p.t }), text, ...files });
+  if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }
+  p.st = ok ? '✓' : '✗';
+  if (!ok && !box.value) { box.value = text; grow(box); }
+  if (!ok && a && !ATT) ATT = a;
+  chatPaint();
+}
+document.addEventListener('submit', async e => {
+  const f = e.target;
+  if (f.matches('#chat .chq')) {
+    e.preventDefault();
+    chatPost({ op: 'answer', fleet: f.dataset.fleet, id: f.dataset.id, text: f.elements.text.value }, f);
+  } else if (f.matches('#chat .chc')) { // #387: a config card's [apply] / [discard]
+    e.preventDefault();
+    chatPost({ op: 'config', id: f.dataset.id, act: e.submitter.value });
+  } else if (f.matches('#chat .chs')) { // #387: a secret card's [save] / [dismiss]; the value only goes in the POST
+    e.preventDefault();
+    const act = e.submitter.value;
+    chatPost({ op: 'secret', t: f.dataset.t, name: f.dataset.name, act, ...(act === 'save' ? { value: f.elements.value.value } : {}) }, f);
+  } else if (f.matches('#chat .tw')) {
+    e.preventDefault();
+    chatSay(f);
+  }
+});
+// #403: on a phone a swipe right from the left edge (iOS style) takes a thread back to the list: it follows the finger,
+// past a third of the width it goes, else it snaps back. Only from the edge, and only sideways: a diff's scroll stays.
+let esw = null;
+addEventListener('touchstart', e => {
+  const v = THR && document.documentElement.dataset.tab === 'chat' && $(`#chat .cvp[data-t="${CSS.escape(THR)}"]`), x = e.touches[0];
+  esw = v && innerWidth < 1000 && !shown() && x.clientX < 24 ? { v, x: x.clientX, y: x.clientY, on: false } : null;
+  if (esw) v.style.transition = 'none';
+}, { passive: true });
+addEventListener('touchmove', e => {
+  if (!esw) return;
+  const dx = e.touches[0].clientX - esw.x, dy = e.touches[0].clientY - esw.y;
+  if (!esw.on && Math.hypot(dx, dy) > 10) { if (dx < 2 * Math.abs(dy)) return void (esw = null); esw.on = true; }
+  if (esw.on) esw.v.style.transform = `translateX(${Math.max(0, dx)}px)`;
+}, { passive: true });
+for (const k of ['touchend', 'touchcancel']) addEventListener(k, e => {
+  if (!esw) return;
+  const { v, x, on } = esw, back = on && k === 'touchend' && e.changedTouches[0].clientX - x > innerWidth / 3;
+  esw = null;
+  v.style.transition = back ? 'none' : '';
+  v.style.transform = '';
+  if (back) chatBack();
+});

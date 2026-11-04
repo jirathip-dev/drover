@@ -54,11 +54,21 @@
     if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
     g.scrollIntoView();
   };
+  // #403: thread t3 open, its composer as a paired phone has it (the demo's is inert).
+  const composer = () => {
+    tab('chat'); chatOpen('t3'); $('.lall')?.click();
+    const f = $('#chat .tw[data-t=t3]');
+    f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+    return f;
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
     'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
     'events-rows': () => { tab('events'); $('#needs').hidden = true; },
+    // #266 gate 2: the first [important] row open (links, time, the raw event), and the [all] view.
+    'events-open': () => { tab('events'); $('#needs').hidden = true; $('#events [data-v=imp] .er').open = true; },
+    'events-all': () => { tab('events'); $('#needs').hidden = true; $('#events .chips [data-k=all]').click(); },
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
     // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
@@ -133,6 +143,180 @@
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
     lanes: () => tab('lanes'),
+    // #386: the [chat] tab's thread list (the needs-you stack folded with [later all]), and one thread open from its
+    // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
+    // shoots blank); at 1440 the list and the thread side by side.
+    chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
+    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #409: t2's reply with a short and a long-line code box (the long one scrolls sideways inside its box), then
+    // [copy] tapped on the short one: `copied` (the clipboard stubbed: headless Chrome's needs a permission).
+    'chat-code': () => {
+      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' });
+      const [a, b] = [...$$('#chat .cvp[data-t="t2"] .cb pre')];
+      if (!b || a.scrollWidth > a.clientWidth || b.scrollWidth <= b.clientWidth || getComputedStyle(b).overflowX !== 'auto') early.push(`code boxes: ${a?.scrollWidth}/${a?.clientWidth}, ${b?.scrollWidth}/${b?.clientWidth}, not short whole and long scrolling`);
+    },
+    'chat-copied': async () => {
+      VIEWS['chat-code']();
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: t => { window.cp = t; return Promise.resolve(); } } });
+      const c = $('#chat .cvp[data-t="t2"] .cpy'), st = window.setTimeout;
+      window.setTimeout = (f, ms) => ms === 1500 ? 0 : st(f, ms); // the flash held for the shot
+      c.click();
+      await wait();
+      window.setTimeout = st;
+      if (c.textContent !== 'copied' || window.cp !== 'curl -s localhost:8080/v1/openapi.json') early.push(`[copy]: "${c.textContent}", copied "${window.cp}"`);
+    },
+    // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
+    // several images (the thread's two, on the second).
+    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it. The thread is scrolled to
+    // the top first, as chat-thread: a scrolled view shoots blank, the viewer over it too.)
+    'chat-viewer': () => { VIEWS['chat-thread'](); $('#chat .cvp[data-t="t4"] .im img').click(); },
+    'chat-viewer-zoom': () => { VIEWS['chat-viewer'](); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
+    'chat-viewer-multi': () => { VIEWS['chat-thread'](); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
+    // #403 gate 2: [send] clears the box before the POST answers and shows the message `sending…` (no #ld overlay, ever);
+    // ✓ once accepted; failed, red with [retry] and the text back in the box. The shot: ✓, sending… and failed in t3.
+    'chat-send': async () => {
+      const f = composer(), box = f.elements.text, ld = new MutationObserver(() => { if (!$('#ld').hidden) early.push('the #ld overlay showed on a chat post'); });
+      ld.observe($('#ld'), { attributes: true });
+      const sent = () => [...$$('#chat .cvp[data-t=t3] .snt')].map(b => b.querySelector('.ct').textContent);
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      const say = t => { box.value = t; f.requestSubmit(); };
+      say('ship the notes on Friday, with the 429 change\nand the OpenAPI link');
+      if (box.value || !hold.length || sent().join() !== 'sending…') early.push(`after [send]: box "${box.value}", ${hold.length} POSTs, marks ${sent()}`);
+      await wait();
+      if (sent().join() !== 'sending…') early.push(`300 ms on, unanswered: ${sent()}`);
+      hold[0](new Response('sent\n'));
+      await wait();
+      if (sent().join() !== '✓') early.push(`accepted: ${sent()}, not ✓`);
+      say('and tag the release');
+      say('this one fails');
+      hold[2](new Response('error: herdr agent list failed: exit 1', { status: 409 }));
+      await wait();
+      const bad = $('#chat .snt.bad');
+      if (sent().join() !== '✓,sending…,✗ not sent' || !bad?.querySelector('.rt') || box.value !== 'this one fails') early.push(`failed: marks ${sent()}, [retry] ${!!bad?.querySelector('.rt')}, box "${box.value}"`);
+      if (getComputedStyle(bad.querySelector('.ct')).color !== getComputedStyle(B.appendChild(el('i', 'r'))).color) early.push('the failed mark is not red');
+      $$('body>i.r').forEach(i => i.remove());
+      ld.disconnect();
+      if (!DBG.get('check')) { $$('#chat .cvp[data-t=t3] .tc>:not(.snt)').forEach(e => { e.hidden = true; }); $('.msg.r')?.remove(); }
+    },
+    // #403 gate 2: a long draft grows the box to 6 lines, then it scrolls inside; a send shrinks it back to one.
+    'chat-long': async () => {
+      const f = composer(), box = f.elements.text, h = () => box.getBoundingClientRect().height, lh = parseFloat(getComputedStyle(box).lineHeight);
+      const type = t => { box.value = t; box.dispatchEvent(new Event('input', { bubbles: true })); return h(); };
+      const one = type(''), three = type('one\ntwo\nthree'), long = type('Rate limits: return 429 with Retry-After on /v1/search, per API key, 600 a minute with a burst of 100. '.repeat(6));
+      const cs = getComputedStyle(box), pad = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((n, k) => n + parseFloat(cs[k]), 0);
+      if (one > 44 || Math.abs(three - 3 * lh - pad) > 1 || Math.abs(long - 6 * lh - pad) > 1 || box.scrollHeight <= box.clientHeight) early.push(`box heights: empty ${one}, 3 lines ${three}, long ${long} (${box.scrollHeight} of text), not 3 and 6 lines of ${lh} + ${pad}`);
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(() => {}) : F(u, o);
+      if (DBG.get('check')) { f.requestSubmit(); if (h() !== one) early.push(`after [send] the box is ${h()} px, not ${one}`); }
+      else $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    // #403 gate 2: the keyboard up (the box focused): no tab bar on a phone, the composer at the bottom.
+    'chat-kb': async () => {
+      const box = composer().elements.text;
+      box.focus();
+      box.value = 'grill me on the land mode';
+      await wait();
+      if (document.activeElement !== box || seen($('nav'))) early.push(`box focused ${document.activeElement === box}, tab bar shown ${seen($('nav'))}`);
+    },
+    // #403 gate 2: opening a thread pushes a history entry, so back returns to the list; so does [‹], and a swipe
+    // right from the left edge past a third of the width (it follows the finger); a short, mid-screen or downward one does not.
+    'chat-back': async () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const row = () => $('#chat .tr[data-t=t3]'), open = () => THR === 't3' && !seen($('#chat .clp'));
+      const popped = () => new Promise(r => addEventListener('popstate', () => setTimeout(r), { once: true }));
+      row().click();
+      if (!open() || history.state?.thr !== 't3') early.push(`row tap: thread ${THR}, history ${JSON.stringify(history.state)}`);
+      const p = popped(); history.back(); await p;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`back: thread "${THR}", not the list`);
+      row().click();
+      const q = popped(); $('#chat .cvp[data-t=t3] .bk').click(); await q;
+      if (THR !== '') early.push(`[‹]: thread "${THR}", not the list`);
+      const v = $('#chat .cvp[data-t=t3]'), swipe = (x0, y0, x1, y1, mid) => {
+        const t = (x, y) => new Touch({ identifier: 1, target: v, clientX: x, clientY: y });
+        v.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [t(x0, y0)], changedTouches: [t(x0, y0)] }));
+        v.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: [t((x0 + x1) / 2, (y0 + y1) / 2)], changedTouches: [t((x0 + x1) / 2, (y0 + y1) / 2)] }));
+        if (mid) mid();
+        v.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [t(x1, y1)] }));
+      };
+      for (const [what, x0, y0, x1, y1] of [['a short edge swipe', 4, 400, 100, 400], ['a swipe from mid-screen', 120, 400, 380, 400], ['a downward drag from the edge', 4, 300, 60, 600]]) {
+        row().click();
+        swipe(x0, y0, x1, y1);
+        if (!open()) early.push(`${what} left the thread`);
+        if (v.style.transform) early.push(`${what}: the thread did not snap back (${v.style.transform})`);
+        const r = popped(); history.back(); await r;
+      }
+      row().click();
+      const s = popped();
+      swipe(4, 400, 300, 400, () => { if (v.style.transform !== 'translateX(148px)') early.push(`mid-swipe the thread is at "${v.style.transform}", not under the finger (148px)`); });
+      await s;
+      if (THR !== '' || !seen($('#chat .clp'))) early.push(`an edge swipe: thread "${THR}", not the list`);
+    },
+    // #403 gate 2: a working thread (its live line as serve.rs renders it): the overlay's art, small, above the box —
+    // the theme's sprite (pixel), its ascii_loading frames (ascii, `ascii-chat-wait`), the glyph (terminal); a still
+    // frame with reduced motion (`chat-wait-still`); never the #ld overlay.
+    'chat-wait': () => {
+      tab('chat'); chatOpen('t3'); $('.lall')?.click();
+      const c = $('#chat').cloneNode(true);
+      c.querySelector('.cvp[data-t=t3] .tlv').innerHTML = '<i class=tld aria-hidden=true></i> working';
+      frag('chat', c.innerHTML);
+      const i = $('#chat .cvp[data-t=t3] .tld'), t = document.documentElement.dataset.theme, asc = B.dataset.mode === 'ascii';
+      const want = asc ? '.lda' : t === 'terminal' ? 'i' : '.lds', shown = [...i.children].filter(seen), r = i.getBoundingClientRect();
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches, a = shown[0] && getComputedStyle(asc ? shown[0].lastChild : shown[0]).animationName;
+      if (shown.length !== 1 || !shown[0].matches(want)) early.push(`${t}${asc ? ' ascii' : ''}: the mark shows ${shown.map(e => e.outerHTML.slice(0, 30))}, not ${want}`);
+      if (r.height > 24 || r.bottom > $('#chat .tw[data-t=t3]').getBoundingClientRect().top) early.push(`the mark ${r.height} px tall, or not above the box`);
+      if (V.endsWith('still') ? a !== 'none' : a === 'none') early.push(`the mark's animation: ${a}`);
+      if (seen($('#ld'))) early.push('the #ld overlay shows');
+      if (!DBG.get('check')) $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    'chat-wait-still': () => VIEWS['chat-wait'](),
+    'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
+    // #405 gate 2: [+ thread]'s empty thread (`new-<repo>`, as the tap opens it): no title form, no blocks, the
+    // composer (its first message starts the thread); the demo's controls inert, so enabled as a paired phone's.
+    'chat-new': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      chatOpen('new-acme-api');
+      const v = $('#chat .cvp[data-t="new-acme-api"]');
+      v.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+      if (!seen(v) || v.querySelector('.tc').childElementCount || v.querySelector('input:not([type=file])') || v.querySelector('.tw').dataset.repo !== 'acme-api') early.push('the new thread is not empty with a composer for acme-api');
+    },
+    // #405 gate 2: a thread row swiped left shows [archive]; swiped right it hides; a short or downward drag does nothing.
+    'chat-archive': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const r = $('#chat .tr[data-t=t4]'), b = r.parentNode.querySelector('.sb[name=archive]'), y = r.getBoundingClientRect().top + 10;
+      const swipe = (x0, x1, dy = 0) => {
+        r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x0, clientY: y }));
+        r.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x1, clientY: y + dy }));
+      };
+      b.disabled = false;
+      for (const [what, x0, x1, dy, want] of [['a short drag', 300, 280, 0, false], ['a downward drag', 300, 240, 200, false], ['a left swipe', 300, 150, 0, true], ['a right swipe', 150, 300, 0, false], ['a left swipe again', 300, 150, 0, true]]) {
+        swipe(x0, x1, dy);
+        if (seen(b) !== want) early.push(`${what}: [archive] ${seen(b) ? 'shows' : 'hidden'}`);
+      }
+      scrollTo({ top: 0, behavior: 'instant' });
+    },
+    // #405 gate 2: the archived fold at the bottom of its repo card, open: t1 with [restore].
+    'chat-archived': () => {
+      tab('chat'); chatOpen(''); $('.lall')?.click();
+      const f = $('#chat .fc .arc');
+      if (!f) return early.push('no archived fold');
+      f.open = true;
+      f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
+      if (f.nextElementSibling || !f.querySelector('.tr[data-t=t1]') || !f.querySelector('.sb[name=restore]') || $('#chat .fc>.sw .tr[data-t=t1]')) early.push('t1 is not in its card\'s last fold with [restore]');
+    },
+    // #405 gate 2: three images picked at once wait above t3's box as thumbnails, each with [×]; [×] drops one.
+    'chat-thumbs': async () => {
+      const f = composer(), i = f.querySelector('input[type=file]'), d = new DataTransfer();
+      const srcs = [...$$('#chat .cvp[data-t="t4"] .im img')].map(m => m.src);
+      for (const [n, src] of [srcs[0], srcs[1], srcs[0]].entries()) d.items.add(new File([await fetch(src).then(r => r.blob())], `IMG_20${41 + n}.PNG`, { type: 'image/png' }));
+      i.files = d.files;
+      i.dispatchEvent(new Event('change', { bubbles: true }));
+      const th = () => [...$$('#chat .tw[data-t=t3] .att')].filter(a => a.querySelector('img') && a.querySelector('button'));
+      if (th().length !== 3) early.push(`${th().length} thumbnails with [×], not 3`);
+      if (DBG.get('check') && th()[1]) { th()[1].querySelector('button').click(); if (th().length !== 2) early.push(`[×]: ${th().length} left, not 2`); }
+      else $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
+    },
+    // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
+    'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word
     // + a long action + its time, and an idle row with no spinner, drawn by a /live redraw of the Lanes tab, then a
     // second one: one ellipsised line in each mode, nothing past the row.
@@ -165,9 +349,9 @@
       }
       if ($$('.lane .act.now').length < 4) early.push('no long now-lines drawn');
     },
-    sheet: async () => { // the longest agent name, then kill refused, kill's dry run, clean refused, a send error
+    sheet: async () => { // the longest agent name (not a conductor row, #422: it opens a thread), then kill refused, kill's dry run, clean refused, a send error
       tab('lanes');
-      open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
+      open([...$$('.lane:not([data-thread])')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
       await wait();
       await canned(400, LONG.kill, () => run('kill'));
       mid('kill refused');
@@ -182,7 +366,7 @@
     // #260: the same sheet with [full conversation] on (every tool run); `sheet` itself is the default view.
     'sheet-full': async () => {
       tab('lanes');
-      open([...$$('.lane')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
+      open([...$$('.lane:not([data-thread])')].sort((a, b) => b.dataset.agent.length - a.dataset.agent.length)[0]);
       await wait();
       $('.fv').click();
       await wait();
@@ -370,6 +554,65 @@
       $('#look').click();
       if (!shown()) early.push('[◐] did not reopen the look sheet after a close');
     },
+    // #370 gate 2: a row sprite loops its two frames (--o1 flips within 0.7 s) and is the same node across a /live
+    // patch between the two reads; `row-loop-still` (reduced motion forced): frame 1, no animation, still the same node.
+    'row-loop': async () => {
+      tab('queue');
+      $('#needs').hidden = true;
+      const q = () => [...$$('#queue .gt>b.rsg>.rsp')].find(seen), u = q(), still = V === 'row-loop-still', o = () => getComputedStyle(u.querySelector('use')).getPropertyValue('--o1').trim();
+      if (!u) return early.push('no Queue row sprite');
+      if (still && !matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
+      // The loop's clock is the page's animation (the Chrome run's virtual time never ticks CSS): frame 1 at 0 ms,
+      // frame 2 at 0.7 s, set on the animation itself, across a /live patch.
+      const at = ms => { const k = u.getAnimations().find(x => x.animationName === 'kfr'); if (k) k.currentTime = ms; return k ? o() : 'none'; };
+      const f1 = at(0);
+      frag('queue', $('#queue').innerHTML);
+      const f2 = at(700);
+      if (q() !== u || !u.isConnected) early.push('the row sprite was replaced by a /live patch');
+      if (still ? f1 !== 'none' || getComputedStyle(u).animationName !== 'none' || o() !== '1' && o() !== '' : f1 !== '1' || f2 !== '0') early.push(`row sprite --o1 ${f1} at 0 ms, ${f2} at 0.7 s (${getComputedStyle(u).animationName})`);
+    },
+    // #370 gate 2: a moment plays on its row once per event: a second call with the same seq does nothing, a /live patch
+    // mid-moment resumes it (a negative delay, not a restart), it ends by 2.4 s; `moment-row-still`: no motion, its tag shows.
+    'moment-row': async () => {
+      tab('queue');
+      $('#needs').hidden = true;
+      // three rows, one moment each, played side by side (the Chrome run's virtual time is 8 s)
+      const ds = [...$$('#queue details.q')].filter(seen).slice(0, 3);
+      if (ds.length < 3) return early.push('under 3 Queue rows in view');
+      let patched; const once = new Promise(r => patched = r); // the other rows read after the one patch, never a clock
+      await Promise.all(['fail', 'needs-you', 'merged'].map(async (k, i) => {
+        const n = +ds[i].querySelector('summary a').textContent.slice(1), f = qname(ds[i].closest('.fc')), seq = 1e9 + i;
+        const sum = () => [...$$('#queue details.q')].find(x => x.querySelector('summary a').textContent === '#' + n && x.closest('.fc')?.querySelector('.fn>b').textContent === f).querySelector('summary');
+        rmoment(k, f, n, seq);
+        const t = sum().querySelector('.mot');
+        if (sum().dataset.mo !== k || !t || t.textContent.replace('!', '') !== TW()[MK[k]]) early.push(`${k}: not on its row, or no "${TW()[MK[k]]}" tag`);
+        await new Promise(r => setTimeout(r, 1100));
+        rmoment(k, f, n, seq);
+        if (i === 2) { // the server's copy: no moment marks
+          const x = $('#queue').cloneNode(true);
+          x.querySelectorAll('[data-mo]').forEach(e => { delete e.dataset.mo; e.style.removeProperty('--mo-d'); e.querySelector('.mot')?.remove(); });
+          frag('queue', x.innerHTML);
+          patched();
+        }
+        else await once;
+        const dl = parseFloat(sum().style.getPropertyValue('--mo-d'));
+        if (sum().dataset.mo !== k || !(dl <= -1000)) early.push(`${k}: a patch at 1.1 s restarted or dropped it (--mo-d ${dl})`);
+        if (V === 'moment-row-still' && [sum(), sum().querySelector('.mot')].some(e => !e || getComputedStyle(e).animationName !== 'none')) early.push(`${k}: moves under reduced motion`);
+        await new Promise(r => setTimeout(r, 1500));
+        if (sum().dataset.mo || sum().querySelector('.mot')) early.push(`${k}: still on at 2.6 s`);
+      }));
+    },
+    // #370: empty tabs: the theme's line over the server's plain one (terminal: the plain line alone).
+    empty: () => {
+      frag('lanes', '<p class=m>no agents</p>');
+      frag('events', '<div data-v=imp><p class="m es">0 important rows</p></div>');
+      frag('queue', '<p class=m>no open work</p>');
+      tab('queue');
+      for (const [t, k] of [['queue', 'empty-queue'], ['lanes', 'empty-lanes'], ['events', 'empty-events']]) {
+        const p = $(`#${t} p.m:not(.es)`), w = TW()[k];
+        if (!p || (w ? p.querySelector('.thw')?.textContent !== w || !p.querySelector('.pw') : p.innerHTML !== p.textContent)) early.push(`${t}: empty line "${p && p.innerHTML}"`);
+      }
+    },
     // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
     'moment-still': () => {
       tab('queue');
@@ -526,10 +769,16 @@
       chip('acme-core').click();
       const nav = $('nav').getBoundingClientRect().top, prog = [...$$('.qg[data-g=prog]>details.q')].filter(seen);
       if (!prog.length || prog.some(d => d.getBoundingClientRect().bottom > nav)) early.push(`running rows not above the fold (tab bar at ${nav})`);
-      const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.textContent).join(', ');
+      const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.dataset.p ?? h.textContent).join(', ');
       if (gs !== 'needs you (1), in progress (2), queued (40)') early.push(`groups "${gs}"`);
       const c = $('#queue .qc'), x = $('#queue .qx');
-      if (!c || c.open || c.querySelector('summary').textContent !== '#302 → #303 · decoupling: split the serve module (6 steps) · next: #400#3' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${c && c.querySelector('summary').textContent}`);
+      // #391: the chain row is a row: the first step's number and title, `chain · 6`, its place, its columns where a queued
+      // row has them, and `▸ #302 → #307 · next: #400 (in impl)` under them.
+      const cs = c && c.querySelector('summary'), cells = s => [':scope>.gt', ':scope>span:first-of-type', ':scope>span:nth-of-type(2)', ':scope>.m', ':scope>.tl'].map(k => s.querySelector(k));
+      const words = cs && [...cells(cs).slice(1), cs.querySelector('.cst')].map(x => x?.textContent).join(' | ');
+      if (!c || c.open || words !== '#302 | chain · 6 | #3 | decoupling: split the serve module | #302 → #307 · next: #400 (in impl)' || getComputedStyle(cs.querySelector('.cst'), '::before').content !== '"▸ "' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${words}`);
+      const q1 = $('#queue .fc:not([hidden]) .qg[data-g=queue]>details.q'), at = s => cells(s).map(x => x && `${x.className}@${Math.round(x.getBoundingClientRect().left)}`).join();
+      if (cs && at(cs) !== at(q1.querySelector('summary'))) early.push(`chain row columns ${at(cs)}, a queued row's ${at(q1.querySelector('summary'))}`);
       if (!x || x.open || x.querySelector('summary').textContent !== '+ 30 more' || [...x.querySelectorAll('details.q')].some(seen)) early.push(`more row: ${x && x.querySelector('summary').textContent}`);
       const rgb = s => s.match(/[\d.]+/g).map(Number), bg = e => { for (; e; e = e.parentElement) { const v = rgb(getComputedStyle(e).backgroundColor); if (v[3] !== 0) return v.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
       for (const t of [...$$('#queue summary>.tl')].filter(seen)) if (ratio(rgb(getComputedStyle(t).color), bg(t)) < 4.5) early.push(`title "${t.textContent.slice(0, 20)}" under 4.5:1`);
@@ -543,6 +792,7 @@
       c.open = x.open = true;
       const steps = [...c.querySelectorAll(':scope>details.q')], rest = [...x.querySelectorAll(':scope>*:not(summary)')];
       if (steps.length !== 6 || !steps.every(seen) || steps.some(d => !/\bd[012]\b/.test(d.className))) early.push(`chain opened ${steps.filter(seen).length} of ${steps.length} steps`);
+      if (getComputedStyle(c.querySelector('summary>.cst'), '::before').content !== '"▾ "') early.push('an open chain row shows no ▾');
       const under = (a, b) => Math.abs(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom) > 1;
       if (under(c.querySelector('summary'), steps[0]) || rest.length !== 30 || !rest.every(seen) || under(x.querySelector('summary'), rest[0])) early.push('chain or more not opened in place');
       const xs = new Set([...$$('#queue summary>.tl')].filter(seen).map(t => Math.round(t.getBoundingClientRect().left + parseFloat(getComputedStyle(t).paddingLeft))));
@@ -608,9 +858,10 @@
     if (t && t.scrollWidth > t.clientWidth) early.push('"! needs you" overflows its ticket');
   }
   let toasted = null, drove = null, href = null;
+  const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -638,6 +889,20 @@
         if (!t || !seen(t) || t.title !== t.textContent || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight)) res.outliers.push(`no one-line title: ${label(s)}`);
       }
     }
+    // #397: the error shows whole (wraps, never ellipsised) and covers no row: "all repos" starts under it.
+    if (V === 'chat-error') {
+      const m = $('.msg.r'), row = $('#chat .fc');
+      if (!m || m.textContent !== ERR) res.outliers.push(`error banner reads "${m && m.textContent}"`);
+      else if (m.scrollWidth > m.clientWidth || m.scrollHeight > m.clientHeight) res.outliers.push(`error banner clipped: ${m.scrollWidth}x${m.scrollHeight} in ${m.clientWidth}x${m.clientHeight}`);
+      else if (m.getBoundingClientRect().bottom > row.getBoundingClientRect().top) res.outliers.push(`error banner covers "${label(row)}"`);
+    }
+    // #406: the viewer is open over the thread, its image loaded; fitted inside the screen, zoomed past it; 2 / 2 of two.
+    if (V.startsWith('chat-viewer')) {
+      const i = $('#iv>img'), r = i.getBoundingClientRect(), fit = r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1;
+      if ($('#iv').hidden || !i.complete || !i.naturalWidth) res.outliers.push(`viewer ${$('#iv').hidden ? 'closed' : 'open'}, image ${i.naturalWidth ? 'loaded' : 'not loaded'}`);
+      if (fit !== (V !== 'chat-viewer-zoom')) res.outliers.push(`image ${r.left | 0}..${r.right | 0} × ${r.top | 0}..${r.bottom | 0}: ${fit ? 'fitted' : 'past the screen'}`);
+      if (V === 'chat-viewer-multi' && $('.ivn').textContent !== '2 / 2') res.outliers.push(`count "${$('.ivn').textContent}", not 2 / 2`);
+    }
     const out = document.createElement('pre');
     out.id = 'audit';
     out.textContent = JSON.stringify(res);
@@ -652,10 +917,19 @@
     if (!TT) return [`theme ${t} never loaded`];
     if (t === 'terminal') {
       if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
+      if ($$('.thw, .pw, .tsub, .lsm, [data-mo]').length) bad.push('terminal shows theme words'); // #370
       if (B.dataset.mode !== 'glyph' || $$('#mode').length || on('.av .px, .av .asc, .rsa, .lsa').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
       return bad;
     }
     if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
+    // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
+    // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
+    if (!on(`#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
+    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
+    for (const e of on(LBL)) if (!e.querySelector('.thw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
+    const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
+    const under = e => { for (; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0) return c[3] < 1 ? over(c.slice(0, 3), rgb(getComputedStyle(B).backgroundColor), c[3]) : c.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
+    for (const e of on('.pw')) { const x = ratio(rgb(getComputedStyle(e).color).slice(0, 3), under(e)); if (x < 4.5) bad.push(`plain word "${e.textContent}" ${x.toFixed(2)}:1, under 4.5`); }
     if (tb === 'events' && !on('#events .kg.rsg>.rsp').length) bad.push('no Events row sprite');
     if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
     if ($$('#mode').length || TM.join() !== 'scene,ascii') bad.push(`Lanes modes ${TM}, a mode button ${$$('#mode').length}`);
@@ -706,13 +980,13 @@
         if (!t.data.trim() || !seen(e) || e.closest('svg, .gl, .asc')) continue;
         const fs = getComputedStyle(e).fontSize, input = e.closest('input, textarea, select');
         if (input ? fs !== '16px' : !['11px', '13px'].includes(fs)) bad.push(`"${t.data.trim().slice(0, 20)}": font ${fs}`);
-        // Text past its box's sides, unless that box ellipsises it (the button's `]` ring is not text).
+        // Text past its box's sides, unless that box ellipsises or scrolls it (the button's `]` ring is not text).
         let b = e;
         while (['inline', 'contents'].includes(getComputedStyle(b).display)) b = b.parentElement;
         const g = document.createRange();
         g.selectNodeContents(t);
         const tr = g.getBoundingClientRect(), br = b.getBoundingClientRect();
-        if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis') bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
+        if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis' && !/auto|scroll/.test(getComputedStyle(b).overflowX)) bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
       }
       // #68: no box holds more than it shows unless it ellipsises (or scrolls by design); nothing past the screen's right edge.
       // Tap rings (`]`, the queued horse's ::before, a picker's invisible select grown 8 px each side) are hit area, not content:
@@ -863,8 +1137,11 @@
       return { view: V, controls: keep.length, outliers: bad };
     },
   };
+  VIEWS['row-loop-still'] = VIEWS['row-loop'];
+  VIEWS['moment-row-still'] = VIEWS['moment-row'];
   const go = async () => {
     await themed; // #241: the phone's theme drawn first
+    await window.boardReady; // #266: the TypeScript board's first draw (Events)
     await VIEWS[V]();
     setTimeout(() => {
       if (V === 'herd2') PG.scrollLeft = PG.clientWidth;

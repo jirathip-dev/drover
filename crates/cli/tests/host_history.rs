@@ -157,7 +157,7 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     let get = |q: &str| {
         String::from_utf8_lossy(&s.respond(&format!("GET {q} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
     };
-    let page = get("/?all=1");
+    let page = host_tab(&s, ADDR, NOW);
     let gs: Vec<&str> = page
         .split("<span class=gn>")
         .skip(1)

@@ -135,6 +135,24 @@ fn rev_role_flags_new_commit_trailers_only() {
 }
 
 /// #320: a predicted conflict is information, not a hold; no generated prompt tells a lane to wait for a merge.
+/// #429: the cap is a repo total; a lane asks only when its own PR would cross it.
+#[test]
+fn cap_asks_only_when_your_own_pr_crosses() {
+    let d = tmpdir("help-429");
+    let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
+    let impl_ = herdsman::spawn::role_prompt("impl").replace("\n  ", " ");
+    for t in [impl_.as_str(), help.as_str()] {
+        for w in [
+            "The cap in `ci/cap.toml` is a total for the repo",
+            "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
+            "Being near the cap, or another PR's growth, is never a reason to ask.",
+            "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
+        ] {
+            assert!(t.contains(w), "{w}");
+        }
+    }
+}
+
 #[test]
 fn conflict_predicted_is_not_a_hold() {
     let d = tmpdir("help-320");

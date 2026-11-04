@@ -1,0 +1,388 @@
+//! #375: the JSON shapes the page reads and posts: the one definition of each, `assets/types/api.d.ts` is made from these
+//! (`just types`), API v1's (#265) too, with the core rows the board shows (`Event`, `IssueState`, `Waiting`, `hosts::Seen`, `hosts::Row`).
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+/// Every shape: serde's JSON both ways (a missing field is its default), and `ts-rs`'s type for it under `--features ts`.
+macro_rules! shapes {
+    ($($s:item)*) => {$(
+        #[derive(Serialize, Deserialize, Default)]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
+        #[serde(default)]
+        $s
+    )*};
+}
+
+shapes! {
+/// `/herd.json` (Herd mode, docs/serve.md).
+pub struct Herd {
+    pub fleets: Vec<HerdFleet>,
+    pub others: Vec<HerdLane>,
+    pub host: HerdHost,
+}
+
+pub struct HerdFleet {
+    pub name: String,
+    pub color: String,
+    pub lanes: Vec<HerdLane>,
+    pub queue: Vec<HerdQueued>,
+    pub needs: Vec<u64>,
+}
+
+pub struct HerdLane {
+    pub name: String,
+    pub act: String,
+    pub issue: Option<u64>,
+    pub title: Option<String>,
+    pub role: String,
+    pub harness: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub account: Option<String>,
+    pub host: Option<String>,
+    pub state: String,
+    pub shown: String,
+    pub tone: String,
+    pub age: String,
+    pub coat: String,
+    pub gone: bool,
+}
+
+pub struct HerdQueued {
+    pub issue: u64,
+    pub title: Option<String>,
+    pub blocked_by: Option<u64>,
+    pub coat: String,
+}
+
+pub struct HerdHost {
+    pub load: Option<f64>,
+    pub limit: f64,
+    pub pressure: Option<String>,
+    pub swapouts: Option<f64>,
+    pub swap_limit: f64,
+    pub gate: Option<String>,
+}
+
+/// `/lane?agent=`: the sheet's chat. A lane with no pane sends no `said`, `notices`, `acts`, `pane` or `status`.
+pub struct Chat {
+    pub said: Option<Vec<Value>>,
+    pub older: bool,
+    pub notices: Vec<Notice>,
+    pub harness: String,
+    pub acts: Vec<String>,
+    pub pane: Option<String>,
+    pub lines: Vec<String>,
+    pub live: usize,
+    pub status: Option<String>,
+    pub before: usize,
+    pub more: bool,
+}
+
+pub struct Notice {
+    pub at: u64,
+    pub text: String,
+}
+
+/// `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
+pub struct Moment {
+    pub seq: u64,
+    pub ts: u64,
+    pub k: Option<String>,
+    pub f: String,
+    pub n: Option<u64>,
+}
+
+/// `/live`'s `frag`: a fragment's new HTML.
+pub struct Frag {
+    pub id: String,
+    pub html: String,
+}
+
+/// #351: `/live`'s `patch`: a `frag` as length `n`, common prefix `p` and the changed pieces by index.
+pub struct Patch {
+    pub id: String,
+    pub n: usize,
+    pub p: usize,
+    pub set: BTreeMap<String, String>,
+}
+
+/// #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.
+pub struct BacklogIssue {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub created: String,
+    pub updated: String,
+    pub labels: Vec<String>,
+    pub ac: bool,
+    pub pr: bool,
+}
+
+/// `POST /send`: a reply to lane `agent`, or to the setup pane `setup`.
+pub struct Send {
+    pub agent: String,
+    pub setup: Option<String>,
+    pub text: String,
+}
+
+/// `POST /answer`: menu option `choice` of the menu hashed `h`.
+pub struct Answer {
+    pub agent: String,
+    pub choice: String,
+    pub h: String,
+}
+
+/// `POST /act`: stop | kill | clean | close; `confirm` `1` does what a dry run showed.
+pub struct Act {
+    pub agent: String,
+    pub op: String,
+    pub confirm: String,
+}
+
+/// `POST /setup`: start the setup pane `name` on `host`.
+pub struct Setup {
+    pub host: String,
+    pub name: String,
+}
+
+/// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
+/// `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
+/// the Events tab's time groups.
+pub struct State {
+    pub seq: u64,
+    pub now: u64,
+    pub tz: i64,
+    pub age: Option<u64>,
+    pub mtime: String,
+    pub theme: String,
+    pub fleets: Vec<Fleet>,
+    pub queue: Vec<Queued>,
+    pub lanes: Vec<Lane>,
+    pub asks: Vec<Ask>,
+    pub hosts: Vec<Row>,
+    pub services: Vec<Row>,
+    pub alerts: Vec<Row>,
+}
+
+pub struct Fleet {
+    pub name: String,
+    pub repo: String,
+    pub color: String,
+    pub paused: bool,
+}
+
+pub struct Queued {
+    pub fleet: String,
+    pub issue: u64,
+    pub title: Option<String>,
+    pub state: String,
+    pub blocked_by: Option<u64>,
+}
+
+/// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
+pub struct Lane {
+    pub name: String,
+    pub fleet: Option<String>,
+    pub issue: Option<u64>,
+    pub title: Option<String>,
+    pub role: String,
+    pub harness: String,
+    pub model: Option<String>,
+    pub state: String,
+    pub shown: String,
+    pub tone: String,
+    pub since: u64,
+}
+
+pub struct Ask {
+    pub id: String,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    pub question: String,
+    pub options: Vec<String>,
+    pub recommend: Option<u64>,
+    pub ts: u64,
+}
+
+/// A Host tab row: HOSTS' (`detail`: its state in words), SERVICES' and ALERTS' (push); `fix` clears a red or amber one.
+pub struct Row {
+    pub name: String,
+    pub tone: String,
+    pub detail: String,
+    pub fix: String,
+}
+
+/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`),
+/// SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live
+/// board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
+/// forms are inert); `mtime` the forms send back.
+pub struct HostTab {
+    pub now: u64,
+    pub rw: bool,
+    pub live: bool,
+    pub mtime: String,
+    pub hosts: Vec<HostCard>,
+    pub disk: Option<Disk>,
+    pub orphans: usize,
+    pub leftovers: Option<Leftovers>,
+    pub spawns: Option<Row>,
+    pub services: Vec<Row>,
+    pub theme: Row,
+    pub accounts: Vec<Account>,
+    pub deepseek: Option<Balance>,
+    pub fleets: Vec<FleetRow>,
+    pub push: Row,
+    pub key: String,
+    pub subs: Vec<Sub>,
+    pub devices: Vec<Paired>,
+}
+
+/// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
+/// its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
+pub struct HostCard {
+    pub name: String,
+    pub main: bool,
+    pub dot: String,
+    pub tone: String,
+    pub words: String,
+    pub n: String,
+    pub rows: Vec<Cell>,
+    pub to: Option<String>,
+    pub lanes: usize,
+    pub setups: Vec<String>,
+}
+
+/// #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and
+/// muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an
+/// export, its chart `x` inline.
+pub struct Cell {
+    pub k: String,
+    pub t: String,
+    pub key: String,
+    pub bar: Option<Bar>,
+    pub b: Option<String>,
+    pub bt: String,
+    pub text: String,
+    pub of: String,
+    pub notes: Vec<String>,
+    pub s: String,
+    pub p: String,
+    pub l: Option<f64>,
+    pub x: String,
+}
+
+/// #141: a 12-cell text gauge: its status `t`, `n` cells full, and how far past the limit (`pct`, else empty).
+pub struct Bar {
+    pub t: String,
+    pub n: usize,
+    pub pct: String,
+}
+
+/// #164: the worktree total (`gb`, `?` unread) against the budget, and how long ago it was walked.
+pub struct Disk {
+    pub bar: Bar,
+    pub gb: String,
+    pub budget: f64,
+    pub ago: Option<String>,
+}
+
+/// #186: processes still running in closed lanes' worktrees, and the memory they hold.
+pub struct Leftovers {
+    pub n: usize,
+    pub mb: String,
+}
+
+/// An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
+pub struct Account {
+    pub name: String,
+    pub capped: bool,
+    pub tone: String,
+    pub cap: String,
+    pub meters: Vec<Meter>,
+    pub pace: Option<String>,
+    pub hint: Option<String>,
+    pub hours: String,
+}
+
+pub struct Meter {
+    pub label: String,
+    pub pct: f64,
+}
+
+/// The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
+pub struct Balance {
+    pub balance: Option<String>,
+    pub low: bool,
+    pub hint: String,
+}
+
+/// #141: a fleet's last `driven` result in words (`word` in `tone`, the plain rest `text`), its age and `raw` line.
+pub struct FleetRow {
+    pub name: String,
+    pub tone: String,
+    pub word: String,
+    pub text: String,
+    pub ago: String,
+    pub raw: Option<String>,
+}
+
+/// #18: a webpush subscription, removable by `id`.
+pub struct Sub {
+    pub id: String,
+    pub label: String,
+    pub created: u64,
+}
+
+/// #59: a paired device, removable by `hash`.
+pub struct Paired {
+    pub hash: String,
+    pub label: String,
+    pub created: u64,
+    pub used: u64,
+}
+
+/// #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
+pub struct Events {
+    pub seq: u64,
+    pub refresh: bool,
+    pub list: Vec<Ev>,
+}
+
+/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
+/// (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
+/// agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
+pub struct Ev {
+    pub seq: u64,
+    pub ts: u64,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub data: serde_json::Map<String, Value>,
+    pub k: Option<String>,
+    pub glyph: String,
+    pub tone: String,
+    pub text: String,
+    pub imp: bool,
+    pub act: String,
+    pub coat: String,
+    pub plain: String,
+    pub pr: Option<u64>,
+    pub run: Option<String>,
+}
+
+/// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
+pub struct Reply {
+    pub ok: bool,
+    pub code: String,
+    pub message: String,
+}
+
+}
+
+/// A form body (`application/x-www-form-urlencoded`, decoded) as one of the action bodies above.
+pub fn body<T: for<'de> Deserialize<'de> + Default>(f: &BTreeMap<String, String>) -> T {
+    serde_json::from_value(serde_json::json!(f)).unwrap_or_default()
+}

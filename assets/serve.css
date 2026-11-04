@@ -19,6 +19,8 @@ p{margin:var(--s2) 0}
 .msg{padding:var(--s2);border:1px solid currentColor;border-radius:6px}
 /* #66: an action's toast, one line under the sticky header; the demo banner (.msg.a) stays in the flow. */
 .msg.g,.msg.r{position:fixed;z-index:2;top:calc(var(--hit) + var(--s2));left:var(--s3);right:var(--s3);margin:0;padding:var(--s1) var(--s2);background:var(--bg);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:opacity .4s}
+/* #397: an error stays until tapped, in full: it wraps and holds its place in the flow, under the header once scrolled. */
+.msg.r{position:sticky;margin:var(--s2) var(--s3);white-space:normal;overflow:visible}
 .msg.out{opacity:0}
 details,.ev,.kv{border-bottom:1px solid var(--line)}
 summary{display:grid;grid-template-columns:7ch minmax(0,1fr) auto;gap:var(--s2);align-items:center;min-height:var(--hit);cursor:pointer;list-style:none}
@@ -26,6 +28,8 @@ summary::-webkit-details-marker{display:none}
 summary>span{min-width:0}
 details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lane{border-bottom:1px solid var(--line)}
+/* #422: an asleep conductor (its pane closed) is dimmed; a tap still opens its thread. */
+.lane[data-thread][data-gone]>.lr{opacity:.55}
 /* #205: an open Queue card's lanes, newest first: one-line 44 px tap rows; `+N older` expands. */
 .ql{display:block;max-width:100%;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
 /* #218: a lane line in the card: the name ellipsises first, `state age` stays at the right (the inline line overflowed the card). */
@@ -71,7 +75,7 @@ nav a.on{box-shadow:inset 0 2px var(--l)}
 nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
 #stale{color:var(--r);font-size:var(--fs-meta)}
-.tl{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl,.cst{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
@@ -92,7 +96,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -118,13 +122,37 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 .rsa{display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-meta);line-height:1;font-style:normal;white-space:pre}
 .lsa{width:auto;font-size:var(--fs-meta);line-height:var(--s4);font-style:normal;white-space:pre;color:var(--mute)}
 #ld .lda{display:none;font-size:var(--fs-code);line-height:1;white-space:pre;color:var(--fg)}#ld.la .lda{display:grid}#ld.la :is(.lds,i){display:none}
-details.q:has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
+:is(details.q,.qc):has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
 details.er:has(>summary>.rsg)>summary{grid-template-columns:calc(var(--s4) + var(--s3)) var(--s2) 6ch minmax(0,1fr) auto}
 details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * var(--s2))}
 #mo{position:fixed;z-index:3;top:calc(var(--hit) + var(--s2));right:var(--s3);width:calc(3 * var(--s4));height:calc(2 * var(--s4) + var(--s1));pointer-events:none;animation:.8s ease-in-out 3 hop}
 #mo svg{width:100%;height:100%}#mo.mo-shake{animation-name:shake}#mo.mo-pulse{animation-name:pulse}
 @keyframes hop{50%{translate:0 calc(-1 * var(--s2))}}@keyframes shake{25%{translate:calc(-1 * var(--s1)) 0}75%{translate:var(--s1) 0}}@keyframes pulse{50%{scale:1.2}}
 @media (prefers-reduced-motion:reduce){#mo{animation:none}}
+/* #370: a label's theme word keeps the label's colour and size, its plain word is the muted part in --fs-meta; each tab's
+   own first line; an Events kind's word in the row's tone; an empty tab's theme line over the plain one; the loading word */
+.pw{color:var(--mute);font-size:var(--fs-meta);font-weight:400;white-space:nowrap}h2 .pw,.tsub .pw{text-transform:none;letter-spacing:0}
+.tsub{margin:var(--s2) 0 0;padding:0 var(--s1);font-weight:600}
+.thw.ev{font-weight:600}details.er:has(.t-g) .thw.ev{color:var(--g)}details.er:has(.t-r) .thw.ev{color:var(--r)}details.er:has(.t-l) .thw.ev{color:var(--l)}
+p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.empty .pw{white-space:normal}
+#ld .ldw{position:absolute;top:calc(var(--s4) * 9 + var(--s2));margin:0;padding:0 var(--s2);border-radius:var(--s1);background:var(--bg);font-size:var(--fs-meta)}#ld .ldw:empty,.tld .ldw{display:none}
+/* the Host card's load: its 48 × 16 mini at 1.5×, two frames, and the level word */
+.lsm{display:inline-flex;align-items:center;gap:var(--s1);margin-left:auto;padding-left:var(--s2);font-size:var(--fs-meta)}
+.lsm svg{width:calc(var(--s4) * 3);height:var(--s4);image-rendering:pixelated;shape-rendering:crispEdges;animation:kfr 1.2s infinite}
+.hhd .hnm:has(.lsm){display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s1)}
+/* every row sprite loops its .kf1/.kf2 frames (herd.css's kfr, 0.6 s a frame): a hidden tab is display:none and html.bg
+   pauses the rest; the <use> inherits --o1/--o2, so no node is replaced. A moment on its row, 2.4 s, once: merged hops, a
+   FAIL shakes the row, a new ask pulses; a rebuilt row resumes it by --mo-d (a negative delay) */
+.rsp{animation:kfr 1.2s infinite}
+[data-mo] .rsp{animation:kfr 1.2s infinite,mo-hop .8s ease-in-out 3 var(--mo-d,0ms)}
+[data-mo=fail]{animation:mo-shake .4s ease-in-out 6 var(--mo-d,0ms)}[data-mo=fail] .rsp{animation:kfr 1.2s infinite}
+[data-mo=needs-you]{animation:mo-tint 2.4s ease-out 1 var(--mo-d,0ms)}[data-mo=needs-you] .rsp{animation:kfr 1.2s infinite,mo-pulse .8s ease-in-out 3 var(--mo-d,0ms)}
+[data-mo]{position:relative}[data-mo]:is(summary)>:is(.ag,span.m:nth-of-type(3)){visibility:hidden}
+.mot{position:absolute;right:0;top:calc((var(--hit) - var(--s4)) / 2);font-style:normal;font-weight:700;font-size:var(--fs-meta);padding:0 var(--s1);border-radius:var(--s1);color:var(--bg);background:var(--g);white-space:nowrap;animation:mo-tag 2.4s ease-out 1 both var(--mo-d,0ms)}
+[data-mo=fail] .mot,[data-mo=needs-you] .mot{background:var(--r)}
+@keyframes mo-hop{50%{translate:0 calc(-1 * var(--s1))}}@keyframes mo-shake{25%{translate:calc(-1 * var(--s1) / 2) 0}75%{translate:calc(var(--s1) / 2) 0}}
+@keyframes mo-pulse{50%{scale:1.25}}@keyframes mo-tint{from{background:color-mix(in srgb,var(--r) 18%,transparent)}}@keyframes mo-tag{0%{opacity:0}8%,85%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.rsp,.lsm svg,[data-mo],[data-mo] .rsp,.mot{animation:none!important}}
 .gl{font-style:normal;font-size:20px}
 .px{width:48px;height:36px}
 .av .asc{font:10px/1 ui-monospace,Menlo,monospace;white-space:pre;font-style:normal}
@@ -247,14 +275,14 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
    so the graph has no gaps at line height 1.5. A clamped row (depth > 3) keeps its dashed ┆─ glyph alone. --d is the drawn
    depth (0-3), the gutter 2·d+1 columns (≤ 6 + the dot); --y is the node line's middle. The row separator starts at the
    #n column, so it never crosses the graph. The card is a box beside the gutter; a hanging row's title wraps. */
-details.q{position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1ch);--y:calc(var(--s1) + var(--fs) * .75);
+:is(details.q,.qc){position:relative;border-bottom:0;--gw:calc((2 * var(--d, 0) + 1) * 1ch);--y:calc(var(--s1) + var(--fs) * .75);
   background:linear-gradient(var(--line),var(--line)) no-repeat calc(var(--gw) + var(--s2)) 100%/100% 1px}
 .d0{--d:0}.d1{--d:1}.d2{--d:2}
-details.q>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
+:is(details.q,.qc)>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 /* #367: titles start in one column at every depth: past the depth-2 gutter (--gm), so no graph line crosses one. */
-details.q{--gm:5ch}details.q:has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
-details.q .tl{grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
-details.q>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
+:is(details.q,.qc){--gm:5ch}:is(details.q,.qc):has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
+:is(details.q,.qc) :is(.tl,.cst){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc)>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
@@ -535,9 +563,8 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 #queue{touch-action:pan-y}
 .qch{padding-left:0;padding-right:0}.qch .r{margin-left:.6ch}
 .qg>h3{margin:var(--s3) 0 0}
-.qc>summary{grid-template-columns:1ch auto minmax(0,1fr) auto;align-items:start;padding:var(--s1) 0}.qc>summary>span:first-of-type{margin-right:calc(-1 * var(--s2))}
-/* Its title ellipsises on the first line; `(6 steps) · next: #n` is the second, as a row's title line is. */
-.qct{display:flex;flex-wrap:wrap;min-width:0;white-space:pre}.qct>span{flex:none}.qct>.el{flex:1 1 0;min-width:0}.qct>:last-child{flex-basis:100%;color:var(--mute);font-size:var(--fs-meta)}
+/* #391: the chain row is a row (serve.js `qfold`); its third line names the steps and opens them in place. */
+.cst::before{content:"▸ "}.qc[open]>summary>.cst::before{content:"▾ "}
 .qx{border-bottom:0}.qx>summary{display:flex;white-space:pre;color:var(--link)}.qx>summary>:last-child{flex:1}
 .fc.qa>:not(.fh,summary,.qg[data-g=need]){display:none}
 /* #365: the backlog under a repo's queue: search, quick filters, rows to tick; [queue N] sits right above the tab bar. */
@@ -548,3 +575,100 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .bi>.tl{grid-column:3;margin-top:0;color:var(--fg)}.bi>.m{grid-column:3;font-size:var(--fs-meta)}
 .bl:has(>.bbar:not([hidden])){padding-bottom:calc(var(--hit) + var(--s3))}
 .bbar{position:fixed;left:0;right:0;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;justify-content:flex-end;padding:var(--s2);background:var(--bg);border-top:1px solid var(--line)}
+/* #386: the [chat] tab (docs/design/conductor-chat/): on a phone the thread list or one thread (serve.js's #cht style
+   picks it); from 1000 px both, the list a 400 px column on the left, the thread beside it, its prose capped at 100ch. */
+#chat{padding-bottom:var(--s2)}
+@media (min-width:1000px){
+  #chat{display:grid;grid-template-columns:400px minmax(0,1fr);gap:0 calc(2 * var(--s4));align-items:start}
+  html:not([data-tab=chat]) #chat{display:none}
+  .clp{position:sticky;top:calc(var(--hit) + var(--s1))}
+  .cvp{border-left:1px solid var(--line);padding-left:calc(2 * var(--s4))}
+  .cvp>*{max-width:100ch}
+  .th .bk{display:none}
+}
+/* A repo card is the Queue tab's fleet card (#162); "all repos" takes the text colour. */
+.fc.k-x{--fk:var(--fg)}
+.fc .fh .ds{margin-left:1ch;font-size:var(--fs-meta);color:var(--mute)}
+/* A thread row: the unread dot, the title, the age; then, 11 px, the state when not plain awake and the last message. */
+.tr{display:grid;grid-template-columns:1.5ch minmax(0,1fr) auto;gap:0 var(--s2);align-items:baseline;min-height:var(--hit);padding:var(--s1) 0;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.tr>.ud{font-style:normal;color:var(--link)}
+.tr>.tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr.rd>.tt{color:var(--mute)}
+.tr>.ta{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}
+.tr>.tp{grid-column:2/-1;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr>.tp b{font-weight:400;margin-right:1ch}
+/* #413: a linked row's chip, `from t5` / `continued in t6`: a tap opens that thread. */
+/* `.lk` is the event card's link line; this chip is inline. */
+.lc{display:inline;margin:0;color:var(--link);border:1px solid var(--edge);border-radius:6px;padding:0 .5ch;cursor:pointer}
+.fc>.done>summary{min-height:var(--hit)}
+/* #405: a thread row on one line with its [archive] (shown once the row is swiped left) or, archived, its [restore]. */
+.sw{display:flex;align-items:center;gap:var(--s4);border-top:1px solid var(--line)}
+.sw>.tr{flex:1;min-width:0;border-top:0;touch-action:pan-y}
+.sw:not(.op)>.sb[name=archive]{display:none}
+/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. */
+.th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
+.th>div{flex:1;min-width:0}
+.th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .ds{font-size:var(--fs-meta);color:var(--mute)}
+.th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
+.tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
+.blk>summary .ct{flex:none;color:var(--mute)}
+/* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
+.im{margin:var(--s2) 0 0}
+.im img{display:block;cursor:zoom-in;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.im figcaption{margin-top:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+/* #406: the image viewer: black in every scheme (a photo's backdrop), the image fitted (the page's gestures off: pinch
+   and swipe are its own); [×], the count and [save] in a bar over its top. `.dr`: a finger is down, the image follows it without easing. */
+#iv{position:fixed;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden;background:black;touch-action:none;-webkit-user-select:none;user-select:none}
+#iv>img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .2s;-webkit-user-drag:none}
+#iv.dr>img{transition:none}
+.ivb{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;min-height:var(--hit);padding:env(safe-area-inset-top) var(--s3) 0;background:color-mix(in srgb,black 50%,transparent);color:white}
+.ivb button{color:white}
+.ivn{font-size:var(--fs-meta)}
+.tf{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin-top:var(--s2);padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;color:var(--fg);text-decoration:none}
+.tf>span:first-of-type{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tf .m{font-size:var(--fs-meta)}
+/* A choice (#63 A's rows, recommended first, and an "other" box); answered, only the green ✓ line stays. Inside a
+   thread "waits for you" is amber; red stays the needs-you stack. */
+.chq{display:flex;flex-direction:column;align-items:stretch;gap:var(--s2);margin-top:var(--s2)}
+.chq .oth{display:flex;gap:var(--s4);align-items:center;margin-top:var(--s1)}
+.chq .oth input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.blk:has(>.md+.chq){--k:var(--a)}
+/* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
+.df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
+/* #409: a fenced block in a message: its exact text in a box that scrolls sideways, [copy] in its top corner (no
+   scrollbar: WebKit leaves a classic one out of the box's height inside a flex column). */
+.cb{position:relative}.cb pre{margin:0;padding:var(--ctl) var(--s2) var(--s2);overflow-x:auto;scrollbar-width:none;white-space:pre;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px}
+.cb .cpy{position:absolute;top:0;right:var(--s2)}
+:is(.chc,.chs){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
+.chs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
+.blk:has(>.md+:is(.chc,.chs)){--k:var(--a)}
+.ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
+.qid{font-size:var(--fs-meta);color:var(--mute)}
+/* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
+.cvp :is(.chq,.chc,.tw):has([disabled]){opacity:.6}
+.cvp>.ns{margin:0;font-size:var(--fs-meta)}
+/* The live line and the composer are the sheet's (.live, .reply). */
+.tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tlv b{font-weight:400;color:var(--a)}.tlv b.g{color:var(--g)}
+.tw{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
+.tw textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
+/* The composer, sticky above the tab bar: [+] attach, the text, [send]; #405: the picked files wait above it, a row of
+   56 px thumbnails (a file's name in its place), [×] under each. */
+.cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));margin-bottom:var(--hit);background:var(--bg);border-top:1px solid var(--line)}
+.ats{flex-basis:100%;display:flex;gap:var(--s4);overflow-x:auto;padding:0 var(--s2) var(--s2)}
+.att{flex:none;display:flex;flex-direction:column;align-items:center;gap:var(--s2);width:calc(var(--hit) + var(--s3))}
+.att>:is(img,span){width:100%;height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.att>span{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #403: the box grows with its text to 6 lines, then scrolls inside; with the keyboard up (the box focused) a phone
+   hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
+   delivery's system line is red too. A working thread's mark is the loading overlay's art (#ld), 24 px, inline. */
+.tw textarea{max-height:calc(6lh + 2 * var(--s2) + 2px);overflow-y:auto}
+@media (max-width:999px){html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp .tw{bottom:0;margin-bottom:0}}
+.snt .md p{white-space:pre-line}.blk>summary .sk{flex:none;font-weight:400;color:var(--g)}
+.blk.snt.bad{--k:var(--r)}.snt.bad>summary .ct{color:var(--r)}.qs.note.r{border-left-color:var(--r);color:var(--r)}
+.tld{display:inline-grid;place-items:center;min-width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);vertical-align:middle;font-style:normal}
+.tld .lds{width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);image-rendering:pixelated;shape-rendering:crispEdges;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
+.tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
+html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
+@media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}

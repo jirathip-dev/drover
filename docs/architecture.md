@@ -76,6 +76,18 @@ herdr argv) and `gh` (cached GitHub reads).
 | `doctor`, `protection` | read-only host and branch-protection checks |
 | `runner`, `herdr`, `gh` | the seams to external programs |
 
+## API types
+
+Every JSON shape the page reads or posts has one definition, in Rust: `crates/server/src/api.rs` (`/herd.json`, the
+lane chat, `/live`'s `ev`, `frag` and `patch`, the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
+board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `HostRow`). `ts-rs`, behind the server's
+`ts` feature (never in the release build; CI checks `cargo tree -e normal`), turns them into `assets/types/api.d.ts`:
+`just types` writes it (`cargo test -p herdsman-server --features ts export_bindings`). The types follow serde's JSON:
+u64 is `number`, `Option<T>` is `field?: T | null`, `rename` and `flatten` as serde does them. CI regenerates the file
+and fails on any diff, then `serde_json_fits_the_types` type-checks the demo export's real payloads and each type's
+default with `tsc --noEmit --strict`, and `just types-lint` fails a hand-written copy of a generated type in the board's
+TS: it imports them from `assets/types/api`.
+
 ## Code rules
 
 - **Format:** rustfmt with `max_width = 120` (`rustfmt.toml`); CI runs `cargo fmt --check`. The formatter decides

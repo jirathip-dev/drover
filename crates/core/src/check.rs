@@ -1,7 +1,7 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
 
 use crate::config::Config;
-use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
+use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -44,6 +44,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let agents = host::agents(r)
         .map_err(|e| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane checks"))
         .ok();
+    if let Some(a) = &agents {
+        crate::conductor::sleep_idle(ctx, cfg, r, &events, a)?; // #355
+    }
     let stall = cfg.limits.stall_minutes * 60;
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
     let remote = crate::hosts::survey(ctx, cfg, r, false);
@@ -51,6 +54,22 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     crate::setup::reap(ctx, r, &events)?;
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
+        // #429: integration within `warn_within` of its line cap: once per integration sha.
+        if let Some((sha, n, cap, warn)) = crate::overlap::cap_at(ctx, cfg, r, name).filter(|c| c.2 - c.1 < c.3) {
+            let why = format!(
+                "{} lines of headroom (< {warn}) at {sha:.7}, {n} / cap {cap}: propose the next cap step",
+                cap - n
+            );
+            fire(
+                ctx,
+                cfg,
+                out,
+                &events,
+                (name, None),
+                "cap-near",
+                json!({"key": sha, "reason": why}),
+            )?;
+        }
         // #331: a queued issue never spawned had no cached spec, so no Queue row title: fetch it once (cached after).
         for i in crate::queue::replay(&events, name) {
             let _ = gh::spec(ctx, r, f, name, i.issue, false);
@@ -86,6 +105,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let d = json!({"key": since, "reason": why});
         fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
     }
+    // #424: an answer that never reached its lane alerts once per ask (drive keeps retrying it); a day on, never.
+    let undelivered = cfg.fleet.keys().flat_map(|f| crate::undelivered(&events, f));
+    for u in undelivered.filter(|u| u.ts + 86_400 > ctx.now) {
+        let mut d = u.data.clone();
+        d.insert("key".into(), json!(u.str("id")));
+        let to = (u.fleet.as_str(), u.issue);
+        fire(ctx, cfg, out, &events, to, "answer-undelivered", d.into())?;
+    }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
@@ -116,8 +143,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 format!("{}:{lane}", s.last_ts)
             };
             // #248: a lane herdsman closed once its handoff was logged is not gone.
-            let mine = |e: &Event| e.kind == "lane-closed" && e.str("agent") == Some(lane);
-            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e) && e.ts >= sp.ts));
+            let mine = |e: &Event, sp| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
+            let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e, sp)));
             if status.is_none() && !closed {
                 hits.push((
                     "lane-dead",
@@ -170,7 +197,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
-            if idle > stall && status != Some("working") && !parked {
+            // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
+            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_none() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
@@ -185,6 +213,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     ),
                     _ => format!("{role} lane {lane} is {st}"),
                 };
+                let key = format!("{key}:{}", (idle - stall) / 7200);
                 hits.push((
                     "stall",
                     key,
@@ -218,15 +247,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let lane = lane.filter(|l| l.2.is_some() && !tracked.contains_key(&(l.0.to_string(), l.1)));
         if let Some(l) = lane.filter(|_| last_spawn(&events, name).is_none()) {
             let why = format!("herdr agent {name} has no spawn event and matches no tracked issue");
-            fire(
-                ctx,
-                cfg,
-                out,
-                &events,
-                (l.0, Some(l.1)),
-                "orphan-lane",
-                json!({"key": name, "reason": why}),
-            )?;
+            let d = json!({"key": name, "reason": why});
+            fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
     let open = open_asks(&events);
@@ -268,15 +290,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             age(ctx.now.saturating_sub(a.ts)),
             a.str("question").unwrap_or("?")
         );
-        fire(
-            ctx,
-            cfg,
-            out,
-            &events,
-            (&a.fleet, a.issue),
-            "ask-waiting",
-            json!({"key": a.str("id"), "reason": why}),
-        )?;
+        let d = json!({"key": a.str("id"), "reason": why});
+        fire(ctx, cfg, out, &events, (&a.fleet, a.issue), "ask-waiting", d)?;
     }
     if let (sent, held @ 1..) = PUSHES.replace((0, 0)) {
         let d = json!({"key": ctx.now, "reason": format!("{} questions waiting — open the board", sent + held)});

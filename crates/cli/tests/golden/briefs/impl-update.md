@@ -33,6 +33,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - After three attempts in one diagnostic class without progress, stop and report.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
   Finish your work, run the gates, push. If the other PR merges first, herdsman gives you an update round to resolve it.
+- A decision that says to wait for another issue #N: run `herdsman queue <fleet> block --on N <issue>`
+  for your own issue and end the turn. Drive prompts you (or respawns the lane) when #N merges.
 - Start any dev server on `$HERDSMAN_PORT`, never a fixed port.
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
@@ -61,8 +63,11 @@ Production code added only for tests counts against the change too.
 ## Standing answers (decide, don't ask)
 
 - An issue's line budget is a guide, not a gate. Never ask about it. State `src/ net +N (budget +M)`
-  in the PR body with one line on why. Only the overall cap in `ci/cap.toml` is hard; if your change
-  would break it, trim first, then ask `--kind owner`.
+  in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
+  hard limit: ask only when your own PR, merged onto current integration, would put the total over
+  `line_cap`; trim first, then ask `--kind owner`.
+- Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
+  the cap after another merge is a fix round: trim, or ask under the same rule.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
   (no limit inside one round).
 - Staging itself broken by someone else's merge: fix the minimal break in your PR, say

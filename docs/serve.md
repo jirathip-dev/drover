@@ -1,13 +1,13 @@
 # The phone page
 
 `herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
-`last update hh:mm` line) with Queue · Lanes · Host · Events tabs. `--read-only` serves GET only.
+`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
 Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
 slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
-every 15 s, for ages) it re-renders the needs-you cards and the four tabs and pushes only
+every 15 s, for ages) it re-renders the needs-you cards and the five tabs and pushes only
 the changed ones as `event: frag` (`{id, html}`) the first time on a stream, then (#351) only as `event: patch`
 (`{id, n, p, set}`: the part cut before each `<d`, its new piece count, the common prefix and the changed pieces by index;
 a piece past the prefix not in `set` is the old one shifted by the count change; serve.js rebuilds the HTML and swaps it
@@ -54,12 +54,14 @@ shows `as of HH:MM` in the header until fresh data lands. A load, refresh or act
 no taps, the header stays clear, `[↻]` spins its plain ↻ meanwhile, and it goes as soon as the data paints. Animations
 pause while the app is in the background. `GET /` also leaves out what the first paint does not show. A fleet's `roles` row is empty
 until opened; opening it reads `GET /frag?id=roles&fleet=<fleet>` (the model/effort forms; kept across
-live swaps, re-read on ↻). The Events tab body is read from `GET /frag?id=events` when the tab opens
-(`/?all=1` still renders it in the page; `/frags` and the live stream still carry it). #351: each Events view opens with its
-last 100 rows; its **older** button reads the next 100 (`GET /frag?id=events&skip=100`, …) under them, kept across live
-swaps. No compression:
+live swaps, re-read on ↻). #266: the Events tab is the TypeScript board's (`web/src/events.ts`): on load it reads
+`/api/v1/state` and the newest 500 events (`events?since=&until=`), then the next 500 back while the open view has no
+more rows than it shows; each `ev` on the live stream reads the new ones (`events?since=`), ↻ reads it all again. #351:
+each Events view opens with its last 100 rows; its **older** button shows the next 100. `/?all=1` reads the whole log,
+unfolded. No compression:
 a repeat visit downloads the page HTML only, the assets come from the service worker's cache. A
-`serve --export` inlines both, so the static demo needs no `/frag`.
+`serve --export` inlines both, so the static demo needs no `/frag`; it writes `api/v1/state`, `api/v1/events` (every
+event) and `api/v1/host` (#267) as files for the board.
 
 Queue tab (#115): each fleet's rows are a `git log --graph` tree in queue order. A row blocked by another row in
 view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and an `on #b` tag), a blocker out of view is a red
@@ -71,9 +73,12 @@ siblings.
 One repo at a time (#367): chips on top, `[repo n]` with a red dot when it needs you, and `[all]` for every repo's
 needs-you rows. A tap, a sideways swipe or ←/→ switches; the pick is kept per phone. A repo's rows are grouped (needs
 you, in progress, queued), each tree drawn inside its group. A running row's time reads `in impl 1h 47m`, a needs-you row's `1h 47m`. Queued rows
-show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row,
-`#265 → #270 · <root's title> (6 steps) · next: #266` (next: the root's open blocker, else the root), and `▾` opens
-its steps. Titles start in one column at every depth.
+show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row laid
+out as a queued row (#391): the root's number, `chain · 6` as its state, its place and the root's title, then
+`▸ #265 → #356 · next: #266 (in impl)` (first → last step; next: the root's open blocker, else the root, with its state
+when it is on the board); a tap opens its steps. A page of an older build (the service worker's copy) loads again on
+`/live`'s first `build` event. `queue add` reads an added issue's title right away; a row queued from the backlog shows
+the backlog read's title until then. Titles start in one column at every depth.
 
 Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
 queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
@@ -94,7 +99,9 @@ Lanes are grouped like Corral: state sections blocked → working → idle → d
 split into fleet subgroups (alphabetical, Others last), newest-changed first. A lane the log has open
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
-when work is at risk. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
+when work is at risk. #422: a thread's conductor (`conductor-<thread>`) is a lane of the thread's repo (an
+`all` thread's in `all repos`), role `conductor`, first in its subgroup, named `<thread title> · <thread>`; once
+its pane closed it stays, dimmed, as `asleep`, and its row opens the thread in the chat tab. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
 PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
 56 px handle, or from the conversation's top; snaps to 50 %, 78 % or full by position and flick; below 50 %, a
@@ -138,8 +145,8 @@ The sheet's reply box sends text to that agent (`herdr agent prompt` + Enter; ds
 phone** (header, blocked cards, the sheet) POSTs `/pair/request`, which shows a 6-digit code and sets
 an HttpOnly, Secure, SameSite=Strict `hd=` cookie with a random token for 10 minutes. The token pairs
 nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
-use; `serve pending` lists requests). The approval is logged, so the waiting page's live Events frag
-changes (or the page's 2 s claim poll, #288) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
+use; `serve pending` lists requests). The approval is logged, so the waiting page's live stream
+sends its `ev` (and the page's 2 s claim poll, #288, sees it) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
 each page load claims again, renewing it, and a device unused for a year (365 days) no longer counts as paired
 (`herdsman serve devices` lists each paired device's days left). Opened on the host itself (a loopback peer whose
 `Host` is `127.0.0.1`/`localhost`, no `X-Forwarded-For` or `Tailscale-User-Login`), the panel also shows the
@@ -160,7 +167,7 @@ Sends pass the same Host/Origin checks, are limited to 10 a minute per device, a
 chars, or a control character other than newline). Removing a device also needs a paired cookie. Each send logs `{"type":"prompt","via":"web","agent","device","chars"}`, never the
 text. Secure cookies need https (`tailscale serve`) or localhost.
 
-Open asks (`herdsman ask`) show as a red **needs you** card above every tab: the question, option
+Open asks (`herdsman ask`, but a conductor's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
 buttons (recommended first) and a free-text box, tagged `routine · defaults to 2 in 24m` or `owner · waits
 for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`herdsman answer … --by owner`,
 logged `"via":"web"`) under the same Host/Origin checks and needs a paired device (401 otherwise). In the
@@ -273,6 +280,11 @@ public key and `POST /push/subscribe`s the subscription; that and the Host tab's
 otherwise). Delivery goes Mac → Apple/Google push service → phone, outbound only; the page stays
 tailnet-only.
 
+#370: the subscription carries the phone's theme words (`w_merged`, `w_needs`), so a merge reads `Order up: #2957
+merged` (kitchen) or `Over the fence: #2957 merged` (farm), and needs-human / an owner ask `The bell: api #2961 needs
+you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme switch re-sends them with `quiet=1`
+(saved, no test push). Only the title changes; the body stays.
+
 ```toml
 [[notify]]
 type = "webpush"
@@ -302,7 +314,38 @@ logged, printed or served; the page gets only the public key and each device's l
 
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
-client). CI's deps gate fails on any other direct dependency.
+client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
+berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md). CI's deps gate fails on any
+other direct dependency.
+
+## JSON API v1 (#265)
+
+Beside the HTML board, `herdsman serve` answers JSON under `/api/v1/`, for the TypeScript board in `web/` and later
+the native app. Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
+transcript, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host) refuse an unpaired one.
+
+| route | answer |
+|---|---|
+| `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
+| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
+| `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
+| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |
+
+Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 403 `FORBIDDEN`, 405
+`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
+choice (localStorage), as on the HTML board: `state.theme` is the board's default, and no route writes it. The service worker
+never caches `api/`. A breaking change is `/api/v2/`.
+
+The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
+`assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
+`crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`.
+
+`web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
+`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev
+dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is committed and embedded in the binary
+(`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
+build` after a UI edit.
 
 ## Host tab (#141)
 
@@ -318,6 +361,8 @@ Load/cpu and swap-out show a 12-cell gauge against their limit (green under 80 %
 floor (`min_free_mem_gb`, `min_free_gb`). The words
 come from one table in `crates/server/src/serve.rs` (`WORDS`, golden-tested in crates/cli/tests/host_words.rs). The tab bar is
 `[queue·N] [lanes] [host] [events]`: the active tab is filled with the accent, and N counts the needs-you cards.
+#267: the tab is the TypeScript board's (`web/src/host.ts`), drawn from API v1's `host` on load and ↻; when its data
+changes the live stream sends it as `event: host` (the JSON itself, to every device), and the board draws it again.
 
 ## Static export and the public demo
 

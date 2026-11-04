@@ -1,0 +1,164 @@
+# Conductor chat (#355, steps 1 to 3)
+
+Talk to a **conductor** through herdsman itself, with no Hermes needed. A **thread** belongs to one fleet's repo, or
+to `all` for cross-cutting work. Each thread is talked through by one conductor lane.
+
+```sh
+herdsman thread new acme "Grill #12"          # prints t1
+herdsman thread say t1 "what should #12 cover?"
+herdsman thread show t1 [--json]              # the conversation; marks it read
+herdsman thread ls [FLEET] [--json]           # per repo: title, last message, unread •, awake/asleep
+```
+
+## The conductor lane
+
+- **Role `conductor`, any harness:** `[fleet.<n>.role.conductor]` takes the usual role keys (`harness`, `model`,
+  `effort`, `account`/`accounts`, `fallback`, `mcp`). An `all` thread uses the first fleet that defines one. Without
+  one (#401), a fleet's conductor is its `impl` role on profile `lane-conductor` (which `profiles sync` writes; a
+  Hermes impl needs `hermes profile create lane-conductor`); only a fleet with neither refuses `NO_CONDUCTOR`.
+  `herdsman spawn … conductor` refuses `BAD_VALUE`.
+- **[config] → Conductor** shows the role in effect (`default: impl` or `set`) with tappable harness, model (the
+  models the fleet's roles use) and effort choices. A tap from a paired device writes `[fleet.<n>.role.conductor]` in
+  place (the first one copies the impl role's keys), after saving the old file as `fleet.toml.bak`; it is refused
+  `DOCTOR` when `herdsman doctor` with the new file shows a ✗ it did not show before. The next conductor start uses it.
+- **No worktree:** it runs in `<state dir>/conductor/<thread>/` (or `<[conductor] dir>/<thread>/`) in its own herdr workspace, as agent
+  `conductor-<thread>`, with `HERDSMAN_LANE=<fleet>:-:conductor` (so the lane hook guards it) and
+  `HERDSMAN_THREAD=<thread>`.
+- **Its brief** (`.brief.md` there, rewritten at each start) is `roles/conductor.md`, the thread and repo, then the
+  `[conductor]` profile:
+
+  ```toml
+  [conductor]
+  dir = "~/conductor"                            # optional: the threads' folders' root (default <state dir>/conductor)
+  instructions = "~/notes/conductor/AGENTS.md"   # inlined
+  memory = "~/notes/conductor/memory"            # each *.md inlined
+  skills = "~/notes/conductor/skills"            # listed, read on demand
+  ```
+
+- **Sleep and resume:** `check` closes an awake conductor whose thread has been quiet for 30 min and that is not
+  working (`conductor-sleep`). The next message starts it again with the same session id. Claude Code is started
+  with `--session-id <uuid>` and resumed with `--resume <uuid>`, so the full conversation carries over. A harness
+  that can't resume gets the thread so far in its kick instead.
+
+## Messages and asks
+
+- `thread say` logs `thread-msg` (from `owner`), then types `[<thread>] owner: <text>` into the conductor (waking it
+  first). The conductor answers with `herdsman thread reply <thread> "<text>"`.
+- **Choices:** the conductor runs `herdsman ask <fleet> - "<question>" --thread <thread> --option … --recommend N`.
+  The thread shows the ask with its options, the recommended one first. `herdsman answer <fleet> <id> <n>` (the
+  tap later) logs the decision, adds `DECISION <id>: <text>` to the thread and types it into the conductor.
+  `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
+
+- **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
+  images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is
+  refused: copy it in first), and the board serves only those. Files the owner attaches on the board (#405: several, up to 10 a message,
+  each at most 10 MB; picked at once or added with `[+]`, waiting above the box as thumbnails with `[×]`) or with
+  `herdsman thread say <thread> "<text>" --file <path>` (repeatable) are saved in the conductor's folder under
+  `uploads/` and each path is typed in with the message (`(attached: <path>)`), so the conductor can read them.
+- **Handoff (#413):** `herdsman thread handoff <from> <repo|thread> <title> <text>` starts a thread titled `<title>`
+  in a repo (or `all`), or reuses an existing thread (`t6`; `<title>` is the handoff row's subject). It logs
+  `thread-handoff` `{from, to, title, text}`, then types `[<to>] <from>: <text>` into the target's conductor (started or
+  resumed, as with `say`). The source shows `continued in <to>` and the target `from <from>` with the text. While the
+  link exists, the target's filed issues (`gh issue create`: `filed #<n>: <title>`, or the title alone) and answered
+  thread asks (`answered <id>: <question> → <answer>`) each post one line back into the source. Any conductor may
+  hand off to any repo; a conductor's plain `thread new` refuses `USE_HANDOFF`, so every thread a conductor starts is
+  logged with its source. The owner's `thread new` (CLI or board) is unchanged.
+- **Commands:** the lane hook logs each `herdsman` or `gh` command the conductor runs (`thread-cmd`, not `thread
+  reply`); the board shows them as closed tool rows.
+
+## The [chat] tab (#386)
+
+Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, `[queue] [lanes] [chat] [host]
+[events]`, reading `[chat·N]` with N the threads where a choice waits.
+
+- **The list:** "all repos", then each fleet by name, a card each with its 3 newest threads (the rest fold under
+  "N older threads") and `[+ thread]`, which opens an empty thread (#405): nothing is logged until its first message,
+  which starts the thread (titled with that message's first line, cut to one row) and its conductor, and is the only
+  thing the conductor gets. After its first reply the conductor retitles it once with a short summary
+  (`herdsman thread title <thread> "<title>"`, logged `thread-title`). A row has the unread dot, the title, the age,
+  then `! choose`, `✻ working` or `☾ asleep` and the last message.
+- **Archive (#405):** a row swiped left shows `[archive]`: the thread's conductor stops (its pane closes; the folder,
+  uploads and log stay) and the thread folds under "N archived" at the bottom of its card, where `[restore]` brings
+  it back; its next message resumes the same session. CLI: `herdsman thread archive|restore <thread>` (logged
+  `thread-archive` / `thread-restore`). Nothing is deleted.
+- **A thread** is the lane sheet's chat blocks: your messages in the accent colour, the conductor's purple, its
+  commands as closed tool rows, system lines (resumed, asleep, account switch), images and file rows
+  (`GET /thread/<thread>/<name>`), plain links. An open ask shows its choice rows (recommended first) and an "other"
+  box, with an amber edge; a tap answers it (`DECISION` typed into the conductor); answered, a green `✓` line with
+  who and when stays. Thread asks never join the red needs-you stack. Below: the live line and the composer (`[+]`
+  attach, the text, `[send]`). Opening a thread marks it read.
+- **Linked threads (#413):** each handoff row, message from another thread and flow-back line carries a
+  `from t5` / `continued in t6` chip, and so does a linked thread's row in the list; a tap opens the other thread.
+- **At 1000 px and up** the list is a 400 px column with the open thread beside it.
+- **Not a paired owner device:** the thread reads the same; the choice rows, `[+ thread]` and the composer are off.
+- **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
+  `read`, `retry`) from a paired device, 10 a minute. #403: `new` and `say` answer once the thread or message is
+  logged; starting or resuming the conductor and typing the line run after the reply. A failed delivery is a red
+  system line with `[retry]` (`retry` types the same line again, logging no copy). No chat post shows the loading
+  overlay.
+- **On a phone (#403):** `[send]` clears the box at once and shows the message `sending…`, then `✓`; failed, red
+  with `[retry]` and the text (and file) back in the box. The box grows to 6 lines, then scrolls; with the keyboard
+  up the tab bar hides. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
+  returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
+  above the box.
+
+**Push** (a `webpush` notifier, default `on`): a conductor's reply is `<repo> · <thread title>: <its first line>`, a
+choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The owner's messages, commands and system
+lines never push.
+
+Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, `conductor-start` (session, resumed,
+account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
+`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only), `telegram-topic`.
+
+## Config changes (#387)
+
+`herdsman config propose <thread> <file>`: `<file>` is the whole new fleet.toml (the conductor edits a copy). It is
+validated like fleet.toml itself, and its diff shows in the thread as a card with **[apply] [discard]**. Only the
+owner applies it: a tap on a paired device, or `herdsman config apply|discard <id>` outside a lane (the lane hook
+refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
+new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
+to restore. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
+thread's system line, e.g. `config c1 applied by owner, backup kept, doctor ✓` (the conductor gets it too).
+
+## Accounts (#387)
+
+The conductor uses its role's `account`/`accounts` or #302's `fallback` chain. When `check` sees the awake conductor's
+usage-limit banner (or a sign-out), it rests that account (else that harness), closes the pane, and resumes the
+**same session** on the next one (Claude Code `--resume <id>`). The thread shows `switched to claude:B (claude:A
+resting until 18:40)`. A harness that can't resume gets the thread so far in its kick. A sign-out also adds a
+`<harness> is signed out: [sign in]` line; the button opens #303's setup terminal on the main host. The conductor
+never edits the account list itself: that change is a `config propose` card.
+
+## Secrets (#387)
+
+- `herdsman secret request <thread> <NAME> --why "…"` shows a masked-input card with [save] [dismiss], on paired
+  owner devices only (elsewhere the card says so).
+- [save] stores the value in the host's keychain as `herdsman/<fleet>/<NAME>` (`<fleet>` is the thread's, or `all`),
+  hex-encoded on `security -i`'s stdin, never in argv. Events, the chat and lanes never see it. The thread records
+  only `secret <NAME> set ✓ (by owner)`.
+- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn the lane's own shell reads it
+  (`security find-generic-password … -w`, the fleet's item, else `all`'s).
+- `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
+
+## Telegram (#387, optional)
+
+herdsman talks to the Telegram Bot API itself (no Hermes). The bot token is the keychain item
+`herdsman/all/TELEGRAM_BOT_TOKEN` (a `secret request` in an `all` thread stores it there), never fleet.toml. curl
+gets it on stdin only.
+
+```toml
+[telegram]
+chat = -100123     # a forum supergroup the bot administers (topics on)
+owner = 4242          # your Telegram user id: only your messages and taps count (required: without it the bridge stays off)
+# api = "https://api.telegram.org"
+```
+
+- `herdsman serve` long-polls it (it moves to Phase C, #345, later).
+- **One forum topic is one thread.** A new topic starts a thread under **all repos**, unless its name starts with a
+  repo's fleet name. A thread started on the board gets a new topic.
+- The conductor's replies and system lines go to the topic. An ask's options become inline keyboard buttons (a tap
+  answers it, `via: telegram`). Images go both ways: a photo you send is saved in the thread's `uploads/` and typed
+  in with its path, and the conductor's images arrive as photos (other files as documents). A config or secret card
+  says it waits on the board.
+- The board stays the primary UI and shows the whole conversation. Your own messages stay where you wrote them.
+- Cursor: `<state dir>/telegram.json` (the next update id, the events relayed). The first run relays nothing older.

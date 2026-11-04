@@ -6,6 +6,7 @@ use crate::{gh, Ctx};
 use serde::Serialize;
 use serde_json::Value;
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Waiting {
     pub fleet: String,
@@ -118,6 +119,10 @@ pub fn waiting_on(
     }
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
+    }
+    if let Some(on) = crate::events::held_on(events, s) {
+        return w("drive", &format!("held until #{on} merges"), s.last_ts, None);
+        // #425: drive wakes it then
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
     if let Some(g) = fc

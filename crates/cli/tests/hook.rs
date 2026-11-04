@@ -364,6 +364,140 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }
 
+/// #410: a conductor thread spawns design lanes; impl, rev, orch and other lanes still may not.
+#[test]
+fn a_conductor_may_spawn_design_lanes() {
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    let spawn = "herdsman spawn synergy 2475 design";
+    assert_eq!(run("synergy:-:conductor", spawn), "", "a conductor may");
+    for lane in [
+        "synergy:12:impl",
+        "synergy:12:rev",
+        "synergy:-:orch",
+        "synergy:-:design",
+        "conductor",
+    ] {
+        assert!(run(lane, spawn).contains("owner-only"), "{lane}");
+    }
+    for cmd in ["herdsman setup", "herdsman secret ls"] {
+        assert!(run("synergy:-:conductor", cmd).contains("REFUSED OWNER_ONLY"), "{cmd}");
+    }
+}
+
+/// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
+#[test]
+fn quoted_text_is_not_a_command() {
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    let reply = r#"herdsman thread reply t5 "run \`herdsman spawn synergy 2475 design\`""#;
+    let heredoc = "cat > f.md <<'EOF'\nrun `herdsman spawn synergy 2475 design`\nEOF\nwc -l f.md";
+    for lane in ["synergy:-:conductor", "synergy:-:orch"] {
+        assert_eq!(run(lane, reply), "", "{lane}");
+    }
+    for cmd in [
+        heredoc,
+        "cat <<-EOF > f.md\n\therdsman setup\n\tEOF",
+        "herdsman thread say t1 'herdsman secret ls'",
+        "herdsman ask x 1 \"spawn?\" --option \"herdsman spawn x 1 design\" --option='docker ps'",
+        "herdsman thread reply t1 'run docker ps'",
+    ] {
+        assert_eq!(run("synergy:-:orch", cmd), "", "{cmd}");
+    }
+    for cmd in [
+        "herdsman thread reply t1 x; herdsman spawn x 1 design",
+        "herdsman thread reply t1 \"x\"; herdsman spawn x 1 design",
+        "cat > f.md <<'EOF'\nx\nEOF\nherdsman spawn x 1 design",
+        "sh -c 'herdsman spawn x 1 design'",
+        "echo \"herdsman spawn x 1 design\" | herdsman spawn x 1 design",
+        // Substitutions still run inside double quotes and unquoted-delimiter heredocs.
+        "herdsman ask q \"$(herdsman spawn x 1 design)\"",
+        "herdsman thread reply t1 \"see `herdsman spawn x 1 design`\"",
+        "herdsman ask q --option \"a $(herdsman spawn x 1 \"design\")\"",
+        "cat > f.md <<EOF\n$(herdsman spawn x 1 design)\nEOF",
+        // A heredoc fed to a shell runs its body; a comment's quote does not swallow the next line.
+        "bash <<'EOF'\nherdsman spawn x 1 design\nEOF",
+        "cat <<'EOF' | sh\nherdsman spawn x 1 design\nEOF",
+        "eval \"x\" $(cat <<'EOF'\nherdsman spawn x 1 design\nEOF\n)",
+        "bash <<<\"herdsman spawn x 1 design\"",
+        "herdsman ask q \"a\" # '\nherdsman spawn x 1 design",
+        // `$'x\''` is the word `x'`: the command after it still runs; so does a split-quoted word.
+        "herdsman ask q $'x\\'' ; herdsman spawn x 1 design",
+        "herdsman thread reply t1 $'x\\'' ; herdsman spawn x 1 design",
+        "herdsman thread reply t1 'x ; herdsman spawn x 1 design",
+        "herdsman spawn x 1 'des'ign",
+        // `eval` and `ssh` re-parse the quoted text, so it is a command there.
+        "eval herdsman ask q '; herdsman spawn s 1 design'",
+        "ssh h herdsman ask q '; herdsman spawn s 1 design'",
+        "herdsman spawn x 1 \"des\"ign",
+    ] {
+        assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
+    }
+    for cmd in [
+        "bash <<'EOF'\ngh pr merge 5\nEOF",
+        "sh -s <<EOF\ngit push origin staging\nEOF",
+        "herdsman ask q $'x\\'' ; gh pr merge 5",
+        "eval herdsman ask q '; gh pr merge 5'",
+    ] {
+        assert!(!run("synergy:12:impl", cmd).is_empty(), "{cmd}");
+    }
+    assert_eq!(run("synergy:-:orch", "ls # herdsman spawn x 1 design"), "");
+    assert_eq!(
+        run(
+            "synergy:-:orch",
+            "time FOO=1 herdsman ask q '; herdsman spawn s 1 design'"
+        ),
+        ""
+    );
+    assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
+}
+
+/// #410: a conductor writes in its own thread folder, but not herdsman's files there, another thread's or the log.
+#[test]
+fn a_conductor_writes_its_own_thread_folder() {
+    let write = |file: &std::path::Path, d: &std::path::Path| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Write",
+            "tool_input": {"file_path": file, "content": "x"}});
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
+        let mut child = cmd
+            .args(["hook", "--role", "conductor"])
+            .env_remove("FLEET_LANE")
+            .env("HERDSMAN_LANE", "synergy:-:conductor")
+            .env("HERDSMAN_THREAD", "t6")
+            .env("FLEET_CONFIG", d.join("fleet.toml"))
+            .env("FLEET_STATE", d.join("state/events.jsonl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let d = tmpdir("hook-own");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let c = d.join("state/conductor");
+    assert_eq!(write(&c.join("t6/mock.png"), &d), "", "its own folder");
+    assert_eq!(write(&c.join("t6/ui/a.html"), &d), "", "a subfolder");
+    for f in [
+        c.join("t6/.thread.md"),
+        c.join("t6/.brief.md"),
+        c.join("t6/../t5/x"),
+        c.join("t5/x"),
+        d.join("state/events.jsonl"),
+    ] {
+        assert!(write(&f, &d).contains("is protected"), "{}", f.display());
+    }
+}
+
 /// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
 #[test]
 fn ai_coauthor_trailer_is_spotted() {
@@ -564,5 +698,89 @@ fn setup_is_owner_only() {
         let out = hook_in(Some("x:1:impl"), "impl", input.clone());
         assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
         assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+}
+
+/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
+#[test]
+fn config_apply_and_secret_ls_rm_are_owner_only() {
+    for cmd in [
+        "herdsman config apply c1",
+        "herdsman config discard c1",
+        "herdsman secret ls",
+        "herdsman secret rm all TOKEN",
+    ] {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let out = hook_in(Some("x:-:conductor"), "conductor", input.clone());
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+    assert_eq!(bash("herdsman config propose t1 /tmp/fleet.toml"), None);
+    assert_eq!(bash("herdsman secret request t1 API_KEY --why x"), None);
+}
+
+/// #386: a conductor's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
+/// `thread reply`, other commands, denied ones and calls outside a thread are not.
+#[test]
+fn a_conductor_command_is_logged_for_its_thread() {
+    let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let (out, d) = hook_cfg(CONFIG, vars, "conductor", input);
+        let log = std::fs::read_to_string(d.join("state/events.jsonl")).unwrap_or_default();
+        let rows: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        (
+            out,
+            rows.into_iter()
+                .filter(|e| e["type"] == "thread-cmd")
+                .collect::<Vec<_>>(),
+        )
+    };
+    let lane = [
+        ("HERDSMAN_LANE", Some("sendmeter:-:conductor")),
+        ("HERDSMAN_THREAD", Some("t1")),
+    ];
+    let cmd = "gh issue create -R acme/x -t \"Rate limits\" -F -";
+    let (out, got) = cmds(&lane, cmd);
+    assert!(out.trim().is_empty(), "allowed: {out}");
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (&got[0]["thread"], &got[0]["cmd"], &got[0]["fleet"]),
+        (&json!("t1"), &json!(cmd), &json!("sendmeter"))
+    );
+    assert_eq!(cmds(&lane, "herdsman queue sendmeter add 52").1.len(), 1);
+    assert!(
+        cmds(&lane, "herdsman thread reply t1 \"done\"").1.is_empty(),
+        "the reply is the message"
+    );
+    assert!(cmds(&lane, "ls -la").1.is_empty());
+    assert!(
+        cmds(&lane, "gh pr merge 5").1.is_empty(),
+        "a denied call is not a tool row"
+    );
+    assert!(cmds(&lane[..1], "gh issue list").1.is_empty(), "no thread");
+}
+
+/// #425: a lane may `queue block` its own issue (to hold itself), never another issue.
+#[test]
+fn a_lane_may_queue_block_only_its_own_issue() {
+    let input =
+        |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    for cmd in [
+        "herdsman queue sendmeter block --on 23 24",
+        "herdsman queue sendmeter block 24 --on 23",
+    ] {
+        assert_eq!(
+            hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
+            "",
+            "its own issue: {cmd}"
+        );
+    }
+    for cmd in [
+        "herdsman queue sendmeter block --on 23 25",
+        "cd /tmp && herdsman queue sendmeter block 25 --on 24",
+    ] {
+        let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
+        assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input(cmd)), "", "the owner (no lane) may: {cmd}");
     }
 }

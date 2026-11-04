@@ -32,6 +32,7 @@ static DIALECT: Dialect = Dialect {
     edits: &["Edit", "Write", "MultiEdit", "NotebookEdit"],
     post: "PostToolUse",
     stop: "Stop",
+    blocked: "Notification",
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
 };
 
@@ -96,8 +97,15 @@ impl Harness for Claude {
             p.mcp_file.to_string_lossy().into(),
             "--strict-mcp-config".into(),
         ]);
+        if let Some((id, resume)) = &p.session {
+            a.extend([if *resume { "--resume" } else { "--session-id" }.into(), id.clone()]);
+        }
         a.push(p.kick.clone());
         herdr::start_argv(&p.agent, "claude", pane, a)
+    }
+
+    fn resumes(&self) -> bool {
+        true
     }
 
     /// Claude gets the kick as argv, so it only waits.

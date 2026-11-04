@@ -31,5 +31,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
 toml = "0.8"
+# #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
+ts-rs = { version = "12", features = ["serde-json-impl"] }
+# #298: berth's wire types only (serde, no I/O), pinned to berth's merge commit until it tags a release.
+berth-proto = { git = "https://github.com/jirathip-dev/berth", rev = "498c9f0d5e5602d845e854cde46a45e0f817f546" }
 herdsman-core = { path = "crates/core" }
 herdsman-server = { path = "crates/server" }

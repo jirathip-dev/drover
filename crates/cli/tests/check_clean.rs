@@ -546,7 +546,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "worktree": w, "pane": "wR:p1", "workspace": "wR"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
-        std::fs::write(&f, "FAIL\n1. blocking\n").unwrap();
+        std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply(&format!("git -C {w} status"), status)
@@ -602,4 +602,61 @@ fn du_counts_blocks_used_not_apparent_size() {
     std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
     let n = herdsman::check::du(&d);
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
+}
+
+/// #425: an unheld lane idle without pushing alerts at the stall threshold and again every 2 h, not only once.
+#[test]
+fn an_unheld_idle_lane_stalls_again_every_two_hours() {
+    let mut c = ctx(&tmpdir("stall-repeat"), CONFIG);
+    spawn_ev(&c, NOW - 3600, 12, LANE);
+    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
+    assert!(check(&c, &r).contains("stall: no event for 60m"));
+    c.now = NOW + 3600;
+    assert_eq!(check(&c, &r), "", "under 2 h since the first alert");
+    c.now = NOW + 7200;
+    assert!(
+        check(&c, &r).contains("stall: no event for 3h"),
+        "2 h later it alerts again"
+    );
+    assert_eq!(check(&c, &r), "");
+    assert_eq!(kinds(&c, "stall"), 2);
+}
+
+/// #425: `queue block` on an issue with a live lane holds it: `held`, status says so, and `check` never stalls it.
+#[test]
+fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
+    let mut c = ctx(&tmpdir("held"), CONFIG);
+    spawn_ev(&c, NOW - 3600, 12, LANE);
+    append(
+        &c.state,
+        &Event::new(
+            NOW - 3600,
+            "sendmeter",
+            None,
+            "queue",
+            json!({"op": "add", "issues": [12]}),
+        ),
+    )
+    .unwrap();
+    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
+    let (code, out) = run(&c, &r, &["queue", "sendmeter", "block", "--on", "11", "12"]);
+    assert_eq!(code, 0, "{out}");
+    let held: Vec<_> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "held")
+        .collect();
+    assert_eq!(held.len(), 1);
+    assert_eq!(
+        (held[0].issue, held[0].str("agent"), held[0].data["on"].as_u64()),
+        (Some(12), Some(LANE), Some(11))
+    );
+    c.now = NOW + 6 * 3600;
+    let (code, out) = run(&c, &r, &["status"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("held until #11 merges"), "{out}");
+    let (_, out) = run(&c, &r, &["waiting"]);
+    assert!(out.contains("held until #11 merges"), "{out}");
+    assert_eq!(check(&c, &r), "", "a held lane is no stall");
+    assert_eq!(kinds(&c, "stall"), 0);
 }

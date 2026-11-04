@@ -46,9 +46,10 @@ pub fn cached_spec(ctx: &Ctx, fleet: &str, issue: u64) -> Option<Value> {
     load(&cache_path(ctx, "issue", fleet, issue))
 }
 
-/// The cached issue title, if any; never calls GitHub.
+/// The cached issue title, if any (#391: else the last backlog read's, for a row queued from it); never calls GitHub.
 pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    cached_spec(ctx, fleet, issue).and_then(|v| v["title"].as_str().map(String::from))
+    let b = || load::<Value>(&cache_path(ctx, "backlog", fleet, 0)).map(|b| b["issues"][issue.to_string()].clone());
+    Some(cached_spec(ctx, fleet, issue).or_else(b)?["title"].as_str()?.into())
 }
 
 /// `(url, text)` of a `**Amendment` comment by an OWNER, MEMBER or COLLABORATOR; strangers can't steer a lane.

@@ -191,3 +191,33 @@ const go = async (path, mode) => {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+
+/// #391: `queue add` reads an added issue's title when no spec is cached (its row shows it at once, not at the next
+/// check); a cached one is not read again. A row queued from the backlog shows the backlog read's title until then.
+#[test]
+fn queue_add_reads_an_uncached_title_and_a_backlog_row_has_the_reads() {
+    let c = queued("add-titles");
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("issue-sendmeter-20.json"),
+        json!({"title": "Cached"}).to_string(),
+    )
+    .unwrap();
+    let r = Fake::default().reply(
+        "gh issue view 21",
+        r#"{"title":"Queued after the read","body":"","updatedAt":"t1"}"#,
+    );
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "20", "21"]).0, 0);
+    assert_eq!(r.count("gh issue view 21"), 1, "{:?}", r.calls.borrow());
+    assert_eq!(r.count("gh issue view 20"), 0, "a cached spec is kept");
+    let read = json!({"ts": 1, "issues": {"22": {"title": "From the backlog read"}}});
+    std::fs::write(cache.join("backlog-sendmeter-0.json"), read.to_string()).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "22"]).0, 0);
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page = get(&s, "/");
+    for t in ["Queued after the read", "Cached", "From the backlog read"] {
+        assert!(page.contains(&format!("class=tl title=\"{t}\"")), "{t}: {page}");
+    }
+}
