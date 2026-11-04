@@ -1934,7 +1934,8 @@ addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
 const SENT = [];
 function chatPaint(root = $('#chat')) {
   if (!root || ATT === undefined) return; // before the `var` line runs
-  root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
+  if (root !== $('#chat')) chatKeep(root);
+  clocks(root);
   root.querySelectorAll('.ats').forEach(e => e.remove());
   const tw = ATT && root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`);
   if (tw) {
@@ -1960,6 +1961,32 @@ function chatPaint(root = $('#chat')) {
     if (p.st === '✗') b.querySelector('.md').append(Object.assign(el('button', 'rt', 'retry'), { type: 'button' }));
   }
 }
+function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); }); }
+// #408: a thread opens with its last 30 messages; near the top a scroll (or a tap on the marker) loads the 30 before
+// them (`thread/<t>?before=`) above, the reading position kept. A live copy's marker becomes the live thread's blocks
+// older than the copy's first (`data-n`), so a swap never drops the pages loaded.
+function chatKeep(root) {
+  root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
+    const tc = $(`#chat .cvp[data-t="${CSS.escape(m.closest('.cvp').dataset.t)}"] .tc`);
+    const old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b) : [];
+    if (old.length) m.replaceWith(tc.firstElementChild.cloneNode(true), ...old.map(c => c.cloneNode(true)));
+  });
+}
+var OLDQ = false;
+async function chatOlder() {
+  const m = THR && $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc>.tmo`);
+  if (!m || OLDQ) return;
+  OLDQ = true;
+  const h = await part(`thread/${encodeURIComponent(THR)}?before=${m.dataset.b}&n=30`), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
+  OLDQ = false;
+  if (!h || !m.isConnected) return;
+  const t = el('div', '');
+  t.innerHTML = h;
+  clocks(t);
+  m.replaceWith(...t.childNodes);
+  if (a) scrollBy(0, a.getBoundingClientRect().top - y);
+}
+addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
@@ -1971,6 +1998,7 @@ document.addEventListener('click', async e => {
   if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
+  else if (t.closest('#chat .tmo')) chatOlder();
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }

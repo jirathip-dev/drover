@@ -138,7 +138,7 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     let page = chat(&s, &cookie, T + 20);
     assert!(
         !page.contains("class=chc")
-            && page.contains("<p class=\"qs note\">config c1 applied by owner, backup kept, doctor ")
+            && page.contains(" class=\"qs note\">config c1 applied by owner, backup kept, doctor ")
     );
     assert!(
         r.called("herdr agent prompt conductor-t1 [t1] system: config c1 applied by owner"),

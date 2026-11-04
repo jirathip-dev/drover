@@ -1016,6 +1016,12 @@ impl<'a> Server<'a> {
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
+            // #408: a thread's older messages, `/thread/<t>?before=<seq>&n=30`.
+            ("GET", p) if p.starts_with("/thread/") && !p[8..].contains('/') => {
+                let rw = self.device(ctx, head).is_some() && self.addr.is_some();
+                let ev = read(&ctx.state).unwrap_or_default();
+                chat::older(ctx, &ev, &p[8..], &form(query), rw).map_or(("404 Not Found", "text/plain", text("no such thread\n")), |h| ("200 OK", HTML, h.into_bytes()))
+            }
             // #386: a file a thread's message carries.
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();

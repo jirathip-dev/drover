@@ -387,6 +387,31 @@ fn a_conductor_may_spawn_design_lanes() {
     }
 }
 
+/// #419: a conductor (and the owner) runs `herdsman lesson`; impl, rev and orch lanes may not, but any reads its digest.
+#[test]
+fn only_a_conductor_runs_lesson() {
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    assert_eq!(
+        run("synergy:-:conductor", "herdsman lesson synergy"),
+        "",
+        "a conductor may"
+    );
+    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:-:orch"] {
+        assert!(
+            run(lane, "herdsman lesson synergy").contains("REFUSED CONDUCTOR_ONLY"),
+            "{lane}"
+        );
+        assert_eq!(
+            run(lane, "herdsman lesson digest synergy --days 7"),
+            "",
+            "{lane} reads the digest"
+        );
+    }
+}
+
 /// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
 #[test]
 fn quoted_text_is_not_a_command() {

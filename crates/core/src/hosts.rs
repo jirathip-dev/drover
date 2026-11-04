@@ -282,7 +282,12 @@ pub fn tags(h: &HostCfg, s: Option<&Seen>) -> Vec<String> {
 /// The tags a lane of `role` on `fleet#issue` needs: the fleet's, the role's and its queue item's.
 pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64)) -> Vec<String> {
     let mut n = f.needs.clone();
-    n.extend(f.role.get(role).map(|r| r.needs.clone()).unwrap_or_default());
+    n.extend(
+        f.role
+            .get(f.role_key(role))
+            .map(|r| r.needs.clone())
+            .unwrap_or_default(),
+    );
     n.extend(crate::queue::needs_of(events, fleet, issue));
     n.sort();
     n.dedup();
@@ -506,7 +511,7 @@ pub fn place(
     let f = cfg.fleet(fleet)?;
     // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
     let design = f.family(role) == "design";
-    let pin = f.role.get(role).and_then(|r| r.host.as_deref());
+    let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
     if let Some(h) = force.or(pin).or(design.then_some("main")) {
         let main = cfg
             .hosts
