@@ -208,6 +208,18 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             "serial",
             ["a", "sent back", "#129: red CI, a fix round next"],
         ),
+        (
+            Some("NO_HOST"),
+            "start",
+            12,
+            "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)",
+            "serial",
+            [
+                "a",
+                "waiting",
+                "no host with docker (cloud host stopped or over budget)",
+            ],
+        ),
     ];
     for (code, step, issue, result, serial, want) in golden {
         let got = said(*code, step, *issue, result, serial);

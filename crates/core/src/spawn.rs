@@ -483,6 +483,7 @@ pub fn spawn(
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f.repo_name());
+        p.env.insert("HERDSMAN_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
 
@@ -769,6 +770,9 @@ pub fn spawn(
             if let Some(pl) = &placed {
                 d["host"] = json!(pl.name);
                 d["machine"] = json!(pl.machine);
+                if let Some(w) = &pl.why {
+                    d["why"] = json!(w);
+                }
             }
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
                 d["sha"] = json!(h);
