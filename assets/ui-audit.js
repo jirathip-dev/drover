@@ -355,7 +355,12 @@
       if ($$('select#theme, select#scheme').length) early.push('a native theme/colours select remains');
       $('#look').click();
       const ls = [...$$('#sheet [role=listbox]')].map(l => `${l.getAttribute('aria-label')}:${l.querySelectorAll('[role=option]').length}/${l.querySelectorAll('[aria-selected=true]').length}`);
-      if (ls.length !== 2 || !/^theme:3\/1,colours:\d+\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
+      if (ls.length !== 3 || !/^theme:3\/1,colours:\d+\/1,style:2\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
+      // #335: STYLE ascii applies in place (rows take the figures, the sheet stays open), pixel puts the sprites back.
+      $('.look .lko[data-y=ascii]').click();
+      if (B.dataset.mode !== 'ascii' || get('mode') !== 'ascii' || !$$('#queue .rsa').length || $$('#queue .rsg>svg').length || !shown()) early.push('style ascii: not applied in place');
+      $('.look .lko[data-y=pixel]').click();
+      if (B.dataset.mode !== 'scene' || $$('.rsa, .lsa').length) early.push('style pixel: ascii figures remain');
       window.kept = 1;
       const s = [...$$('.look .lko[data-s]')].find(o => o.getAttribute('aria-selected') !== 'true');
       s.click();
@@ -410,6 +415,27 @@
       });
     },
     'loading-still': () => VIEWS.loading(),
+    // #335 gate 2: ascii style (the look sheet's STYLE): the rows, Lanes, Host and the wait in the theme's ASCII figures.
+    'ascii-queue': () => { style('ascii'); return VIEWS.queue(); },
+    'ascii-lanes': () => { style('ascii'); return VIEWS.lanes(); },
+    'ascii-host': () => { style('ascii'); return VIEWS.host(); },
+    'ascii-events': () => { style('ascii'); return VIEWS.events(); },
+    // The overlay runs its frames by CSS alone: no node or text changes while it shows (#334), [↻] stays the plain ↻.
+    'ascii-loading': () => {
+      style('ascii');
+      tab('queue');
+      const ov = $('#ld'), a = ov.querySelector('.lda');
+      let n = 0;
+      const mo = new MutationObserver(m => { n += m.length; });
+      busy = true;
+      sync('a');
+      loading(true);
+      mo.observe(ov, { subtree: true, childList: true, characterData: true, attributes: true });
+      if (!a || !seen(a) || seen(ov.querySelector('svg')) || seen(ov.querySelector('i'))) early.push('ascii: not the ascii loading frames');
+      if (a && (a.children.length !== 2 || getComputedStyle(a.lastChild).animationName !== 'f')) early.push(`ascii: ${a.children.length} loading frames, ${getComputedStyle(a.lastChild).animationName}`);
+      if (rf.querySelector('svg') || rf.textContent !== '↻') early.push('[↻] is not the plain ↻');
+      setTimeout(() => { mo.disconnect(); if (n) early.push(`${n} changes to the loading overlay while it ran`); }, 1100);
+    },
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
     // #172: the kitchen theme (`?theme=kitchen`), and it missing `done` (`&nopose=done`): farm's done horse.
@@ -524,7 +550,7 @@
     // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them, above the fixed tab bar (one under it
     // would take in the bar's text); ui-audit.sh checks their pixels are crisp.
     const nav = $('nav').getBoundingClientRect().top;
-    const sprites = [...$$('.rsg:not(.k)>.rsp')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
+    const sprites = [...$$('.rsg:not(.k)>.rsp:not(.rsa)')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
     const W = +(DBG.get('w') || 390); // #337: `&w=1440`, a desktop shot
     if (innerWidth !== W) res.outliers.push(`viewport ${innerWidth} px wide, not ${W}`); // #68: new-headless Chrome keeps windows ≥ 500 px
@@ -532,7 +558,7 @@
     const vp = $('meta[name=viewport]').content, ta = getComputedStyle(document.documentElement).touchAction;
     if (vp !== 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover') res.outliers.push(`viewport meta "${vp}"`);
     if (ta !== 'manipulation') res.outliers.push(`html touch-action ${ta}, not manipulation`);
-    if (['queue', 'lanes', 'host', 'events', 'queue-rows', 'events-rows'].includes(V)) Object.assign(res, { sprites }).outliers.push(...drawn());
+    if (['queue', 'lanes', 'host', 'events', 'queue-rows', 'events-rows', 'ascii-queue', 'ascii-lanes', 'ascii-host', 'ascii-events'].includes(V)) Object.assign(res, { sprites }).outliers.push(...drawn());
     // #331: every Queue row at every depth (the demo has a 4-deep chain) shows its whole title on one ellipsised line.
     if (V === 'queue') {
       if (![...$$('#queue summary .m')].some(e => e.textContent.startsWith('after #'))) res.outliers.push('no clamped (4-deep) chain row');
@@ -555,13 +581,17 @@
     if (!TT) return [`theme ${t} never loaded`];
     if (t === 'terminal') {
       if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
-      if (B.dataset.mode !== 'glyph' || on('#mode').length || on('.av .px, .av .asc').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
+      if (B.dataset.mode !== 'glyph' || $$('#mode').length || on('.av .px, .av .asc, .rsa, .lsa').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
       return bad;
     }
     if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
     if (tb === 'events' && !on('#events .kg.rsg>.rsp').length) bad.push('no Events row sprite');
     if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
-    if (tb === 'lanes' && (!on('#mode').length || TM.join() !== 'scene,ascii')) bad.push(`Lanes modes ${TM}, button shown ${on('#mode').length}`);
+    if ($$('#mode').length || TM.join() !== 'scene,ascii') bad.push(`Lanes modes ${TM}, a mode button ${$$('#mode').length}`);
+    // #335: ascii style draws the theme's figures, never a sprite; pixel style never a figure.
+    const asc = B.dataset.mode === 'ascii';
+    if (asc ? on('.rsg>svg, svg.lsc, .av .px').length : on('.rsa, .lsa').length) bad.push(`${B.dataset.mode}: a ${asc ? 'sprite' : 'figure'} of the other style`);
+    if (asc && tb === 'lanes' && !on('.av .asc').length) bad.push('ascii: no ascii Lanes avatar');
     for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
     // #281: a row sprite is 24×24 in a fixed 28 px slot, and the row with it is at most 4 px taller than with its glyph (no wrap).
     for (const g of on('.rsg')) {

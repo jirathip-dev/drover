@@ -1,0 +1,19 @@
+# Performance budgets
+
+The board stays fast by never re-sending everything (#337, #351): the step takes one look and saves it, a request
+replays it, the live stream sends changes, and history opens bounded. Each budget below is asserted by a test; a miss
+fails CI. The timings run through the real server, `serve_on` on a socket with its sampler and watcher threads, on a
+fixture runner that answers like herdr, git and ssh do (30 lanes on 2 hosts, +300 ms per remote call); a call-count
+probe on that runner proves the server, not a hand-built page, produced them.
+
+| Budget | Path it covers | Test |
+|---|---|---|
+| a step makes ≤ 1 remote call per host; a request or `status` makes none | `drive --fast`, then `serve_on` + the CLI | `perf.rs` `a_step_makes_one_remote_call_per_host_and_requests_make_none` |
+| first page `GET /` < 150 ms and < 40 KB | `serve_on`'s socket (warm) | same |
+| `/herd.json` < 100 ms, `status` < 300 ms | `serve_on`'s socket; the CLI | same |
+| first contentful paint in WebKit < 300 ms (warm) | `serve_on`'s socket, WebKit | `perf.rs` `the_first_paint_in_webkit_is_under_300ms` |
+| a steady-state `/live` change < 5 KB: one `patch` with only the changed pieces, no unchanged row | `serve_on`'s `/live` stream and watcher; serve.js rebuilds the same HTML | `perf.rs` `a_steady_state_live_change_is_a_patch_under_5kb` |
+| a chat opens with ≤ 64 KB: its last 10 turns (3.2 KB a turn) and the lines that fit in 32 KB; 10 turns more a scroll | `GET /lane` | `history.rs` `a_chat_opens_with_its_last_10_turns_within_64kb` |
+| Events opens with 100 rows a view, then 100 a page | `GET /frag?id=events&skip=` | `history.rs` `events_open_with_100_rows_then_page` |
+
+The numbers go to the CI job summary (`$GITHUB_STEP_SUMMARY`). How each path works: [serve.md](serve.md).

@@ -165,6 +165,22 @@ fn form_only_parses_tags() {
     ));
     assert!(!ok("FAIL (form-only)\n- non-blocking [format] a.rs:1\n"), "no blocker");
     assert!(!ok("FAIL (form-only)\n- blocking [code] a.rs:1\n"));
+    // #360: the verdict's anti-patterns line is no finding.
+    let line = "Tests checked against anti-patterns: yes\n";
+    assert!(ok(&format!("FAIL (form-only)\n{line}- blocking [format] a.rs:1\n")));
+}
+
+/// #360: a verdict.md carrying `Tests checked against anti-patterns: yes` records as usual.
+#[test]
+fn the_antipatterns_line_is_accepted() {
+    let (c, d) = fixture("form-antipatterns", "");
+    let body = format!(
+        "{FORM}Reviewed head: {}\nTests checked against anti-patterns: yes\n",
+        "a".repeat(40)
+    );
+    let out = verdict(&c, &d, 'a', &body);
+    assert!(out.contains("recorded FAIL (form-only)"), "{out}");
+    assert_eq!(state(&c).form, 1);
 }
 
 #[test]

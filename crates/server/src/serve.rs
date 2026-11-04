@@ -256,6 +256,36 @@ fn sse(e: &Event) -> String {
     )
 }
 
+/// #351: a `frag` this client had, as a `patch`: length `n`, common prefix `p`, the changed pieces (cut before `<d`).
+fn delta(sent: &mut BTreeMap<String, Vec<String>>, m: &str) -> Option<String> {
+    let f: serde_json::Value = serde_json::from_str(m.split_once("event: frag\ndata: ")?.1).ok()?;
+    let (id, h) = (f["id"].as_str()?, f["html"].as_str()?);
+    let mut at = vec![0];
+    at.extend(h.match_indices("<d").map(|m| m.0).filter(|&i| i > 0).chain([h.len()]));
+    let new: Vec<String> = at.windows(2).map(|w| h[w[0]..w[1]].into()).collect();
+    let old = sent.insert(id.into(), new.clone())?;
+    let p = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let d = old.len().wrapping_sub(new.len());
+    let mut diff = serde_json::Map::new();
+    for (i, s) in new.iter().enumerate().skip(p) {
+        if old.get(i.wrapping_add(d)) != Some(s) {
+            diff.insert(i.to_string(), json!(s));
+        }
+    }
+    let j = json!({"id": id, "n": new.len(), "p": p, "set": diff});
+    Some(format!("{}\nevent: patch\ndata: {j}\n\n", m.lines().next()?))
+}
+
+/// #351: a chat's window: the last at most `n` of `v` within `kb` KB, sized as `{:?}` (no less than JSON; at least one).
+fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
+    let (mut size, mut k) = (0, 0);
+    for x in v.iter().rev().take(n) {
+        size += format!("{x:?}").len();
+        k += usize::from(k == 0 || size <= kb << 10);
+    }
+    &v[v.len() - k..]
+}
+
 pub struct Server<'a> {
     ctx: &'a Ctx,
     r: &'a dyn Runner,
@@ -701,7 +731,7 @@ impl<'a> Server<'a> {
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
-            let mut top = 0;
+            let (mut top, mut sent) = (0, BTreeMap::new());
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
                 let ev = read(&self.ctx.state).unwrap_or_default();
                 top = ev.last().map_or(n, |e| e.seq);
@@ -725,7 +755,7 @@ impl<'a> Server<'a> {
                                         .and_then(|r| r.split_once("\nevent: ev\n"))
                                         .is_some_and(|(id, _)| id.parse::<u64>().is_ok_and(|i| i <= top)) =>
                             {
-                                break m
+                                break delta(&mut sent, &m).unwrap_or(m)
                             }
                             Err(RecvTimeoutError::Disconnected) => return,
                             _ if s
@@ -783,17 +813,12 @@ impl<'a> Server<'a> {
         }
         // #37: Herd's data rides the same stream, re-read every 10 s (host weather) while anyone listens;
         // like a frag, pushed only on a change (the page reads `/herd.json` when Herd opens).
+        let at = &Ctx {
+            now,
+            ..self.ctx.clone()
+        };
         if (changed || now >= w.herd.0 + 10) && !lock(&self.clients).is_empty() {
-            let j = self
-                .herd(
-                    &Ctx {
-                        now,
-                        ..self.ctx.clone()
-                    },
-                    None,
-                )
-                .map(|v| v.to_string())
-                .unwrap_or_default();
+            let j = self.herd(at, None).map(|v| v.to_string()).unwrap_or_default();
             if w.herd.0 > 0 && hash(&j) != w.herd.1 && !j.is_empty() {
                 let msg = format!("id: {}\nevent: herd\ndata: {j}\n\n", w.seen.unwrap_or(0));
                 lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
@@ -805,18 +830,7 @@ impl<'a> Server<'a> {
         }
         w.rendered = now;
         for paired in [false, true] {
-            for (id, html) in self
-                .frags(
-                    &Ctx {
-                        now,
-                        ..self.ctx.clone()
-                    },
-                    false,
-                    paired,
-                    None,
-                )
-                .unwrap_or_default()
-            {
+            for (id, html) in self.frags(at, false, paired, None).unwrap_or_default() {
                 if w.frags
                     .insert((paired, id), hash(&html))
                     .is_some_and(|h| h != hash(&html))
@@ -1189,7 +1203,7 @@ impl<'a> Server<'a> {
             let saved = wt.and_then(|wt| lanes::session(&ctx.home, wt));
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
             let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
-            let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
+            let page = window(&all[..all.len().saturating_sub(before)], lines, 32);
             return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
@@ -1198,11 +1212,14 @@ impl<'a> Server<'a> {
         let body = lanes::body(&screen);
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
         let end = all.len().saturating_sub(before);
-        let page = &all[end.saturating_sub(lines)..end];
+        let page = window(&all[..end], lines, 32);
         let status = lanes::chat(&screen).1.map(lanes::strip);
         // #260: the default view's source: Claude's session transcript, else (null) the pane's role runs.
         let ok = self.export.is_none();
+        // #351: the last `turns` (10, more as the sheet scrolls up) within 3.2 KB each: a chat opens with ~64 KB at most.
         let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
+        let (said, turns) = (said.map(|s| lanes::said(&s).0), n("turns", 10));
+        let win = said.as_deref().map(|s| window(s, turns, turns * 16 / 5));
         let note = |e: &&Event| {
             let t = match e.kind.as_str() {
                 _ if Some(&e.fleet) != l.fleet.as_ref() || e.issue != l.issue => None,
@@ -1214,7 +1231,7 @@ impl<'a> Server<'a> {
             Some(json!({"at": e.ts, "text": lanes::mask(&t?)}))
         };
         let notices: Vec<_> = events.iter().filter_map(|e| note(&e)).collect();
-        Some(serde_json::json!({"said": said.map(|s| lanes::said(&s).0), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
+        Some(serde_json::json!({"said": win, "older": win.zip(said.as_ref()).is_some_and(|(w, s)| w.len() < s.len()), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -1325,13 +1342,9 @@ impl<'a> Server<'a> {
         let parts: [(&'static str, &dyn Fn() -> String); 5] = [
             ("needs", &|| self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired)),
             ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
-            ("lanes", &|| {
-                "<p class=lh><button id=mode type=button aria-label=\"lane display mode\">scene</button></p>"
-                    .to_string()
-                    + &self.lanes_tab(ctx, cfg, ev, st, paired)
-            }),
+            ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
             ("host", &|| self.host_tab(ctx, cfg, ev)),
-            ("events", &|| events_tab(ctx, self.r, cfg, ev, all)),
+            ("events", &|| events_tab(ctx, self.r, cfg, ev, all, 0)),
         ];
         let want = |id: &str| tab.is_none_or(|t| id == "needs" || id == t);
         Ok(parts
@@ -1359,8 +1372,9 @@ impl<'a> Server<'a> {
             return Some(crate::hosts::chart(&rows, q.get("host")?, q.get("k")?, ctx.now));
         }
         let (events, cfg) = (read(&ctx.state).ok()?, Config::load(&ctx.config).ok());
+        let skip = q.get("skip").map_or(0, |n| n.parse().unwrap_or(0));
         match q.get("id")?.as_str() {
-            "events" => Some(events_tab(ctx, self.r, cfg.as_ref(), &events, false)),
+            "events" => Some(events_tab(ctx, self.r, cfg.as_ref(), &events, false, skip)),
             "config" => {
                 let (c, f) = (cfg?, q.get("fleet")?);
                 Some(config_sheet(
@@ -2652,7 +2666,10 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 })
         })
     };
-    let maps: [(&str, &[&str], Check, &str); 9] = [
+    // #335: a row figure is one line of 3 (its 24 px box), the Host miniature's load one line of 5.
+    let line = |x: &Value, n| narrow(x) && x.as_str().is_some_and(|t| !t.contains('\n') && t.chars().count() <= n);
+    let (row, load) = (|x: &Value| line(x, 3), |x: &Value| line(x, 5));
+    let maps: [(&str, &[&str], Check, &str); 11] = [
         ("poses", &["working", "idle", "done", "blocked"], &id, "a sprite id"),
         ("glyphs", &[], &id, "a string"),
         ("words", &[], &id, "a string"),
@@ -2672,6 +2689,13 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             "icon-180.png, icon-192.png or icon-512.png",
         ),
         ("ascii", &acts, &narrow, "at most 3 lines of 8 narrow characters"),
+        ("ascii_rows", &acts, &row, "one line of at most 3 narrow characters"),
+        (
+            "ascii_load",
+            &["calm", "busy", "held"],
+            &load,
+            "one line of at most 5 narrow characters",
+        ),
     ];
     for (k, keys, ok, want) in maps {
         let m = match o.get(k) {
@@ -2716,7 +2740,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             !a.is_empty() && m.len() == a.len()
         })
     };
-    let rules: [(&str, Check, &str); 5] = [
+    let rules: [(&str, Check, &str); 6] = [
         ("scene", &Value::is_object, "an object"),
         ("scheme", &Value::is_string, "a colour scheme's name"),
         (
@@ -2730,6 +2754,11 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             "{\"kind\": weather|heat|none, \"levels\": {calm, busy, held}}",
         ),
         ("modes", &modes, "a list of scene, ascii, glyph, each at most once"),
+        (
+            "ascii_loading",
+            &narrow,
+            "at most 3 lines (frames) of 8 narrow characters",
+        ),
     ];
     match rules.iter().find(|r| o.get(r.0).is_some_and(|x| !r.1(x))) {
         Some((k, _, want)) => Err(format!("`{k}` must be {want}")),
@@ -3290,9 +3319,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
     }
 }
 
-/// #170: chips `[all] [important] [● fleet]…` (serve.js keeps the choice per phone), then each view's last 50 rows
-/// (a fold is one row; `all`: every event, unfolded), newest first, under sticky time groups.
-fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event], all: bool) -> String {
+/// #170: chips `[all] [important] [● fleet]…` (serve.js keeps the choice per phone), then each view's rows (#351: 100 from
+/// row `skip`, its [older] loads the next 100; a fold is one row; `all`: every event, unfolded), newest first, under sticky time groups.
+fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event], all: bool, skip: usize) -> String {
     let fc = |f: &str| cfg.and_then(|c| c.fleet.get(f));
     let tz = crate::usage::date(r, ctx.now, "+%z")
         .parse::<i64>()
@@ -3329,7 +3358,7 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
     }
     h += "</div>";
     for (v, imp) in [("imp", true), ("all", false)] {
-        let mut rows: Vec<(Vec<&Event>, Words)> = vec![];
+        let (mut rows, mut past): (Vec<(Vec<&Event>, Words)>, _) = (vec![], false);
         for e in &order {
             let w = words(e, fc(&e.fleet).map_or("serial", |f| f.serial_label()));
             if imp && !w.3 {
@@ -3349,11 +3378,13 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
                 r.0.push(e);
                 continue;
             }
-            if rows.len() == 50 && !all {
+            if rows.len() == skip + 100 && !all {
+                past = true;
                 break;
             }
             rows.push((vec![e], w));
         }
+        let rows = &rows[skip.min(rows.len())..];
         let back = rows.last().map(|r| r.0[0].ts).map_or(String::new(), |t| {
             let l = local(t).rem_euclid(86_400);
             format!(" · back to {} {:02}:{:02}", group(t), l / 3600, l % 3600 / 60)
@@ -3432,6 +3463,12 @@ fn events_tab(ctx: &Ctx, r: &dyn Runner, cfg: Option<&Config>, events: &[Event],
             }
             h += "</div>";
             i += n;
+        }
+        if past {
+            h += &format!(
+                "<button type=button class=eo data-skip={}><span>older</span></button>",
+                skip + 100
+            );
         }
         h += "</div>";
     }

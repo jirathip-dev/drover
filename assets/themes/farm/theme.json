@@ -13,5 +13,8 @@
   "icons": { "180": "icon-180.png", "192": "icon-192.png", "512": "icon-512.png", "favicon": "icon-192.png" },
   "ascii": { "impl": "     _/>\n\\=~(___)\n \\ /  \\", "fix": "    _/>\n~(___) *\n  |\\ =n=", "rev": "#   _/>\n#~(___)\n# |  |o/", "update": "  ##_/>\n~(___)\n /  \\", "idle": "\n~(____)\n | | \\>,", "done": "   _/|##\n~(__)|##\n /\\  |##", "blocked": "   />! H\n ~(_/  H\n  / \\  H" },
   "modes": ["scene", "ascii"],
+  "ascii_rows": { "impl": "~h=", "fix": "~h*", "rev": "+h~", "update": "~h#", "idle": "~h.", "done": "[h]", "blocked": "!h!" },
+  "ascii_load": { "calm": "\\O/", "busy": "~~~", "held": "///" },
+  "ascii_loading": "~h~\n>h<",
   "loading": "horse-working"
 }
