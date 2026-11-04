@@ -21,9 +21,9 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
- * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`).
+ * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
  */
-export type Moment = { seq: number, ts: number, k?: string | null, };
+export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
  * `/live`'s `frag`: a fragment's new HTML.
@@ -62,11 +62,12 @@ export type Setup = { host: string, name: string, };
 
 /**
  * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
- * `mtime` a POST sends back (STALE when fleet.toml changed since).
+ * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
+ * the Events tab's time groups.
  */
-export type State = { seq: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
 
-export type Fleet = { name: string, color: string, paused: boolean, };
+export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
 export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, };
 
@@ -83,14 +84,79 @@ export type Ask = { id: string, fleet: string, issue?: number | null, question: 
 export type Row = { name: string, tone: string, detail: string, fix: string, };
 
 /**
- * #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+ * #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`),
+ * SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live
+ * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
+ * forms are inert); `mtime` the forms send back.
+ */
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, };
+
+/**
+ * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
+ * its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
+ */
+export type HostCard = { name: string, main: boolean, dot: string, tone: string, words: string, n: string, rows: Array<Cell>, to?: string | null, lanes: number, setups: Array<string>, };
+
+/**
+ * #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and
+ * muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an
+ * export, its chart `x` inline.
+ */
+export type Cell = { k: string, t: string, key: string, bar?: Bar | null, b?: string | null, bt: string, text: string, of: string, notes: Array<string>, s: string, p: string, l?: number | null, x: string, };
+
+/**
+ * #141: a 12-cell text gauge: its status `t`, `n` cells full, and how far past the limit (`pct`, else empty).
+ */
+export type Bar = { t: string, n: number, pct: string, };
+
+/**
+ * #164: the worktree total (`gb`, `?` unread) against the budget, and how long ago it was walked.
+ */
+export type Disk = { bar: Bar, gb: string, budget: number, ago?: string | null, };
+
+/**
+ * #186: processes still running in closed lanes' worktrees, and the memory they hold.
+ */
+export type Leftovers = { n: number, mb: string, };
+
+/**
+ * An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
+ */
+export type Account = { name: string, capped: boolean, tone: string, cap: string, meters: Array<Meter>, pace?: string | null, hint?: string | null, hours: string, };
+
+export type Meter = { label: string, pct: number, };
+
+/**
+ * The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
+ */
+export type Balance = { balance?: string | null, low: boolean, hint: string, };
+
+/**
+ * #141: a fleet's last `driven` result in words (`word` in `tone`, the plain rest `text`), its age and `raw` line.
+ */
+export type FleetRow = { name: string, tone: string, word: string, text: string, ago: string, raw?: string | null, };
+
+/**
+ * #18: a webpush subscription, removable by `id`.
+ */
+export type Sub = { id: string, label: string, created: number, };
+
+/**
+ * #59: a paired device, removable by `hash`.
+ */
+export type Paired = { hash: string, label: string, created: number, used: number, };
+
+/**
+ * #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
  */
 export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 
 /**
- * One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+ * One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
+ * (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
+ * agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
  */
-export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, };
+export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
 
 /**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

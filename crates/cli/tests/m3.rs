@@ -390,17 +390,19 @@ fn serve_is_read_only_html() {
         res.contains("https://github.com/jirathip-dev/sendmeter/pull/15"),
         "PR link"
     );
-    // #60: the Events tab body loads on tab open.
-    let res = String::from_utf8(srv.respond("GET /frag?id=events HTTP/1.1\r\nHost: x\r\n\r\n", 1_000_000)).unwrap();
-    assert!(
-        res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
-        "issue link"
-    );
-    // #169: `checks` is the PR's checks page; never a query-string Actions URL.
-    assert!(
-        res.contains("pull/15/checks\">checks</a>]") && !res.contains("actions?query"),
-        "checks link"
-    );
+    // #60: the Events tab body loads on tab open (#266: the board draws it from API v1).
+    let api = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    if let Some(res) = events_tab(&api, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") {
+        assert!(
+            res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
+            "issue link"
+        );
+        // #169: `checks` is the PR's checks page; never a query-string Actions URL.
+        assert!(
+            res.contains("pull/15/checks\">checks</a>]") && !res.contains("actions?query"),
+            "checks link"
+        );
+    }
     for m in ["POST", "PUT", "DELETE", "PATCH", "HEAD"] {
         let res = String::from_utf8(srv.respond(&format!("{m} / HTTP/1.1\r\n\r\n"), 1_000_000)).unwrap();
         assert!(res.starts_with("HTTP/1.1 405 "), "{m}: {res}");

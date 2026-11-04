@@ -26,7 +26,8 @@
     {
       "color": "g",
       "name": "sendmeter",
-      "paused": false
+      "paused": false,
+      "repo": "jirathip-dev/sendmeter"
     }
   ],
   "hosts": [
@@ -53,6 +54,7 @@
     }
   ],
   "mtime": "<mtime>",
+  "now": 1000000,
   "queue": [
     {
       "blocked_by": null,
@@ -113,5 +115,6 @@
       "tone": "a"
     }
   ],
-  "theme": "farm"
+  "theme": "farm",
+  "tz": 0
 }

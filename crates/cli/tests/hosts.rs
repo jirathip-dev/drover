@@ -343,8 +343,7 @@ fn an_offline_host_never_pages_and_shows_grey() {
     );
     assert!(hosts.contains("1 lane(s) sendmeter-impl-12"), "{hosts}");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+    let page = host_tab(&s, ADDR, NOW);
     let g = &page[page
         .find("<article class=hcd data-h=\"bazzite\"")
         .expect("a bazzite card")..];
@@ -374,8 +373,7 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("bazzite"));
     assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+    let page = host_tab(&s, ADDR, NOW);
     assert!(
         page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
         "draining shown"
@@ -411,9 +409,7 @@ fn cli_and_board_toggles_both_log() {
     assert_eq!(run(&c, &r, &["hosts", "off", "nope"]).0, 1);
     // The board's [on] button: paired devices only.
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let get = || {
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
-    };
+    let get = || host_tab(&s, ADDR, NOW);
     let page = get();
     assert!(
         page.contains("<span class=\"hw m\">off · not used for lanes</span>")
