@@ -264,6 +264,11 @@ public key and `POST /push/subscribe`s the subscription; that and the Host tab's
 otherwise). Delivery goes Mac → Apple/Google push service → phone, outbound only; the page stays
 tailnet-only.
 
+#370: the subscription carries the phone's theme words (`w_merged`, `w_needs`), so a merge reads `Order up: #2957
+merged` (kitchen) or `Over the fence: #2957 merged` (farm), and needs-human / an owner ask `The bell: api #2961 needs
+you` / `At the gate: …`; terminal sends none and keeps today's titles. A theme switch re-sends them with `quiet=1`
+(saved, no test push). Only the title changes; the body stays.
+
 ```toml
 [[notify]]
 type = "webpush"
