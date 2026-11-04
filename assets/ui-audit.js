@@ -145,6 +145,23 @@
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #409: t2's reply with a short and a long-line code box (the long one scrolls sideways inside its box), then
+    // [copy] tapped on the short one: `copied` (the clipboard stubbed: headless Chrome's needs a permission).
+    'chat-code': () => {
+      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' });
+      const [a, b] = [...$$('#chat .cvp[data-t="t2"] .cb pre')];
+      if (!b || a.scrollWidth > a.clientWidth || b.scrollWidth <= b.clientWidth || getComputedStyle(b).overflowX !== 'auto') early.push(`code boxes: ${a?.scrollWidth}/${a?.clientWidth}, ${b?.scrollWidth}/${b?.clientWidth}, not short whole and long scrolling`);
+    },
+    'chat-copied': async () => {
+      VIEWS['chat-code']();
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: t => { window.cp = t; return Promise.resolve(); } } });
+      const c = $('#chat .cvp[data-t="t2"] .cpy'), st = window.setTimeout;
+      window.setTimeout = (f, ms) => ms === 1500 ? 0 : st(f, ms); // the flash held for the shot
+      c.click();
+      await wait();
+      window.setTimeout = st;
+      if (c.textContent !== 'copied' || window.cp !== 'curl -s localhost:8080/v1/openapi.json') early.push(`[copy]: "${c.textContent}", copied "${window.cp}"`);
+    },
     // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
     // several images (the thread's two, on the second).
     // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it. The thread is scrolled to
@@ -847,13 +864,13 @@
         if (!t.data.trim() || !seen(e) || e.closest('svg, .gl, .asc')) continue;
         const fs = getComputedStyle(e).fontSize, input = e.closest('input, textarea, select');
         if (input ? fs !== '16px' : !['11px', '13px'].includes(fs)) bad.push(`"${t.data.trim().slice(0, 20)}": font ${fs}`);
-        // Text past its box's sides, unless that box ellipsises it (the button's `]` ring is not text).
+        // Text past its box's sides, unless that box ellipsises or scrolls it (the button's `]` ring is not text).
         let b = e;
         while (['inline', 'contents'].includes(getComputedStyle(b).display)) b = b.parentElement;
         const g = document.createRange();
         g.selectNodeContents(t);
         const tr = g.getBoundingClientRect(), br = b.getBoundingClientRect();
-        if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis') bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
+        if (!input && (tr.right > br.right + 1 || tr.left < br.left - 1) && getComputedStyle(b).textOverflow !== 'ellipsis' && !/auto|scroll/.test(getComputedStyle(b).overflowX)) bad.push(`"${t.data.trim().slice(0, 20)}": text overflows its box by ${Math.max(tr.right - br.right, br.left - tr.left) | 0}px`);
       }
       // #68: no box holds more than it shows unless it ellipsises (or scrolls by design); nothing past the screen's right edge.
       // Tap rings (`]`, the queued horse's ::before, a picker's invisible select grown 8 px each side) are hit area, not content:

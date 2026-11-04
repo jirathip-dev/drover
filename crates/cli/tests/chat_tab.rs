@@ -652,3 +652,93 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
         "{chat}"
     );
 }
+
+/// #409: a reply's fenced blocks: each one box with its exact text (escaped, indentation and blank lines kept) and
+/// [copy]; the text around them prose; an unclosed fence runs to the end.
+const CODE: &str = "Run this:\n\n```sh\n  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi\n```\nThen check `x`.\n\n```\nunclosed <tail>\n  more";
+
+fn coded(name: &str) -> herdsman::Ctx {
+    let c = setup(name);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Code"]).1,
+        "t1\n"
+    );
+    let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", CODE]);
+    assert_eq!(code, 0, "{out}");
+    c
+}
+
+#[test]
+fn a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy() {
+    let (c, r) = (coded("chat-code"), Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let (chat, _) = frags(&s, &cookie, T);
+    let want = "<div class=md><p>Run this:</p>\
+        <div class=cb><pre>  if [ 1 &lt; 2 ] &amp;&amp; true; then\n\n    echo &quot;b &amp; c&quot;\nfi</pre><button type=button class=cpy>copy</button></div>\
+        <p>Then check <code>x</code>.</p>\
+        <div class=cb><pre>unclosed &lt;tail&gt;\n  more</pre><button type=button class=cpy>copy</button></div></div>";
+    assert!(chat.contains(want), "{chat}");
+}
+
+#[test]
+fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_one() {
+    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let c = coded("chat-copy");
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap().to_string();
+    let (c2, at) = (c.clone(), addr.clone());
+    std::thread::spawn(move || {
+        let r = Fake::default();
+        let s = Server::new(&c2, &r, Some(at));
+        for mut st in l.incoming().flatten() {
+            let mut buf = [0u8; 8192];
+            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
+            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
+        }
+    });
+    // The clipboard records what it is given; the 1.5 s flash runs on a held timer, fired by hand.
+    let pre = "window.copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, \
+        value: { writeText: t => (copied.push(t), Promise.resolve()) } })";
+    let (first, second) = (
+        "  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi",
+        "unclosed <tail>\n  more",
+    );
+    let js = format!(
+        "(async () => {{ try {{ const q = () => [...$$('#chat .cvp[data-t=\"t1\"] .cpy')], timers = [], st = window.setTimeout; \
+          while (!q().length) await new Promise(r => st(r, 50)); \
+          const b = q(); \
+          window.setTimeout = (f, ms) => (ms === 1500 && timers.push(f), ms === 1500 ? 0 : st(f, ms)); \
+          b[0].click(); await new Promise(r => st(r, 50)); \
+          const flash = b[0].textContent; timers.forEach(f => f()); \
+          Object.defineProperty(navigator, 'clipboard', {{ configurable: true, value: undefined }}); \
+          b[1].click(); \
+          window.late = [b.length, copied.length, +(copied[0] === {}), +(flash === 'copied'), +(b[0].textContent === 'copy'), \
+            timers.length, +(getSelection().toString() === {}), errs.length]; }} catch (e) {{ window.late = [-1]; }} }})()",
+        serde_json::json!(first),
+        serde_json::json!(second)
+    );
+    let o = swift()
+        .env("HERDSMAN_WAIT", "3")
+        .env("HERDSMAN_PRE", pre)
+        .args([
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
+            &format!("http://{addr}/"),
+            "390",
+            "chat",
+            "scene",
+            tmpdir("chat-copy-png").join("t.png").to_str().unwrap(),
+            &format!("chatOpen('t1'); {{ {js} }}"),
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+    // 2 boxes; one write, the first block exactly; `copied`, back to `copy` when the 1.5 s timer fires; no clipboard:
+    // the second block selected exactly; no page errors.
+    assert_eq!(m, [2., 1., 1., 1., 1., 1., 1., 0.], "{out}");
+}

@@ -8,6 +8,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - Each owner message reaches you as `[<thread>] owner: <text>`; a `DECISION <id>: <text>` line answers your ask.
 - The owner reads only the thread, never your pane. Every reply goes there:
   `herdsman thread reply <thread> "<text>"`. Keep replies short; one reply per turn.
+- Put any command, config or snippet the owner may copy in a ``` fenced block, one block per command group; the
+  thread shows each as a box with [copy].
 - A choice is an ask in the thread, at most 4 options, your recommendation first:
   `herdsman ask <fleet> - "<question>" --thread <thread> --option "<a>" --option "<b>" --recommend 1`.
   Then stop and wait for the `DECISION` line.

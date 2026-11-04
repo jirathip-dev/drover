@@ -607,6 +607,10 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .blk:has(>.md+.chq){--k:var(--a)}
 /* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
 .df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
+/* #409: a fenced block in a message: its exact text in a box that scrolls sideways, [copy] in its top corner (no
+   scrollbar: WebKit leaves a classic one out of the box's height inside a flex column). */
+.cb{position:relative}.cb pre{margin:0;padding:var(--ctl) var(--s2) var(--s2);overflow-x:auto;scrollbar-width:none;white-space:pre;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px}
+.cb .cpy{position:absolute;top:0;right:var(--s2)}
 :is(.chc,.chs){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
 .chs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
 .blk:has(>.md+:is(.chc,.chs)){--k:var(--a)}

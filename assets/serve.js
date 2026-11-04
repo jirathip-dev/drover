@@ -1795,6 +1795,7 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
   else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
   else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+  else if (t.closest('#chat .cpy')) copyBox(t.closest('.cpy'));
   else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
 });
 // #406: an image tap opens the viewer over the page (the URL stays): black, the image fitted; pinch or double-tap to
@@ -1882,6 +1883,13 @@ document.addEventListener('change', e => {
   };
   r.readAsDataURL(f);
 });
+// #409: a code box's [copy]: its exact text to the clipboard, then `copied` for 1.5 s; without the clipboard API
+// (plain http) the text is selected instead.
+function copyBox(b) {
+  const p = b.previousElementSibling, pick = () => getSelection().selectAllChildren(p);
+  if (!navigator.clipboard) return pick();
+  navigator.clipboard.writeText(p.textContent).then(() => { b.textContent = 'copied'; setTimeout(() => { b.textContent = 'copy'; }, 1500); }, pick);
+}
 async function chatPost(d, f) {
   try {
     const r = await send('thread', d), m = (await r.text()).trim();

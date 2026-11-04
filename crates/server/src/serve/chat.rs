@@ -56,8 +56,26 @@ pub fn choosing(events: &[Event]) -> usize {
         .count()
 }
 
-/// Escaped prose: paragraphs at blank lines, `code`, and plain links.
+/// #409: prose; between fence lines (to the end if unclosed) a box with [copy] of the block's exact text.
 fn prose(text: &str) -> String {
+    let mut seg = vec![String::new()];
+    for l in text.split('\n') {
+        if l.trim_start().starts_with("```") {
+            seg.push(String::new());
+        } else if let Some(s) = seg.last_mut() {
+            *s += &format!("{l}\n");
+        }
+    }
+    let cb = |c: &str| format!("<div class=cb><pre>{c}</pre><button type=button class=cpy>copy</button></div>");
+    let html = |(i, s): (usize, &String)| match i % 2 {
+        0 => paras(s),
+        _ => cb(&esc(s.strip_suffix('\n').unwrap_or(s))),
+    };
+    seg.iter().enumerate().map(html).collect()
+}
+
+/// Escaped prose: paragraphs at blank lines, `code`, and plain links.
+fn paras(text: &str) -> String {
     let link = |w: &str| {
         let url = w.trim_end_matches(['.', ',', ')', ';', ':']);
         if url.starts_with("https://") || url.starts_with("http://") {
