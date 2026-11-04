@@ -148,9 +148,12 @@ pub struct Setup {
 }
 
 /// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
-/// `mtime` a POST sends back (STALE when fleet.toml changed since).
+/// `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
+/// the Events tab's time groups.
 pub struct State {
     pub seq: u64,
+    pub now: u64,
+    pub tz: i64,
     pub age: Option<u64>,
     pub mtime: String,
     pub theme: String,
@@ -165,6 +168,7 @@ pub struct State {
 
 pub struct Fleet {
     pub name: String,
+    pub repo: String,
     pub color: String,
     pub paused: bool,
 }
@@ -210,14 +214,16 @@ pub struct Row {
     pub fix: String,
 }
 
-/// #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+/// #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
 pub struct Events {
     pub seq: u64,
     pub refresh: bool,
     pub list: Vec<Ev>,
 }
 
-/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
+/// (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
+/// agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
 pub struct Ev {
     pub seq: u64,
     pub ts: u64,
@@ -227,6 +233,15 @@ pub struct Ev {
     pub kind: String,
     pub data: serde_json::Map<String, Value>,
     pub k: Option<String>,
+    pub glyph: String,
+    pub tone: String,
+    pub text: String,
+    pub imp: bool,
+    pub act: String,
+    pub coat: String,
+    pub plain: String,
+    pub pr: Option<u64>,
+    pub run: Option<String>,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

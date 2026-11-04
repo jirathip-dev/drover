@@ -66,6 +66,9 @@
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
     'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
     'events-rows': () => { tab('events'); $('#needs').hidden = true; },
+    // #266 gate 2: the first [important] row open (links, time, the raw event), and the [all] view.
+    'events-open': () => { tab('events'); $('#needs').hidden = true; $('#events [data-v=imp] .er').open = true; },
+    'events-all': () => { tab('events'); $('#needs').hidden = true; $('#events .chips [data-k=all]').click(); },
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
     // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
@@ -1121,6 +1124,7 @@
   VIEWS['moment-row-still'] = VIEWS['moment-row'];
   const go = async () => {
     await themed; // #241: the phone's theme drawn first
+    await window.boardReady; // #266: the TypeScript board's first draw (Events)
     await VIEWS[V]();
     setTimeout(() => {
       if (V === 'herd2') PG.scrollLeft = PG.clientWidth;
