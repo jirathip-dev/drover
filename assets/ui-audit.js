@@ -395,6 +395,7 @@
       // three rows, one moment each, played side by side (the Chrome run's virtual time is 8 s)
       const ds = [...$$('#queue details.q')].filter(seen).slice(0, 3);
       if (ds.length < 3) return early.push('under 3 Queue rows in view');
+      let patched; const once = new Promise(r => patched = r); // the other rows read after the one patch, never a clock
       await Promise.all(['fail', 'needs-you', 'merged'].map(async (k, i) => {
         const n = +ds[i].querySelector('summary a').textContent.slice(1), f = qname(ds[i].closest('.fc')), seq = 1e9 + i;
         const sum = () => [...$$('#queue details.q')].find(x => x.querySelector('summary a').textContent === '#' + n && x.closest('.fc')?.querySelector('.fn>b').textContent === f).querySelector('summary');
@@ -407,8 +408,9 @@
           const x = $('#queue').cloneNode(true);
           x.querySelectorAll('[data-mo]').forEach(e => { delete e.dataset.mo; e.style.removeProperty('--mo-d'); e.querySelector('.mot')?.remove(); });
           frag('queue', x.innerHTML);
+          patched();
         }
-        else await new Promise(r => setTimeout(r, 10));
+        else await once;
         const dl = parseFloat(sum().style.getPropertyValue('--mo-d'));
         if (sum().dataset.mo !== k || !(dl <= -1000)) early.push(`${k}: a patch at 1.1 s restarted or dropped it (--mo-d ${dl})`);
         if (V === 'moment-row-still' && [sum(), sum().querySelector('.mot')].some(e => !e || getComputedStyle(e).animationName !== 'none')) early.push(`${k}: moves under reduced motion`);

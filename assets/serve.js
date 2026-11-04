@@ -448,11 +448,11 @@ function rmoment(k, f, n, seq) {
 const again = () => MO.forEach(m => { const r = target(m.f, m.n, m.k); if (r && !msum(r).dataset.mo) play(r, m.k, m.t0); });
 // #370: the push words of this phone's theme go with its subscription (`Order up: #2957 merged`); a theme switch re-sends
 // them quietly (no test push). None: today's titles.
-const pw = () => Object.fromEntries(['merged', 'needs'].filter(k => TW()[k]).map(k => ['w_' + k, TW()[k][0].toUpperCase() + TW()[k].slice(1)]));
+const pw = () => ({ words: JSON.stringify(Object.fromEntries(['merged', 'needs'].filter(k => TW()[k]).map(k => [k, TW()[k][0].toUpperCase() + TW()[k].slice(1)]))) });
 let PWT = '';
 async function pushwords() {
   const w = JSON.stringify(pw());
-  if (DEMO || PWT === w || (get('push:w') ?? '{}') === w || !('serviceWorker' in navigator)) return;
+  if (DEMO || PWT === w || (get('push:w') ?? JSON.stringify({ words: '{}' })) === w || !('serviceWorker' in navigator)) return;
   PWT = w; // one try per page and theme
   try {
     const s = (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.toJSON();

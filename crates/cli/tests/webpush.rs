@@ -510,15 +510,15 @@ fn push_titles_use_each_devices_theme_words() {
             .collect()
     };
     webpush::subscribe(&c.state, &form("https://push.example/plain", ""), "Mac", 1, None).unwrap();
-    let words = "&w_merged=Over the fence&w_needs=At the gate";
+    let words = r#"&words={"merged":"Over the fence","needs":"At the gate"}"#;
     webpush::subscribe(&c.state, &form("https://push.example/phone", words), "iPhone", 1, None).unwrap();
     // The phone switches to the kitchen: its words are replaced quietly, nothing is pushed.
     let kitchen = form(
         "https://push.example/phone",
-        "&w_merged=Order up&w_needs=The bell&quiet=1",
+        r#"&words={"merged":"Order up","needs":"The bell"}&quiet=1"#,
     );
     let said = webpush::subscribe(&c.state, &kitchen, "iPhone", 1, Some("mailto:owner@example.com")).unwrap();
-    assert_eq!((said.as_str(), dir.join("calls").exists()), ("saved", false));
+    assert_eq!((said.as_str(), dir.join("calls").exists()), (webpush::OFF, false));
     let titles = |kind: &str| {
         let ev = Event::new(
             1,
