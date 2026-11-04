@@ -1,0 +1,28 @@
+{
+  "acts": [
+    "stop",
+    "kill",
+    "clean"
+  ],
+  "before": 2,
+  "harness": "claude",
+  "lines": [
+    "⏺ Bash(cargo test)",
+    "  ⎿ ok"
+  ],
+  "live": 2,
+  "more": false,
+  "notices": [
+    {
+      "at": 900100,
+      "text": "spawned sendmeter-impl-12"
+    },
+    {
+      "at": 900300,
+      "text": "merged"
+    }
+  ],
+  "pane": null,
+  "said": null,
+  "status": null
+}

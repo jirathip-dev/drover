@@ -31,5 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
 toml = "0.8"
+# #265: dev-only, it writes web/src/api.ts from the API types in a test; never linked into the binary.
+ts-rs = { version = "12", features = ["serde-json-impl"] }
 herdsman-core = { path = "crates/core" }
 herdsman-server = { path = "crates/server" }

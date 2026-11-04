@@ -18,7 +18,7 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
+      - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary. #265: fails when web/src/api.ts is stale)"
         run: cargo test --locked
       - name: demo export (#39, synthetic data in demo/)
         run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
@@ -26,7 +26,7 @@ jobs:
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|herdsman-core|herdsman-server' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|herdsman-core|herdsman-server' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
       - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
         run: |
@@ -46,6 +46,30 @@ jobs:
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
+
+  # #265: the TypeScript board (web/): strict typecheck, the esbuild bundle, and the committed dist must match it.
+  # Node is CI's and developers' only: the binary embeds the committed web/dist, so `cargo install` needs no Node.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: install (pinned typescript + esbuild, package-lock.json)
+        run: npm ci --no-audit --no-fund
+      - name: typecheck (tsc --strict --noEmit)
+        run: npm run check
+      - name: build, and the committed dist is that build
+        run: |
+          npm run build
+          git diff --exit-code -- dist || { echo "::error::web/dist is stale: run \`npm run build\` in web/ and commit"; exit 1; }
+          test -z "$(git status --porcelain -- dist)" || { echo "::error::web/dist has uncommitted files"; exit 1; }
+      - name: web TypeScript lines (soft budget, reported only; #265 Q5)
+        run: echo "web/src TypeScript lines: $(cat src/*.ts | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # #63 gate 2 (docs/ui.md): headless Chrome (preinstalled on ubuntu-latest) audits the demo at 390 px.
   ui:

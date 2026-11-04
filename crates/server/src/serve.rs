@@ -19,6 +19,8 @@ use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+mod api;
+
 const SW: &str = include_str!("../assets/sw.js");
 macro_rules! th {
     ($f:literal, $t:expr) => {
@@ -35,6 +37,9 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     ("herd.css", "text/css", include_bytes!("../assets/herd.css")),
     ("serve.js", "text/javascript", include_bytes!("../assets/serve.js")),
     ("herd.js", "text/javascript", include_bytes!("../assets/herd.js")),
+    // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
+    ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
+    ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
     // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
     th!("farm/sprites.svg", SVG),
     th!("farm/theme.json", JSON),
@@ -539,6 +544,12 @@ fn row_coat(lane: &str) -> String {
     }
 }
 
+/// The Services board row: this board's uptime and version.
+fn board(ctx: &Ctx) -> String {
+    let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
+    format!("up {up} · v{}", env!("CARGO_PKG_VERSION"))
+}
+
 /// `age` since `t`, or nothing when `t` is unknown (0).
 fn ago(now: u64, t: u64) -> String {
     if t > 0 {
@@ -893,6 +904,7 @@ impl<'a> Server<'a> {
         let loopback =
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
+            (_, p) if p.starts_with("/api/") => self.api(ctx, head, method, p, query, body),
             ("GET", _) if frags => self.frags(ctx, false, self.device(ctx, head).is_some(), form(query).get("tab").map(String::as_str)).map_or_else(fail, |f| {
                 ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
             }),
@@ -928,14 +940,7 @@ impl<'a> Server<'a> {
                 ("401 Unauthorized", "text/plain", text("only a paired device may unpair, answer or drive\n"))
             }
             ("POST", "/") => {
-                // #140: an op that can spawn or merge runs on `serve_on`'s job thread; the reply is at once.
-                let f = form(body.trim());
-                let [op, fleet] = ["op", "fleet"].map(|k| f.get(k).cloned().unwrap_or_default());
-                let msg = match self.jobs.as_ref().filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str())) {
-                    Some(_) if !lock(&self.running).insert(fleet.clone()) => format!("REFUSED DRIVE_RUNNING: {fleet} has a {op} running"),
-                    Some(tx) => (format!("{op} started for {fleet}"), drop(tx.send((ctx.clone(), f, fleet)))).0,
-                    None => self.write(ctx, &f).unwrap_or_else(|e| shown(&e)),
-                };
+                let msg = self.op(ctx, form(body.trim())).unwrap_or_else(|e| shown(&e));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
@@ -1190,7 +1195,14 @@ impl<'a> Server<'a> {
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
             let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
             let page = &all[all.len().saturating_sub(before + lines)..all.len().saturating_sub(before)];
-            return Some(json!({"harness": "", "lines": page, "live": 0, "before": before + page.len(), "more": all.len() > before + page.len()}).to_string());
+            let (lines, before, more) = (page.to_vec(), before + page.len(), all.len() > before + page.len());
+            return serde_json::to_string(&api::Transcript {
+                lines,
+                before,
+                more,
+                ..Default::default()
+            })
+            .ok();
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
         let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
@@ -1211,10 +1223,26 @@ impl<'a> Server<'a> {
                 "verdict" => Some(format!("verdict {}", e.str("verdict")?)),
                 k => (k == "merged").then(|| k.into()),
             };
-            Some(json!({"at": e.ts, "text": lanes::mask(&t?)}))
+            Some(api::Notice {
+                at: e.ts,
+                text: lanes::mask(&t?),
+            })
         };
         let notices: Vec<_> = events.iter().filter_map(|e| note(&e)).collect();
-        Some(serde_json::json!({"said": said.map(|s| lanes::said(&s).0), "notices": notices, "harness": l.harness, "acts": if l.role == "other" { &["close"][..] } else { &["stop", "kill", "clean"] }, "pane": (l.role == "other").then_some(&l.pane), "lines": page, "live": if before == 0 { live.min(page.len()) } else { 0 }, "status": status, "before": before + page.len(), "more": end > page.len()}).to_string())
+        let acts = [&["stop", "kill", "clean"][..], &["close"]][usize::from(l.role == "other")];
+        serde_json::to_string(&api::Transcript {
+            said: said.map(|s| lanes::said(&s).0),
+            notices,
+            acts: acts.iter().map(|a| (*a).into()).collect(),
+            pane: l.pane.filter(|_| l.role == "other"),
+            lines: page.to_vec(),
+            live: if before == 0 { live.min(page.len()) } else { 0 },
+            before: before + page.len(),
+            more: end > page.len(),
+            harness: l.harness,
+            status,
+        })
+        .ok()
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -2111,9 +2139,7 @@ impl<'a> Server<'a> {
     fn host_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> String {
         let (hs, r, dl) = (self.sample(), &self.cached(ctx.now, 60), Limits::default());
         let lim = cfg.map_or(&dl, |c| &c.limits);
-        let up = age(ctx.now.saturating_sub(*STARTED.get_or_init(|| ctx.now)));
-        let board = format!("up {up} · v{}", env!("CARGO_PKG_VERSION"));
-        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board)));
+        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
         let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
         let dc = Config::default();
         let hosts = self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs);
