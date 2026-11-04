@@ -1085,7 +1085,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 g.unwrap_or_default()
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
-                            // #391: an added issue's title for its Queue row now, not at the next check (#331).
                             for &i in &issues {
                                 let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
                             }

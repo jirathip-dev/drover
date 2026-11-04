@@ -3167,10 +3167,7 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
 
 /// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    // #391: a row queued from the backlog has its title in the last read until its spec is cached.
-    let bl = || crate::usage::load::<serde_json::Value>(&gh::cache_path(ctx, "backlog", fleet, 0));
-    let spec = gh::cached_title(ctx, fleet, issue)
-        .or_else(|| Some(bl()?["issues"][issue.to_string()]["title"].as_str()?.into()));
+    let spec = gh::cached_title(ctx, fleet, issue);
     let pr = gh::cached_pr(ctx, fleet, issue);
     let pr = pr["number"]
         .as_u64()
