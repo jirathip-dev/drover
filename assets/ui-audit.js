@@ -140,8 +140,9 @@
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
     // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
     // several images (the thread's two, on the second).
+    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it.)
     'chat-viewer': () => { tab('chat'); chatOpen('t4'); $('#chat .cvp[data-t="t4"] .im img').click(); },
-    'chat-viewer-zoom': () => { tab('chat'); chatOpen('t4'); $('#chat .cvp[data-t="t4"] .im img').click(); ivTap(innerWidth / 2, innerHeight / 2); },
+    'chat-viewer-zoom': () => { tab('chat'); chatOpen('t4'); $('#chat .cvp[data-t="t4"] .im img').click(); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
     'chat-viewer-multi': () => { tab('chat'); chatOpen('t4'); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
