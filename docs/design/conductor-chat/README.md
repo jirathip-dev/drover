@@ -1,6 +1,6 @@
 # Conductor chat: the [chat] tab, design mockup (#355, step 0)
 
-`index.html` is the board with a fifth tab, `[chat]`: repos with their conductor threads, one thread open with choice
+`index.html` is the board with a new middle tab, `[chat]` (`[queue] [lanes] [chat] [host] [events]`): repos with their conductor threads, one thread open with choice
 rows, image bubbles, a file, a link, a config-propose card and a secret-request card (Amendment A). It links
 `assets/serve.css` unchanged and inlines the farm scheme's tokens as `serve.rs` writes them. One `<style>` block holds
 the new rules, which use existing tokens only and move to `serve.css` when the tab is built (step 1). Static: the
@@ -23,8 +23,8 @@ writes 844 px slices.
 is the AC's live readback: a grill (3 choices, one answered from Telegram), a filed issue (#52) queued after #21, a
 mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `../farm-v2/board-events-390.png`
 (a real board screenshot). `rate-limits-docs-390.png` is the conductor's "mockup", made from
-`fixtures/rate-limits-docs.html`. The account names, times, ids (`q31`, `c8`) and the working directory
-`~/conductor/acme-api` are made up.
+`fixtures/rate-limits-docs.html`. The account names, times and ids (`q31`, `c8`) are made up. The working directory
+`~/conductor/acme-api` is the decided one (Q6).
 
 ## The list
 
@@ -45,7 +45,7 @@ mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is
   A read thread's title is muted.
 - **New thread:** `[+ thread]` opens a title input and `[start]` in that card. Starting spawns the conductor lane for
   that repo (or for every repo, from "all repos").
-- **The tab:** `[chat·N]`, where N (red, as on `[queue·N]`) is the number of threads where `! choose` is set. Unread
+- **The tab:** the middle one, `[queue] [lanes] [chat] [host] [events]` (Q1). It reads `[chat·N]`, where N (red, as on `[queue·N]`) is the number of threads where `! choose` is set. Unread
   replies don't count: they are only the blue dots.
 - **Needs-you stack:** on the list it shows folded (#154's `n need you ▸`). Inside a thread at 390 it is hidden, so the
   conversation keeps the screen.
@@ -100,28 +100,19 @@ hidden. The needs-you line stays above both.
 settled cards and older-threads rows ≥ 44 px, and every cut line ellipsised. Five tabs fit at 390 px. Step 1 should add
 `chat`, `chat-thread` and `chat-states` views to `ui-audit.js`.
 
-## Open questions for the owner
+## Owner decisions (2026-11-04)
 
-1. **Tab place.** `[chat]` is last (after `[events]`), so the tabs you use today keep their places. First would say
-   "this is the main way in". **Recommend: last.**
-2. **Repo cards vs repo chips.** Per the issue, the mockup stacks every repo's card, each with its 3 newest threads.
-   #367's chip row (one repo at a time, swipe between them) scales better past about 6 repos. **Recommend: cards now;
-   switch to chips if the list gets long.**
-3. **Owner cards amber, not red.** A pending config or secret card is "waits for you", which the board shows in red.
-   Red cards inside a conversation read as errors, so the mockup uses amber in the thread. The thread row's
-   `! choose`, the `[chat·N]` count and the push stay red. **Recommend: as mocked.** Related: should pending owner
-   cards also join the top needs-you stack? **Recommend: no.** One place per decision: lane asks stay in the stack,
-   and a conductor's asks and cards stay in its thread.
-4. **Answered choices fold to the answer.** The alternative keeps every row with the picked one marked, which costs
-   about 3 lines per past question. **Recommend: fold.**
-5. **The conductor's commands are visible** as closed tool runs. Hiding them would make the thread read like a plain
-   chat, but you would lose the record of what it ran (issues filed, queue moves, spawns). **Recommend: show, closed.**
-6. **Where a conductor lives.** It needs a working directory without a worktree. The mockup says `~/conductor/<repo>`
-   (and `~/conductor/all`). **Pick the path**, or name it in `[conductor]`.
-7. **Push text.** Proposed: `acme-api · Rate limits for /v1/search: <first line of the reply>`, and for a choice
-   `… asks: <question>`. A tap opens the thread. No push for tool runs or system lines.
-8. **Not in the issue, left out:** renaming or archiving a thread, search across threads, and the full-screen image
-   viewer's look. Say if any belongs in step 1 or 2.
-9. **The Telegram side** (step 3) has no board UI beyond the `tg` marks. The issue's mapping (topic ↔ thread, choice
-   rows → inline keyboard, images both ways) needs no mockup. Starting a thread from Telegram (a new forum topic)
-   would create it under "all repos" unless the topic name starts with a repo name. **Confirm that rule.**
+1. **Tab place:** `[chat]` is the third, middle tab: `[queue] [lanes] [chat] [host] [events]`.
+2. **Repo cards**, each with its 3 newest threads. #367's chips only if the list gets long (past about 6 repos).
+3. **Owner cards are amber** inside a thread. The thread row's `! choose`, the `[chat·N]` count and the push stay red.
+   Pending owner cards don't join the top needs-you stack: lane asks stay in the stack, and a conductor's asks and
+   cards stay in its thread.
+4. **Answered choices fold** to the `✓` answer line.
+5. **The conductor's commands are shown**, as closed tool runs.
+6. **Working directory:** `~/conductor/<repo>`, and `~/conductor/all` for "all repos".
+7. **Push text:** `<repo> · <thread title>: <first line of the reply>`, and `… asks: <question>` for a choice. A tap
+   opens the thread. No push for tool runs or system lines.
+8. **Left out of steps 1–2:** renaming or archiving a thread, search across threads, and the full-screen image
+   viewer's look.
+9. **Telegram (step 3):** no board UI beyond the `tg` marks. A thread started from a new forum topic goes under
+   "all repos" unless the topic name starts with a repo name.
