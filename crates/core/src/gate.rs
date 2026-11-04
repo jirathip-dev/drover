@@ -285,15 +285,17 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
     !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
 }
 
-/// #418: each finding (`blocking`, or not when `non-blocking`) with the lines under it, up to the next finding or
-/// heading (#249: a heading is none); fenced and `>` quoted lines are never findings.
+/// #418: each finding (a `-`/`*`/`1.` item saying `blocking`, or not when `non-blocking`) with the lines under it,
+/// up to the next finding, heading or unindented prose line (#249: these end it as none); fenced lines never are.
 fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
     let (mut out, mut fence) = (Vec::<(bool, Vec<&str>)>::new(), false);
     for l in body.lines().skip(1) {
         let (t, lc) = (l.trim_start(), l.to_lowercase());
-        let finding = !fence && !t.starts_with(['#', '>']) && lc.contains("blocking");
+        let item = t.starts_with(['-', '*']) || t.starts_with(|c: char| c.is_ascii_digit());
+        let finding = !fence && item && lc.contains("blocking");
+        let prose = !l.starts_with(char::is_whitespace) && !t.is_empty() && !item && !t.starts_with(['>', '`', '~']);
         match out.last_mut() {
-            _ if finding || (!fence && t.starts_with('#')) => {
+            _ if finding || (!fence && prose && !lc.starts_with("proof:")) => {
                 out.push((finding && !lc.contains("non-blocking"), vec![l]));
             }
             Some(f) => f.1.push(l),

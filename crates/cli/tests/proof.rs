@@ -70,7 +70,11 @@ fn malformed_proofs_are_refused() {
         ("Proof: run\n", "run proof has no fenced command"),
         ("Proof: hunch\n> AC 3\n", "Proof is neither `run` nor `spec`"),
     ];
-    for (proof, why) in cases {
+    let trailer = "\nReviewed head: aaaa\nTests checked against anti-patterns: yes\n";
+    for (proof, why) in cases
+        .iter()
+        .flat_map(|c| [(c.0.to_string(), c.1), (format!("{}{trailer}", c.0), c.1)])
+    {
         let (code, out, c) = verdict("FAIL", &format!("FAIL\n- blocking [code] src/x.rs:9: wrong\n{proof}"));
         assert_eq!((code, verdicts(&c)), (3, 0), "{proof}: {out}");
         assert!(
@@ -83,6 +87,13 @@ fn malformed_proofs_are_refused() {
     let (code, out, _) = verdict("FAIL", "FAIL\n- blocking [code] wrong\nProof: spec\n> AC 3\n");
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("spec proof has no file:line"), "{out}");
+}
+
+#[test]
+fn prose_after_the_findings_is_not_a_finding() {
+    let body = format!("FAIL\n{RUN}\nNo other blocking findings.\nReviewed head: aaaa\n");
+    let (code, out, c) = verdict("FAIL", &body);
+    assert_eq!((code, verdicts(&c)), (0, 1), "{out}");
 }
 
 #[test]
