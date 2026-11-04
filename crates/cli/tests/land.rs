@@ -417,3 +417,99 @@ fn a_revert_that_does_not_apply_is_logged_and_alerted_once() {
     watch(&c, &r);
     assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
 }
+
+#[test]
+fn a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it() {
+    let (_d, c) = setup("land-bisect-cancelled", true, HEAD);
+    landed(
+        &c,
+        &[
+            (12, "fast-first", "m1"),
+            (13, "fast-first", "m2"),
+            (14, "fast-first", "m3"),
+        ],
+    );
+    // m2's run was cancelled by m3's push: not blamed, it gets a run of its own.
+    let mut old = check("e2e", "COMPLETED", "CANCELLED");
+    old["startedAt"] = json!("1970-01-01T00:00:10Z");
+    let cancelled = json!([check("unit", "COMPLETED", "SUCCESS"), old.clone()]);
+    let r = integration("m3", &[("m1", green()), ("m2", cancelled), ("m3", red())])
+        .reply("gh run view 99", "{\"workflowName\": \"CI\"}")
+        .reply("gh workflow run", "")
+        .reply("git", "");
+    watch(&c, &r);
+    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref herdsman-bisect-m2")));
+    assert!(!r.called("gh pr create"));
+    // Only the stale cancelled check so far: still waiting, no second dispatch.
+    let r = integration("m3", &[("m1", green()), ("m2", json!([old])), ("m3", red())]).reply("git", "");
+    watch(&c, &r);
+    assert!(!r.called("gh workflow run") && !r.called("gh pr create"));
+    // Its own run is red: #13 is the culprit.
+    let r = integration("m3", &[("m1", green()), ("m2", red()), ("m3", red())])
+        .reply(
+            &format!("gh pr create -R {REPO}"),
+            "https://github.com/jirathip-dev/sendmeter/pull/80\n",
+        )
+        .reply("git", "");
+    watch(&c, &r);
+    let o = event(&c, "revert-opened").expect("revert");
+    assert_eq!((o.issue, o.str("culprit")), (Some(13), Some("m2")));
+}
+
+#[test]
+fn a_bisect_run_that_does_not_start_is_alerted_once_and_retried() {
+    let (d, c) = setup("land-bisect-fail", true, HEAD);
+    landed(&c, &[(12, "fast-first", "m1"), (13, "fast-first", "m2")]);
+    // `gh workflow run` unscripted: it fails.
+    let fake = || {
+        integration("m2", &[("m1", json!([])), ("m2", red())])
+            .reply("gh run view 99", "{\"workflowName\": \"CI\"}")
+            .reply("git", "")
+    };
+    watch(&c, &fake());
+    let e = event(&c, "revert-failed").expect("revert-failed");
+    assert_eq!((e.issue, e.str("sha")), (Some(12), Some("m1")));
+    assert!(event(&c, "land-bisect").is_none());
+    let alerts = std::fs::read_to_string(d.join("alerts.txt")).unwrap();
+    assert!(alerts.contains("revert-failed"), "{alerts}");
+    let r = fake();
+    watch(&c, &r);
+    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref herdsman-bisect-m1")));
+    assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
+}
+
+#[test]
+fn a_revert_whose_fast_checks_go_red_is_alerted_once() {
+    let (d, c) = setup("land-revert-red", true, HEAD);
+    landed(&c, &[(12, "fast-first", "m1")]);
+    let o = json!({"culprit": "m1", "pr": "77", "red_sha": "m1", "red_job": "e2e", "run": "99"});
+    append(&c.state, &Event::new(200, "sendmeter", Some(12), "revert-opened", o)).unwrap();
+    let rv = json!({"state": "OPEN", "headRefOid": "r3v",
+        "statusCheckRollup": [check("unit", "COMPLETED", "FAILURE")]});
+    let fake = || integration("m1", &[("m1", red())]).reply("gh pr view 77", &rv.to_string());
+    let out = watch(&c, &fake());
+    assert!(out.contains("revert PR #77: fast checks red"), "{out}");
+    assert_eq!(event(&c, "revert-failed").unwrap().str("pr"), Some("77"));
+    let alerts = std::fs::read_to_string(d.join("alerts.txt")).unwrap();
+    assert!(alerts.contains("revert-failed"), "{alerts}");
+    let r = fake();
+    watch(&c, &r);
+    assert!(!r.called("gh pr merge"));
+    assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
+}
+
+#[test]
+fn the_only_fast_first_landing_is_the_culprit_beside_full_first_ones() {
+    let (_d, c) = setup("land-one-fast", true, HEAD);
+    landed(&c, &[(12, "full-first", "m1"), (13, "fast-first", "m2")]);
+    let r = integration("m2", &[("m2", red())])
+        .reply(
+            &format!("gh pr create -R {REPO}"),
+            "https://github.com/jirathip-dev/sendmeter/pull/81\n",
+        )
+        .reply("git", "");
+    watch(&c, &r);
+    assert!(!r.called("gh workflow run") && !r.called(&format!("gh api repos/{REPO}/commits/m1")));
+    let o = event(&c, "revert-opened").expect("revert");
+    assert_eq!((o.issue, o.str("culprit")), (Some(13), Some("m2")));
+}

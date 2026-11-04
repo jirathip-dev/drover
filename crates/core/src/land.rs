@@ -101,7 +101,16 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         let fields = "headRefOid,statusCheckRollup,state";
         let pr = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", fields])?;
         let head = pr["headRefOid"].as_str().unwrap_or_default();
-        if pr["state"] != "OPEN" || gh::ci(&gh::required(&pr["statusCheckRollup"], &l.fast)) != "green" {
+        let st = gh::ci(&gh::required(&pr["statusCheckRollup"], &l.fast));
+        if pr["state"] != "OPEN" || st != "green" {
+            // A revert whose fast checks went red is said once, left to a human.
+            let told = |e: &Event| mine("revert-failed")(&e) && e.str("pr") == Some(num);
+            if pr["state"] == "OPEN" && st == "failed" && !ev.iter().any(told) {
+                writeln!(out, "{fleet} revert PR #{num}: fast checks red")?;
+                let mut d = Value::Object(o.data.clone());
+                d["reason"] = json!(format!("revert PR #{num}: fast checks red"));
+                log(o.issue, "revert-failed", d)?;
+            }
             continue;
         }
         ok(
@@ -220,8 +229,10 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     log(Some(n), "revert-opened", d)
 }
 
-/// The landing that turned integration red: the only one since the last green, else the first of them whose own
-/// full suite is red. A landing with no run yet gets one (a temp ref, its workflow dispatched there); None meanwhile.
+/// The landing that turned integration red: the only fast-first one (or the only one) since the last green, else the
+/// first of them whose own full suite is red. A landing with no run yet, or only a runner/infra red (a run a newer push
+/// cancelled), gets its own run (a temp ref, its workflow dispatched there; only checks started since count); None
+/// meanwhile. A dispatch that fails is retried each pass and alerted once (`revert-failed`).
 fn culprit<'a>(
     ctx: &Ctx,
     cfg: &Config,
@@ -231,31 +242,56 @@ fn culprit<'a>(
     since: &[&'a Event],
     run: &str,
 ) -> Result<Option<&'a Event>> {
-    if since.len() < 2 {
-        return Ok(since.first().copied());
+    let fast: Vec<&'a Event> = (since.iter().copied())
+        .filter(|e| e.str("mode") == Some("fast-first"))
+        .collect();
+    if fast.len() == 1 || since.len() < 2 {
+        return Ok(fast.first().or(since.first()).copied());
     }
     for c in since {
         let sha = c.str("sha").unwrap_or_default();
-        match suite(r, f, sha).0 {
+        let at = |e: &&Event| e.fleet == fleet && e.kind == "land-bisect" && e.str("sha") == Some(sha);
+        let bisect = ev.iter().rfind(at);
+        let (mut st, checks) = suite(r, f, sha);
+        if let Some(b) = bisect {
+            let since_b = |c: &&Value| c["startedAt"].as_str().and_then(crate::usage::epoch) >= Some(b.ts);
+            let fresh: Vec<Value> = (checks.as_array().into_iter().flatten())
+                .filter(since_b)
+                .cloned()
+                .collect();
+            st = if fresh.is_empty() {
+                "pending"
+            } else {
+                gh::ci(&json!(fresh))
+            };
+        }
+        match st {
             "green" => continue,
-            "failed" => return Ok(Some(c)),
+            "failed" if bisect.is_some() || !red(&checks).2 => return Ok(Some(c)),
             "pending" => return Ok(None),
             _ => {}
         }
-        let at = |e: &Event| e.fleet == fleet && e.kind == "land-bisect" && e.str("sha") == Some(sha);
-        if !ev.iter().any(at) {
-            let tmp = format!("herdsman-bisect-{sha:.7}");
-            git(
-                r,
-                &f.local_path(),
-                &["push", "-q", "-f", "origin", &format!("{sha}:refs/heads/{tmp}")],
-            )?;
-            let wf = json(r, "gh", &["run", "view", run, "-R", &f.repo, "--json", "workflowName"]).unwrap_or_default();
-            let wf = wf["workflowName"].as_str().unwrap_or_default();
-            let _ = ok(r, "gh", &["workflow", "run", wf, "-R", &f.repo, "--ref", &tmp]);
-            let d = json!({"sha": sha, "ref": tmp});
-            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, c.issue, "land-bisect", d))?;
-        }
+        let tmp = format!("herdsman-bisect-{sha:.7}");
+        let wf = json(r, "gh", &["run", "view", run, "-R", &f.repo, "--json", "workflowName"]).unwrap_or_default();
+        let wf = wf["workflowName"].as_str().unwrap_or_default();
+        let push = ["push", "-q", "-f", "origin", &format!("{sha}:refs/heads/{tmp}")];
+        let sent = git(r, &f.local_path(), &push).and_then(|_| {
+            anyhow::ensure!(!wf.is_empty(), "no workflow for run {run}");
+            ok(r, "gh", &["workflow", "run", wf, "-R", &f.repo, "--ref", &tmp])
+        });
+        let told = |e: &Event| e.fleet == fleet && e.kind == "revert-failed" && e.str("sha") == Some(sha);
+        let d = match sent {
+            Ok(_) => (json!({"sha": sha, "ref": tmp}), "land-bisect"),
+            Err(e) if !ev.iter().any(told) => {
+                let reason = format!("bisect run for {sha:.7} did not start");
+                (
+                    json!({"sha": sha, "reason": reason, "error": format!("{e:#}")}),
+                    "revert-failed",
+                )
+            }
+            Err(_) => return Ok(None),
+        };
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, c.issue, d.1, d.0))?;
         return Ok(None);
     }
     Ok(since.last().copied())
