@@ -54,6 +54,22 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     crate::setup::reap(ctx, r, &events)?;
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
+        // #429: integration within `warn_within` of its line cap: once per integration sha.
+        if let Some((sha, n, cap, warn)) = crate::overlap::cap_at(ctx, cfg, r, name).filter(|c| c.2 - c.1 < c.3) {
+            let why = format!(
+                "{} lines of headroom (< {warn}) at {sha:.7}, {n} / cap {cap}: propose the next cap step",
+                cap - n
+            );
+            fire(
+                ctx,
+                cfg,
+                out,
+                &events,
+                (name, None),
+                "cap-near",
+                json!({"key": sha, "reason": why}),
+            )?;
+        }
         // #331: a queued issue never spawned had no cached spec, so no Queue row title: fetch it once (cached after).
         for i in crate::queue::replay(&events, name) {
             let _ = gh::spec(ctx, r, f, name, i.issue, false);

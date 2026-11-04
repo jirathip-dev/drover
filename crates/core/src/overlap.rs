@@ -148,16 +148,53 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`.
+/// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
+/// #429: under `warn_within` lines of headroom it warns and still passes.
 pub fn cap_check(config: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
-    let v: toml::Value = toml::from_str(&std::fs::read_to_string(config)?)?;
-    let fleets = v.get("fleet").and_then(toml::Value::as_table);
-    let cap = fleets.and_then(|t| t.values().find_map(|t| t.get("line_cap")?.as_integer()));
-    let cap = cap.ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
+    let (cap, warn) = limits(&std::fs::read_to_string(config)?)
+        .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
     let crates = std::fs::read_dir("crates").into_iter().flatten().flatten();
     let n = lines(Path::new("src")) + crates.map(|c| lines(&c.path().join("src"))).sum::<usize>();
     writeln!(out, "src lines (formatted): {n} / cap {cap}")?;
-    Ok(i32::from(i64::try_from(n)? > cap))
+    let left = cap - i64::try_from(n)?;
+    if (0..warn).contains(&left) {
+        writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
+    }
+    Ok(i32::from(left < 0))
+}
+
+/// The first `[fleet.<n>]` with a `line_cap`: (cap, `warn_within`, default 500).
+fn limits(text: &str) -> Option<(i64, i64)> {
+    let v: toml::Value = toml::from_str(text).ok()?;
+    let t = v
+        .get("fleet")?
+        .as_table()?
+        .values()
+        .find(|t| t.get("line_cap").is_some())?;
+    let warn = t.get("warn_within").and_then(toml::Value::as_integer).unwrap_or(500);
+    Some((t["line_cap"].as_integer()?, warn))
+}
+
+/// #429: `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone;
+/// cached per sha (`serve`'s banner reads the cache).
+pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(String, i64, i64, i64)> {
+    let (f, p) = (cfg.fleet(fleet).ok()?, gh::cache_path(ctx, "cap", fleet, 0));
+    let dir = f.local_path();
+    let sha = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]).ok()?;
+    let old = crate::usage::load::<Value>(&p).unwrap_or_default();
+    let n = |k: &str| old[k].as_i64();
+    if old["sha"] == sha.as_str() {
+        return Some((sha, n("lines")?, n("cap")?, n("warn")?));
+    }
+    let (cap, warn) = limits(&git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).ok()?)?;
+    let globs = [":(glob)src/**/*.rs", ":(glob)crates/*/src/**/*.rs"];
+    let counts = git(r, &dir, &[&["grep", "-c", "", &sha, "--"][..], &globs].concat()).unwrap_or_default();
+    let lines = counts
+        .lines()
+        .filter_map(|l| l.rsplit(':').next()?.parse::<i64>().ok())
+        .sum();
+    let _ = gh::store(&p, &json!({"sha": sha, "lines": lines, "cap": cap, "warn": warn}));
+    Some((sha, lines, cap, warn))
 }
 
 fn lines(p: &Path) -> usize {
