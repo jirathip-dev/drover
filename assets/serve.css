@@ -166,6 +166,10 @@ details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * 
 .pairp.g{border-color:var(--g);color:var(--g)}.pairp.r{border-color:var(--r)}.pairp p{margin:0}
 .pairp .code{font-size:var(--fs-code);letter-spacing:.2em;text-align:center}
 .st{flex:none;margin:0;font-size:var(--fs-meta);min-height:1.5em}
+/* #363 report mode: the tapped element outlined; the note box fixed at the bottom. */
+.rep .repo{outline:2px solid var(--r);outline-offset:-2px}
+.repf{position:fixed;z-index:4;left:0;right:0;bottom:0;display:flex;align-items:center;gap:var(--s4);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--r)}
+.repf input{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);font-size:var(--fs-input)}
 .ask{border:1px solid var(--r);background:color-mix(in srgb,var(--r) 15%,transparent);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}
 .ask b{color:var(--r)}.ask form{display:flex;flex-wrap:wrap;gap:var(--s4)}.ask input[name=text]{flex:1;min-width:8em;font:inherit;font-size:var(--fs-input)}
 .ask form button[name]{order:-1}

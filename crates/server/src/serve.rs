@@ -685,14 +685,22 @@ impl<'a> Server<'a> {
 
     fn handle(&self, mut s: TcpStream) -> std::io::Result<()> {
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
-        let (mut buf, mut chunk) = (vec![], [0u8; 2048]);
+        let (mut buf, mut chunk) = (vec![], vec![0u8; 65_536]);
         let done = |b: &[u8]| {
             let t = String::from_utf8_lossy(b);
             t.split_once("\r\n\r\n").is_some_and(|(h, body)| {
                 body.len() >= header(h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0)
             })
         };
-        while !done(&buf) && buf.len() < 32_768 {
+        // #363: a report carries its screenshot, up to 3 MB.
+        let cap = |b: &[u8]| {
+            if b.starts_with(b"POST /report ") {
+                3 << 20
+            } else {
+                32_768
+            }
+        };
+        while !done(&buf) && buf.len() < cap(&buf) {
             match s.read(&mut chunk)? {
                 0 => break,
                 n => buf.extend_from_slice(&chunk[..n]),
@@ -991,7 +999,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/report")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1037,7 +1045,7 @@ impl<'a> Server<'a> {
         devices::find(ctx, header(head, "cookie").unwrap_or_default())
     }
 
-    /// The reply box (or a blocked menu's option, or a sheet action): a paired device (cookie) prompts one agent, at most 10 sends a minute.
+    /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
     fn send(&self, ctx: &Ctx, head: &str, f: &BTreeMap<String, String>, path: &str) -> (&'static str, String) {
         let Some(dev) = self.device(ctx, head) else {
             return ("401 Unauthorized", "pair this device: tap Pair this phone".into());
@@ -1060,6 +1068,8 @@ impl<'a> Server<'a> {
             self.pick(ctx, &dev, f)
         } else if act {
             self.act(ctx, &dev, f)
+        } else if path == "/report" {
+            Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             self.prompt(ctx, &dev, f)
         };

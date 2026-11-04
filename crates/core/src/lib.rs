@@ -22,6 +22,7 @@ pub mod overlap;
 pub mod pipeline;
 pub mod protection;
 pub mod queue;
+pub mod report;
 pub mod runner;
 pub mod setup;
 pub mod snapshot;

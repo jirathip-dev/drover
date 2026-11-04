@@ -1349,11 +1349,12 @@ if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit)
 sh.addEventListener('focusin', fit);
 sh.addEventListener('focusout', () => setTimeout(fit, 100));
 // `/` first in the reply box: a filtered command list (tap or Enter); stop/kill/clean act, the rest go as text.
-const CMDS = ['/stop', '/kill', '/clean', '/compact', '/clear', '/status'], ta = $('.reply textarea'), cmds = $('.cmds');
+const CMDS = ['/stop', '/kill', '/clean', '/compact', '/clear', '/status', '/report'], ta = $('.reply textarea'), cmds = $('.cmds');
 const matches = () => /^\/\S*$/.test(ta.value) ? CMDS.filter(c => c.startsWith(ta.value)) : [];
 function pick(c) {
   cmds.hidden = true;
   if (['/stop', '/kill', '/clean'].includes(c)) { ta.value = ''; return run(c.slice(1)); }
+  if (c === '/report') { ta.value = ''; return report(); }
   ta.value = c;
   $('.reply').requestSubmit();
 }
@@ -1364,6 +1365,73 @@ ta.oninput = () => {
 };
 ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && matches().length) { e.preventDefault(); pick(matches()[0]); } };
 cmds.onclick = e => { const li = e.target.closest('li'); if (li) pick(li.textContent); };
+// #363 report mode: `/report` closes the sheet; a tap outlines an element, a second tap on it confirms, and a one-line
+// note sends its markup (8 KB), key styles, the board's context and a PNG of it plus 24 px to `/report` (paired
+// phones only; serve keeps it under state/reports/). The PNG is drawn from the layout: boxes, borders and words.
+const KEYS = ['display', 'position', 'width', 'height', 'margin', 'padding', 'border', 'border-radius', 'font-family', 'font-size',
+  'font-weight', 'line-height', 'color', 'background-color', 'opacity', 'overflow', 'white-space', 'text-overflow', 'z-index'];
+let rep = null;
+function report() { close(); B.classList.add('rep'); toast('report: tap an element, then tap it again · tap here to stop'); }
+function unreport() { B.classList.remove('rep'); if (rep) rep.classList.remove('repo'); rep = null; $$('.repf').forEach(f => f.remove()); }
+document.addEventListener('click', e => {
+  if (!B.classList.contains('rep') || e.target.closest('.repf')) return;
+  if (e.target.closest('.msg')) return unreport(); // the toast: a tap on it stops report mode
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (rep === e.target) return repnote();
+  unreport();
+  B.classList.add('rep');
+  (rep = e.target).classList.add('repo');
+}, true);
+function repnote() {
+  const f = el('form', 'repf');
+  f.innerHTML = '<input name=note maxlength=200 placeholder="what is wrong here?" aria-label="report note"><button>Send</button><button type=button>Cancel</button>';
+  B.append(f);
+  f.note.focus();
+  f.lastChild.onclick = unreport;
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const x = rep, note = f.note.value, h = document.documentElement, cs = getComputedStyle(x);
+    unreport();
+    const ctx = { tab: h.dataset.tab, theme: h.dataset.theme, scheme: h.dataset.scheme, style: B.dataset.mode,
+      viewport: [innerWidth, innerHeight, devicePixelRatio], live: seq };
+    const d = { html: x.outerHTML.slice(0, 8192), styles: JSON.stringify(Object.fromEntries(KEYS.map(k => [k, cs.getPropertyValue(k)]))),
+      ctx: JSON.stringify(ctx), note, png: shot(x) };
+    try { const r = await post('report', d); toast((r.ok ? '' : 'error: ') + (await r.text()).trim()); } catch (err) { toast('error: ' + err.message); }
+  };
+}
+// The visible part of `x` plus 24 px, at the device's pixel ratio: each box's background and border, then each word.
+function shot(x) {
+  const r = x.getBoundingClientRect(), dpr = devicePixelRatio || 1, L = Math.max(0, r.left - 24), T = Math.max(0, r.top - 24);
+  const W = Math.max(1, Math.min(innerWidth, r.right + 24) - L), H = Math.max(1, Math.min(innerHeight, r.bottom + 24) - T);
+  const c = Object.assign(document.createElement('canvas'), { width: Math.ceil(W * dpr), height: Math.ceil(H * dpr) }), g = c.getContext('2d');
+  g.scale(dpr, dpr);
+  g.translate(-L, -T);
+  g.fillStyle = getComputedStyle(B).backgroundColor;
+  g.fillRect(L, T, W, H);
+  const hit = q => q.width && q.height && q.right > L && q.left < L + W && q.bottom > T && q.top < T + H, rg = document.createRange();
+  const w = document.createTreeWalker(B, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  for (let n = w.currentNode; n; n = w.nextNode()) {
+    const s = getComputedStyle(n.nodeType === 1 ? n : n.parentElement);
+    if (s.visibility !== 'visible') continue;
+    if (n.nodeType === 1) {
+      const q = n.getBoundingClientRect(), b = parseFloat(s.borderTopWidth);
+      if (!hit(q)) continue;
+      g.fillStyle = s.backgroundColor;
+      g.fillRect(q.left, q.top, q.width, q.height);
+      if (b) { g.strokeStyle = s.borderTopColor; g.lineWidth = b; g.strokeRect(q.left + b / 2, q.top + b / 2, q.width - b, q.height - b); }
+      continue;
+    }
+    [g.font, g.fillStyle, g.textBaseline] = [`${s.fontWeight} ${s.fontSize} ${s.fontFamily}`, s.color, 'middle'];
+    for (const m of n.textContent.matchAll(/\S+/g)) {
+      rg.setStart(n, m.index);
+      rg.setEnd(n, m.index + m[0].length);
+      const q = rg.getBoundingClientRect();
+      if (hit(q)) g.fillText(m[0], q.left, q.top + q.height / 2);
+    }
+  }
+  return c.toDataURL('image/png');
+}
 // #154: [later] hides a needs-you card on this phone (localStorage `later`: key → {until, sig}) for 12 h, until its
 // content changes, or until it is gone. Hidden cards fold into one red line before their list (#needs, each Herd
 // page's .hn), `n need you ▸ [later all]`; a tap on it shows them in place. View only: the cards stay in the DOM.
