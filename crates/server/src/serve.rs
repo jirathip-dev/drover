@@ -738,9 +738,10 @@ impl<'a> Server<'a> {
                 )
                 .map(|d| d.hash),
             ));
-            let mut msg =
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\n"
-                    .to_string();
+            // #391: the build first, so a page of another one (the service worker's copy) loads again.
+            let mut msg = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
+            );
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
@@ -3104,7 +3105,11 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
 
 /// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
-    let spec = gh::cached_title(ctx, fleet, issue);
+    // #391: a row queued from the backlog has its title in the last read until its spec is cached.
+    let spec = gh::cached_title(ctx, fleet, issue).or_else(|| {
+        let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", fleet, 0))?;
+        bl["issues"][issue.to_string()]["title"].as_str().map(String::from)
+    });
     let pr = gh::cached_pr(ctx, fleet, issue);
     let pr = pr["number"]
         .as_u64()

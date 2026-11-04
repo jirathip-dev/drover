@@ -82,6 +82,8 @@ jobs:
           echo "CHROME=$c" >> "$GITHUB_ENV"
       - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
+      - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
+        run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
       - uses: actions/upload-artifact@v4
         if: always()
         with:

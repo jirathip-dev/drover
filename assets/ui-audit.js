@@ -529,7 +529,13 @@
       const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.textContent).join(', ');
       if (gs !== 'needs you (1), in progress (2), queued (40)') early.push(`groups "${gs}"`);
       const c = $('#queue .qc'), x = $('#queue .qx');
-      if (!c || c.open || c.querySelector('summary').textContent !== '#302 → #303 · decoupling: split the serve module (6 steps) · next: #400#3' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${c && c.querySelector('summary').textContent}`);
+      // #391: the chain row is a row: the first step's number and title, `chain · 6`, its place, its columns where a queued
+      // row has them, and `▸ #302 → #307 · next: #400 (in impl)` under them.
+      const cs = c && c.querySelector('summary'), cells = s => [':scope>.gt', ':scope>span:first-of-type', ':scope>span:nth-of-type(2)', ':scope>.m', ':scope>.tl'].map(k => s.querySelector(k));
+      const words = cs && [...cells(cs).slice(1), cs.querySelector('.cst')].map(x => x?.textContent).join(' | ');
+      if (!c || c.open || words !== '#302 | chain · 6 | #3 | decoupling: split the serve module | #302 → #307 · next: #400 (in impl)' || getComputedStyle(cs.querySelector('.cst'), '::before').content !== '"▸ "' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${words}`);
+      const q1 = $('#queue .fc:not([hidden]) .qg[data-g=queue]>details.q'), at = s => cells(s).map(x => x && `${x.className}@${Math.round(x.getBoundingClientRect().left)}`).join();
+      if (cs && at(cs) !== at(q1.querySelector('summary'))) early.push(`chain row columns ${at(cs)}, a queued row's ${at(q1.querySelector('summary'))}`);
       if (!x || x.open || x.querySelector('summary').textContent !== '+ 30 more' || [...x.querySelectorAll('details.q')].some(seen)) early.push(`more row: ${x && x.querySelector('summary').textContent}`);
       const rgb = s => s.match(/[\d.]+/g).map(Number), bg = e => { for (; e; e = e.parentElement) { const v = rgb(getComputedStyle(e).backgroundColor); if (v[3] !== 0) return v.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
       for (const t of [...$$('#queue summary>.tl')].filter(seen)) if (ratio(rgb(getComputedStyle(t).color), bg(t)) < 4.5) early.push(`title "${t.textContent.slice(0, 20)}" under 4.5:1`);
@@ -543,6 +549,7 @@
       c.open = x.open = true;
       const steps = [...c.querySelectorAll(':scope>details.q')], rest = [...x.querySelectorAll(':scope>*:not(summary)')];
       if (steps.length !== 6 || !steps.every(seen) || steps.some(d => !/\bd[012]\b/.test(d.className))) early.push(`chain opened ${steps.filter(seen).length} of ${steps.length} steps`);
+      if (getComputedStyle(c.querySelector('summary>.cst'), '::before').content !== '"▾ "') early.push('an open chain row shows no ▾');
       const under = (a, b) => Math.abs(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom) > 1;
       if (under(c.querySelector('summary'), steps[0]) || rest.length !== 30 || !rest.every(seen) || under(x.querySelector('summary'), rest[0])) early.push('chain or more not opened in place');
       const xs = new Set([...$$('#queue summary>.tl')].filter(seen).map(t => Math.round(t.getBoundingClientRect().left + parseFloat(getComputedStyle(t).paddingLeft))));
