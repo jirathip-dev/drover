@@ -440,6 +440,15 @@ pub fn drive(
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
         res = Err(e);
     };
+    // #365: the tick's pass refreshes each fleet's backlog (issues updated since the last read).
+    for name in fleets
+        .iter()
+        .filter(|_| !fast && KICK.get().is_none() && only.is_none())
+    {
+        if let Err(e) = crate::gh::backlog(ctx, r, cfg.fleet(name)?, name) {
+            writeln!(out, "backlog: {e:#}")?;
+        }
+    }
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
     let seen = if fleets.is_empty() {

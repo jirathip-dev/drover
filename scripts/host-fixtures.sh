@@ -71,7 +71,7 @@ EOF
   rm -rf "${d:?}"
 done
 # #367 gate 2: <site>/queue, the Queue tab's fixture: 3 repos (acme-core: 2 running, 1 needing you, 40 queued with a 6-step
-# chain at #3; acme-api 3 queued; docs 1), every row titled; herdr lists the 2 running lanes alone.
+# chain at #3; acme-api 3 queued and a 100-issue backlog; docs 1), every row titled; herdr lists the 2 running lanes alone.
 d=$(mktemp -d)
 cp -R demo/. "$d"
 python3 - "$d" <<'EOF'
@@ -100,6 +100,12 @@ for f, ns in fleets.items():
     for n in ns + ([400, 401, 402] if f == "acme-core" else []):
         t = "decoupling: split the serve module" if 302 <= n <= 307 else f"{f} issue {n}: one line of title text"
         json.dump({"title": t, "body": "", "updatedAt": "2026-01-01T00:00:00Z"}, open(f"{d}/cache/issue-{f}-{n}.json", "w"))
+# #365: acme-api's backlog, 100 open issues from 0 to 198 days old, some labelled, with AC or in a closed PR.
+labels = [["bug"], ["ui", "phone"], [], ["docs"], ["infra", "ci"]]
+iss = {str(n): {"title": f"acme-api backlog {n}: " + ("a title that runs well past one phone line, cut by CSS" if n % 7 == 0 else "one line"),
+    "labels": labels[n % 5], "created": ts - (599 - n) * 2 * 86400, "updated": ts - (599 - n) * 2 * 86400, "ac": n % 3 == 0, "pr": n % 10 == 0}
+    for n in range(500, 600)}
+json.dump({"ts": ts, "since": "2026-01-01T00:00:00Z", "issues": iss}, open(f"{d}/cache/backlog-acme-api-0.json", "w"))
 EOF
 HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl" "$bin" serve --export "$site/queue" --demo
 rm -rf "${d:?}"

@@ -500,7 +500,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host",
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "backlog",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -1324,6 +1324,19 @@ impl<'a> Server<'a> {
                 crate::hosts::toggle(ctx, &mut out, g("host"), on, "web")?;
                 format!("{} {}", g("host"), if on { "on" } else { "off" })
             }
+            // #365: [queue N]: the ticked backlog issues in tick order, marked `needs-check` until their specs are checked.
+            "bqueue" => {
+                let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                let mut d = queue::op("add", &ns, false, None, None, None);
+                d["check"] = json!(true);
+                crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))?;
+                let ns: Vec<_> = ns.iter().map(|n| format!("#{n}")).collect();
+                format!("queued {} (needs-check)", ns.join(" "))
+            }
+            "backlog" => {
+                let n = gh::backlog(ctx, self.r, Config::load(&ctx.config)?.fleet(fleet)?, fleet)?;
+                format!("{fleet} backlog: {n} open issues")
+            }
             "unpair" => {
                 let _g = devices::lock();
                 let mut all = devices::load(ctx);
@@ -1741,6 +1754,12 @@ impl<'a> Server<'a> {
                 if let Some(b) = blocked_by {
                     card.push(format!("<span class=r>blocked by #{b}</span>"));
                 }
+                let ck = k.is_some_and(|k| q[k].check);
+                if ck {
+                    card.push(
+                        "<span class=m>needs-check: queued from the backlog, its spec not checked yet</span>".into(),
+                    );
+                }
                 if let Some(w) = crate::land::note(events, f, n) {
                     card.push(format!("<span class=r>{}</span>", esc(&w)));
                 }
@@ -1778,8 +1797,9 @@ impl<'a> Server<'a> {
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
-                    "class=\"q\"{}{b}{} data-act={}{}",
+                    "class=\"q\"{}{}{b}{} data-act={}{}",
                     if k.is_some() { " data-q" } else { "" },
+                    if ck { " data-ck" } else { "" },
                     s.unwrap_or_default(),
                     act(["", "update"][usize::from(up)], state),
                     coat
@@ -1852,6 +1872,66 @@ impl<'a> Server<'a> {
                 body += &format!(
                     "<details class=done><summary><i class=cv></i><span>done today: {}</span></summary>{rows}</details>",
                     done.len()
+                );
+            }
+            // #365: the repo's open issues not queued and with no lane, newest first, from the tick's read; serve.js
+            // searches, filters and ticks them (in order) for [queue N].
+            let bl = gh::cached_backlog(ctx, f);
+            let mut open: Vec<(u64, &serde_json::Value)> = (bl["issues"].as_object().into_iter().flatten())
+                .filter_map(|(n, v)| Some((n.parse().ok()?, v)))
+                .filter(|(n, _)| !queued(*n) && !st.contains_key(&(f.clone(), *n)))
+                .collect();
+            open.sort_by_key(|o| std::cmp::Reverse(o.0));
+            let (mut labels, mut items) = (BTreeSet::new(), String::new());
+            for (n, v) in &open {
+                let (c, u) = (
+                    v["created"].as_u64().unwrap_or(now),
+                    v["updated"].as_u64().unwrap_or(now),
+                );
+                let ls: Vec<&str> = v["labels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|l| l.as_str())
+                    .collect();
+                labels.extend(ls.iter().copied());
+                let stale =
+                    ["", " <span class=\"tag m\">stale</span>"][usize::from(now.saturating_sub(u) > 90 * 86_400)];
+                let flag = |k: &str| [String::new(), format!(" data-{k}")][usize::from(v[k] == true)].clone();
+                items += &format!(
+                    "<label class=bi data-n={n} data-c={c} data-l=\"{}\"{}{}><input type=checkbox value={n}><span>#{n}</span>\
+                     <span class=tl>{}</span><span class=m>{}{stale} {}</span></label>",
+                    esc(&json!(ls).to_string()),
+                    flag("ac"),
+                    flag("pr"),
+                    esc(v["title"].as_str().unwrap_or_default()),
+                    esc(&ls.join(" ")),
+                    age(now.saturating_sub(c))
+                );
+            }
+            if bl["issues"].is_object() {
+                let opts: String = labels.iter().map(|l| format!("<option>{}</option>", esc(l))).collect();
+                let quick = [
+                    ("new", "new"),
+                    ("30", "&gt;30 days"),
+                    ("90", "&gt;90 days"),
+                    ("ac", "has AC"),
+                    ("pr", "in a closed PR"),
+                ];
+                let quick: String = quick
+                    .iter()
+                    .map(|(k, l)| format!("<button type=button data-bf={k}>{l}</button>"))
+                    .collect();
+                let bar = format!("<form method=post class=bbar hidden>{}<input type=hidden name=issues><button>queue</button></form>", hidden("bqueue", f, &mt));
+                body += &format!(
+                    "<details class=bl><summary><i class=cv></i><span>backlog</span><span class=m>({})</span></summary>\
+                     <p class=bs><input type=search placeholder=\"search #, title, label\" aria-label=\"search the backlog\"></p>\
+                     <p class=\"chips bfs\">{quick}<select aria-label=label><option value=\"\">any label</option>{opts}</select></p>\
+                     <div class=bls>{items}</div><p class=m>read {} ago{}</p>{}</details>",
+                    open.len(),
+                    age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+                    if rw { format!(" <form method=post>{}<button>↻ read again</button></form>", hidden("backlog", f, &mt)) } else { String::new() },
+                    bar
                 );
             }
             let button = |op: &str, label: &str| {

@@ -333,7 +333,7 @@ function sync(s) {
   const at = new Date(last).toTimeString().slice(0, 5);
   Object.assign($('#stale'), { textContent: 'as of ' + at, title: 'last update ' + at });
   $$('form button, form select:not([data-off]), .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
-  if (DEMO) $$('input, textarea, .acts button').forEach(b => b.disabled = true);
+  if (DEMO) $$('input:not(.bl *), textarea, .acts button').forEach(b => b.disabled = true); // #365: the backlog's search and ticks write nothing
 }
 function pulse() { dot.classList.remove('p'); void dot.offsetWidth; dot.classList.add('p'); }
 const live = () => es && es.readyState === 1;
@@ -374,6 +374,7 @@ function frag(id, html) {
   if (id === 'events') olds(nu);
   tidy(nu);
   morph(el, nu);
+  bshow(el);
   nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
@@ -772,6 +773,49 @@ const inph = (s, t) => `in ${s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0]} ${dur(
 // chain waits on next: the root's open blocker, else the root.
 const qsum = st => [`#${st[0].n} → #${st[1].n} · `, st[0].title, ` (${st.length} steps) · next: #${st[0].b || st[0].n}`];
 // queue:end
+// #365 backlog: pure from here to `backlog:end` (tests/backlog.rs runs it under node). A row d = {n, title, labels,
+// age (s), ac, pr} shows when it has the picked label, every pressed quick filter and every search word; ticks keep
+// their order ([queue N] queues them so).
+const BF = { new: d => d.age < 7 * 86400, 30: d => d.age > 30 * 86400, 90: d => d.age > 90 * 86400, ac: d => d.ac, pr: d => d.pr };
+const bpass = (d, s) => (!s.label || d.labels.includes(s.label)) && s.on.every(k => BF[k](d)) &&
+  s.q.toLowerCase().split(/\s+/).every(w => `#${d.n} ${d.title} ${d.labels.join(' ')}`.toLowerCase().includes(w));
+const btick = (ticks, n, on) => [...ticks.filter(x => x !== n), ...(on ? [n] : [])];
+// backlog:end
+// #365: each repo's backlog state (search, filters, label, ticks) lives here, so a /live patch never drops it; a
+// ticked issue that left the backlog (queued) drops its tick.
+const BS = {}, bst = b => (BS[qname(b.closest('.fc'))] ??= { q: '', on: [], label: '', ticks: [] });
+function bshow(root) {
+  for (const b of root.querySelectorAll('.bl')) {
+    const s = bst(b), rs = [...b.querySelectorAll('.bi')], now = Date.now() / 1000 + SKEW, f = b.querySelector('.bbar');
+    s.ticks = s.ticks.filter(n => rs.some(r => +r.dataset.n === n));
+    for (const r of rs) {
+      const d = { n: r.dataset.n, title: r.querySelector('.tl').textContent, labels: JSON.parse(r.dataset.l), age: now - r.dataset.c, ac: 'ac' in r.dataset, pr: 'pr' in r.dataset };
+      r.hidden = !bpass(d, s);
+      r.querySelector('input').checked = s.ticks.includes(+d.n);
+    }
+    const shown = rs.filter(r => !r.hidden).length, i = b.querySelector('.bs input'), sel = b.querySelector('.bfs select');
+    b.querySelector('summary>.m').textContent = shown === rs.length ? `(${rs.length})` : `(${shown} of ${rs.length})`;
+    if (i.value !== s.q) i.value = s.q;
+    if (sel.value !== s.label) { sel.value = s.label; sel.dispatchEvent(new Event('change')); }
+    b.querySelectorAll('[data-bf]').forEach(x => x.setAttribute('aria-pressed', s.on.includes(x.dataset.bf)));
+    f.hidden = !s.ticks.length;
+    f.elements.issues.value = s.ticks.join(',');
+    const t = f.querySelector('button');
+    (t.firstElementChild || t).textContent = `queue ${s.ticks.length}`;
+  }
+}
+document.addEventListener('input', e => { if (e.target.matches('.bl .bs input')) { bst(e.target).q = e.target.value; bshow(document); } });
+document.addEventListener('change', e => {
+  const t = e.target, s = t.closest('.bl') && bst(t);
+  if (!s) return;
+  if (t.matches('.bi input')) s.ticks = btick(s.ticks, +t.value, t.checked);
+  else if (t.matches('select')) s.label = t.value;
+  bshow(document);
+});
+document.addEventListener('click', e => {
+  const x = e.target.closest('.bl [data-bf]'), s = x && bst(x), k = x && x.dataset.bf;
+  if (s) { s.on = s.on.includes(k) ? s.on.filter(y => y !== k) : [...s.on, k]; bshow(document); }
+});
 // #367: the Queue tab one repo at a time. Chips on top ([repo n], a red dot when it needs you; [all]: every repo's
 // needs-you rows), the pick kept per phone; a tap, a sideways swipe or ←/→ switches. A repo's rows in groups: needs
 // you, in progress (`in impl 1h 47m`), queued: the next 5 by position, `+ N more` opening the rest in place; a blocked
@@ -894,6 +938,7 @@ function tidy(root) {
     b.replaceChildren(t);
     if (b.matches('[name=choice], .pick')) b.title = b.textContent;
   }
+  bshow(root);
 }
 tidy(document);
 nows();

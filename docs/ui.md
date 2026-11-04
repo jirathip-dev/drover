@@ -98,6 +98,9 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    rows above the fold, the chain is one closed row `#302 → #303 · decoupling… (6 steps) · next: #400`, `+ 30 more` is
    closed, and every title line is ≥ 4.5:1 on what is under it. `queue-chain` opens both: the 6 steps (depth ≤ 2) and the
    30 rows right under their rows, every title starting at one x, and scrolled to the end the last row clears the tab bar.
+   #365: `queue-backlog` opens acme-api's 100-issue backlog in that fixture and fails unless it shows `(100)` rows, a search
+   (`past one`) leaves only matching rows with `(N of 100)`, `>90 days` and the `phone` label leave only such rows, and
+   three ticks show `[queue 3]` above the tab bar carrying the issues in tick order; no row scrolls sideways.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).
