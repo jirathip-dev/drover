@@ -1073,3 +1073,55 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
     );
     assert!(!r.called("herdr pane close w9:p1"), "never on the main host's herdr");
 }
+
+/// #438: short of disk on a remote host, its shared build folder is trimmed over ssh first; then its disk is read again.
+#[test]
+fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
+    let c = setup("hosts-trim", "", true, 0);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let toml = toml.replace("build_root = \"\"", "build_root = \"~/.cache/herdsman/target\"");
+    std::fs::write(&c.config, toml).unwrap();
+    let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
+    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let low = |freed: &str| {
+        fake(1.0, 0.1)
+            .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
+            .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
+            .reply(
+                &trim,
+                &format!("builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)\n{freed}\n"),
+            )
+    };
+    let r = low("freed 20971520");
+    assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
+    assert!(
+        call.ends_with("'sh' '~/.cache/herdsman/target' '0'"),
+        "every idle profile goes: {call}"
+    );
+    // Nothing freed: the first reading stands.
+    let e = placed(&c, &low("freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
+    assert_eq!(e, "DISK_LOW: bazzite: 1.0 GB free < 10; `herdsman clean --yes`");
+}
+
+/// #438: drive's budget pass trims each remote host's shared build folder to `build_budget_gb` over ssh.
+#[test]
+fn the_budget_pass_trims_remote_shared_build_folders() {
+    let c = setup("hosts-budget-trim", "", true, 0);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let toml = toml.replace(
+        "build_root = \"\"",
+        "build_root = \"~/.cache/herdsman/target\"\nbuild_budget_gb = 2",
+    );
+    std::fs::write(&c.config, toml).unwrap();
+    let cfg = Config::load(&c.config).unwrap();
+    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let line = "builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)";
+    let r = fake(1.0, 0.1).reply(&trim, &format!("{line}\nfreed 9\n"));
+    let mut out = Vec::new();
+    herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains(line), "{out}");
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
+    assert!(call.ends_with("'sh' '~/.cache/herdsman/target' '2097152'"), "{call}");
+}

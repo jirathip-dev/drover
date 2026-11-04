@@ -692,16 +692,21 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             }
         }
     }
-    trim_builds(cfg, out, false)?;
+    trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
+    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if let Err(e) = trim_on(&On::new(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
+            writeln!(out, "builds: {name}: {e:#}")?;
+        }
+    }
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
 }
 
-/// #438: over `build_budget_gb`, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
+/// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. Bytes freed.
-pub fn trim_builds(cfg: &Config, out: &mut dyn Write, dry: bool) -> Result<u64> {
+pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
     let root = crate::config::expand(&cfg.limits.build_root);
     if cfg.limits.build_root.is_empty() || !root.is_dir() {
         return Ok(0);
@@ -713,7 +718,7 @@ pub fn trim_builds(cfg: &Config, out: &mut dyn Write, dry: bool) -> Result<u64> 
         .filter(|p| p.join(".cargo-lock").is_file())
         .collect();
     for dir in profiles {
-        if gb(total) <= cfg.limits.build_budget_gb {
+        if gb(total) <= budget {
             break;
         }
         // Cargo flocks the profile's `.cargo-lock` while it builds there.
@@ -730,6 +735,42 @@ pub fn trim_builds(cfg: &Config, out: &mut dyn Write, dry: bool) -> Result<u64> 
         }
     }
     Ok(freed)
+}
+
+/// #438: `trim_builds` on a remote host, in its shell: `lsof` stands in for cargo's flock (no `lsof`: nothing goes).
+const TRIM: &str = r#"r=$1; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
+cd "$r" 2>/dev/null && command -v lsof >/dev/null || { echo "freed 0"; exit 0; }
+t=$(du -sk . | cut -f1); f=0
+for d in */*/; do
+  [ "$t" -le "$2" ] && break
+  [ -f "$d.cargo-lock" ] || continue
+  if lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $r/$d: cargo is building"; continue; fi
+  s=$(du -sk "$d" | cut -f1)
+  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "builds: trimmed $r/$d ($s KB)"
+done
+echo "freed $f""#;
+
+/// The shared build folder on `on`'s host trimmed to `budget` GB; bytes freed.
+pub fn trim_on(on: &On, cfg: &Config, budget: f64, out: &mut dyn Write) -> Result<u64> {
+    if on.machine.is_none() || cfg.limits.build_root.is_empty() {
+        return trim_builds(cfg, budget, out, false);
+    }
+    let kb = format!("{:.0}", budget * 1_048_576.0);
+    let o = on.run(
+        "sh",
+        &crate::runner::argv(&["-c", TRIM, "sh", &cfg.limits.build_root, &kb]),
+    )?;
+    anyhow::ensure!(o.code == 0, "trim failed ({}): {}", o.code, o.stderr.trim());
+    let s = o.stdout;
+    let (log, last) = s.trim_end().rsplit_once('\n').unwrap_or(("", s.trim()));
+    if !log.is_empty() {
+        writeln!(out, "{log}")?;
+    }
+    Ok(last
+        .strip_prefix("freed ")
+        .and_then(|k| k.parse::<u64>().ok())
+        .unwrap_or(0)
+        * 1024)
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
@@ -756,7 +797,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
-    total += trim_builds(cfg, o, !yes)?;
+    total += trim_builds(cfg, cfg.limits.build_budget_gb, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {

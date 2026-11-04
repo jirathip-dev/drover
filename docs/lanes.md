@@ -42,9 +42,11 @@ A fleet's `env` table is exported into every lane's shell. #438: every lane shar
 host and repo, `CARGO_TARGET_DIR=<[limits] build_root>/<repo>` (default `~/.cache/herdsman/target/<repo>`; `""`
 turns it off), so N lanes cost one `target/` plus deltas: new lanes skip full rebuilds, and lanes building at once
 wait on cargo's lock (`Blocking waiting for file lock on build directory`). A fleet's own `CARGO_TARGET_DIR` in `env`
-or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20) on the main host, drive's pass and
-`reclaim` remove the folder's profiles (`<repo>/debug`, ...) whose `.cargo-lock` no cargo holds, never one building. Node fleets: pnpm's store is already shared; for npm set
-`npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
+or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
+folder's profiles (`<repo>/debug`, ...) whose `.cargo-lock` no cargo holds, never one building: on the main host
+(and in `reclaim`) directly, on each `[hosts]` machine over ssh (there `lsof` tells a building one). A host short
+of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. Node fleets: pnpm's store is
+already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
 for `target`, `package-lock.json` and `pnpm-lock.yaml` for `node_modules`; other names are logged and skipped.
 It runs beside the kick once the lane has started, never over a folder the lane already has, and logs

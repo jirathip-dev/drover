@@ -309,7 +309,13 @@ pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
 /// Admission on one host, in order `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
     let min = cfg.limits.min_free_gb;
-    if let Some(gb) = host::free_gb(on).filter(|g| *g < min) {
+    let low = || host::free_gb(on).filter(|g| *g < min);
+    let mut free = low();
+    // #438: short of disk, the shared build folder's idle profiles go first; then the disk is read again.
+    if free.is_some() && crate::check::trim_on(on, cfg, 0.0, &mut std::io::sink()).unwrap_or(0) > 0 {
+        free = low();
+    }
+    if let Some(gb) = free {
         let why = format!("{gb:.1} GB free < {min}; `herdsman clean --yes`");
         return (Host::default(), Some(("DISK_LOW", why)));
     }
