@@ -468,7 +468,7 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "stats", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "resume", "serve", "setup", "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
