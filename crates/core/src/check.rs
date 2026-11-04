@@ -734,7 +734,7 @@ fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &*w][..], a].concat()).ok();
     let head = git(&["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"])?;
     let mut t: u64 = head.trim().strip_prefix("HEAD@{")?.strip_suffix('}')?.parse().ok()?;
-    for f in git(&["status", "--porcelain", "-z", "--untracked-files=all"])?.split('\0') {
+    for f in git(&["status", "--porcelain", "-z", "--untracked-files=all"])?.split_terminator('\0') {
         // `XY path`, or a rename's bare source path; a deleted file's mtime is its nearest folder's
         let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
         let m = wt.join(f).ancestors().find_map(|a| a.metadata().ok());

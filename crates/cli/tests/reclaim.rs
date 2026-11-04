@@ -57,6 +57,7 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
     let old = NOW - 8 * DAY;
     std::fs::write(w.join("notes.md"), "x").unwrap();
     touch(&w.join("notes.md"), old);
+    touch(&w, NOW); // the worktree folder's own mtime is no edit: the tests hold whatever the real clock says
     let r = || {
         git(Fake::default(), &w, old, "?? notes.md\0")
             .reply("herdr agent list", NO_AGENTS)
@@ -81,6 +82,7 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
 fn a_y_answer_applies() {
     let c = setup("reclaim-y");
     let w = lane(&c, 12);
+    touch(&w, NOW);
     let r = git(Fake::default(), &w, NOW - 8 * DAY, "")
         .reply("herdr agent list", NO_AGENTS)
         .reply("lsof", "")
