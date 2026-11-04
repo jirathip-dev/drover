@@ -150,7 +150,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 
 /// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
 /// #429: under `warn_within` lines of headroom it warns and still passes.
-pub fn cap_check(config: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
+pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let (cap, warn) = limits(&std::fs::read_to_string(config)?)
         .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
     let crates = std::fs::read_dir("crates").into_iter().flatten().flatten();
@@ -160,7 +160,16 @@ pub fn cap_check(config: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     if (0..warn).contains(&left) {
         writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
     }
-    Ok(i32::from(left < 0))
+    // #419: a repo's `.herdsman/rules.md` holds at most 30 rules; one that code enforces is deleted.
+    let over = std::fs::read_to_string(rules).map_or(0, |t| t.lines().count());
+    if over > 30 {
+        writeln!(
+            out,
+            "{}: {over} lines, over 30: delete the rules a check now enforces",
+            rules.display()
+        )?;
+    }
+    Ok(i32::from(left < 0 || over > 30))
 }
 
 /// The first `[fleet.<n>]` with a `line_cap`: (cap, `warn_within`, default 500).

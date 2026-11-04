@@ -197,6 +197,13 @@ enum Cmd {
     Next { fleet: String },
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
+    /// File this week's lessons issue, queue it on top and spawn its `lesson` lane (conductors and the owner only)
+    #[command(args_conflicts_with_subcommands = true)]
+    Lesson {
+        #[command(subcommand)]
+        cmd: Option<LessonCmd>,
+        fleet: Option<String>,
+    },
     /// Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)
     #[command(alias = "host")]
     Hosts {
@@ -242,11 +249,13 @@ enum Cmd {
         #[arg(long, hide = true)]
         now: bool,
     },
-    /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it
+    /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
     },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
     /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
@@ -539,6 +548,17 @@ enum HostsCmd {
 }
 
 #[derive(Subcommand)]
+enum LessonCmd {
+    /// The fleet's recent mistakes as plain text: rev FAIL findings, the owner's thread lines and `by: owner` events, reverts
+    Digest {
+        fleet: String,
+        /// The window in days
+        #[arg(long, default_value_t = 7)]
+        days: u64,
+    },
+}
+
+#[derive(Subcommand)]
 enum ProfilesCmd {
     /// Write ~/.config/herdsman/claude/<profile>/ (settings.json + hooks, role.md, fleet.md) and Hermes profiles' `hooks:` + hook approval
     Sync {
@@ -548,8 +568,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`).
-pub const HELP_AGENT_MAX: usize = 274;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`).
+pub const HELP_AGENT_MAX: usize = 283;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -672,7 +692,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
         }
         Cmd::Migrate => migrate(&ctx.home, out)?,
-        Cmd::CapCheck { config } => return crate::overlap::cap_check(&config, out),
+        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -1110,6 +1130,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
+                    crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                }
+                Cmd::Lesson {
+                    cmd: Some(LessonCmd::Digest { fleet, days }),
+                    ..
+                } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                Cmd::Lesson { fleet, .. } => {
+                    let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
+                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
+                        return Ok(4);
+                    }
                 }
                 Cmd::Park { fleet, issue } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;

@@ -321,6 +321,10 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block` only its own issue (#425)".into());
     }
+    // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest is open.
+    if !conductor && r.first() == Some(&"lesson") && r.get(1) != Some(&"digest") {
+        return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman lesson` (#419)".into());
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }

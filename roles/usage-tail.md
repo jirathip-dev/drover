@@ -34,6 +34,11 @@ queued → impl → review(n) → fix(n) → ready → merged; plus blocked, nee
 - DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
 - MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`)
 
+## Lessons
+
+`herdsman lesson <fleet>` (conductors and the owner only; a conductor runs it when the owner says "correct") files `lessons: <fleet> week of <date>`, queues it on top and spawns a `lesson` lane (the impl role's harness unless `[fleet.<n>.role.lesson]` sets one). `herdsman tick` runs it every 7 days per fleet: `lessons = "weekly"` (default) or `"off"` in `[fleet.<n>]`. Any lane may read `herdsman lesson digest <fleet> [--days 7]`.
+`.herdsman/rules.md` in a repo: at most 30 "don't X" lines (CI's cap check fails over that), each naming its enforcer or `none`; every impl and rev brief carries it. Follow it.
+
 ## Exit codes
 
 0 ok · 1 error (incl. merged but evidence comment missing) · 2 usage · 3 refused · 4 spawned but prompt not confirmed
