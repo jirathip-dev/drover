@@ -42,16 +42,12 @@ pub fn load(ctx: &Ctx) -> Option<Snapshot> {
 }
 
 pub fn out(v: Option<String>) -> Out {
-    v.map_or(
-        Out {
-            code: 1,
-            ..Out::default()
-        },
-        |stdout| Out {
-            stdout,
-            ..Out::default()
-        },
-    )
+    let code = i32::from(v.is_none());
+    Out {
+        code,
+        stdout: v.unwrap_or_default(),
+        ..Out::default()
+    }
 }
 
 /// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot
