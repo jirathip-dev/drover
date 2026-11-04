@@ -557,7 +557,9 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
     append(&c.state, &Event::new(T + 1, "sendmeter", Some(7), "merged", json!({}))).unwrap();
     let got = drain(&mut s, 1_500);
     assert!(
-        got.contains("id: 2\nevent: ev\ndata: {\"k\":\"merged\",\"seq\":2,\"ts\":1000001}\n\n"),
+        got.contains(
+            "id: 2\nevent: ev\ndata: {\"f\":\"sendmeter\",\"k\":\"merged\",\"n\":7,\"seq\":2,\"ts\":1000001}\n\n"
+        ),
         "{got}"
     );
     assert!(got.contains("id: 2\nevent: frag\n"), "a frag carries the seq: {got}");
@@ -581,7 +583,7 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         .unwrap();
     s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
     let back = drain(&mut s, 2_500);
-    let ids: Vec<&str> = back.lines().filter(|l| l.starts_with("data: {\"k\"")).collect();
+    let ids: Vec<&str> = back.lines().filter(|l| l.starts_with("data: {\"f\"")).collect();
     assert_eq!(
         ids.len(),
         3,
@@ -623,7 +625,7 @@ fn the_board_dedupes_by_seq_and_skips_stale_moments() {
     let part = &src[src.find("  const at = e").unwrap()..src.find("  es.addEventListener('refresh'").unwrap()];
     let js = format!(
         "let seq = 0; const played = [], h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }};\n\
-         const moment = k => played.push(k);\n{part}\n\
+         const rmoment = k => played.push(k);\n{part}\n\
          const now = Math.floor(Date.now() / 1e3), ev = (s, ts, k) => h.ev({{ lastEventId: String(s), data: JSON.stringify({{ seq: s, ts, k }}) }});\n\
          ev(1, now, 'merged'); ev(1, now, 'merged'); ev(2, now - 300, 'fail'); ev(3, now, null); ev(2, now, 'fail'); ev(4, now, 'needs-you');\n\
          console.log(played.join(','), seq);"

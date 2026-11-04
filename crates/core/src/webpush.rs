@@ -25,6 +25,9 @@ pub struct Sub {
     pub auth: String,
     pub label: String,
     pub created: u64,
+    /// #370: the push words of this device's theme (`merged`, `needs`); none: today's titles.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub words: BTreeMap<String, String>,
 }
 
 impl Sub {
@@ -116,7 +119,7 @@ pub fn jwt(k: &SecretKey, endpoint: &str, sub: &str, now: u64) -> String {
 /// What a subscribe says with no webpush notifier: the device is kept, nothing is sent (#87).
 pub const OFF: &str = "alerts are saved but off: add `[[notify]] type = \"webpush\"` to fleet.toml (docs/serve.md)";
 
-/// `POST /push/subscribe` (endpoint, p256dh, auth): add or replace this endpoint's subscription, then (#87) push
+/// `POST /push/subscribe` (endpoint, p256dh, auth; #370 `w_merged`, `w_needs`, `quiet`): add or replace this endpoint's subscription, then (#87) push
 /// "alerts are on" to it alone; with no webpush notifier (`sub`), say the alerts are saved but off.
 pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64, sub: Option<&str>) -> Result<String> {
     let g = |k: &str| f.get(k).cloned().unwrap_or_default();
@@ -126,6 +129,10 @@ pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64
         auth: g("auth"),
         label: label.into(),
         created: now,
+        words: ["merged", "needs"]
+            .into_iter()
+            .filter_map(|k| Some((k.into(), f.get(&format!("w_{k}"))?.clone())))
+            .collect(),
     };
     if !s.endpoint.starts_with("https://") || s.endpoint.chars().any(char::is_whitespace) {
         bail!("endpoint must be an https:// URL");
@@ -137,6 +144,9 @@ pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64
     all.retain(|x| x.endpoint != s.endpoint);
     all.push(s);
     store(log, &all)?;
+    if f.contains_key("quiet") {
+        return Ok("saved".into()); // #370: a theme switch re-sends its words, no test push
+    }
     let Some(sub) = sub else { return Ok(OFF.into()) };
     let ev = Event::new(
         now,
@@ -230,9 +240,19 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
         None => ("herdsman".into(), plain(ev)),
     };
-    let payload = serde_json::json!({"title": title, "body": body.trim(), "url": format!("/{url}")}).to_string();
+    // #370: a device whose theme has words gets its own title (`Order up: #2957 merged`); the body stays.
+    let (wk, said) = match (ev.kind.as_str(), ev.issue) {
+        ("merged", Some(n)) => ("merged", format!("#{n} merged")),
+        ("needs-human" | "needs-decision", Some(n)) => ("needs", format!("{} #{n} needs you", ev.fleet)),
+        _ => ("", String::new()),
+    };
     let (mut sent, mut gone, mut errs) = (0, vec![], vec![]);
     for s in &all {
+        let t = s
+            .words
+            .get(wk)
+            .map_or_else(|| title.clone(), |w| format!("{w}: {said}"));
+        let payload = serde_json::json!({"title": t, "body": body.trim(), "url": format!("/{url}")}).to_string();
         let one = || -> Result<u16> {
             let salt: [u8; 16] = random(16)?.try_into().map_err(|_| anyhow!("salt"))?;
             post(

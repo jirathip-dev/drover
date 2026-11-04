@@ -370,6 +370,63 @@
       $('#look').click();
       if (!shown()) early.push('[◐] did not reopen the look sheet after a close');
     },
+    // #370 gate 2: a row sprite loops its two frames (--o1 flips within 0.7 s) and is the same node across a /live
+    // patch between the two reads; `row-loop-still` (reduced motion forced): frame 1, no animation, still the same node.
+    'row-loop': async () => {
+      tab('queue');
+      $('#needs').hidden = true;
+      const q = () => [...$$('#queue .gt>b.rsg>.rsp')].find(seen), u = q(), still = V === 'row-loop-still', o = () => getComputedStyle(u.querySelector('use')).getPropertyValue('--o1').trim();
+      if (!u) return early.push('no Queue row sprite');
+      if (still && !matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
+      // The loop's clock is the page's animation (the Chrome run's virtual time never ticks CSS): frame 1 at 0 ms,
+      // frame 2 at 0.7 s, set on the animation itself, across a /live patch.
+      const at = ms => { const k = u.getAnimations().find(x => x.animationName === 'kfr'); if (k) k.currentTime = ms; return k ? o() : 'none'; };
+      const f1 = at(0);
+      frag('queue', $('#queue').innerHTML);
+      const f2 = at(700);
+      if (q() !== u || !u.isConnected) early.push('the row sprite was replaced by a /live patch');
+      if (still ? f1 !== 'none' || getComputedStyle(u).animationName !== 'none' || o() !== '1' && o() !== '' : f1 !== '1' || f2 !== '0') early.push(`row sprite --o1 ${f1} at 0 ms, ${f2} at 0.7 s (${getComputedStyle(u).animationName})`);
+    },
+    // #370 gate 2: a moment plays on its row once per event: a second call with the same seq does nothing, a /live patch
+    // mid-moment resumes it (a negative delay, not a restart), it ends by 2.4 s; `moment-row-still`: no motion, its tag shows.
+    'moment-row': async () => {
+      tab('queue');
+      $('#needs').hidden = true;
+      // three rows, one moment each, played side by side (the Chrome run's virtual time is 8 s)
+      const ds = [...$$('#queue details.q')].filter(seen).slice(0, 3);
+      if (ds.length < 3) return early.push('under 3 Queue rows in view');
+      await Promise.all(['fail', 'needs-you', 'merged'].map(async (k, i) => {
+        const n = +ds[i].querySelector('summary a').textContent.slice(1), f = qname(ds[i].closest('.fc')), seq = 1e9 + i;
+        const sum = () => [...$$('#queue details.q')].find(x => x.querySelector('summary a').textContent === '#' + n && x.closest('.fc')?.querySelector('.fn>b').textContent === f).querySelector('summary');
+        rmoment(k, f, n, seq);
+        const t = sum().querySelector('.mot');
+        if (sum().dataset.mo !== k || !t || t.textContent.replace('!', '') !== TW()[MK[k]]) early.push(`${k}: not on its row, or no "${TW()[MK[k]]}" tag`);
+        await new Promise(r => setTimeout(r, 1100));
+        rmoment(k, f, n, seq);
+        if (i === 2) { // the server's copy: no moment marks
+          const x = $('#queue').cloneNode(true);
+          x.querySelectorAll('[data-mo]').forEach(e => { delete e.dataset.mo; e.style.removeProperty('--mo-d'); e.querySelector('.mot')?.remove(); });
+          frag('queue', x.innerHTML);
+        }
+        else await new Promise(r => setTimeout(r, 10));
+        const dl = parseFloat(sum().style.getPropertyValue('--mo-d'));
+        if (sum().dataset.mo !== k || !(dl <= -1000)) early.push(`${k}: a patch at 1.1 s restarted or dropped it (--mo-d ${dl})`);
+        if (V === 'moment-row-still' && [sum(), sum().querySelector('.mot')].some(e => !e || getComputedStyle(e).animationName !== 'none')) early.push(`${k}: moves under reduced motion`);
+        await new Promise(r => setTimeout(r, 1500));
+        if (sum().dataset.mo || sum().querySelector('.mot')) early.push(`${k}: still on at 2.6 s`);
+      }));
+    },
+    // #370: empty tabs: the theme's line over the server's plain one (terminal: the plain line alone).
+    empty: () => {
+      frag('lanes', '<p class=m>no agents</p>');
+      frag('events', '<div data-v=imp><p class="m es">0 important rows</p></div>');
+      frag('queue', '<p class=m>no open work</p>');
+      tab('queue');
+      for (const [t, k] of [['queue', 'empty-queue'], ['lanes', 'empty-lanes'], ['events', 'empty-events']]) {
+        const p = $(`#${t} p.m:not(.es)`), w = TW()[k];
+        if (!p || (w ? p.querySelector('.tw')?.textContent !== w || !p.querySelector('.pw') : p.innerHTML !== p.textContent)) early.push(`${t}: empty line "${p && p.innerHTML}"`);
+      }
+    },
     // #241: a moment under reduced motion is a still frame (scripts/ui-audit.sh runs this view with it forced).
     'moment-still': () => {
       tab('queue');
@@ -526,7 +583,7 @@
       chip('acme-core').click();
       const nav = $('nav').getBoundingClientRect().top, prog = [...$$('.qg[data-g=prog]>details.q')].filter(seen);
       if (!prog.length || prog.some(d => d.getBoundingClientRect().bottom > nav)) early.push(`running rows not above the fold (tab bar at ${nav})`);
-      const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.textContent).join(', ');
+      const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.dataset.p ?? h.textContent).join(', ');
       if (gs !== 'needs you (1), in progress (2), queued (40)') early.push(`groups "${gs}"`);
       const c = $('#queue .qc'), x = $('#queue .qx');
       if (!c || c.open || c.querySelector('summary').textContent !== '#302 → #303 · decoupling: split the serve module (6 steps) · next: #400#3' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${c && c.querySelector('summary').textContent}`);
@@ -626,10 +683,19 @@
     if (!TT) return [`theme ${t} never loaded`];
     if (t === 'terminal') {
       if ($$('.rsp, .lsc, #mo').length) bad.push('terminal draws sprites');
+      if ($$('.tw, .pw, .tsub, .lsm, [data-mo]').length) bad.push('terminal shows theme words'); // #370
       if (B.dataset.mode !== 'glyph' || $$('#mode').length || on('.av .px, .av .asc, .rsa, .lsa').length) bad.push(`terminal Lanes: mode ${B.dataset.mode}, or a mode button or sprite avatar shows`);
       return bad;
     }
     if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
+    // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
+    // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
+    if (!on(`#${tb}>.tsub>.tw`).length) bad.push(`${tb}: no theme line`);
+    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
+    for (const e of on(LBL)) if (!e.querySelector('.tw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
+    const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
+    const under = e => { for (; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0) return c[3] < 1 ? over(c.slice(0, 3), rgb(getComputedStyle(B).backgroundColor), c[3]) : c.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
+    for (const e of on('.pw')) { const x = ratio(rgb(getComputedStyle(e).color).slice(0, 3), under(e)); if (x < 4.5) bad.push(`plain word "${e.textContent}" ${x.toFixed(2)}:1, under 4.5`); }
     if (tb === 'events' && !on('#events .kg.rsg>.rsp').length) bad.push('no Events row sprite');
     if (tb === 'host' && $$('#host>.grp>summary').length !== $$('#host>.grp>summary>.lsc').length) bad.push('a Host group without its load scene');
     if ($$('#mode').length || TM.join() !== 'scene,ascii') bad.push(`Lanes modes ${TM}, a mode button ${$$('#mode').length}`);
@@ -837,6 +903,8 @@
       return { view: V, controls: keep.length, outliers: bad };
     },
   };
+  VIEWS['row-loop-still'] = VIEWS['row-loop'];
+  VIEWS['moment-row-still'] = VIEWS['moment-row'];
   const go = async () => {
     await themed; // #241: the phone's theme drawn first
     await VIEWS[V]();
