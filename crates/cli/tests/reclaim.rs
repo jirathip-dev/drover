@@ -23,7 +23,7 @@ fn lane(c: &herdsman::Ctx, issue: u64) -> PathBuf {
 }
 
 fn touch(p: &Path, at: u64) {
-    let f = std::fs::File::options().write(true).open(p).unwrap();
+    let f = std::fs::File::open(p).unwrap();
     f.set_modified(UNIX_EPOCH + Duration::from_secs(at)).unwrap();
 }
 
@@ -92,18 +92,21 @@ fn a_y_answer_applies() {
     assert_eq!(gone(&w), [true, true, true, true, false]);
 }
 
-/// A worktree with a process in it, a live lane, a recent edit or a recent HEAD move keeps its build folders.
+/// A worktree with a process in it, a live lane, a recent edit or deletion or a recent HEAD move keeps its build folders.
 #[test]
 fn busy_or_recent_worktrees_are_skipped() {
     let c = setup("reclaim-skip");
     let (proc_wt, live, edited, moved) = (lane(&c, 1), lane(&c, 2), lane(&c, 3), lane(&c, 4));
+    let deleted = lane(&c, 5);
     let old = NOW - 8 * DAY;
     std::fs::write(edited.join("src/lib.rs"), "x").unwrap();
     touch(&edited.join("src/lib.rs"), NOW - DAY);
+    touch(&deleted.join("src"), NOW - DAY); // the folder a deletion bumps
     let lsof = format!("p42\ncnode\nn{}/src\n", proc_wt.display());
     let r = git(Fake::default(), &proc_wt, old, "");
     let r = git(r, &live, old, "");
     let r = git(r, &edited, old, " M src/lib.rs\0");
+    let r = git(r, &deleted, old, " D src/gone.rs\0");
     let r = git(r, &moved, NOW - 2 * DAY, "")
         .reply(
             "herdr agent list",
@@ -117,6 +120,7 @@ fn busy_or_recent_worktrees_are_skipped() {
         (&proc_wt, "a process runs there"),
         (&live, "a live lane"),
         (&edited, "touched"),
+        (&deleted, "touched"),
         (&moved, "touched"),
     ] {
         assert!(out.contains(&format!("skip {}: {why}", w.display())), "{out}");

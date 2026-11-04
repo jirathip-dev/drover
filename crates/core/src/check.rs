@@ -748,7 +748,7 @@ pub fn reclaim(
     )?)
 }
 
-/// #361: the latest of HEAD's last move and the mtimes of the worktree's changed or untracked files.
+/// #361: the latest of HEAD's last move and the mtimes of the worktree's changed, deleted or untracked files.
 fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     let w = wt.to_string_lossy();
     let head = ok(
@@ -767,7 +767,12 @@ fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     for f in st.split('\0').filter(|f| !f.is_empty()) {
         // `XY path`, or a rename's bare source path
         let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
-        if let Ok(m) = std::fs::metadata(wt.join(f)).and_then(|m| m.modified()) {
+        // a deleted file has no mtime: its nearest folder's, which the deletion bumped
+        let p = wt.join(f);
+        if let Some(m) = p
+            .ancestors()
+            .find_map(|a| std::fs::metadata(a).and_then(|m| m.modified()).ok())
+        {
             t = t.max(m.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()));
         }
     }
