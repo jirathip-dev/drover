@@ -1,7 +1,6 @@
 //! #92 `herdsman drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
 use crate::events::{append, emit, fold, read, Event, IssueState};
-use crate::hosts::On;
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::waiting::Waiting;
@@ -248,21 +247,18 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 /// #318: a pass's spawn as its own detached kick, at most `max_parallel_spawns` at once, admitted counting those starting.
 fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
-                                // #416: a spawn bound for a full host (its earlier lanes' worktree is there) is refused here, never kicked, and
-                                // one starting holds no slot: a full host never holds back spawns bound elsewhere.
-    let bound = |f: &str, n: u64| (!cfg.hosts.is_empty()).then(|| ev.iter().rev().find(|e| e.is("spawn", f, n)))?;
-    if let Some((e, why)) =
-        bound(fleet, n).and_then(|e| Some((e, crate::hosts::disk_low(ctx, cfg, &On::of(r, Some(e)))?)))
-    {
-        return crate::gate::refused("DISK_LOW", format!("{}: {why}", e.str("host").unwrap_or("local")));
-    }
-    let full = |p: &Event| {
-        let e = p.issue.and_then(|n| bound(&p.fleet, n));
-        e.is_some_and(|e| crate::host::free_gb(&On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb))
+    let live = pending(ctx);
+    // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
+    let low =
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
+    let bound = |p: &Event| {
+        ev.iter()
+            .rev()
+            .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
     };
-    let live: Vec<Event> = pending(ctx).into_iter().filter(|p| !full(p)).collect();
-    if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
-        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
+    if n_live >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -616,7 +612,7 @@ fn pass(
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
-            go &= !halts(cfg, code);
+            go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
@@ -641,7 +637,7 @@ fn pass(
             // #214: a merge that conflicts (known before, or failed on it) gets its `--update` lane instead.
             if merge && !fast && conflicted(fleet, code) {
                 let code = update_lane(ctx, cfg, r, out, &events, fleet, s.issue)?;
-                go &= !halts(cfg, code);
+                go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             } else if merge && !fast && code.is_none() {
                 updated = true;
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
@@ -926,14 +922,8 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
     Ok(())
 }
 
-/// Does a lane step's refusal end this pass's starts? `HOST_BUSY`, and `DISK_LOW` on the one host (#416: with `[hosts]`
-/// it is the lane's own host, and new lanes go to another).
-fn halts(cfg: &Config, code: Code) -> bool {
-    code == Some("HOST_BUSY") || code == Some("DISK_LOW") && cfg.hosts.is_empty()
-}
-
 /// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
-/// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW` (`halts`)/`ALL_CAPPED` all fleets' (false).
+/// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets' (false).
 fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
     let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
     let mut go = start;
@@ -945,9 +935,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     {
         let at = (fleet, n.parse().ok(), "start");
         let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
-        let halt = halts(cfg, code) || matches!(code, Some("DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED"));
-        go &= !halt;
-        if halt || code == Some("CAP") {
+        go &= !matches!(
+            code,
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
+        );
+        if matches!(
+            code,
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "CAP" | "ALL_CAPPED")
+        ) {
             break;
         }
     }
@@ -963,7 +958,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if KICK.get().is_none()
         && events
             .iter()
-            .filter(|e| crate::check::lane_of(e) && e.fleet == fleet)
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
             .filter(merged)
             .any(|e| left(&e))
     {

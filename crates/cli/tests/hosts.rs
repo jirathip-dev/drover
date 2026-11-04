@@ -349,8 +349,7 @@ fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
         .reply("herdr --machine bazzite worktree remove --workspace w9", "{}")
         .reply("herdr --machine bazzite pane close w9:p2", "{}");
     let e = placed(&c, &r, 13, "impl", Some("bazzite")).unwrap_err();
-    let want =
-        "DISK_LOW: bazzite: 1.0 GB free < 10; `herdsman clean --yes` frees 1 done lane worktree(s) there: rev-12-r1";
+    let want = "DISK_LOW: bazzite: 1.0 GB free < 10; `herdsman clean --yes` frees 1 lane worktree(s) there: rev-12-r1";
     assert_eq!(e, want);
     let (code, dry) = run(&c, &r, &["clean"]);
     assert_eq!(code, 0, "{dry}");

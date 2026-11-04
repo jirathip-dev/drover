@@ -324,31 +324,32 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
     (hs, busy)
 }
 
-/// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there (the worktrees of done
-/// issues' lanes on it), else `reclaim`.
+/// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
-    let min = cfg.limits.min_free_gb;
+    let (min, events) = (cfg.limits.min_free_gb, read(&ctx.state).unwrap_or_default());
     let gb = host::free_gb(on).filter(|g| *g < min)?;
-    let (events, mut wts) = (read(&ctx.state).unwrap_or_default(), vec![]);
     let st = fold(&events);
-    let done = |e: &Event| {
+    let lane = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.str("machine") == on.machine;
+    let done = |e: &&Event| {
         e.issue
-            .is_some_and(|n| st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done))
+            .and_then(|n| st.get(&(e.fleet.clone(), n)))
+            .is_some_and(IssueState::done)
     };
-    for e in events
+    let mut wts: Vec<&str> = events
         .iter()
-        .filter(|e| crate::check::lane_of(e) && e.str("machine") == on.machine && done(e))
-    {
-        wts.extend(e.str("worktree").filter(|w| !wts.contains(w)));
-    }
+        .filter(lane)
+        .filter(done)
+        .filter_map(|e| e.str("worktree"))
+        .collect();
+    wts.sort_unstable();
+    wts.dedup();
     wts.retain(|w| on.exists(Path::new(w)));
-    let names: Vec<&str> = wts.iter().map(|w| w.rsplit('/').next().unwrap_or(w)).collect();
-    let more = if names.len() > 5 { ", …" } else { "" };
+    let names: Vec<&str> = wts.iter().filter_map(|w| w.rsplit('/').next()).collect();
     let free = match names.len() {
         0 => "nothing for `herdsman clean --yes` there; `herdsman reclaim` frees idle build folders".into(),
         n => format!(
-            "`herdsman clean --yes` frees {n} done lane worktree(s) there: {}{more}",
-            names[..n.min(5)].join(", ")
+            "`herdsman clean --yes` frees {n} lane worktree(s) there: {}",
+            names.join(", ")
         ),
     };
     Some(format!("{gb:.1} GB free < {min}; {free}"))

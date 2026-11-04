@@ -413,12 +413,11 @@ pub fn clean(
     let mut failed = 0;
     let mut freed = 0;
     let mut closed = BTreeMap::new();
-    // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed or
-    // crashed after its worktree was made) is a lane too.
+    // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
     for e in events
         .iter()
         .rev()
-        .filter(|e| lane_of(e) && fleet.is_none_or(|f| f == e.fleet))
+        .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
     {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
@@ -449,11 +448,7 @@ pub fn clean(
         };
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
-        // #416: a lane on another host is named with it.
-        let shown = match (on.machine, e.str("host")) {
-            (Some(_), Some(h)) => format!("{h}:{wt}"),
-            _ => wt.to_string(),
-        };
+        let shown = (e.str("host").filter(|_| on.machine.is_some())).map_or(wt.into(), |h| format!("{h}:{wt}")); // #416
         let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
         let keep = if live {
             Some("live agent".to_string())
@@ -780,37 +775,29 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, remove: bool) -> Re
     Ok(found.len())
 }
 
-/// #416: `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's worktree root; removed there
-/// only with `remove`. An unreachable host is named and skipped. The count.
+/// #416: `orphan <host>:<path> <size>` per orphan folder under each enabled remote host's root; gone with `remove`.
 pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove: bool) -> Result<usize> {
-    let ours: Vec<&str> = cfg.fleet.values().map(crate::config::Fleet::repo_name).collect();
-    let mut found = 0;
-    for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
-        let Some(on) = h.machine.as_deref().map(|m| On::new(r, Some(m))) else {
-            continue;
-        };
-        let root = h.root.as_deref().unwrap_or("~/.herdr/worktrees");
-        let list = match ok(&on, "sh", &["-c", DIRS, "sh", root.strip_prefix("~/").unwrap_or(root)]) {
-            Ok(l) => l,
-            Err(e) => {
-                writeln!(out, "cannot list orphans on {name}: {e:#}")?;
-                continue;
-            }
-        };
+    let (ours, mut found): (Vec<&str>, _) = (cfg.fleet.values().map(crate::config::Fleet::repo_name).collect(), 0);
+    for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
+        let (on, root) = (
+            On::new(r, h.machine.as_deref()),
+            h.root.as_deref().unwrap_or("~/.herdr/worktrees"),
+        );
+        let list = ok(&on, "sh", &["-c", DIRS, "sh", root.trim_start_matches("~/")]);
+        let list = list.or_else(|e| writeln!(out, "cannot list orphans on {name}: {e:#}").map(|()| String::new()))?;
         for (kb, p) in list.lines().filter_map(|l| l.split_once('\t')) {
-            if ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
-                continue;
-            }
-            found += 1;
-            if remove {
-                ok(&on, "rm", &["-rf", "--", p]).with_context(|| format!("removing {name}:{p}"))?;
-                writeln!(out, "removed orphan {name}:{p}")?;
-            } else {
-                writeln!(
-                    out,
-                    "orphan {name}:{p} {:.1} GB",
-                    gb(kb.parse::<u64>().unwrap_or(0) * 1024)
-                )?;
+            if !ours.iter().any(|o| p.rsplit('/').next() == Some(o)) {
+                found += 1;
+                if remove {
+                    ok(&on, "rm", &["-rf", "--", p])?;
+                    writeln!(out, "removed orphan {name}:{p}")?;
+                } else {
+                    writeln!(
+                        out,
+                        "orphan {name}:{p} {:.1} GB",
+                        gb(kb.parse::<u64>().unwrap_or(0) * 1024)
+                    )?;
+                }
             }
         }
     }
@@ -820,11 +807,6 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
 /// `<KB>\t<path>` per folder (not a symlink) under the root `$1`, from `$HOME` unless absolute.
 const DIRS: &str = "cd && cd \"$1\" 2>/dev/null || exit 0; \
 for d in */; do [ -d \"$d\" ] && [ ! -L \"${d%/}\" ] && du -sk \"$PWD/${d%/}\"; done; true";
-
-/// #416: a lane's own event: its `spawn`, or the `spawn-started` before it (alone when the spawn failed or crashed).
-pub fn lane_of(e: &Event) -> bool {
-    matches!(e.kind.as_str(), "spawn" | "spawn-started")
-}
 
 /// #138: the lane's rolling transcript goes with it.
 fn drop_log(ctx: &Ctx, agent: Option<&str>) {
