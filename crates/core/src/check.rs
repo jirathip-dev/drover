@@ -590,7 +590,7 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
         }
         let size = du(&dir);
         if dry {
-            writeln!(out, "  would remove {} ({})", dir.display(), mb(size))?;
+            writeln!(out, "  would remove {} ({:.2} GB)", dir.display(), gb(size))?;
             freed += size;
         } else if std::fs::remove_dir_all(&dir).is_ok() {
             freed += size;
@@ -685,110 +685,62 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     )?)
 }
 
-/// #361: `herdsman reclaim`: the build folders of worktrees idle 7 days (no live lane, no process there, HEAD and
-/// changed files untouched), previewed; removed with `apply` or a `y` on stdin.
-pub fn reclaim(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    stdin: &mut dyn Read,
-    apply: bool,
-) -> Result<()> {
+const NOTE: &str = "(logical sizes; APFS clones may free less)";
+/// #361: build folders of worktrees idle 7 days (no live lane or process there, HEAD and changes untouched),
+/// previewed; removed with `yes` or a `y` on stdin.
+pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
     let (mut seen, mut idle, mut total) = (std::collections::BTreeSet::new(), vec![], 0);
-    for e in events
-        .iter()
-        .rev()
-        .filter(|e| e.kind == "spawn" && e.str("machine").is_none())
-    {
-        let Some(wt) = e.str("worktree").map(Path::new) else {
-            continue;
-        };
-        if !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
+    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+        let wt = Path::new(e.str("worktree").unwrap_or_default());
+        if e.str("machine").is_some() || !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
             continue;
         }
-        let why = if !host::live_in(&agents, e.str("agent").unwrap_or("\0"), wt).is_empty() {
-            "a live lane".into()
-        } else if !host::inside(&ps, wt).is_empty() {
-            "a process runs there".into()
-        } else {
-            match touched(r, wt) {
-                Some(t) if ctx.now.saturating_sub(t) >= 7 * 86_400 => String::new(),
-                Some(t) => format!("touched {} ago", age(ctx.now.saturating_sub(t))),
-                None => "HEAD or status unreadable".into(),
-            }
+        let why = match touched(r, wt).map(|t| ctx.now.saturating_sub(t)) {
+            _ if !host::live_in(&agents, e.str("agent").unwrap_or("\0"), wt).is_empty() => "a live lane".into(),
+            _ if !host::inside(&ps, wt).is_empty() => "a process runs there".into(),
+            Some(a) if a >= 7 * 86_400 => String::new(),
+            Some(a) => format!("touched {} ago", age(a)),
+            None => "HEAD or status unreadable".into(),
         };
         if !why.is_empty() {
-            writeln!(out, "skip {}: {why}", wt.display())?;
+            writeln!(o, "skip {}: {why}", wt.display())?;
             continue;
         }
-        writeln!(out, "{}:", wt.display())?;
-        let bytes = purge(r, cfg, &e.fleet, out, wt, true)?;
+        writeln!(o, "{}:", wt.display())?;
+        let bytes = purge(r, cfg, &e.fleet, o, wt, true)?;
         total += bytes;
-        idle.extend((bytes > 0).then_some((e, wt)));
+        idle.extend((bytes > 0).then_some((&e.fleet, wt)));
     }
-    writeln!(
-        out,
-        "{} reclaimable (logical sizes; APFS clones may free less)",
-        mb(total)
-    )?;
-    if idle.is_empty() {
-        return Ok(());
-    }
-    if !apply {
-        write!(out, "apply? [y/N] ")?;
+    writeln!(o, "{:.2} GB reclaimable {NOTE}", gb(total))?;
+    if !yes && !idle.is_empty() {
+        write!(o, "apply? [y/N] ")?;
         let mut line = String::new();
-        let _ = std::io::BufReader::new(stdin).read_line(&mut line);
+        let _ = std::io::BufReader::new(i).read_line(&mut line);
         if line.trim() != "y" {
-            return Ok(writeln!(out, "preview: nothing changed; pass --apply to remove")?);
+            return Ok(writeln!(o, "preview: nothing changed; pass --apply to remove")?);
         }
     }
     let mut freed = 0;
-    for (e, wt) in idle {
-        freed += purge(r, cfg, &e.fleet, out, wt, false)?;
+    for (fleet, wt) in idle {
+        freed += purge(r, cfg, fleet, o, wt, false)?;
     }
-    Ok(writeln!(
-        out,
-        "freed {} (logical sizes; APFS clones may free less)",
-        mb(freed)
-    )?)
+    Ok(writeln!(o, "freed {:.2} GB {NOTE}", gb(freed))?)
 }
 
 /// #361: the latest of HEAD's last move and the mtimes of the worktree's changed, deleted or untracked files.
 fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     let w = wt.to_string_lossy();
-    let head = ok(
-        r,
-        "git",
-        &["-C", &w, "log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"],
-    )
-    .ok()?;
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*w][..], a].concat()).ok();
+    let head = git(&["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"])?;
     let mut t: u64 = head.trim().strip_prefix("HEAD@{")?.strip_suffix('}')?.parse().ok()?;
-    let st = ok(
-        r,
-        "git",
-        &["-C", &w, "status", "--porcelain", "-z", "--untracked-files=all"],
-    )
-    .ok()?;
-    for f in st.split('\0').filter(|f| !f.is_empty()) {
-        // `XY path`, or a rename's bare source path
+    for f in git(&["status", "--porcelain", "-z", "--untracked-files=all"])?.split('\0') {
+        // `XY path`, or a rename's bare source path; a deleted file's mtime is its nearest folder's
         let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
-        // a deleted file has no mtime: its nearest folder's, which the deletion bumped
-        let p = wt.join(f);
-        if let Some(m) = p
-            .ancestors()
-            .find_map(|a| std::fs::metadata(a).and_then(|m| m.modified()).ok())
-        {
-            t = t.max(m.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()));
-        }
+        let m = wt.join(f).ancestors().find_map(|a| a.metadata().ok());
+        t = t.max(m.map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs()));
     }
     Some(t)
-}
-
-#[allow(clippy::cast_precision_loss)] // MB to one decimal
-fn mb(bytes: u64) -> String {
-    format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
 #[allow(clippy::cast_precision_loss)] // GB to one decimal

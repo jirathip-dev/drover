@@ -282,8 +282,7 @@ enum Cmd {
     },
     /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
     Reclaim {
-        /// Remove without asking
-        #[arg(long)]
+        #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`

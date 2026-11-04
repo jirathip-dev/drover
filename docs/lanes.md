@@ -40,8 +40,8 @@ herdsman clean --orphans --yes        # also remove folders under the worktree r
 
 A fleet's `env` table is exported into every lane's shell. Share one build cache per fleet instead of
 one per lane, e.g. `[fleet.herdsman.env] CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman"` (cargo's
-lock makes it safe; lanes queue on it). `shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/<fleet>/target" }`
-says the same, opt-in per fleet, `<fleet>` replaced by its name: new lanes skip full rebuilds, but lanes building at once
+lock makes it safe; lanes queue on it). `shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/herdsman/target" }`
+says the same, opt-in per fleet: new lanes skip full rebuilds, but lanes building at once
 wait on cargo's lock (`Blocking waiting for file lock on build directory`), and `reclaim` never touches it (it lives
 outside the worktrees). Node fleets: pnpm's store is already shared; for npm set
 `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
