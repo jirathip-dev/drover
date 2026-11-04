@@ -1,7 +1,7 @@
 // herdsman service worker: the page stale-while-revalidate (the cached copy paints first, the network
 // refresh replaces it on a 200; no copy yet: the network answer as is), the `a/@V/` assets precached at
 // install (immutable), other static files cache-first; the live /lane transcript, the /live stream,
-// /herd.json, /frags and `?…` reads are never cached. A navigation to any other URL (#67: iOS restoring a fetch
+// /herd.json, /frags, the JSON API (#265, `api/…`) and `?…` reads are never cached. A navigation to any other URL (#67: iOS restoring a fetch
 // URL as the page) gets the page: the cached copy, else the network's.
 // Paths are under the registration's scope (`/` live, e.g. `/herdsman/` for the Pages demo); one cache per scope and
 // build (#241: a new build drops the old one, so `themes/…`, cache-first, never outlives an upgrade).
@@ -13,7 +13,7 @@ self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
   if (e.request.mode === 'navigate' && u.pathname !== P) return e.respondWith(caches.match(P).then(m => m || fetch(P)));
-  if ([P + 'lane', P + 'live', P + 'herd.json', P + 'frags'].includes(u.pathname) || u.search) return;
+  if ([P + 'lane', P + 'live', P + 'herd.json', P + 'frags'].includes(u.pathname) || u.pathname.startsWith(P + 'api/') || u.search) return;
   if (u.pathname === P) {
     const net = fetch(e.request).then(r => {
       const copy = r.clone();

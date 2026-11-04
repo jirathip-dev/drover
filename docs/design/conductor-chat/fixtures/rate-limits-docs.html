@@ -1,0 +1,25 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Rate limits (conductor's mockup)</title>
+<!-- The mockup PNG the conductor "sends" in the chat mockup: acme-api's docs page for #52. Shot at 390 px. -->
+<style>
+body{margin:0;font:15px/1.5 -apple-system,system-ui,sans-serif;color:#1b1f24;background:#fff}
+.bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #e3e6ea;font-weight:600}
+.bar i{width:18px;height:18px;border-radius:5px;background:#3d7bfd}
+main{padding:8px 16px 24px}h1{font-size:24px;margin:12px 0 4px}p{margin:8px 0;color:#454c55}
+.pill{display:inline-block;font:12px ui-monospace,monospace;background:#fde9e7;color:#b3261e;border-radius:4px;padding:1px 6px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}th,td{text-align:left;padding:7px 6px;border-bottom:1px solid #e3e6ea;vertical-align:top}
+th{color:#6b737d;font-weight:500}code{font:12px ui-monospace,monospace;background:#f2f4f7;border-radius:3px;padding:1px 4px}
+pre{font:12px/1.5 ui-monospace,monospace;background:#0f1720;color:#d9e1ea;border-radius:8px;padding:10px 12px;white-space:pre-wrap}
+.k{color:#7cc4f0}.s{color:#9fd78a}
+</style></head><body><div class=bar><i></i>acme-api docs</div><main>
+<h1>Rate limits</h1><p>Every API key gets <b>600 requests a minute</b> with a burst of 100. Over it, the API answers <span class=pill>429 Too Many Requests</span>.</p>
+<table><tr><th>header</th><th>on</th><th>meaning</th></tr>
+<tr><td><code>X-RateLimit-Limit</code></td><td>every response</td><td>requests allowed per minute</td></tr>
+<tr><td><code>X-RateLimit-Remaining</code></td><td>every response</td><td>left in this window</td></tr>
+<tr><td><code>X-RateLimit-Reset</code></td><td>every response</td><td>seconds until the window resets</td></tr>
+<tr><td><code>Retry-After</code></td><td>429 only</td><td>seconds to wait before retrying</td></tr></table>
+<pre>HTTP/1.1 429 Too Many Requests
+Retry-After: 12
+{ <span class=k>"error"</span>: <span class=s>"rate_limited"</span>,
+  <span class=k>"limit"</span>: 600, <span class=k>"retry_after"</span>: 12 }</pre>
+<p>Retry with backoff; webhooks (#19) already do.</p></main></body></html>

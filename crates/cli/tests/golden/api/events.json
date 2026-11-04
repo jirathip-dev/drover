@@ -1,0 +1,78 @@
+{
+  "list": [
+    {
+      "data": {
+        "issues": [
+          12,
+          17
+        ],
+        "op": "add"
+      },
+      "fleet": "sendmeter",
+      "issue": null,
+      "k": null,
+      "seq": 1,
+      "ts": 1000000,
+      "type": "queue"
+    },
+    {
+      "data": {
+        "issues": [
+          17
+        ],
+        "on": 12,
+        "op": "block"
+      },
+      "fleet": "sendmeter",
+      "issue": null,
+      "k": null,
+      "seq": 2,
+      "ts": 1000000,
+      "type": "queue"
+    },
+    {
+      "data": {
+        "agent": "sendmeter-impl-12",
+        "harness": "claude",
+        "role": "impl"
+      },
+      "fleet": "sendmeter",
+      "issue": 12,
+      "k": null,
+      "seq": 3,
+      "ts": 900100,
+      "type": "spawn"
+    },
+    {
+      "data": {
+        "id": "q7",
+        "options": [
+          "sqlite",
+          "postgres"
+        ],
+        "question": "Which DB?",
+        "recommend": 1
+      },
+      "fleet": "sendmeter",
+      "issue": 9,
+      "k": "needs-you",
+      "seq": 4,
+      "ts": 900200,
+      "type": "needs-decision"
+    },
+    {
+      "data": {
+        "into": "staging",
+        "pr": 40
+      },
+      "fleet": "sendmeter",
+      "issue": 12,
+      "k": "merged",
+      "seq": 5,
+      "ts": 900300,
+      "type": "merged"
+    }
+  ],
+  "refresh": false,
+  "seq": 5
+}

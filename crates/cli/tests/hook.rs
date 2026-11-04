@@ -566,3 +566,62 @@ fn setup_is_owner_only() {
         assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
     }
 }
+
+/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
+#[test]
+fn config_apply_and_secret_ls_rm_are_owner_only() {
+    for cmd in [
+        "herdsman config apply c1",
+        "herdsman config discard c1",
+        "herdsman secret ls",
+        "herdsman secret rm all TOKEN",
+    ] {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let out = hook_in(Some("x:-:conductor"), "conductor", input.clone());
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
+        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+    }
+    assert_eq!(bash("herdsman config propose t1 /tmp/fleet.toml"), None);
+    assert_eq!(bash("herdsman secret request t1 API_KEY --why x"), None);
+}
+
+/// #386: a conductor's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
+/// `thread reply`, other commands, denied ones and calls outside a thread are not.
+#[test]
+fn a_conductor_command_is_logged_for_its_thread() {
+    let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        let (out, d) = hook_cfg(CONFIG, vars, "conductor", input);
+        let log = std::fs::read_to_string(d.join("state/events.jsonl")).unwrap_or_default();
+        let rows: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        (
+            out,
+            rows.into_iter()
+                .filter(|e| e["type"] == "thread-cmd")
+                .collect::<Vec<_>>(),
+        )
+    };
+    let lane = [
+        ("HERDSMAN_LANE", Some("sendmeter:-:conductor")),
+        ("HERDSMAN_THREAD", Some("t1")),
+    ];
+    let cmd = "gh issue create -R acme/x -t \"Rate limits\" -F -";
+    let (out, got) = cmds(&lane, cmd);
+    assert!(out.trim().is_empty(), "allowed: {out}");
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (&got[0]["thread"], &got[0]["cmd"], &got[0]["fleet"]),
+        (&json!("t1"), &json!(cmd), &json!("sendmeter"))
+    );
+    assert_eq!(cmds(&lane, "herdsman queue sendmeter add 52").1.len(), 1);
+    assert!(
+        cmds(&lane, "herdsman thread reply t1 \"done\"").1.is_empty(),
+        "the reply is the message"
+    );
+    assert!(cmds(&lane, "ls -la").1.is_empty());
+    assert!(
+        cmds(&lane, "gh pr merge 5").1.is_empty(),
+        "a denied call is not a tool row"
+    );
+    assert!(cmds(&lane[..1], "gh issue list").1.is_empty(), "no thread");
+}
