@@ -1152,13 +1152,19 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             .or_default()
             .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "kick": kicks}));
     });
+    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
+    // #438: a launched spawn's outcome is its kick's to log (a refusal there must not follow an `ok` here).
+    if kicks && issue.is_some() && code.is_none() {
+        return writeln!(out, "{who} {step}: launched")
+            .map(|()| None)
+            .map_err(Into::into);
+    }
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
     // A repeated refusal is silent too (no cron mail every pass).
     if code.is_some() && ev.iter().any(|e| recent(e) && same(e)) {
         return Ok(code);
     }
-    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
     writeln!(out, "{who} {step}: {result}")?;
     let d = json!({"step": step, "cmd": format!("herdsman {}", c.join(" ")), "result": result, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "driven", d)).map(|()| code)

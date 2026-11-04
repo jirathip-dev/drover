@@ -130,3 +130,39 @@ fn busy_or_recent_worktrees_are_skipped() {
     }
     assert!(out.contains("0.00 GB freed"), "{out}");
 }
+
+/// #438: over `build_budget_gb` the shared build folder's profiles go, but never one cargo holds locked.
+#[test]
+fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile() {
+    let d = tmpdir("reclaim-shared");
+    let root = d.join("builds");
+    let cfg = CONFIG.replace(
+        "build_root = \"\"",
+        &format!("build_root = \"{}\"\nbuild_budget_gb = 0", root.display()),
+    );
+    let c = ctx(&d, &cfg);
+    let profile = |p: &str| {
+        let dir = root.join(p);
+        std::fs::create_dir_all(dir.join("deps")).unwrap();
+        std::fs::write(dir.join("deps/blob"), vec![0u8; 4096]).unwrap();
+        std::fs::write(dir.join(".cargo-lock"), "").unwrap();
+        dir
+    };
+    let (building, idle) = (profile("sendmeter/debug"), profile("other/debug"));
+    let held = std::fs::File::open(building.join(".cargo-lock")).unwrap();
+    held.lock().unwrap(); // a cargo build running there
+    let r = || Fake::default().reply("herdr agent list", NO_AGENTS).reply("lsof", "");
+    let (code, out) = run(&c, &r(), &["reclaim"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("would trim") && idle.exists(),
+        "preview removes nothing: {out}"
+    );
+    let (code, out) = run(&c, &r(), &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!idle.exists(), "{out}");
+    assert!(
+        building.join("deps/blob").exists() && out.contains("cargo is building"),
+        "{out}"
+    );
+}
