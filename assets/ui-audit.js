@@ -250,6 +250,30 @@
     },
     'chat-wait-still': () => VIEWS['chat-wait'](),
     'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
+    // #408: a long thread: the demo's t4 under an older-messages marker, the page before it 30 canned messages. `chat-older`:
+    // scrolled to the top, that page loaded above (the message on screen stays put); `chat-mid`: then half way down, the
+    // thread header pinned under the page header.
+    'chat-older': async () => {
+      tab('chat'); chatOpen('t4'); $('.lall')?.click();
+      const tc = $('#chat .cvp[data-t="t4"] .tc'), a = tc.querySelector(':scope>[data-n]'), at = Date.now() / 1e3 | 0;
+      tc.firstElementChild.outerHTML = `<p class="qs tmo" data-b=${a.dataset.n}>↑ older messages</p>`;
+      const msg = i => `<details data-n=${i} class="blk ${i % 3 ? 'ai' : 'me'}" open><summary><span class=k>${i % 3 ? 'conductor' : 'you'}</span><span class=pv>older message ${i}</span><span class=ct data-ts=${at}></span><i class=cv></i></summary><div class=md><p>older message ${i}: the rate limit's burst, the retry window and the docs page.</p></div></details>`;
+      const page = '<p class=qs>thread started by owner · 09:12</p>' + Array.from({ length: 30 }, (_, i) => msg(i + 1)).join('');
+      window.fetch = (u, o) => /thread\/t4\?before=/.test(u) ? Promise.resolve(new Response(page)) : F(u, o);
+      scrollTo({ top: 1e6, behavior: 'instant' }); await wait();
+      scrollTo({ top: 0, behavior: 'instant' });
+      const y = a.getBoundingClientRect().top;
+      await wait();
+      const n = tc.querySelectorAll(':scope>[data-n]').length, d = a.getBoundingClientRect().top - y;
+      if (n < 40 || Math.abs(d) > 1 || tc.querySelector('.tmo')) early.push(`older page: ${n} messages, the one on screen moved ${d} px`);
+    },
+    'chat-mid': async () => {
+      await VIEWS['chat-older']();
+      scrollTo({ top: document.documentElement.scrollHeight / 2, behavior: 'instant' });
+      await wait();
+      const th = $('#chat .cvp[data-t="t4"] .th'), r = th.getBoundingClientRect(), hb = $('header').getBoundingClientRect().bottom;
+      if (Math.abs(r.top - hb) > 1 || !th.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))) early.push(`thread header at ${r.top} px, not pinned under the page header (${hb})`);
+    },
     // #397: a start error on the [chat] tab, as `thread say` failed on the mini.
     'chat-error': () => { tab('chat'); chatOpen(''); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); toast(ERR); },
     // #276: long `now:` lines as the server emits them (one-line classes, full text in title): plain, Claude's spinner word

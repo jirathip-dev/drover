@@ -70,16 +70,16 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     for want in [
         "<span class=ds><i class=dt></i>acme-api · claude · opus · awake</span>",
         "conductor in ",
-        "<details class=\"blk me\" open><summary><span class=k>you</span>",
+        " class=\"blk me\" open><summary><span class=k>you</span>",
         "<code>/v1/search</code>",
         "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
         "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
-        "<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span>",
+        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span>",
         "<p class=ans>✓ 1. per API key <span class=m>· you · ",
         "<p class=ans>✓ other: \"600 a minute, burst 100\" <span class=m>· you · ",
         "<a class=tf href=\"thread/t4/429%2Dbody%2Ejson\"><span>▤ 429-body.json</span><span class=m>87 B</span></a>",
         "<a href=\"https://docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api\">",
-        "<p class=\"qs note\">⇄ switched to account B",
+        " class=\"qs note\">⇄ switched to account B",
         "<form class=chq data-id=\"q33\" data-fleet=\"acme-api\"><button type=button name=choice value=1><span>1. both:",
         "<small>(recommended)</small>",
         "placeholder=\"other: type an answer\"",
@@ -624,7 +624,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     assert_eq!(body(&res), "sent\n", "{res}");
     let (chat, _) = frags(&s, &cookie, T + 5);
     let at = chat
-        .find("<p class=\"qs note r\">✗ not delivered: ")
+        .find(" class=\"qs note r\">✗ not delivered: ")
         .unwrap_or_else(|| panic!("{chat}"));
     let line = &chat[at..at + chat[at..].find("</p>").unwrap()];
     let n = line.split("data-n=").nth(1).and_then(|x| x.split('>').next()).unwrap();
@@ -650,5 +650,131 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     assert!(
         chat.contains("<p class=tlv><i class=tld aria-hidden=true></i> working</p>"),
         "{chat}"
+    );
+}
+
+/// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
+fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
+    let c = setup(name);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
+        "t1\n"
+    );
+    for i in 1..=n {
+        let d = serde_json::json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
+        let e = herdsman::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
+        herdsman::events::append(&c.state, &e).unwrap();
+    }
+    let cookie = pair(
+        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        now,
+    );
+    (c, cookie)
+}
+
+/// #408: a thread of 100 messages carries its last 30 under the older-messages marker; `thread/t1?before=` sends the
+/// 30 before them in order, and the last page stops at the thread's start.
+#[test]
+fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time() {
+    let (c, cookie) = long("chat-window", 100, T);
+    let r = Fake::default();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let msgs = |h: &str| -> Vec<String> {
+        h.split("<span class=pv>")
+            .skip(1)
+            .map(|p| p[..p.find('<').unwrap()].into())
+            .collect()
+    };
+    let want = |a: u64, b: u64| (a..=b).map(|i| format!("m{i}")).collect::<Vec<_>>();
+    let b = |h: &str| {
+        h.split("class=\"qs tmo\" data-b=")
+            .nth(1)
+            .map(|s| s[..s.find('>').unwrap()].to_string())
+    };
+    let (chat, _) = frags(&s, &cookie, T + 200);
+    let view = &chat[chat.find("<div class=cvp data-t=\"t1\">").unwrap()..];
+    assert_eq!(msgs(view), want(71, 100));
+    assert!(!view.contains("thread started"), "{view}");
+    assert!(view.contains(" data-n="), "each block names its event");
+    let page = |b: &str| {
+        body(&req(
+            &s,
+            "GET",
+            &format!("/thread/t1?before={b}&n=30"),
+            "",
+            &cookie,
+            T + 200,
+        ))
+        .to_string()
+    };
+    let p1 = page(&b(view).unwrap());
+    assert_eq!(msgs(&p1), want(41, 70));
+    let p2 = page(&b(&p1).unwrap());
+    assert_eq!(msgs(&p2), want(11, 40));
+    let p3 = page(&b(&p2).unwrap());
+    assert_eq!(msgs(&p3), want(1, 10));
+    assert!(
+        p3.starts_with("<p class=qs>thread started by owner") && b(&p3).is_none(),
+        "{p3}"
+    );
+    let no = req(&s, "GET", "/thread/t9?before=5", "", &cookie, T + 200);
+    assert!(no.starts_with("HTTP/1.1 404"), "{no}");
+}
+
+/// #408 in WebKit on a real server: the thread opens with 30 messages; scrolled to the top it loads 30 more each time
+/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header;
+/// a message sent (the live update) keeps every page loaded.
+#[test]
+fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let (c, cookie) = long("chat-window-webkit", 100, now);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
+        const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
+        (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
+          for (const k of [60, 90, 100]) { scrollTo(0, 1e6); await new Promise(r => setTimeout(r, 100)); scrollTo(0, 0); const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
+            await until(() => n() >= k); at.push(n(), +(Math.abs(a.getBoundingClientRect().top - y) > 1)); await new Promise(r => setTimeout(r, 200)); } \
+          at.push(+!!tc().querySelector('.tmo'), +tc().firstElementChild.textContent.startsWith('thread started')); \
+          scrollTo(0, document.documentElement.scrollHeight / 2); await new Promise(r => setTimeout(r, 200)); \
+          const th = $('#chat .cvp[data-t=\"t1\"] .th'), r = th.getBoundingClientRect(); \
+          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(scrollY > innerHeight)); \
+          const f = $('#chat .tw[data-t=\"t1\"]'); f.elements.text.value = 'a new one'; f.requestSubmit(); \
+          await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
+          at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
+    let png = tmpdir("chat-window-png").join("thread.png");
+    let o = swift()
+        .env("HERDSMAN_WAIT", "8")
+        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .args([
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
+            &format!("http://{addr}/"),
+            "390",
+            "chat",
+            "scene",
+            png.to_str().unwrap(),
+            &format!("chatOpen('t1'); {{ {js} }}"),
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+    // 30 open; 60, 90, 100 loaded, each with no jump; no marker, the start line; the header right under the page's,
+    // on top, the page scrolled; after the send: m1 still first under the start line, the new message in, no errors.
+    assert_eq!(
+        m,
+        [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
+        "{out}"
     );
 }

@@ -576,13 +576,17 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .nt[hidden]{display:none}
 .nt input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
 .nt .ns{flex-basis:100%;margin:0;color:var(--mute);font-size:var(--fs-meta)}
-/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. */
+/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. #408: on the
+   [chat] tab the page clips sideways instead of hiding (a hidden body is a scroll box: nothing in it would stick). */
+html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
+
 .th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
 .th>div{flex:1;min-width:0}
 .th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .th .ds{font-size:var(--fs-meta);color:var(--mute)}
 .th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
 .tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
+.tmo{cursor:pointer}
 .blk>summary .ct{flex:none;color:var(--mute)}
 /* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
 .im{margin:var(--s2) 0 0}
@@ -613,7 +617,7 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
 .qid{font-size:var(--fs-meta);color:var(--mute)}
 /* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
-.cvp :is(.chq,.chc,.tw):has([disabled]){opacity:.6}
+.cvp :is(.chq,.chc):has([disabled]),.cvp .tw:has([disabled])>*{opacity:.6}
 .cvp>.ns{margin:0;font-size:var(--fs-meta)}
 /* The live line and the composer are the sheet's (.live, .reply). */
 .tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
