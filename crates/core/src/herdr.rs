@@ -167,19 +167,7 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
 /// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
 /// close the workspace; the screen (None: no pane).
 pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
-    let ws = json(
-        r,
-        &argv(&[
-            "workspace",
-            "create",
-            "--cwd",
-            cwd,
-            "--label",
-            "herdsman-health",
-            "--no-focus",
-        ]),
-    );
-    let pane = ws.ok()?["result"]["root_pane"]["pane_id"].as_str()?.to_string();
+    let pane = workspace_create(r, cwd, "herdsman-health").ok()?;
     let _ = exec(r, &run_argv(&pane, &[line]));
     let _ = exec(r, &wait_output_argv(&pane, done, "20000"));
     let text = read(r, &pane).unwrap_or_default();
@@ -238,6 +226,18 @@ pub fn worktree_create_argv(local: &str, branch: &str, base: &str, path: &str, l
 
 pub fn worktree_open_argv(local: &str, path: &str, label: &str) -> Vec<String> {
     argv(&["worktree", "open", "--cwd", local, "--path", path, "--label", label])
+}
+
+/// A new workspace at `cwd`, unfocused: its root pane.
+pub fn workspace_create(r: &dyn Runner, cwd: &str, label: &str) -> Result<String> {
+    let ws = json(
+        r,
+        &argv(&["workspace", "create", "--cwd", cwd, "--label", label, "--no-focus"]),
+    )?;
+    Ok(ws["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .context("herdr: no root pane")?
+        .into())
 }
 
 pub fn workspace_rename(r: &dyn Runner, ws: &str, label: &str) -> Result<Out> {
