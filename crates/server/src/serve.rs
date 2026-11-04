@@ -693,14 +693,7 @@ impl<'a> Server<'a> {
             })
         };
         // #363: a report carries its screenshot, up to 3 MB.
-        let cap = |b: &[u8]| {
-            if b.starts_with(b"POST /report ") {
-                3 << 20
-            } else {
-                32_768
-            }
-        };
-        while !done(&buf) && buf.len() < cap(&buf) {
+        while !done(&buf) && buf.len() < [32_768, 3 << 20][usize::from(buf.starts_with(b"POST /report "))] {
             match s.read(&mut chunk)? {
                 0 => break,
                 n => buf.extend_from_slice(&chunk[..n]),
