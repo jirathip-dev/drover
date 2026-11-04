@@ -143,13 +143,21 @@ pub fn now() -> u64 {
 /// Apply one queue change and log it (`herdsman queue`, and the page's ▲/▼ with `via`); the new order as shown.
 pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<&str>) -> Result<String> {
     cfg.fleet(fleet)?;
-    let mut q = queue::replay(&read(&ctx.state)?, fleet);
+    let events = read(&ctx.state)?;
+    let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
+    // #425: blocking an issue with a lane holds that lane until the blocker merges.
+    let n = d["issues"][0].as_u64().filter(|_| d["op"] == "block");
+    let s = n.and_then(|n| events::fold(&events).remove(&(fleet.into(), n)));
+    let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": d["on"]})));
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, "queue", with_via(d, via)),
     )?;
+    if let Some(h) = held {
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, n, "held", h))?;
+    }
     let order: Vec<String> = q.iter().map(|i| format!("#{}", i.issue)).collect();
     let order = if order.is_empty() {
         "empty".into()
