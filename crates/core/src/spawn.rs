@@ -624,6 +624,7 @@ pub fn spawn(
     }
 
     let mut sha = None;
+    let note; // #353: a superseded or fallback lane's summary for its successor, logged on its spawn
     let (created, brief_text) = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         // #157: first use on a host: it clones the repo itself; #307: plain git, so its insteadOf/SSH and helpers apply.
@@ -649,6 +650,9 @@ pub fn spawn(
         }
         let (title, body) = (iss["title"].as_str().unwrap_or(""), iss["body"].as_str().unwrap_or(""));
         p.title = lane_title(&p.head, title);
+        note = prior
+            .filter(|_| gone.is_some() || o.supersede && !dup.is_empty())
+            .map(|prev| handover(ctx, r, &events, prev, &p, (fleet, issue, title)));
         // A fix round's brief carries the findings of the latest verdict if it was FAIL.
         let last = events.iter().rev().find(|e| e.is("verdict", fleet, issue));
         let fix = last
@@ -663,7 +667,7 @@ pub fn spawn(
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
-            .chain(gone.map(|_| carry_over(r, &wt)))
+            .chain(note.clone())
             .map(|t| format!("\n\n{t}"));
         (
             created,
@@ -767,6 +771,7 @@ pub fn spawn(
             d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
+            d["handover"] = json!(note);
             if let Some(pl) = &placed {
                 d["host"] = json!(pl.name);
                 d["machine"] = json!(pl.machine);
@@ -844,16 +849,162 @@ pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, is
     Ok(())
 }
 
-/// #302: the carry-over for a lane taking over from an unavailable one: its last commits and final message.
-fn carry_over(r: &dyn Runner, wt: &str) -> String {
-    let log = ok(r, "git", &["-C", wt, "log", "--oneline", "-5"]).unwrap_or_default();
-    let jsonl =
-        crate::lanes::session_file(&crate::config::home(), wt).and_then(|f| crate::lanes::read_tail(&f, 1 << 20));
-    let said = jsonl.and_then(|t| crate::lanes::said(&t).0.into_iter().rfind(|m| m["k"] == "ai"));
-    let said = said
-        .and_then(|m| Some(m["text"].as_str()?.to_string()))
-        .unwrap_or_default();
-    format!("Carry-over: the last lane on this issue stopped (its agent became unavailable). Its last commits:\n{log}\nIts final message:\n{said}\n\nContinue; don't redo.")
+/// #353: a summary of lane `prev` for its successor `p`, one whitespace-collapsed line of at most 240 chars per item:
+/// from its harness's transcript, else its pane log. If `p`'s harness[:account] ran this role before, only what came
+/// after that lane was replaced.
+fn handover(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    events: &[Event],
+    prev: &Event,
+    p: &Plan,
+    (fleet, issue, title): (&str, u64, &str),
+) -> String {
+    let acct = p.account.as_ref().map(|a| a.0.as_str());
+    let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(issue);
+    let spawns: Vec<&Event> = events
+        .iter()
+        .filter(mine)
+        .filter(|e| e.kind == "spawn" && e.str("role") == Some(&p.role))
+        .collect();
+    let ran = spawns
+        .iter()
+        .rposition(|e| e.str("harness") == Some(&p.harness) && e.str("account") == acct);
+    let since = ran.and_then(|i| spawns.get(i + 1)).map(|e| e.ts);
+    let at = since.map(iso);
+    let after = |t: &Value| at.as_ref().is_none_or(|s| t.as_str().is_none_or(|t| t > s.as_str()));
+    let (wt, h) = (
+        p.worktree.to_string_lossy(),
+        harness::get(prev.str("harness").unwrap_or_default()),
+    );
+    let (mut prompts, mut replies, mut cmds) = (vec![], vec![], vec![]);
+    let jsonl = h
+        .transcript(&ctx.home, &wt)
+        .and_then(|f| crate::lanes::read_tail(&f, 1 << 20));
+    let log = crate::lanes::log(&ctx.state, prev.str("agent").unwrap_or_default());
+    if let Some(t) = &jsonl {
+        for m in crate::lanes::said(t).0.into_iter().filter(|m| after(&m["at"])) {
+            let text = m["text"].as_str().unwrap_or_default().to_string();
+            [&mut replies, &mut prompts][usize::from(m["k"] == "me")].push(text);
+        }
+        let rows = t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+        for v in rows.filter(|v| after(&v["timestamp"])) {
+            let parts = v["message"]["content"].as_array().cloned().unwrap_or_default();
+            cmds.extend(
+                parts
+                    .iter()
+                    .filter_map(|c| c["input"]["command"].as_str())
+                    .map(crate::lanes::mask),
+            );
+        }
+    } else if let Some(text) = log.and_then(|f| std::fs::read_to_string(f).ok()) {
+        let mut open = false; // a reply's wrapped lines follow it
+        for l in text.lines().map(crate::lanes::strip) {
+            let l = l.trim();
+            let glyph = |g: &[char]| {
+                l.strip_prefix(g)
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+            };
+            open = match (h.tool_line(l), glyph(&['❯', '›', '>']), glyph(&['⏺', '•'])) {
+                (Some((t, a)), ..) => {
+                    cmds.extend((t == "Bash" || t == "$").then_some(a));
+                    false
+                }
+                (_, Some(t), _) => {
+                    prompts.push(t);
+                    false
+                }
+                (.., Some(t)) => {
+                    replies.push(t);
+                    true
+                }
+                _ if open && !l.is_empty() => {
+                    replies.last_mut().into_iter().for_each(|r| *r += &format!(" {l}"));
+                    true
+                }
+                _ => false,
+            };
+        }
+    }
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*wt][..], a].concat()).unwrap_or_default();
+    let files = match since {
+        Some(s) => {
+            git(&["log", &format!("--since=@{s}"), "--name-only", "--format="]) + &git(&["diff", "--name-only", "HEAD"])
+        }
+        None => git(&["diff", "--name-only", &p.base]),
+    };
+    let mut files: Vec<String> = files
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(String::from)
+        .collect();
+    files.sort();
+    files.dedup();
+    let later = |e: &&Event| since.is_none_or(|s| e.ts > s);
+    let asks = events
+        .iter()
+        .filter(mine)
+        .filter(later)
+        .filter(|e| matches!(e.kind.as_str(), "needs-decision" | "decision"));
+    let asks: Vec<String> = asks.map(plain).collect();
+    let notes = spawns
+        .iter()
+        .copied()
+        .filter(later)
+        .filter_map(|e| e.str("handover"))
+        .map(String::from);
+    let mut out =
+        "Handover: Summary of the previous lane; its tool state and approvals are not carried over.".to_string();
+    if let Some(s) = since {
+        let who = [Some(p.harness.as_str()), acct]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(":");
+        out += &format!(
+            "\nOnly what happened since {who}'s last lane on this issue was replaced ({} UTC).",
+            iso(s).replace('T', " ")
+        );
+    }
+    out += &format!("\nIssue: {}", handover_item(title));
+    let sections = [
+        ("Prompts", prompts),
+        ("Final replies", replies),
+        ("Commands run", cmds),
+        ("Files changed", files),
+        ("Asks and answers", asks),
+        ("Prior handover notes", notes.collect()),
+    ];
+    for (name, items) in sections.into_iter().filter(|s| !s.1.is_empty()) {
+        out += &format!("\n{name}:");
+        for i in &items[items.len().saturating_sub(20)..] {
+            out += &format!("\n- {}", handover_item(i));
+        }
+    }
+    out + "\nContinue; don't redo."
+}
+
+/// #353: one handover item: whitespace collapsed, at most 240 chars (237 and `...`).
+fn handover_item(s: &str) -> String {
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    match s.char_indices().nth(237) {
+        Some((i, _)) if s.chars().count() > 240 => format!("{}...", &s[..i]),
+        _ => s,
+    }
+}
+
+/// `YYYY-MM-DDTHH:MM:SS` (UTC) of unix time `t`, as a session transcript's `timestamp` starts.
+fn iso(t: u64) -> String {
+    let (d, s) = (t / 86_400, t % 86_400);
+    let (m, day) = access::civil_month_day(d);
+    format!(
+        "{}-{m:02}-{day:02}T{:02}:{:02}:{:02}",
+        access::civil_year(d),
+        s / 3600,
+        s / 60 % 60,
+        s % 60
+    )
 }
 
 /// The `spawn` event's data for a lane of plan `p` running in `pane`.
