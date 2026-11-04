@@ -419,9 +419,22 @@ fn quoted_text_is_not_a_command() {
         "herdsman thread reply t1 \"see `herdsman spawn x 1 design`\"",
         "herdsman ask q --option \"a $(herdsman spawn x 1 \"design\")\"",
         "cat > f.md <<EOF\n$(herdsman spawn x 1 design)\nEOF",
+        // A heredoc fed to a shell runs its body; a comment's quote does not swallow the next line.
+        "bash <<'EOF'\nherdsman spawn x 1 design\nEOF",
+        "cat <<'EOF' | sh\nherdsman spawn x 1 design\nEOF",
+        "eval \"x\" $(cat <<'EOF'\nherdsman spawn x 1 design\nEOF\n)",
+        "bash <<<\"herdsman spawn x 1 design\"",
+        "herdsman ask q \"a\" # '\nherdsman spawn x 1 design",
     ] {
         assert!(run("synergy:-:orch", cmd).contains("owner-only"), "{cmd}");
     }
+    for cmd in [
+        "bash <<'EOF'\ngh pr merge 5\nEOF",
+        "sh -s <<EOF\ngit push origin staging\nEOF",
+    ] {
+        assert!(!run("synergy:12:impl", cmd).is_empty(), "{cmd}");
+    }
+    assert_eq!(run("synergy:-:orch", "ls # herdsman spawn x 1 design"), "");
     assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
