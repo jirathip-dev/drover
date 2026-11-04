@@ -978,6 +978,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"])?;
+    let checks = crate::gate::premerge_checks(ctx, f);
     // A scratch `git worktree`, not a herdr one: no pane, no lane.
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for (_, s) in prs {
@@ -990,9 +991,18 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         // #350: a behind fast-first PR is always caught up: it lands only on the integration its fast checks ran on.
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
+        let push = to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
+        // #373: the premerge checks re-run on the updated head before it is pushed; a failure is its fix round.
+        let fail = (clean && push)
+            .then(|| crate::gate::run_checks(r, &wt, &into, &checks))
+            .flatten();
         let res = if !clean {
             update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet)) {
+        } else if let Some((c, o)) = fail {
+            let at = format!("{from:.7} updated onto {into}");
+            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), &from, &at, c, &o);
+            rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
+        } else if push {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
                 gh::forget_pr(ctx, fleet, s.issue);
                 writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;

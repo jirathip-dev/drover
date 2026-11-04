@@ -639,7 +639,7 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
 }
 
 /// #272: a fleet whose local checkout has `ci/cap.toml` (or not); returns (dir, ctx, local, scratch worktree).
-fn premerge_setup(name: &str, cap: bool) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
+fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     std::fs::create_dir_all(local.join("ci")).unwrap();
@@ -647,7 +647,7 @@ fn premerge_setup(name: &str, cap: bool) -> (std::path::PathBuf, herdsman::Ctx, 
         std::fs::write(local.join("ci/cap.toml"), "[fleet.x]\nline_cap = 1\n").unwrap();
     }
     let local = local.to_string_lossy().to_string();
-    let c = ctx(&d, &CONFIG.replace("/tmp/does-not-matter/sendmeter", &local));
+    let c = ctx(&d, &(CONFIG.replace("/tmp/does-not-matter/sendmeter", &local) + extra));
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     let v = json!({"verdict": "PASS", "sha": HEAD, "round": 1});
@@ -665,7 +665,7 @@ fn premerge_fake(local: &str) -> Fake {
 
 #[test]
 fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
-    let (_d, c, local, wt) = premerge_setup("pre-cap", true);
+    let (_d, c, local, wt) = premerge_setup("pre-cap", true, "");
     let r = premerge_fake(&local).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
@@ -682,7 +682,7 @@ fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
 
 #[test]
 fn premerge_passing_merges_and_logs_its_time() {
-    let (_d, c, local, _) = premerge_setup("pre-ok", true);
+    let (_d, c, local, _) = premerge_setup("pre-ok", true, "");
     let r = premerge_fake(&local).reply("sh -c", "src lines (formatted): 10 / cap 14700\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
@@ -694,7 +694,7 @@ fn premerge_passing_merges_and_logs_its_time() {
 
 #[test]
 fn premerge_rechecks_when_staging_moved() {
-    let (_d, c, local, wt) = premerge_setup("pre-moved", true);
+    let (_d, c, local, wt) = premerge_setup("pre-moved", true, "");
     let tip = format!("git -C {local} rev-parse origin/staging");
     let r = premerge_fake(&local)
         .once(&tip, 0, "base1")
@@ -711,7 +711,7 @@ fn premerge_rechecks_when_staging_moved() {
 
 #[test]
 fn premerge_default_needs_cap_toml() {
-    let (_d, c, local, _) = premerge_setup("pre-none", false);
+    let (_d, c, local, _) = premerge_setup("pre-none", false, "");
     let r = premerge_fake(&local);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
@@ -719,4 +719,94 @@ fn premerge_default_needs_cap_toml() {
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.kind == "merged").unwrap();
     assert!(!m.data.contains_key("premerge_secs"));
+}
+
+/// #373: the issue's own example, as `[[fleet.<n>.premerge]]` tables.
+const NAMED: &str = r#"
+[[fleet.sendmeter.premerge]]
+name  = "migration-order"
+run   = "node scripts/check-migrations.mjs --base origin/staging --ledger"
+when  = ["supabase/migrations/**"]
+code  = "BACKDATED_MIGRATION"
+fix   = "Rename the migration so its version is after {min}; output: {output}"
+"#;
+
+#[test]
+fn named_premerge_skips_when_its_paths_are_unchanged() {
+    let (_d, c, local, wt) = premerge_setup("pre-when-skip", true, NAMED);
+    let diff = format!("git -C {wt} diff --name-only base1 HEAD");
+    let r = premerge_fake(&local).once(&diff, 0, "src/a.rs\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    assert!(r.called(&diff));
+    assert!(!r.called("sh -c"), "{:#?}", r.calls.borrow());
+    assert!(r.called("gh pr merge"));
+}
+
+#[test]
+fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
+    let (_d, c, local, wt) = premerge_setup("pre-when-fail", true, NAMED);
+    let o = "migration 20260101_x.sql is behind the dev ledger\nmin_version=20261104000000\nSUPABASE_ACCESS_TOKEN=sbp9f8e7d6c5b4a\n";
+    let r = premerge_fake(&local)
+        .once(
+            &format!("git -C {wt} diff --name-only base1 HEAD"),
+            0,
+            "supabase/migrations/20260101_x.sql\n",
+        )
+        .once("sh -c", 1, o);
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 3, "{out}");
+    let want = "REFUSED BACKDATED_MIGRATION: migration 20260101_x.sql is behind the dev ledger";
+    assert!(out.contains(want), "{out}");
+    assert!(r.called("sh -c cd \"$0\" && node scripts/check-migrations.mjs --base origin/staging --ledger"));
+    assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
+    let ev = read(&c.state).unwrap();
+    let st = &fold(&ev)[&("sendmeter".to_string(), 12)];
+    assert_eq!((st.state.as_str(), st.rounds), ("fix(1)", 1), "not a new review round");
+    let p = ev.iter().find(|e| e.kind == "premerge-failed").unwrap();
+    assert_eq!(
+        (p.str("name"), p.str("code")),
+        (Some("migration-order"), Some("BACKDATED_MIGRATION"))
+    );
+    let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
+    let body = v.str("body").unwrap();
+    assert!(
+        body.contains("Rename the migration so its version is after 20261104000000; output:"),
+        "{body}"
+    );
+    assert!(body.contains("is behind the dev ledger"), "{body}");
+    let log = std::fs::read_to_string(&c.state).unwrap();
+    assert!(!log.contains("sbp9f8e7d6c5b4a"), "secret in events: {log}");
+    let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
+    assert!(board.contains("migration-order failed: rename needed"), "{board}");
+}
+
+#[test]
+fn list_form_premerge_still_runs_its_checks() {
+    let (_d, c, local, wt) = premerge_setup("pre-list", false, "");
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    let cfg = cfg.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\npremerge = [\"make lint\"]",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    let r = premerge_fake(&local).once("sh -c", 2, "lint: error: unused import\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 3, "{out}");
+    assert!(
+        out.contains("REFUSED STAGING_WOULD_BREAK: make lint: lint: error: unused import"),
+        "{out}"
+    );
+    assert!(r.called("sh -c cd \"$0\" && make lint"));
+    assert!(!r.called(&format!("git -C {wt} diff")), "no `when`, no diff");
+    assert!(!r.called("gh pr merge"));
+    let p = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "premerge-failed")
+        .unwrap();
+    assert_eq!(
+        (p.str("name"), p.str("code")),
+        (Some("make lint"), Some("STAGING_WOULD_BREAK"))
+    );
 }

@@ -377,20 +377,17 @@ fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
 }
 
 /// #272: the fleet's `premerge` checks on `head` merged into current integration, in a scratch worktree; the seconds
-/// they took (`None`: no checks). Integration moving during the checks re-runs them once.
+/// they took (`None`: no checks). Integration moving during the checks re-runs them once. A failed check is a fix round.
 fn premerge(
     ctx: &Ctx,
-    f: &Fleet,
+    cfg: &Config,
     r: &dyn Runner,
+    out: &mut dyn Write,
     (fleet, issue): (&str, u64),
     head: &str,
 ) -> Result<Result<Option<u64>, Refusal>> {
-    let dir = f.local_path();
-    let cap = dir
-        .join("ci/cap.toml")
-        .exists()
-        .then(|| format!("{} cap-check --config ci/cap.toml", ctx.exe));
-    let checks = f.premerge.clone().unwrap_or_else(|| cap.into_iter().collect());
+    let f = cfg.fleet(fleet)?;
+    let checks = premerge_checks(ctx, f);
     if checks.is_empty() {
         return Ok(Ok(None));
     }
@@ -398,7 +395,7 @@ fn premerge(
         ctx.state.with_file_name(format!("premerge-{fleet}")),
         format!("origin/{}", f.integration),
     );
-    let wts = wt.to_string_lossy();
+    let (dir, wts) = (f.local_path(), wt.to_string_lossy());
     let tip = || git(r, &dir, &["fetch", "-q", "origin"]).and_then(|_| git(r, &dir, &["rev-parse", &into]));
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for _ in 0..2 {
@@ -407,29 +404,15 @@ fn premerge(
         tree(&["add", "-f", "--detach", &wts, &base])?;
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = std::time::Instant::now();
-        let fail = checks.iter().take_while(|_| clean).find_map(|c| {
-            let o = r
-                .run("sh", &argv(&["-c", &format!("cd \"$0\" && {c}"), &wts]))
-                .unwrap_or_default();
-            (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
-        });
+        let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
         let secs = t.elapsed().as_secs();
         let _ = tree(&["remove", "--force", &wts]);
         if !clean {
             return Ok(Err(refuse("NOT_MERGEABLE", format!("{head:.7} conflicts with {into}"))));
         }
         if let Some((c, o)) = fail {
-            let first = o
-                .lines()
-                .find(|l| l.contains("error"))
-                .or_else(|| o.lines().find(|l| !l.trim().is_empty()));
-            let msg = format!("{c}: {}", first.unwrap_or("failed").trim());
-            let body = format!(
-                "FAIL\n\nPremerge on {head:.7} merged with {into} @ {base:.7}, {secs}s: {msg}\n\n```\n{}\n```\n",
-                crate::lanes::mask(&o)
-            );
-            std::fs::write(premerge_file(ctx, fleet, issue), body)?;
-            return Ok(Err(refuse("STAGING_WOULD_BREAK", msg)));
+            let at = format!("{head:.7} merged with {into} @ {base:.7}, {secs}s");
+            return Err(premerge_failed(ctx, cfg, r, out, (fleet, issue), head, &at, c, &o)?.into());
         }
         if tip()? == base {
             return Ok(Ok(Some(secs)));
@@ -439,6 +422,99 @@ fn premerge(
         "STAGING_MOVED",
         format!("{into} moved during the premerge checks twice"),
     )))
+}
+
+pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<crate::config::Check> {
+    let cap =
+        (f.local_path().join("ci/cap.toml").exists()).then(|| format!("{} cap-check --config ci/cap.toml", ctx.exe));
+    let plain = || cap.into_iter().map(crate::config::Premerge::Cmd).collect();
+    f.premerge
+        .clone()
+        .unwrap_or_else(plain)
+        .iter()
+        .map(crate::config::Premerge::check)
+        .collect()
+}
+
+/// #373: the first failing check in the scratch worktree `wt` (`base` merged with the PR) and its output; a check with
+/// `when` runs only if the merge changes a path its globs match.
+pub(crate) fn run_checks<'a>(
+    r: &dyn Runner,
+    wt: &Path,
+    base: &str,
+    checks: &'a [crate::config::Check],
+) -> Option<(&'a crate::config::Check, String)> {
+    let files = if checks.iter().any(|c| !c.when.is_empty()) {
+        git(r, wt, &["diff", "--name-only", base, "HEAD"]).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let hit = |c: &&crate::config::Check| {
+        let glob = |g: &String| files.lines().any(|p| crate::config::glob(g.as_bytes(), p.as_bytes()));
+        c.when.is_empty() || c.when.iter().any(glob)
+    };
+    checks.iter().filter(hit).find_map(|c| {
+        let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
+        let o = r.run("sh", &sh).unwrap_or_default();
+        (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
+    })
+}
+
+/// #272/#373: a failed check at `head` is a FAIL verdict (a fix round briefed with its output or `fix` text, no new
+/// review round) and `premerge-failed`; returns the refusal: the check's `code` (else `STAGING_WOULD_BREAK`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn premerge_failed(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, issue): (&str, u64),
+    head: &str,
+    at: &str,
+    c: &crate::config::Check,
+    o: &str,
+) -> Result<Refusal> {
+    let o = crate::lanes::mask(o);
+    let line = |l: &&str| !l.trim().is_empty();
+    let msg = if c.code.is_some() {
+        o.lines().find(line).unwrap_or("failed").trim().to_string()
+    } else {
+        let first = o.lines().find(|l| l.contains("error")).or_else(|| o.lines().find(line));
+        format!("{}: {}", c.name, first.unwrap_or("failed").trim())
+    };
+    let lines: Vec<&str> = o.lines().collect();
+    let tail = lines[lines.len().saturating_sub(20)..].join("\n");
+    let min = o
+        .lines()
+        .find_map(|l| l.split_once("min_version="))
+        .map_or("", |m| m.1.trim());
+    let fix = c.fix.as_ref().map_or(format!("```\n{o}\n```"), |t| {
+        t.replace("{output}", &format!("\n```\n{tail}\n```\n"))
+            .replace("{min}", min)
+    });
+    let file = premerge_file(ctx, fleet, issue);
+    std::fs::write(&file, format!("FAIL\n\nPremerge on {at}: {msg}\n\n{fix}\n"))?;
+    // The card's line: `migration-order failed: rename needed` (the fix text's first word).
+    let what = c
+        .fix
+        .as_deref()
+        .and_then(|t| t.split_whitespace().next())
+        .map(str::to_lowercase);
+    let note = what.map_or(format!("{} failed", c.name), |w| {
+        format!("{} failed: {w} needed", c.name)
+    });
+    let code: &'static str = match &c.code {
+        Some(k) => Box::leak(k.clone().into_boxed_str()),
+        None => "STAGING_WOULD_BREAK",
+    };
+    let d = json!({"name": crate::lanes::mask(&c.name), "code": code, "note": crate::lanes::mask(&note)});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(issue), "premerge-failed", d),
+    )?;
+    verdict(ctx, cfg, r, out, (fleet, issue), false, head, &file.to_string_lossy())?;
+    Ok(refuse(code, msg))
 }
 
 /// #294: the serial groups (name order) `n`'s PR diff touches and it is not in yet, each with the first such file.
@@ -537,7 +613,7 @@ pub fn merge(
         res => res,
     };
     let res = match res {
-        Ok(h) => premerge(ctx, f, r, (fleet, issue), &h)?.map(|s| (h, s)),
+        Ok(h) => premerge(ctx, cfg, r, out, (fleet, issue), &h)?.map(|s| (h, s)),
         Err(rf) => Err(rf),
     };
     let (head, secs) = match res {
@@ -549,13 +625,6 @@ pub fn merge(
                 || rf.code == "CI_NOT_GREEN"
                     && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
         {
-            return Err(rf.into());
-        }
-        // #272: like red CI, a FAIL at the passed head: a fix round with the output, no new review round.
-        Err(rf) if rf.code == "STAGING_WOULD_BREAK" => {
-            let file = premerge_file(ctx, fleet, issue);
-            let h = pr["headRefOid"].as_str().unwrap_or_default();
-            verdict(ctx, cfg, r, out, (fleet, issue), false, h, &file.to_string_lossy())?;
             return Err(rf.into());
         }
         Err(rf) => {
