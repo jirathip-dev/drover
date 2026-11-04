@@ -184,11 +184,7 @@ fn unquote(cmd: &str) -> String {
                 let sink = top && words.first().is_some_and(|w| matches!(word(w), "cat" | "tee"));
                 docs.push((delim, quoted, sink));
             }
-            '#' if out
-                .chars()
-                .last()
-                .is_none_or(|l| l.is_whitespace() || ";|&()`".contains(l)) =>
-            {
+            '#' if out.is_empty() || out.ends_with(|l: char| l.is_whitespace() || ";|&()`".contains(l)) => {
                 while cs.next_if(|n| *n != '\n').is_some() {}
             }
             '\n' | ';' | '|' | '&' | '(' | ')' | '`' => {
