@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 /// Matched case-insensitively anywhere in a shipped file.
-const WORDS: [&str; 7] = [
-    "conductor",
+/// #355 made `conductor` a herdsman role, so it is no longer an install's own name.
+const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",
     "sendmeter",
@@ -14,17 +14,7 @@ const WORDS: [&str; 7] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 13] = [
-    (
-        "assets/deny_commands.toml",
-        "or ask the conductor.",
-        "#216: the owner's verbatim NO_CONTAINERS message",
-    ),
-    (
-        "docs/lanes.md",
-        "or ask the conductor.",
-        "#216: quotes the owner's verbatim NO_CONTAINERS message",
-    ),
+const EXCEPTIONS: [(&str, &str, &str); 11] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",

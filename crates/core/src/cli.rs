@@ -126,6 +126,9 @@ enum Cmd {
         /// routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)
         #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
         kind: String,
+        /// Ask in this conductor thread: its options become choice rows, the answer goes back into it
+        #[arg(long, value_name = "ID")]
+        thread: Option<String>,
     },
     /// Answer an open ask (option number or free text); prompts the asking agent `DECISION <id>: <text>`
     Answer {
@@ -135,6 +138,11 @@ enum Cmd {
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
         by: String,
+    },
+    /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
+    Thread {
+        #[command(subcommand)]
+        cmd: ThreadCmd,
     },
     /// The open asks, oldest first, with age
     Asks {
@@ -342,6 +350,31 @@ struct Scope {
 }
 
 #[derive(Subcommand)]
+enum ThreadCmd {
+    /// Start a thread for a fleet's repo (or `all`); prints its id
+    New { repo: String, title: String },
+    /// The owner's message: logged, then typed into the thread's conductor (started or resumed first)
+    Say {
+        id: String,
+        text: String,
+        /// Who wrote it, as the thread shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+    },
+    /// The conductor's reply to the owner
+    Reply { id: String, text: String },
+    /// The conversation, asks with their options; marks it read
+    Show {
+        id: String,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Per repo, its threads: title, last message, unread dot, conductor awake/asleep
+    Ls(Scope),
+}
+
+#[derive(Subcommand)]
 enum QueueCmd {
     /// Append issues to the queue (or put them on top / after N)
     Add {
@@ -457,8 +490,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`).
-pub const HELP_AGENT_MAX: usize = 222;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`).
+pub const HELP_AGENT_MAX: usize = 241;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -821,6 +854,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
                     // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.
+                    if role == "conductor" {
+                        return gate::refused("BAD_VALUE", "a conductor starts from `herdsman thread say`");
+                    }
                     if role == "orch" {
                         let why = "herdsman drives fleets itself; see herdsman timer";
                         return gate::refused("NO_ORCH", why);
@@ -847,15 +883,27 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     options,
                     recommend: n,
                     kind,
+                    thread,
                 } => {
                     let at = lane(&issue)?;
-                    crate::ask(ctx, &cfg, out, (&fleet, at), &question, &options, (n, &kind))?;
+                    let how = (n, kind.as_str(), thread.as_deref());
+                    crate::ask(ctx, &cfg, out, (&fleet, at), &question, &options, how)?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
                 Cmd::Answer { fleet, id, choice, by } => {
                     crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?;
                 }
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
+                Cmd::Thread { cmd } => match cmd {
+                    ThreadCmd::New { repo, title } => crate::conductor::new(ctx, &cfg, out, &repo, &title)?,
+                    ThreadCmd::Say { id, text, by } => {
+                        let agent = crate::conductor::say(ctx, &cfg, r, &id, &text, (&by, false))?;
+                        writeln!(out, "{id}: -> {agent}")?;
+                    }
+                    ThreadCmd::Reply { id, text } => crate::conductor::reply(ctx, &cfg, &id, &text)?,
+                    ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
+                    ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,
+                },
                 Cmd::Hosts { cmd } => match cmd {
                     None => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
