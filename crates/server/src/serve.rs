@@ -1,6 +1,8 @@
 //! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
-use crate::api::{body, Chat, Frag, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, Moment, Notice, Patch};
+use crate::api::{
+    body, BacklogIssue, Chat, Frag, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, Moment, Notice, Patch,
+};
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, fold, plain, read, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
@@ -1887,7 +1889,8 @@ impl<'a> Server<'a> {
             }
             // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
-            let mut open = bl["issues"].as_object().cloned().unwrap_or_default();
+            let mut open: BTreeMap<String, BacklogIssue> =
+                serde_json::from_value(bl["issues"].clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
             if bl["issues"].is_object() {
                 body += &format!(

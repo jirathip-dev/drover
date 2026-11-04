@@ -24,6 +24,7 @@ macro_rules! each {
             Moment,
             Frag,
             Patch,
+            BacklogIssue,
             Send,
             Answer,
             Act,
@@ -131,11 +132,29 @@ fn serde_json_fits_the_types() {
         ("Patch", json!(patch)),
         ("Moment", json!(moment)),
     ]);
+    // #365: a backlog row as `gh::backlog`'s jq writes it to the cache.
+    let issue = json!({"number": 9, "title": "t", "state": "OPEN", "created": "2026-01-01T00:00:00Z",
+        "updated": "2026-01-02T00:00:00Z", "labels": ["phone"], "ac": true, "pr": false});
+    checks.push(("BacklogIssue", same::<BacklogIssue>(&issue)));
     macro_rules! defaults {
         ($($t:ident),*) => { $( checks.push((stringify!($t), json!($t::default()))); )* };
     }
     defaults!(
-        Herd, HerdFleet, HerdLane, HerdQueued, HerdHost, Chat, Notice, Moment, Frag, Patch, Send, Answer, Act, Setup
+        Herd,
+        HerdFleet,
+        HerdLane,
+        HerdQueued,
+        HerdHost,
+        Chat,
+        Notice,
+        Moment,
+        Frag,
+        Patch,
+        BacklogIssue,
+        Send,
+        Answer,
+        Act,
+        Setup
     );
     checks.extend([
         ("HostSeen", json!(hosts::Seen::default())),

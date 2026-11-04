@@ -106,6 +106,18 @@ pub struct Patch {
     pub set: BTreeMap<String, String>,
 }
 
+/// #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.
+pub struct BacklogIssue {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub created: String,
+    pub updated: String,
+    pub labels: Vec<String>,
+    pub ac: bool,
+    pub pr: bool,
+}
+
 /// `POST /send`: a reply to lane `agent`, or to the setup pane `setup`.
 pub struct Send {
     pub agent: String,

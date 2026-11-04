@@ -36,6 +36,11 @@ export type Frag = { id: string, html: string, };
 export type Patch = { id: string, n: number, p: number, set: { [key in string]: string }, };
 
 /**
+ * #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.
+ */
+export type BacklogIssue = { number: number, title: string, state: string, created: string, updated: string, labels: Array<string>, ac: boolean, pr: boolean, };
+
+/**
  * `POST /send`: a reply to lane `agent`, or to the setup pane `setup`.
  */
 export type Send = { agent: string, setup?: string | null, text: string, };
