@@ -794,7 +794,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
         )
         .reply(
             &format!("{SSH}'cat' '{rev}/verdict.md'"),
-            "FAIL\n- blocking [code] a.rs:1\n",
+            "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
         )
         .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{head} 20"))
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")

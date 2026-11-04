@@ -18,7 +18,7 @@ queued → impl → review(n) → fix(n) → ready → merged; plus blocked, nee
 - ROUND_LIMIT: review rounds exceed [limits].review_rounds (→ needs-human). UPDATE_LIMIT: spawn --update after [limits].update_rounds (default 3) PASSed update rounds (→ needs-human)
 - CI_NOT_GREEN: a check at the head sha is missing, pending or failed
 - BAD_SHA: verdict --sha is not 40 hex chars
-- STALE_SHA: verdict --sha is not the branch head
+- STALE_SHA: verdict --sha is not the branch head. NO_PROOF: verdict FAIL: a `- blocking [<category>] file:line: what` finding lacks a `Proof:` block right under it: `Proof: run` (a fenced command, then its output; or a screenshot path) or `Proof: spec` (a `>` quoted AC, amendment or rule line, plus a `file:line`). Names each finding; notes and PASS are free-form
 - HOST_BUSY: spawn: memory pressure, sustained swap-out (with pressure) or load/cpu over [limits]; --force overrides (logged). MEM_LOW: under [limits] min_free_mem_gb memory free (default 2). DISK_LOW: under [limits] min_free_gb free (default 10); `herdsman clean --yes`. DISK_BUDGET: worktrees over [limits] worktree_budget_gb (default 25) after drive freed the idlest lanes' build folders
 - LANE_LIVE: spawn: a herdr agent is live in the worktree, or the log has an unfinished lane for it; --supersede
 - WORKTREE_DIRTY: spawn: the worktree has unpushed or uncommitted work from no known lane; --supersede

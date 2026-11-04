@@ -546,7 +546,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "worktree": w, "pane": "wR:p1", "workspace": "wR"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
-        std::fs::write(&f, "FAIL\n1. blocking\n").unwrap();
+        std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply(&format!("git -C {w} status"), status)
