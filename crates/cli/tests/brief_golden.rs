@@ -85,3 +85,31 @@ fn lane_briefs_match_staging() {
         );
     }
 }
+
+/// #360: the rev and impl briefs carry the test anti-patterns list; rev asks for the verdict's anti-patterns line.
+#[test]
+fn briefs_carry_the_test_antipatterns() {
+    let (rev, imp) = (
+        brief("ap-rev", "12", "rev", false, false),
+        brief("ap-impl", "12", "impl", false, false),
+    );
+    for w in [
+        "re-implement production logic instead of exercising it",
+        "assert only mock calls or values their own mocks supplied",
+        "a fixture that bypasses the real server path",
+        "pixel or interaction coverage from static markup",
+        "persistence at a path the code never writes",
+        "a capability flag instead of delivery or acknowledgement",
+        "without hitting the real rejection path",
+        "real time or networks instead of fake clocks",
+        "Production code added only for tests",
+    ] {
+        assert!(rev.contains(w) && imp.contains(w), "missing {w}");
+    }
+    assert!(rev.contains("## Tests that don't count"), "{rev}");
+    assert!(
+        imp.contains("## Write tests that would fail without your change"),
+        "{imp}"
+    );
+    assert!(rev.contains("`Tests checked against anti-patterns: yes`"), "{rev}");
+}
