@@ -224,16 +224,33 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     } else {
         "queue"
     };
-    let url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
+    let mut url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
     // #130: needs-human says who and why in the title; the body adds the last verdict's first finding.
     let n = ev.issue.filter(|_| ev.kind == "needs-human");
+    let kinds = ["thread-msg", "needs-decision"];
+    let thread = ev.str("thread").filter(|_| kinds.contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
-    let evs = n.map(|_| read(log)).transpose()?.unwrap_or_default();
+    let evs = if n.is_some() || thread.is_some() {
+        read(log)?
+    } else {
+        vec![]
+    };
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
-    let (title, body) = match n {
+    let (title, mut body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
         None => ("herdsman".into(), plain(ev)),
     };
+    // #386: `<repo> · <thread title>: <the reply's first line>`, or `… asks: <question>`; a tap opens the thread.
+    if let Some(t) = thread.and_then(|t| crate::conductor::find(&evs, t).ok()) {
+        let repo = if t.fleet == "all" { "all repos" } else { &t.fleet };
+        let head = format!("{repo} · {}", t.str("title").unwrap_or_default());
+        let text = ev.str("text").and_then(|x| x.lines().find(|l| !l.trim().is_empty()));
+        body = match ev.str("question") {
+            Some(q) => format!("{head} asks: {q}"),
+            None => format!("{head}: {}", text.unwrap_or_default()),
+        };
+        url = format!("?thread={}#chat", t.str("thread").unwrap_or_default());
+    }
     // #370: a device whose theme has words gets its own title (`Order up: #2957 merged`); the body stays.
     let (wk, said) = match (ev.kind.as_str(), ev.issue) {
         ("merged", Some(n)) => ("merged", format!("#{n} merged")),

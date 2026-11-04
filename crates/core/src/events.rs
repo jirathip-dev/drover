@@ -11,10 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
     #[serde(default, skip_serializing_if = "is_zero")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<u64>", optional))]
     pub seq: u64,
     pub ts: u64,
     pub fleet: String,
@@ -270,6 +272,8 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     let push = match ev.kind.as_str() {
         "needs-decision" if ev.str("kind") == Some("routine") => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
+        // #386: a conductor's reply pushes; the owner's own words and system lines never do.
+        "thread-msg" if ev.str("from") != Some("conductor") => "",
         k => k,
     };
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
@@ -374,6 +378,7 @@ fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
     }
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct IssueState {
@@ -427,6 +432,7 @@ pub fn checks(e: &Event) -> bool {
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    "lane-state",
     "budget-freed",
     "wip-saved",
     "wip-blocked",

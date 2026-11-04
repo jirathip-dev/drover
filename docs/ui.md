@@ -95,7 +95,7 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    #367: the `queue` fixture (`scripts/host-fixtures.sh`: 3 repos, 40 queued rows, a 6-step chain) at 390 and 1440 px.
    `queue-repos` fails unless a chip tap, ←, → and a sideways drag each switch repos (only the picked card shows, the pick
    stored; `[all]` only needs-you groups), the groups read `needs you (1), in progress (2), queued (40)` with the running
-   rows above the fold, the chain is one closed row `#302 → #303 · decoupling… (6 steps) · next: #400`, `+ 30 more` is
+   rows above the fold, the chain is one closed row laid out as a queued row (#391: `#302 chain · 6 #3`, its title, `▸ #302 → #307 · next: #400 (in impl)`), `+ 30 more` is
    closed, and every title line is ≥ 4.5:1 on what is under it. `queue-chain` opens both: the 6 steps (depth ≤ 2) and the
    30 rows right under their rows, every title starting at one x, and scrolled to the end the last row clears the tab bar.
    #365: `queue-backlog` opens acme-api's 100-issue backlog in that fixture and fails unless it shows `(100)` rows, a search

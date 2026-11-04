@@ -383,16 +383,22 @@ fn bad_config_and_hermes_profiles() {
         "no profile, nothing to check: {out}"
     );
 
-    write(&c.hermes.join("fleet-impl/config.yaml"), "", 0o644);
+    // #401: the default conductor (the impl role on `lane-conductor`) needs its Hermes profile too.
+    assert!(line(&out, "hermes lane-conductor").starts_with('✗'), "{out}");
+    for p in ["fleet-impl", "lane-conductor"] {
+        write(&c.hermes.join(p).join("config.yaml"), "", 0o644);
+    }
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "hermes fleet-impl").starts_with('✓'), "{out}");
     assert!(line(&out, "hermes hooks").contains("→ herdsman profiles sync"), "{out}");
 
-    let hook = format!("'{}' hook --role impl ✓ allowed", c.exe);
+    let hook = |role: &str| format!("'{}' hook --role {role} ✓ allowed", c.exe);
     let (code, out) = run(
         &c,
-        &good().reply("env HERDSMAN_LANE=demo:-:impl hermes", &hook),
+        &good()
+            .reply("env HERDSMAN_LANE=demo:-:impl hermes", &hook("impl"))
+            .reply("env HERDSMAN_LANE=demo:-:conductor hermes", &hook("conductor")),
         &["doctor"],
     );
     assert_eq!(code, 0, "{out}");

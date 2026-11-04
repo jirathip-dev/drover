@@ -17,6 +17,7 @@ pub fn role_prompt(role: &str) -> &'static str {
     match role {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
+        "conductor" => include_str!("../roles/conductor.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -114,6 +115,8 @@ pub struct Plan {
     pub title: String,
     /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
     pub resting: Option<(String, u64)>,
+    /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
+    pub session: Option<(String, bool)>,
 }
 
 impl Plan {
@@ -122,7 +125,12 @@ impl Plan {
         let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
         let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
         let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
-        c.extend(self.env.iter().map(|(k, x)| format!("{k}='{}'", v(x))));
+        // #387: `secret:<NAME>` is read from the keychain by the pane's shell, never by herdsman.
+        let fleet = self.lane.split(':').next().unwrap_or_default();
+        c.extend(self.env.iter().map(|(k, x)| match x.strip_prefix("secret:") {
+            Some(n) => format!("{k}={}", crate::secret::shell(fleet, n)),
+            None => format!("{k}='{}'", v(x)),
+        }));
         c.extend(
             self.account
                 .iter()
@@ -276,6 +284,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         head,
         title,
         resting,
+        session: None,
     })
 }
 
@@ -330,6 +339,28 @@ fn create_argv(local: &str, p: &Plan, reopen: bool) -> Vec<String> {
     }
 }
 
+/// #298: a berth lane's labels.
+fn labels(p: &Plan) -> [(&'static str, String); 4] {
+    let issue = p.lane.split(':').nth(1).unwrap_or_default().to_string();
+    let fleet = p.lane.split(':').next().unwrap_or_default().to_string();
+    [
+        ("fleet", fleet),
+        ("issue", issue),
+        ("role", p.role.clone()),
+        ("harness", p.harness.clone()),
+    ]
+}
+
+/// #298: `git worktree add` for a berth lane: its branch checked out if it exists (`have`), else made at the base.
+fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
+    let wt = p.worktree.to_string_lossy();
+    if have {
+        argv(&["-C", local, "worktree", "add", &wt, &p.branch])
+    } else {
+        argv(&["-C", local, "worktree", "add", "-b", &p.branch, &wt, &p.base])
+    }
+}
+
 /// #236: the commands as sent to the lane's host (`on`, `home`): spawn runs these same argvs.
 fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str, bool), home: Option<&str>) -> Value {
     let sent = |prog: &str, a: Vec<String>| {
@@ -341,10 +372,29 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         "git",
         argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
     )];
-    cmds.push(sent(herdr::BIN, create_argv(local, p, reopen)));
-    cmds.push(sent(herdr::BIN, home(p.lane_cmd("<pane>"))));
-    cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
-    cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
+    if on.berth().is_some() {
+        // #298: plain git makes the worktree; the lane is berth terminal `<agent>`, its shell typed into.
+        let pane = p.agent.as_str();
+        cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+        let run = herdr::Berth::run_params(pane, &labels(p), &p.worktree.to_string_lossy());
+        cmds.push(sent("berth", argv(&["run", &json!(run).to_string()])));
+        let typed = [
+            home(p.lane_cmd(pane)),
+            herdr::typed(pane, &home(p.start_cmd(ctx, pane))),
+        ];
+        let shown = |a: Vec<String>| herdr::berth_line(&a)[1..].to_vec();
+        cmds.extend(
+            typed
+                .into_iter()
+                .chain(p.kick_cmds(pane))
+                .map(|a| sent("berth", shown(a))),
+        );
+    } else {
+        cmds.push(sent(herdr::BIN, create_argv(local, p, reopen)));
+        cmds.push(sent(herdr::BIN, home(p.lane_cmd("<pane>"))));
+        cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
+        cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
+    }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base, "account": p.account.as_ref().map(|a| &a.0),
@@ -507,6 +557,7 @@ pub fn spawn(
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;
+    let bt = r.berth().map(herdr::Berth);
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     // Duplicate guard.
@@ -637,7 +688,21 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let created = herdr::json(r, &create_argv(&local, &p, reopen))?;
+        let created = match bt {
+            None => herdr::json(r, &create_argv(&local, &p, reopen))?,
+            Some(_) if reopen => Value::Null,
+            Some(_) => {
+                let have = r
+                    .run(
+                        "git",
+                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
+                    )?
+                    .code
+                    == 0;
+                ok(r, "git", &worktree_add(&local, &p, have))?;
+                Value::Null
+            }
+        };
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
             if reopen {
@@ -675,8 +740,11 @@ pub fn spawn(
         )
     };
     let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);
-    let mut ws = wsid(created).context("herdr: no workspace_id")?;
-    herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
+    let mut ws = String::new();
+    if bt.is_none() {
+        ws = wsid(created).context("herdr: no workspace_id")?;
+        herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
+    }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
@@ -687,76 +755,90 @@ pub fn spawn(
         }
         x => x,
     };
-    let mut pane = pick(&mut ws, None)?;
+    let mut pane = if bt.is_some() {
+        p.agent.clone()
+    } else {
+        pick(&mut ws, None)?
+    };
     // #376: logged before the harness starts, so a crash before `spawn` leaves a lane the next step adopts.
     let host = placed.as_ref().map(|pl| (&pl.name, &pl.machine));
     let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
-    herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-    let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-    // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
-    if herdr::failed_with(&start, "agent_pane_busy") {
-        // #327: pane ids are per host: only a lane spawned on this one left this pane.
-        let lane = events
-            .iter()
-            .any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane) && e.str("machine") == on.machine);
-        let closed = lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
-        event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
-        pane = pick(&mut ws, Some(&pane))?;
-        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-        start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-    }
-    // #275/#359: under load (or over `--machine`) the start can give up (timeout, name lost, launch pending) while the
-    // harness still comes up: confirm the pane over a window; one that never confirms is closed and started once more.
-    let soft = |s: &Out| s.code != 0 && SOFT.iter().any(|c| herdr::failed_with(s, c));
-    let mut late = soft(&start) && confirm(r, h, &pane);
-    if soft(&start) && !late {
-        let _ = herdr::close(r, &pane);
-        pane = pick(&mut ws, Some(&pane))?;
-        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-        start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-        late = soft(&start) && confirm(r, h, &pane);
-    }
-    if start.code != 0 {
-        let taken = herdr::failed_with(&start, "agent_name_taken");
-        if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
-            return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
+    if let Some(b) = &bt {
+        // #298: the lane's terminal, then its exports and harness typed into its shell (as into a herdr pane).
+        b.start(r, &pane, &labels(&p), &wt)?;
+        if b.0.acp.is_none() {
+            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+            herdr::ok(r, &herdr::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
         }
-        // #182: any failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
-        let why = if late {
-            herdr::rename(r, &pane, &p.agent).err().map(|e| format!("{e:#}"))
-        } else if soft(&start) {
-            Some(format!("no harness came up in 120 s: {}", start.stderr.trim()))
-        } else {
-            Some(format!("herdr agent start failed: {}", start.stderr.trim()))
-        };
-        if let Some(why) = why {
-            // #302: a harness[:account] that failed to start twice in a row rests (`[limits] fallback_rest_minutes`).
-            let mine = |k: &str, e: &Event| e.is(k, fleet, issue) && e.str("agent") == Some(&p.agent);
-            let acct = p.account.as_ref().map(|a| a.0.as_str());
-            let same = |e: &Event| e.str("harness") == Some(&p.harness) && e.str("account") == acct;
-            let twice = events
+    } else {
+        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+        let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
+        // #168: `agent_pane_busy` is transient: close the pane if a finished lane left it, then retry once on a fresh one.
+        if herdr::failed_with(&start, "agent_pane_busy") {
+            // #327: pane ids are per host: only a lane spawned on this one left this pane.
+            let lane = events
                 .iter()
-                .rev()
-                .take_while(|e| !mine("spawn", e))
-                .any(|e| mine("spawn-failed", e) && same(e));
-            let until = ctx.now + cfg.limits.fallback_rest_minutes * 60;
-            let kind = ["spawn-failed", "agent-unavailable"][usize::from(twice)];
-            let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start"});
-            if chain {
-                event(kind, d)?;
-            }
-            // #236: on another host the half-made workspace goes too (nobody there would close it).
-            if on.machine.is_some() {
-                let _ = herdr::workspace_close(r, &ws);
-                bail!("{why}; closed workspace {ws}");
-            }
-            let _ = herdr::close(r, &pane);
-            bail!("{why}; closed pane {pane}");
+                .any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane) && e.str("machine") == on.machine);
+            let closed =
+                lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
+            event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
+            pane = pick(&mut ws, Some(&pane))?;
+            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+            start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
         }
-        event("spawn-adopted", json!({"agent": p.agent, "pane": pane}))?;
+        // #275/#359: under load (or over `--machine`) the start can give up (timeout, name lost, launch pending) while the
+        // harness still comes up: confirm the pane over a window; one that never confirms is closed and started once more.
+        let soft = |s: &Out| s.code != 0 && SOFT.iter().any(|c| herdr::failed_with(s, c));
+        let mut late = soft(&start) && confirm(r, h, &pane);
+        if soft(&start) && !late {
+            let _ = herdr::close(r, &pane);
+            pane = pick(&mut ws, Some(&pane))?;
+            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
+            start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
+            late = soft(&start) && confirm(r, h, &pane);
+        }
+        if start.code != 0 {
+            let taken = herdr::failed_with(&start, "agent_name_taken");
+            if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
+                return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
+            }
+            // #182: any failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
+            let why = if late {
+                herdr::rename(r, &pane, &p.agent).err().map(|e| format!("{e:#}"))
+            } else if soft(&start) {
+                Some(format!("no harness came up in 120 s: {}", start.stderr.trim()))
+            } else {
+                Some(format!("herdr agent start failed: {}", start.stderr.trim()))
+            };
+            if let Some(why) = why {
+                // #302: a harness[:account] that failed to start twice in a row rests (`[limits] fallback_rest_minutes`).
+                let mine = |k: &str, e: &Event| e.is(k, fleet, issue) && e.str("agent") == Some(&p.agent);
+                let acct = p.account.as_ref().map(|a| a.0.as_str());
+                let same = |e: &Event| e.str("harness") == Some(&p.harness) && e.str("account") == acct;
+                let twice = events
+                    .iter()
+                    .rev()
+                    .take_while(|e| !mine("spawn", e))
+                    .any(|e| mine("spawn-failed", e) && same(e));
+                let until = ctx.now + cfg.limits.fallback_rest_minutes * 60;
+                let kind = ["spawn-failed", "agent-unavailable"][usize::from(twice)];
+                let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start"});
+                if chain {
+                    event(kind, d)?;
+                }
+                // #236: on another host the half-made workspace goes too (nobody there would close it).
+                if on.machine.is_some() {
+                    let _ = herdr::workspace_close(r, &ws);
+                    bail!("{why}; closed workspace {ws}");
+                }
+                let _ = herdr::close(r, &pane);
+                bail!("{why}; closed pane {pane}");
+            }
+            event("spawn-adopted", json!({"agent": p.agent, "pane": pane}))?;
+        }
     }
     // #185: a new lane's clone runs beside the kick and pane clean-up, once the lane has started; a failure is logged.
     let mut dirs: Vec<String> = f.clone_build.clone();
@@ -771,8 +853,14 @@ pub fn spawn(
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| clone_build(r, dirs, &f.local_path(), &p.worktree));
         let res = (|| -> Result<bool> {
-            let kicked = h.kick(r, &p, &pane);
+            let kicked = match bt.as_ref().filter(|b| b.0.acp.is_some()) {
+                Some(b) => b.kick_acp(r, &pane, &p.kick),
+                None => h.kick(r, &p, &pane),
+            };
             let mut d = lane_data(&p, &pane, &ws);
+            if bt.is_some() {
+                d["runtime"] = json!("berth");
+            }
             d["confirmed"] = json!(kicked.as_ref().is_ok_and(|c| *c));
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
             d["update"] = json!(o.update);
@@ -815,6 +903,9 @@ pub fn spawn(
     }
     res
 }
+
+/// #393: the longest a spawn runs between `spawn-started` and `spawn`: the start and two confirm windows.
+const SPAWN_SECS: u64 = 3 * herdr::CONFIRM_SECS;
 
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
@@ -1114,14 +1205,18 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
 /// verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`).
 /// True when it logged any.
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
+    // #393: the log is read after the (slow, remote) listing, so a lane spawned meanwhile is logged.
+    let agents = crate::hosts::all_agents(cfg, seen)?;
     let events = read(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
-    for a in crate::hosts::all_agents(cfg, seen)? {
+    for a in agents {
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
         let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
-        let logged = events.iter().filter(|e| e.kind == "spawn").any(|e| at(&e));
+        // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
+        let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
+        let logged = events.iter().filter(|e| e.kind == "spawn" || young(e)).any(|e| at(&e));
         let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
             continue;
         };

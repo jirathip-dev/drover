@@ -167,7 +167,8 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// `herdsman spawn … design` (or pre-rename `fleet`), `setup` and `serve approve|unpair|devices --revoke`: owner-only.
+/// `herdsman spawn … design` (or pre-rename `fleet`), `setup`, `serve approve|unpair|devices --revoke`, `config
+/// apply|discard` and `secret ls|rm`: owner-only.
 fn design_spawn(t: &[&str]) -> Option<String> {
     let i = t
         .iter()
@@ -175,6 +176,15 @@ fn design_spawn(t: &[&str]) -> Option<String> {
     let r = &t[i + 1..];
     if r.first() == Some(&"serve") && ["approve", "unpair", "--revoke"].iter().any(|w| r.contains(w)) {
         return Some("REFUSED OWNER_ONLY: only the owner pairs or unpairs devices, never a lane (#288)".into());
+    }
+    if matches!(
+        (r.first(), r.get(1)),
+        (Some(&"config"), Some(&("apply" | "discard"))) | (Some(&"secret"), Some(&("ls" | "rm")))
+    ) {
+        return Some(
+            "REFUSED OWNER_ONLY: only the owner applies config or lists and removes secrets, never a lane (#387)"
+                .into(),
+        );
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
@@ -291,6 +301,35 @@ pub fn push_dir(input: &Value) -> Option<String> {
         })
 }
 
+/// #386: a shell call's command when it runs `herdsman` or `gh` (but `herdsman thread reply`, which is the reply
+/// itself): a conductor's tool row in its thread.
+pub fn fleet_cmd(input: &Value) -> Option<&str> {
+    let tool = input["tool_name"].as_str().unwrap_or_default();
+    let cmd = tool_input(input)["command"].as_str()?.trim();
+    let first = cmd.split_whitespace().next().map(word)?;
+    (dialects().any(|d| d.shell == tool) && ["herdsman", "gh"].contains(&first) && !cmd.contains("thread reply"))
+        .then_some(cmd)
+}
+
+/// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
+pub fn issue_filed(input: &Value) -> Option<String> {
+    let cmd = fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let title = [" -t ", " --title ", " --title="].iter().find_map(|f| {
+        let rest = &cmd[cmd.find(f)? + f.len()..];
+        let q = rest.chars().next().filter(|c| matches!(c, '"' | '\''));
+        let rest = q.map_or(rest, |q| &rest[q.len_utf8()..]);
+        let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
+        Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
+    });
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let n = res.split("/issues/").nth(1).and_then(|r| {
+        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
+        d.parse().ok()
+    });
+    let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
+    title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
+}
+
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
     const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];
@@ -319,6 +358,17 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// #298: the state a hook call reports to berth: `done` at a turn's end, `blocked` while the harness waits on a person,
+/// else `working`.
+pub fn reported(input: &Value) -> Option<&'static str> {
+    let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
+    Some(match dialects().find(|d| d.stop == ev || d.blocked == ev) {
+        Some(d) if d.stop == ev => "done",
+        Some(_) => "blocked",
+        None => "working",
+    })
 }
 
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).

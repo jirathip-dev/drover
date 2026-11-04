@@ -51,6 +51,8 @@ pub struct Dialect {
     pub edits: &'static [&'static str],
     pub post: &'static str,
     pub stop: &'static str,
+    /// #298: its `hook_event_name` while it waits on a person (none: "").
+    pub blocked: &'static str,
     pub deny: fn(&str) -> Value,
 }
 
@@ -99,6 +101,10 @@ pub trait Harness: Sync {
     /// herdr argv that launches the harness in `pane` (generic: its name typed into the lane's shell).
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         herdr::run_argv(pane, &[&p.harness])
+    }
+    /// #355: `start_cmd` honours `Plan::session` (start it, or resume it with its conversation).
+    fn resumes(&self) -> bool {
+        false
     }
     /// herdr commands that settle the harness, deliver the kick and confirm it landed.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {

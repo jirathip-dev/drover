@@ -25,6 +25,60 @@ pub struct Config {
     pub hosts: BTreeMap<String, HostCfg>,
     /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
+    /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
+    pub runtime: Runtime,
+    /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
+    pub conductor: ConductorCfg,
+    /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
+    pub telegram: Telegram,
+}
+
+/// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
+#[derive(Debug, Default, Deserialize)]
+pub struct Telegram {
+    pub chat: Option<i64>,
+    pub owner: Option<i64>,
+    pub api: Option<String>,
+}
+
+/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
+/// root of the per-thread working folders (default `<state dir>/conductor`).
+#[derive(Debug, Default, Deserialize)]
+pub struct ConductorCfg {
+    pub dir: Option<String>,
+    pub instructions: Option<String>,
+    pub skills: Option<String>,
+    pub memory: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeKind {
+    #[default]
+    Herdr,
+    Berth,
+}
+
+/// #298: `kind`, herdr or berth; berth's `socket` (default its per-user one), and an ACP agent id its lanes run
+/// instead of the harness's terminal UI (`berth run --acp`), with berth's permission `acp_policy` (default `ask`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Runtime {
+    pub kind: RuntimeKind,
+    pub socket: Option<String>,
+    pub acp: Option<String>,
+    pub acp_policy: Option<String>,
+}
+
+impl Runtime {
+    /// The berth runtime, when it is the kind.
+    pub fn berth(&self) -> Option<crate::berth::Berth> {
+        (self.kind == RuntimeKind::Berth).then(|| crate::berth::Berth {
+            wire: crate::berth::Wire::Socket(self.socket.as_deref().map_or_else(crate::berth::default_socket, expand)),
+            acp: self.acp.clone(),
+            policy: self.acp_policy.clone().unwrap_or_else(|| "ask".into()),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,6 +359,9 @@ pub struct Role {
     pub needs: Vec<String>,
     /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
+    /// #401: the default conductor `Config::parse` adds for a fleet without one: its impl role on `lane-conductor`.
+    #[serde(skip)]
+    pub default: bool,
 }
 
 impl Role {
@@ -457,6 +514,7 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "thread-msg",
     "blocked",
     "stall",
     "lane-dead",
@@ -501,6 +559,13 @@ impl Config {
                 format!("{k} looks like a secret; keep keys in an env file (docs/providers.md)"),
             );
         }
+        let env = c.fleet.iter().flat_map(|(n, f)| f.env.values().map(move |v| (n, v)));
+        if let Some((n, v)) = env
+            .filter_map(|(n, v)| Some((n, v.strip_prefix("secret:")?)))
+            .find(|v| !crate::secret::name_ok(v.1))
+        {
+            bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
+        }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");
         }
@@ -541,6 +606,14 @@ impl Config {
             f.pipeline = Some(p);
         }
         for (name, f) in &mut c.fleet {
+            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("conductor")) {
+                let r = Role {
+                    profile: Some("lane-conductor".into()),
+                    default: true,
+                    ..r.clone()
+                };
+                f.role.insert("conductor".into(), r);
+            }
             if !f.serial_paths.is_empty() {
                 if !f.serial.is_empty() {
                     bail!("fleet.{name}: serial_paths and [[fleet.{name}.serial]] together; keep one");
@@ -642,6 +715,7 @@ impl Fleet {
     pub fn family(&self, role: &str) -> &'static str {
         match role {
             "design" => "design",
+            "conductor" => "conductor",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }

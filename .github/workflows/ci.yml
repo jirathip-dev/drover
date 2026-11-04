@@ -26,7 +26,7 @@ jobs:
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|herdsman-core|herdsman-server' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|berth-proto|herdsman-core|herdsman-server' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
       - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
         run: |
@@ -39,6 +39,19 @@ jobs:
         run: |
           bad=$(grep -rniE 'claude|anthropic' crates/*/src | grep -v '^crates/core/src/harness/' | grep -vE '^[^:]+:[0-9]+: *//' | grep -v 'const AI:' || true)
           test -z "$bad" || { echo "harness named outside crates/core/src/harness/: $bad"; exit 1; }
+      - name: "release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)"
+        run: "! cargo tree --locked -p herdsman -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: "TS types (#375): regenerate, no drift from assets/types/, serde's JSON type-checks with tsc, no hand-written copies"
+        run: |
+          npm install -g typescript@7.0.2
+          just types
+          git diff --exit-code assets/types/ || { echo "::error::assets/types/ is stale: run \`just types\` and commit it"; exit 1; }
+          test -z "$(git status --porcelain assets/types/)" || { echo "::error::untracked file in assets/types/: run \`just types\`"; exit 1; }
+          cargo test --locked -p herdsman-server --features ts serde_json_fits_the_types
+          just types-lint
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
@@ -46,6 +59,31 @@ jobs:
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
+
+  # #265: the TypeScript board (web/): strict typecheck, the esbuild bundle, and the committed dist must match it.
+  # Node is CI's and developers' only: the binary embeds the committed web/dist, so `cargo install` needs no Node.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: install (pinned typescript + esbuild, package-lock.json)
+        run: npm ci --no-audit --no-fund
+      - name: typecheck (tsc --strict --noEmit)
+        run: npm run check
+      - name: build, and the committed dist is that build
+        run: |
+          npm run build
+          git diff --exit-code -- dist || { echo "::error::web/dist is stale: run \`npm run build\` in web/ and commit"; exit 1; }
+          test -z "$(git status --porcelain -- dist)" || { echo "::error::web/dist has uncommitted files"; exit 1; }
+      - name: web TypeScript lines (soft budget, reported only; #265 Q5)
+        run: |
+          echo "web/src TypeScript lines: $(cat src/*.ts | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # #63 gate 2 (docs/ui.md): headless Chrome (preinstalled on ubuntu-latest) audits the demo at 390 px.
   ui:
@@ -69,6 +107,8 @@ jobs:
           echo "CHROME=$c" >> "$GITHUB_ENV"
       - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
+      - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
+        run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
       - uses: actions/upload-artifact@v4
         if: always()
         with:

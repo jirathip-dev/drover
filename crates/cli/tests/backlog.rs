@@ -310,3 +310,75 @@ fn rows_search_filters_and_ticks_in_serve_js() {
         ])
     );
 }
+
+/// #391 in headless Chrome (`CHROME`, the ui job's chrome-headless-shell; skipped without it): the real server
+/// (`serve_on`), a backlog and a 3-step chain. The backlog draws its count, rows, search and quick filters on a fresh
+/// load, after a `/live` patch, and on a page that carried the Lanes tab only, with no uncaught error. A `build` of
+/// another build reloads the page once; its own build none. The stream's first event names the server's build.
+#[test]
+fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
+    let Some(chrome) = std::env::var_os("CHROME") else {
+        eprintln!("skipping: no CHROME here");
+        return;
+    };
+    let c = ctx(&tmpdir("backlog-live"), CONFIG);
+    let r = agents().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30", "31", "32", "33"]).0, 0);
+    for (n, on) in [(31, 30), (32, 31)] {
+        let (n, on) = (n.to_string(), on.to_string());
+        assert_eq!(run(&c, &r, &["queue", "sendmeter", "block", "--on", &on, &n]).0, 0);
+    }
+    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &agents(), l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    std::io::Write::write_all(&mut s, format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
+    let mut head = [0; 160];
+    let n = std::io::Read::read(&mut s, &mut head).unwrap();
+    let head = String::from_utf8_lossy(&head[..n]).into_owned();
+    let page = String::from_utf8_lossy(
+        &Server::new(&c, &r, Some(addr.to_string())).respond(&format!("GET / HTTP/1.1\r\nHost: {addr}\r\n\r\n"), NOW),
+    )
+    .into_owned();
+    let ver = &page[page.find("serve.js").unwrap() - 9..page.find("serve.js").unwrap() - 1];
+    assert!(
+        head.contains(&format!(": ping\n\nevent: build\ndata: {ver}\n\n")),
+        "{head}"
+    );
+    drop(s);
+    let line = |n: u64, t: u64| {
+        json!({"ts": t, "fleet": "sendmeter", "type": "queue", "op": "add", "issues": [n]}).to_string()
+    };
+    let now = herdsman::now();
+    let o = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/live.mjs"))
+        .args([
+            chrome.as_os_str(),
+            format!("http://{addr}/").as_ref(),
+            c.state.as_os_str(),
+        ])
+        .args([line(40, now), line(41, now + 1)])
+        .output()
+        .unwrap();
+    let out: Value =
+        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&o.stderr)));
+    let drawn = json!([{"count": "(5)", "rows": 5, "search": 1, "chips": 5, "flex": "flex"}]);
+    assert_eq!(out["failed"], Value::Null, "{out}");
+    assert_eq!(out["fresh"], drawn, "fresh load: {out}");
+    assert_eq!(
+        (&out["frag"], &out["patched"]),
+        (&json!(true), &json!(true)),
+        "a frag, then a patch: {out}"
+    );
+    assert_eq!(out["after_patch"], drawn, "after a /live patch: {out}");
+    assert_eq!(out["reloads"], json!([0, 1, 0]), "{out}");
+    assert_eq!(
+        (&out["served_queue"], &out["tab"]),
+        (&json!(false), &json!("queue")),
+        "{out}"
+    );
+    assert_eq!(out["other_tab"], drawn, "a page that carried another tab: {out}");
+    assert_eq!(out["errors"], json!([]), "{out}");
+}
