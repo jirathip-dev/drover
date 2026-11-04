@@ -513,3 +513,14 @@ fn the_only_fast_first_landing_is_the_culprit_beside_full_first_ones() {
     let o = event(&c, "revert-opened").expect("revert");
     assert_eq!((o.issue, o.str("culprit")), (Some(13), Some("m2")));
 }
+
+#[test]
+fn doctor_warns_on_an_unknown_mode() {
+    let (d, _) = setup("land-doctor-mode", true, HEAD);
+    let text = std::fs::read_to_string(d.join("config/fleet.toml")).unwrap();
+    let c = ctx(&d, &text.replace("mode = \"fast-first\"", "mode = \"fast_first\""));
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
+    assert!(out.contains("! land sendmeter — mode `fast_first` is unknown"), "{out}");
+    let (_, c) = setup("land-doctor-mode-ok", true, HEAD);
+    assert!(!run(&c, &Fake::default(), &["doctor"]).1.contains("is unknown"));
+}

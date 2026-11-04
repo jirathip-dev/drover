@@ -60,6 +60,17 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
+        // #350: an unknown `mode` silently means full-first.
+        if let Some(m) = fleet
+            .land
+            .as_ref()
+            .map(|l| l.mode.as_str())
+            .filter(|m| !["", "full-first", "fast-first"].contains(m))
+        {
+            rows.push(format!(
+                "! land {name} — mode `{m}` is unknown, landing full-first → \"fast-first\" or \"full-first\""
+            ));
+        }
         // #350: each `fast` check must be one the repo's PRs report.
         if let Some(l) = fleet.fast_first() {
             if l.fast.is_empty() {
