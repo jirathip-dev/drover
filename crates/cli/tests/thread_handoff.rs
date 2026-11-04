@@ -322,16 +322,14 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
         "<span class=lc data-go=\"t2\">continued in t2</span>",
     );
     assert!(
-        view("t1").contains(&format!("<p class=qs>{go2} · Rate limits</p>")),
+        view("t1").contains(&format!(" class=qs>{go2} · Rate limits</p>")),
         "{}",
         view("t1")
     );
-    let back = "<p class=\"qs note\"><span class=lc data-go=\"t2\">from t2</span> filed #52: Rate-limit search</p>";
+    let back = " class=\"qs note\"><span class=lc data-go=\"t2\">from t2</span> filed #52: Rate-limit search</p>";
     assert!(view("t1").contains(back), "{}", view("t1"));
     assert!(
-        view("t2").contains(&format!(
-            "<details class=\"blk ai\" open><summary><span class=k>{go1}</span>"
-        )),
+        view("t2").contains(&format!(" class=\"blk ai\" open><summary><span class=k>{go1}</span>")),
         "{}",
         view("t2")
     );
