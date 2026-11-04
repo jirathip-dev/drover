@@ -248,8 +248,17 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
-    if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
-        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
+    let low =
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
+    let bound = |p: &Event| {
+        ev.iter()
+            .rev()
+            .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
+    };
+    let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
+    if n_live >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -976,7 +985,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if KICK.get().is_none()
         && events
             .iter()
-            .filter(|e| e.kind == "spawn" && e.fleet == fleet)
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
             .filter(merged)
             .any(|e| left(&e))
     {
