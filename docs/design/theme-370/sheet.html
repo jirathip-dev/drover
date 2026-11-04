@@ -106,9 +106,9 @@ for (const t of ['farm', 'kitchen']) {
 html += `<section class=t data-t=terminal><h2>terminal</h2><p>No <code>words</code>, <code>row_sprites: false</code>, <code>moments: false</code>: every label is today's plain word, the rows keep their glyphs, no loop, no moment, push text as today. shoot.mjs compares each terminal fixture with today's export pixel for pixel (report.json <code>terminal</code>).</p>
 <div class=crops>${['queue', 'lanes', 'events'].map(x => `<figure><img src="shots/parts/empty-terminal-${x}.png" alt=""><figcaption>empty ${x}: today's line</figcaption></figure>`).join('')}</div></section>`;
 // 7. push
-const P = [['farm', 'Over the fence: #2957 merged', 'synergy #2957 merged → staging 8ed4a06 (PR #2960)', 'At the gate: synergy #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
-  ['kitchen', 'Order up: #2957 merged', 'synergy #2957 merged → staging 8ed4a06 (PR #2960)', 'The bell: synergy #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
-  ['terminal', 'herdsman', 'synergy #2957 merged → staging 8ed4a06 (PR #2960)', '#2961 needs you: review rounds ran out (4/3)', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off']];
+const P = [['farm', 'Over the fence: #2957 merged', 'api #2957 merged → staging 8ed4a06 (PR #2960)', 'At the gate: api #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
+  ['kitchen', 'Order up: #2957 merged', 'api #2957 merged → staging 8ed4a06 (PR #2960)', 'The bell: api #2961 needs you', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off'],
+  ['terminal', 'herdsman', 'api #2957 merged → staging 8ed4a06 (PR #2960)', '#2961 needs you: review rounds ran out (4/3)', 'review rounds ran out (4/3)\nhost.rs: the retry loop never backs off']];
 const icon = t => t === 'farm' ? '../../../assets/icon-180.png' : `../../../assets/themes/${t}/icon-180.png`;
 html += `<section class=t data-t=terminal><h2>7 · push: each phone's own theme (the theme it had when it turned alerts on, sent again when it switches)</h2><div class=crops>`;
 for (const [t, mt, mb, nt, nb] of P) html += `<figure><div class=lock><div class=push>

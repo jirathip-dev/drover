@@ -149,8 +149,8 @@ The loading overlay keeps #337's sprite (already the cook / the trot) and adds t
 | event | farm | kitchen | terminal (today's, unchanged) |
 |---|---|---|---|
 | merged | `Over the fence: #2957 merged` | `Order up: #2957 merged` | `herdsman` |
-| needs-human | `At the gate: synergy #2961 needs you` | `The bell: synergy #2961 needs you` | `#2961 needs you: <why>` |
-| needs-decision (owner ask) | `At the gate: synergy #2961 needs you` | `The bell: synergy #2961 needs you` | `herdsman` |
+| needs-human | `At the gate: api #2961 needs you` | `The bell: api #2961 needs you` | `#2961 needs you: <why>` |
+| needs-decision (owner ask) | `At the gate: api #2961 needs you` | `The bell: api #2961 needs you` | `herdsman` |
 
 Only the title changes. The body stays today's (`plain(ev)`; for needs-human, the why and the first finding).
 

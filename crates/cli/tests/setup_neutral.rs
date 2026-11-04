@@ -14,7 +14,7 @@ const WORDS: [&str; 7] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 13] = [
+const EXCEPTIONS: [(&str, &str, &str); 14] = [
     (
         "assets/deny_commands.toml",
         "or ask the conductor.",
@@ -49,6 +49,11 @@ const EXCEPTIONS: [(&str, &str, &str); 13] = [
         "docs/design/farm-v2/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "#242: MIT notice of the ported Corral horses",
+    ),
+    (
+        "docs/design/theme-370/proposed/farm/sprites.svg",
+        "(c) 2026 jirathip-dev, MIT",
+        "#370: MIT notice of the ported Corral horses",
     ),
     (
         "docs/design/farm-v2/README.md",
