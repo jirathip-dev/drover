@@ -391,4 +391,29 @@ fn stats_land_reports_both_modes() {
     assert!(out.contains("sendmeter fast-first: 1 landed"), "{out}");
     assert!(out.contains("sendmeter full-first: 1 landed"), "{out}");
     assert!(out.contains("integration red (landings paused): 0 min"), "{out}");
+    // One landing over two days is half a landing a day, not 0.
+    let c = herdsman::Ctx {
+        now: 100 + 2 * 86_400,
+        ..c
+    };
+    let (_, out) = run(&c, &Fake::default(), &["stats", "land", "sendmeter"]);
+    assert!(out.contains("1 landed · 0.5/day"), "{out}");
+}
+
+#[test]
+fn a_revert_that_does_not_apply_is_logged_and_alerted_once() {
+    let (d, c) = setup("land-revert-failed", true, HEAD);
+    landed(&c, &[(12, "fast-first", "m1")]);
+    // Only the repo's own git works: `git revert` in the revert worktree conflicts (unscripted = exit 1).
+    let r = integration("m1", &[("m1", red())]).reply(&format!("git -C {DIR}"), "");
+    let out = watch(&c, &r);
+    assert!(out.contains("revert of m1 failed"), "{out}");
+    assert!(!r.called("gh pr create"));
+    let e = event(&c, "revert-failed").expect("revert-failed");
+    assert_eq!(e.str("culprit"), Some("m1"));
+    let alerts = std::fs::read_to_string(d.join("alerts.txt")).unwrap();
+    assert!(alerts.contains("revert-failed"), "{alerts}");
+    // The next watch tries no second revert.
+    watch(&c, &r);
+    assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
 }

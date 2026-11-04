@@ -62,6 +62,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
         // #350: each `fast` check must be one the repo's PRs report.
         if let Some(l) = fleet.fast_first() {
+            if l.fast.is_empty() {
+                rows.push(format!(
+                    "! land {name} — fast = [] gates every check → list [fleet.{name}.land] fast"
+                ));
+            }
             let jq = ".[].statusCheckRollup[] | .name // .context";
             let a = [
                 "pr",

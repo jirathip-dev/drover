@@ -49,7 +49,8 @@ pub fn note(events: &[Event], fleet: &str, n: u64) -> Option<String> {
     (e.str("mode") == Some("fast-first") && !green).then(|| "landed (fast) · full suite running".into())
 }
 
-/// Swap-if-unchanged: integration's tip is in `head`, so the fast checks ran against what it lands on.
+/// Swap-if-unchanged: integration's tip is in `head`, so the fast checks ran against what it lands on. Only the head
+/// is pinned (`--match-head-commit`): integration moving between this check and the merge is a small window left open.
 pub fn based(r: &dyn Runner, f: &Fleet, head: &str) -> bool {
     let (dir, tip) = (f.local_path(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"]).is_ok()
@@ -192,7 +193,12 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         )
     });
     let _ = tree(&["remove", "--force", &wts]);
-    pushed?;
+    if let Err(e) = pushed {
+        // A conflicting revert (later landings on top) or a culprit that is no merge commit: said once, left to a human.
+        writeln!(out, "{fleet} #{n} revert of {sha:.7} failed: {e:#}")?;
+        (d["reason"], d["error"]) = (json!(format!("revert of {sha:.7} failed")), json!(format!("{e:#}")));
+        return log(Some(n), "revert-failed", d);
+    }
     let title = format!("Revert #{n}: `{job}` red on {}", f.integration);
     let body = format!(
         "Fast-first landing (#350): the full suite went red at {tip:.7} (`{job}`); this reverts #{n}'s landing {sha:.7}."
@@ -314,17 +320,18 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
                 .find(|e| e.ts <= l.ts && e.issue == l.issue && e.str("verdict") == Some("PASS"));
             v.map(|v| l.ts - v.ts)
         };
-        let days = lands
-            .first()
-            .map_or(1, |l| (ctx.now.saturating_sub(l.ts) / 86_400).max(1));
+        // Tenths of a landing per day, over at least a day.
+        let span = lands.first().map_or(1, |l| ctx.now.saturating_sub(l.ts).max(86_400));
+        let day = lands.len() as u64 * 864_000 / span;
         let secs = lands
             .iter()
             .filter_map(|l| l.data.get("checks_secs").and_then(Value::as_u64));
         writeln!(
             out,
-            "{fleet} {mode}: {} landed · {}/day · median PASS → landed {} · {} {back} · median checks {}",
+            "{fleet} {mode}: {} landed · {}.{}/day · median PASS → landed {} · {} {back} · median checks {}",
             lands.len(),
-            lands.len() as u64 / days,
+            day / 10,
+            day % 10,
             median(lands.iter().filter_map(|l| pass(l)).collect()),
             ev.iter().filter(|e| e.kind == back).count(),
             median(secs.collect()),
