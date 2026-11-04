@@ -290,7 +290,8 @@ logged, printed or served; the page gets only the public key and each device's l
 
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
-client). CI's deps gate fails on any other direct dependency.
+client), and, for the berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md). CI's
+deps gate fails on any other direct dependency.
 
 ## Host tab (#141)
 

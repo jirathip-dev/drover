@@ -527,6 +527,12 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
+    // #298: `[runtime] kind = "berth"`: lanes start, and are reached, on berth.
+    let with = Config::load(&ctx.config)
+        .ok()
+        .and_then(|c| c.runtime.berth())
+        .map(|b| crate::berth::With(r, b));
+    let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
         Some(o) => o.map(|o| {
             let _ = write!(out, "{}", o.stdout);
@@ -1085,6 +1091,25 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         eprintln!("herdsman hook: input is not JSON; allowing");
         return Ok(());
     };
+    // #298: in a berth terminal (`$BERTH`) the hook reports the turn's state, so nothing reads it off the screen.
+    if let (Ok(name), Some(state)) = (std::env::var("BERTH"), hook::reported(&input)) {
+        let w = r.berth().map_or_else(
+            || crate::berth::Wire::Socket(crate::berth::default_socket()),
+            |b| b.wire,
+        );
+        let report = berth_proto::Reported {
+            state: state.into(),
+            note: None,
+        };
+        if let Err(e) = crate::berth::call(
+            r,
+            &w,
+            berth_proto::Method::State,
+            json!(berth_proto::StateParams { name, report }),
+        ) {
+            eprintln!("herdsman hook: berth state: {e:#}");
+        }
+    }
     // #304: a turn's end or a push that went through kicks the lane's issue at once.
     if let Some(why) = hook::kick_why(&input) {
         let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();

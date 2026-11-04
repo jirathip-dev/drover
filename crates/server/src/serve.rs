@@ -195,6 +195,16 @@ impl Runner for Memo<'_> {
         cache().insert(key, (t, out.clone()));
         Ok(crate::snapshot::out(out))
     }
+    /// #298: a call with stdin (`berth connect`, a file write) is never a cached read.
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        if input.is_empty() {
+            return self.run(prog, args);
+        }
+        self.0.run_in(prog, args, input)
+    }
+    fn berth(&self) -> Option<crate::berth::Berth> {
+        self.0.berth()
+    }
 }
 
 /// The mutex's data, even after a thread panicked holding it.

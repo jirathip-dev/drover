@@ -51,6 +51,8 @@ pub struct Dialect {
     pub edits: &'static [&'static str],
     pub post: &'static str,
     pub stop: &'static str,
+    /// #298: its `hook_event_name` while it waits on a person (none: "").
+    pub blocked: &'static str,
     pub deny: fn(&str) -> Value,
 }
 
