@@ -519,4 +519,134 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
     // images, loaded, at `/`; open, same URL, first, `1 / 2`; second, `2 / 2`; zoomed; [×] closed; swipe closed,
     // still loaded, same URL, page errors.
     assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
+/// #403: a runner whose typing into an agent (`herdr agent prompt`) waits for the test's go, then reports the line.
+struct Held(
+    Fake,
+    std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    std::sync::Mutex<std::sync::mpsc::Sender<String>>,
+);
+impl herdsman::runner::Runner for Held {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let typing = prog == "herdr" && args.starts_with(&["agent".into(), "prompt".into()]);
+        if typing {
+            self.1.lock().unwrap().recv().unwrap();
+        }
+        let out = self.0.run(prog, args);
+        if typing {
+            self.2
+                .lock()
+                .unwrap()
+                .send(format!("{prog} {}", args.join(" ")))
+                .unwrap();
+        }
+        out
+    }
+}
+
+/// #403: `say` answers as soon as the message is logged; typing it into the conductor runs after the reply.
+#[test]
+fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
+    use std::io::{Read, Write};
+    let c = setup("chat-async");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    assert_eq!(
+        run(&c, &live(), &["thread", "say", "t1", "hi"]).0,
+        0,
+        "its conductor is up"
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let cookie = pair(
+        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
+        &c,
+        "Mozilla/5.0 (iPhone)",
+        now,
+    );
+    let (go, held) = std::sync::mpsc::channel();
+    let (typed, seen) = std::sync::mpsc::channel();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || {
+        let r = Held(live(), held.into(), typed.into());
+        herdsman::serve::serve_on(&c2, &r, l, false)
+    });
+    let body = "op=say&t=t1&text=a+long+message";
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(
+        s,
+        "POST /thread HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    // Before #403 the reply waited for the typing, which waits for `go`: no reply.
+    s.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    let mut res = String::new();
+    s.read_to_string(&mut res).unwrap();
+    assert!(
+        res.starts_with("HTTP/1.1 200 OK") && res.ends_with("\r\n\r\nsent\n"),
+        "{res}"
+    );
+    assert!(
+        std::fs::read_to_string(&c.state)
+            .unwrap()
+            .contains("\"from\":\"owner\",\"text\":\"a long message\""),
+        "logged"
+    );
+    assert!(
+        seen.try_recv().is_err(),
+        "the reply came while the conductor was still not typed into"
+    );
+    go.send(()).unwrap();
+    let line = seen.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+    assert_eq!(line, "herdr agent prompt conductor-t1 [t1] owner: a long message");
+}
+
+/// #403: a delivery that fails is a red system line with [retry]; [retry] types the same line, logging no copy.
+#[test]
+fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
+    let c = setup("chat-retry");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    let down = Fake::default();
+    let s = Server::new(&c, &down, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let res = req(&s, "POST", "/thread", "op=say&t=t1&text=hello", &cookie, T);
+    assert_eq!(body(&res), "sent\n", "{res}");
+    let (chat, _) = frags(&s, &cookie, T + 5);
+    let at = chat
+        .find("<p class=\"qs note r\">✗ not delivered: ")
+        .unwrap_or_else(|| panic!("{chat}"));
+    let line = &chat[at..at + chat[at..].find("</p>").unwrap()];
+    let n = line.split("data-n=").nth(1).and_then(|x| x.split('>').next()).unwrap();
+    assert!(
+        line.ends_with(&format!(" <button type=button class=rty data-n={n}>retry</button>")),
+        "{line}"
+    );
+    let r = live();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
+    assert_eq!(body(&res), "retrying\n", "{res}");
+    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
+    let log = std::fs::read_to_string(&c.state).unwrap();
+    assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
+    let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
+    assert!(body(&res).contains("nothing to retry"), "{res}");
+    // Mid-turn, the live line is the inline mark serve.js fills with the theme's loading art.
+    let busy = Fake::default().reply(
+        "herdr agent list",
+        &agents(&[("conductor-t1", "working", "/x", "w9:p1")]),
+    );
+    let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
+    assert!(
+        chat.contains("<p class=tlv><i class=tld aria-hidden=true></i> working</p>"),
+        "{chat}"
+    );
 }
