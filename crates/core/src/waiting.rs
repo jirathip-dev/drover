@@ -472,8 +472,10 @@ pub fn scan(
         }
         // #388: a PASS whose head never got a check says CI is missing or broken, never `running 0/0`.
         let grace = cfg.limits.ci_start_minutes * 60;
-        let gone =
-            (w.who == "ci").then(|| gh::missing(ctx, live.then_some(r), f, (&s.fleet, s.issue), events, &pr, grace));
+        let gone = w
+            .what
+            .starts_with("PASS · CI running")
+            .then(|| gh::missing(ctx, live.then_some(r), f, (&s.fleet, s.issue), events, &pr, grace));
         if let Some(m) = gone.flatten() {
             w.what = format!("PASS · {m}");
         }
