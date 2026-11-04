@@ -1,0 +1,300 @@
+{
+ "today-new-390": {
+  "header": "acme-api",
+  "chips": [],
+  "note": null,
+  "composer": 61,
+  "sheet": null,
+  "lists": [],
+  "lines": [],
+  "outliers": []
+ },
+ "new-390": {
+  "header": "acme-api · claude · opus",
+  "chips": [
+   "[claude ▾]",
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [],
+  "outliers": []
+ },
+ "new-sheet-390": {
+  "header": "acme-api · claude · opus",
+  "chips": [
+   "[claude ▾]",
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "new thread · conductor",
+  "lists": [
+   "harness: claude ✓ opus · high (default), hermes kimi-k2.5 · high, dsh its profile’s model",
+   "model: opus ✓ (default), sonnet",
+   "effort: none claude’s own, low, medium, high ✓ (default), xhigh"
+  ],
+  "lines": [],
+  "outliers": []
+ },
+ "new-hermes-sheet-390": {
+  "header": "acme-api · hermes · kimi-k2.5",
+  "chips": [
+   "[hermes ▾]",
+   "[kimi-k2.5 · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "new thread · conductor",
+  "lists": [
+   "harness: claude opus · high (default), hermes ✓ kimi-k2.5 · high, dsh its profile’s model",
+   "model: kimi-k2.5 ✓ (default), gpt-5.6-luna",
+   "effort: none hermes’s own, low, medium, high ✓ (default), xhigh"
+  ],
+  "lines": [],
+  "outliers": []
+ },
+ "new-hermes-390": {
+  "header": "acme-api · hermes · kimi-k2.5",
+  "chips": [
+   "[hermes ▾]",
+   "[kimi-k2.5 · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [],
+  "outliers": []
+ },
+ "new-dsh-390": {
+  "header": "acme-api · dsh",
+  "chips": [
+   "[dsh ▾]"
+  ],
+  "note": "dsh sets its own model and effort",
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [],
+  "outliers": [],
+  "posts": "{\"op\":\"new\",\"repo\":\"acme-api\",\"harness\":\"dsh\",\"model\":\"\",\"effort\":\"none\"}"
+ },
+ "thread-390": {
+  "header": "acme-api · claude · opus · awake",
+  "chips": [
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [
+   "thread started by owner · 13:13 · conductor in demo/conductor/t4",
+   "⇄ switched to account B (A resting until 18:40) · same session"
+  ],
+  "outliers": []
+ },
+ "model-390": {
+  "header": "acme-api · claude · opus · awake",
+  "chips": [
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "conductor · Rate limits for /v1/search",
+  "lists": [
+   "model: opus ✓ (default), sonnet",
+   "effort: none claude’s own, low, medium, high ✓ (default), xhigh"
+  ],
+  "lines": [
+   "thread started by owner · 13:13 · conductor in demo/conductor/t4",
+   "⇄ switched to account B (A resting until 18:40) · same session"
+  ],
+  "outliers": []
+ },
+ "model-picked-390": {
+  "header": "acme-api · claude · sonnet · awake",
+  "chips": [
+   "[sonnet · xhigh ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "conductor · Rate limits for /v1/search",
+  "lists": [
+   "model: opus (default), sonnet ✓",
+   "effort: none claude’s own, low, medium, high (default), xhigh ✓"
+  ],
+  "lines": [
+   "⇄ switched to account B (A resting until 18:40) · same session",
+   "model opus · high → sonnet · xhigh · from the next turn · you"
+  ],
+  "outliers": []
+ },
+ "changed-390": {
+  "header": "acme-api · claude · sonnet · awake",
+  "chips": [
+   "[sonnet · xhigh ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [
+   "⇄ switched to account B (A resting until 18:40) · same session",
+   "model opus · high → sonnet · xhigh · from the next turn · you"
+  ],
+  "outliers": []
+ },
+ "next-turn-390": {
+  "header": "acme-api · claude · sonnet · awake",
+  "chips": [
+   "[sonnet · xhigh ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [
+   "model opus · high → sonnet · xhigh · from the next turn · you",
+   "↻ resumed · same session (7f3c9…) · sonnet · xhigh"
+  ],
+  "outliers": []
+ },
+ "hermes-390": {
+  "header": "acme-api · hermes · kimi-k2.5 · asleep",
+  "chips": [
+   "[kimi-k2.5 · medium ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [
+   "thread started by owner · 00:06 · conductor in demo/conductor/t2",
+   "☾ asleep after 30 min idle · writes wake it"
+  ],
+  "outliers": []
+ },
+ "guest-390": {
+  "header": "acme-api · claude · opus · awake",
+  "chips": [
+   "[opus · high ▾] (disabled)"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": null,
+  "lists": [],
+  "lines": [
+   "thread started by owner · 13:13 · conductor in demo/conductor/t4",
+   "⇄ switched to account B (A resting until 18:40) · same session"
+  ],
+  "outliers": []
+ },
+ "new-sheet-1440": {
+  "header": "acme-api · claude · opus",
+  "chips": [
+   "[claude ▾]",
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "new thread · conductor",
+  "lists": [
+   "harness: claude ✓ opus · high (default), hermes kimi-k2.5 · high, dsh its profile’s model",
+   "model: opus ✓ (default), sonnet",
+   "effort: none claude’s own, low, medium, high ✓ (default), xhigh"
+  ],
+  "lines": [],
+  "outliers": []
+ },
+ "model-1440": {
+  "header": "acme-api · claude · opus · awake",
+  "chips": [
+   "[opus · high ▾]"
+  ],
+  "note": null,
+  "composer": 105,
+  "sheet": "conductor · Rate limits for /v1/search",
+  "lists": [
+   "model: opus ✓ (default), sonnet",
+   "effort: none claude’s own, low, medium, high ✓ (default), xhigh"
+  ],
+  "lines": [
+   "thread started by owner · 13:13 · conductor in demo/conductor/t4",
+   "⇄ switched to account B (A resting until 18:40) · same session"
+  ],
+  "outliers": []
+ },
+ "audit": {
+  "chat@390": {
+   "view": "chat",
+   "controls": 10,
+   "outliers": [],
+   "chips": ""
+  },
+  "chat-thread@390": {
+   "view": "chat-thread",
+   "controls": 11,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-new@390": {
+   "view": "chat-new",
+   "controls": 8,
+   "outliers": [],
+   "chips": "claude ▾ opus · high ▾"
+  },
+  "chat-send@390": {
+   "view": "chat-send",
+   "controls": 8,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-long@390": {
+   "view": "chat-long",
+   "controls": 7,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-kb@390": {
+   "view": "chat-kb",
+   "controls": 7,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-thumbs@390": {
+   "view": "chat-thumbs",
+   "controls": 9,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-back@390": {
+   "view": "chat-back",
+   "controls": 10,
+   "outliers": [],
+   "chips": ""
+  },
+  "chat-code@390": {
+   "view": "chat-code",
+   "controls": 9,
+   "outliers": [],
+   "chips": "kimi-k2.5 · medium ▾"
+  },
+  "chat-thread@1440": {
+   "view": "chat-thread",
+   "controls": 17,
+   "outliers": [],
+   "chips": "opus · high ▾"
+  },
+  "chat-new@1440": {
+   "view": "chat-new",
+   "controls": 14,
+   "outliers": [],
+   "chips": "claude ▾ opus · high ▾"
+  }
+ },
+ "errors": []
+}

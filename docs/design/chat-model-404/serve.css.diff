@@ -1,0 +1,21 @@
+--- a/assets/serve.css
++++ b/assets/serve.css
+@@ -668,3 +668,18 @@
+ .tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
+ html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
+ @media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}
++/* #404: the composer's run chips (docs/design/chat-model-404). Under the [+] box [send] line, unchanged, one 44 px row:
++   in a new thread `[claude ▾] [opus · high ▾]`, in a started one `[opus · high ▾]` alone (the harness is fixed and shows
++   in the header). A chip is a bracket control; the effort after the model is muted, as t3code's trigger has it. A
++   harness with nothing to pick (dsh today) shows its fixed run as an 11 px line, not a control. */
++.tw .rcs{display:flex;flex-basis:100%;align-items:center;gap:var(--s4);min-width:0;min-height:var(--hit);margin:calc(-1 * var(--s2)) 0}
++.tw .rcs button{min-width:0}
++.tw .rcs button>span{white-space:nowrap}
++.tw .rcs i{font-style:normal;color:var(--mute)}
++.tw .rcs button:active i{color:var(--bg)}
++.tw .rcs .rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-meta);color:var(--mute)}
++/* The picker: the look sheet's box and rows (#290), not the system menu. HARNESS (a new thread only), MODEL, EFFORT;
++   each a listbox, the current row ticked, the default marked. ≥ 720 px the lists sit side by side, as t3code's model
++   list beside its effort column. */
++.sh.rpk .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
++@media (min-width:720px){.sh.rpk .top{display:grid;grid-template-columns:repeat(2,minmax(0,320px));gap:0 calc(3 * var(--s4));align-content:start}.sh.rpk.n3 .top{grid-template-columns:repeat(3,minmax(0,320px))}.sh.rpk .lkn{grid-column:1/-1}}
