@@ -2086,6 +2086,18 @@ impl<'a> Server<'a> {
                     let at = esc(p.str("at").unwrap_or("?"));
                     format!("<p class=r>landing paused: {} red since {at}</p>", esc(&fc.integration))
                 });
+            // #429: `check`'s measurement of integration within `warn_within` of its line cap.
+            let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
+            let left = cap["cap"].as_i64().zip(cap["lines"].as_i64()).map(|(c, n)| c - n);
+            let bad = bad
+                + &left
+                    .filter(|l| *l < cap["warn"].as_i64().unwrap_or(500))
+                    .map_or(String::new(), |l| {
+                        format!(
+                            "<p class=r>cap-near: {l} lines of headroom on {}</p>",
+                            esc(&fc.integration)
+                        )
+                    });
             cards.push((!need.is_empty(), format!(
                 "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
                  <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{bad}{body}</div>",
