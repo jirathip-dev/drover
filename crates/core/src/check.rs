@@ -1,7 +1,7 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
 
 use crate::config::{Config, Fleet};
-use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
+use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -196,7 +196,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
-            if idle > stall && status != Some("working") && !parked {
+            // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
+            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_none() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
@@ -211,6 +212,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     ),
                     _ => format!("{role} lane {lane} is {st}"),
                 };
+                let key = format!("{key}:{}", (idle - stall) / 7200);
                 hits.push((
                     "stall",
                     key,
