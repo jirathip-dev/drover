@@ -567,7 +567,7 @@ pub fn spawn(
         }
     }
     if let Some(pane) = orphan(&agents, &events, &p, false).filter(|_| live.len() == 1 && !o.supersede) {
-        return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
+        return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
     }
     if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
         return refused(
@@ -688,6 +688,11 @@ pub fn spawn(
         x => x,
     };
     let mut pane = pick(&mut ws, None)?;
+    // #376: logged before the harness starts, so a crash before `spawn` leaves a lane the next step adopts.
+    let host = placed.as_ref().map(|pl| (&pl.name, &pl.machine));
+    let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
+        "worktree": p.worktree, "pane": pane});
+    event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), hm);
     herdr::ok(r, &home(p.lane_cmd(&pane)))?;
     let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
@@ -717,7 +722,7 @@ pub fn spawn(
     if start.code != 0 {
         let taken = herdr::failed_with(&start, "agent_name_taken");
         if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
-            return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane).map(|()| true);
+            return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
         }
         // #182: any failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
         let why = if late {
@@ -1040,7 +1045,8 @@ fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
         "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port})
 }
 
-/// `herdsman adopt`: log the lane running in `pane` and name its agent as planned; nothing is started.
+/// `herdsman adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the
+/// `spawn` data (#376: an orphan's host, machine, worktree, `since`).
 pub fn adopt(
     ctx: &Ctx,
     cfg: &Config,
@@ -1048,6 +1054,7 @@ pub fn adopt(
     out: &mut dyn Write,
     (fleet, issue, role): (&str, u64, &str),
     pane: &str,
+    extra: &Value,
 ) -> Result<()> {
     let p = plan(ctx, cfg, fleet, issue, role)?;
     let info = herdr::harness_in(r, pane).with_context(|| format!("no harness running in pane {pane}"))?;
@@ -1058,15 +1065,129 @@ pub fn adopt(
         .unwrap_or_default();
     let mut d = lane_data(&p, pane, ws);
     d["adopted"] = json!(true);
-    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))?;
-    writeln!(
-        out,
-        "adopted {pane} as {} ({} @ {})",
-        p.agent,
-        p.branch,
-        p.worktree.display()
-    )?;
-    Ok(())
+    extra
+        .as_object()
+        .into_iter()
+        .flatten()
+        .for_each(|(k, v)| d[k] = v.clone());
+    writeln!(out, "adopted {pane} as {} ({} @ {})", p.agent, p.branch, d["worktree"])?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
+}
+
+/// #376: the lane a herdr agent looks like, `(fleet, issue, role, worktree)`: named `<fleet>-<role>-<issue>[-rN]`, or
+/// working under `worktrees/<repo>/issue-N` (role: none) or `worktrees/<repo>/<check role>-N-rK`.
+pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<String>, Option<String>)> {
+    let name = a["name"].as_str().unwrap_or_default();
+    let cwd = Path::new(a["cwd"].as_str().or(a["foreground_cwd"].as_str()).unwrap_or_default());
+    let parts: Vec<&str> = cwd.iter().filter_map(|c| c.to_str()).collect();
+    cfg.fleet.iter().find_map(|(fl, f)| {
+        let lane = |b: &str, issue: bool| {
+            let mut w = b.split('-');
+            let role = w
+                .next()
+                .filter(|r| f.role.contains_key(*r) && (issue || f.family(r) == "rev"))?;
+            Some((Some(role.to_string()), w.next()?.parse::<u64>().ok()?))
+        };
+        let named = name.strip_prefix(&format!("{fl}-")).and_then(|w| lane(w, true));
+        let at = parts
+            .windows(3)
+            .position(|w| w[0] == "worktrees" && w[1] == f.repo_name());
+        let by_cwd = at.and_then(|i| match parts[i + 2].strip_prefix("issue-") {
+            Some(n) => Some((None, n.parse().ok()?)),
+            None => lane(parts[i + 2], false),
+        });
+        let (role, n) = named.or(by_cwd.clone())?;
+        let wt = at.filter(|_| by_cwd.is_some_and(|c| c.1 == n));
+        let wt = wt.map(|i| {
+            parts[..i + 3]
+                .iter()
+                .collect::<PathBuf>()
+                .to_string_lossy()
+                .into_owned()
+        });
+        Some((fl.as_str(), n, role, wt))
+    })
+}
+
+/// #376: each lane-shaped herdr agent (`shaped`, any host) of a tracked issue that no `spawn` logged: an open issue's is
+/// adopted (`spawn-adopted`, why `orphan`), so its verdict is recorded as any lane's; a done issue's, or a review whose
+/// verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`).
+/// True when it logged any.
+pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
+    let events = read(&ctx.state)?;
+    let (st, mut any) = (fold(&events), false);
+    for a in crate::hosts::all_agents(cfg, seen)? {
+        let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
+            continue;
+        };
+        let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
+        let logged = events.iter().filter(|e| e.kind == "spawn").any(|e| at(&e));
+        let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
+            continue;
+        };
+        let Some(s) = st.get(&(fleet.to_string(), n)) else {
+            continue; // `check` alerts it
+        };
+        let f = cfg.fleet(fleet)?;
+        let started = events.iter().filter(|e| e.kind == "spawn-started").rfind(at);
+        let role = role.or(s.build.clone()).unwrap_or(f.flow().start().into());
+        let wt = wt.or(started.and_then(|e| e.str("worktree")).map(String::from));
+        let on = crate::hosts::On::new(r, m);
+        let rev = wt.as_deref().filter(|_| f.family(&role) == "rev");
+        let verdict = rev.and_then(|w| on.read(&Path::new(w).join("verdict.md")));
+        let git = |w: &str| ok(&on, "git", &["-C", w, "rev-parse", "HEAD"]).ok();
+        let named = verdict.map(|v| {
+            crate::waiting::reviewed_head(&v)
+                .map(String::from)
+                .or_else(|| git(rev?))
+        });
+        let branch = crate::gate::branch_of(Some(s), n);
+        let head = |x: String| {
+            Some((
+                x,
+                crate::gh::pr(ctx, r, f, (fleet, n), &branch, ctx.now).ok()?["headRefOid"]
+                    .as_str()?
+                    .into(),
+            ))
+        };
+        let old = named
+            .flatten()
+            .and_then(head)
+            .filter(|(x, h): &(String, String)| !x.eq_ignore_ascii_case(h));
+        let stale = match old {
+            _ if s.done() => Some(format!("{fleet}#{n} is {}", s.state)),
+            Some((x, h)) => Some(format!("verdict for {x:.7}, head is {h:.7}")),
+            None => None,
+        };
+        let agent = name.filter(|n| !n.is_empty()).unwrap_or(pane);
+        let res = if let Some(why) = stale {
+            (|| {
+                if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
+                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
+                    crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
+                }
+                herdr::close(&on, pane)?;
+                writeln!(out, "closed stale orphan {agent} ({why})")?;
+                let d = json!({"agent": agent, "pane": pane, "host": a["host"], "why": "stale-orphan", "reason": why});
+                emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-closed", d))
+            })()
+        } else {
+            let since = started.map_or(0, |e| e.ts);
+            let mut d = json!({"why": "orphan", "since": since, "worktree": wt, "host": a["host"], "machine": m});
+            d.as_object_mut()
+                .into_iter()
+                .for_each(|o| o.retain(|_, v| !v.is_null()));
+            adopt(ctx, cfg, &on, out, (fleet, n, &role), pane, &d).and_then(|()| {
+                let d = json!({"agent": agent, "pane": pane, "why": "orphan"});
+                emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "spawn-adopted", d))
+            })
+        };
+        match res {
+            Ok(()) => any = true,
+            Err(e) => writeln!(out, "{fleet} #{n} orphan {agent}: {e:#}")?,
+        }
+    }
+    Ok(any)
 }
 
 fn print_plan(out: &mut dyn Write, pj: &Value, as_json: bool) -> Result<()> {
