@@ -17,6 +17,7 @@ pub fn role_prompt(role: &str) -> &'static str {
     match role {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
+        "conductor" => include_str!("../roles/conductor.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -114,6 +115,8 @@ pub struct Plan {
     pub title: String,
     /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
     pub resting: Option<(String, u64)>,
+    /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
+    pub session: Option<(String, bool)>,
 }
 
 impl Plan {
@@ -276,6 +279,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         head,
         title,
         resting,
+        session: None,
     })
 }
 
