@@ -35,6 +35,9 @@ local = "~/Projects/herdsman"
 integration = "staging"
 # exported into every lane: one shared cargo build cache per fleet, not one target/ per lane
 env = { CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman" }
+# or, opt-in (#361): the same, under its own key. New lanes skip full rebuilds; lanes
+# building at once queue on cargo's lock on the shared dir (docs/lanes.md).
+# shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/herdsman/target" }
 
 [fleet.herdsman.role.impl]
 harness = "claude"

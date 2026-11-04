@@ -280,6 +280,11 @@ enum Cmd {
         #[arg(long)]
         orphans: bool,
     },
+    /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
+    Reclaim {
+        #[arg(long, help = "Remove without asking")]
+        apply: bool,
+    },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
@@ -462,7 +467,7 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "stats", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "resume", "serve", "setup", "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -923,6 +928,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                     }
                 }
+                Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
                 Cmd::Kill { agent, yes } => check::kill(ctx, &cfg, r, out, &agent, yes)?,
