@@ -136,7 +136,5 @@ pub struct Setup {
 
 /// A form body (`application/x-www-form-urlencoded`, decoded) as one of the action bodies above.
 pub fn body<T: for<'de> Deserialize<'de> + Default>(f: &BTreeMap<String, String>) -> T {
-    serde_json::to_value(f)
-        .and_then(serde_json::from_value)
-        .unwrap_or_default()
+    serde_json::from_value(serde_json::json!(f)).unwrap_or_default()
 }

@@ -847,14 +847,8 @@ impl<'a> Server<'a> {
                     .insert((paired, id), hash(&html))
                     .is_some_and(|h| h != hash(&html))
                 {
-                    let (seq, j) = (
-                        w.seen.unwrap_or(0),
-                        json!(Frag {
-                            id: id.into(),
-                            html: html.clone()
-                        }),
-                    );
-                    let msg = format!("id: {seq}\nevent: frag\ndata: {j}\n\n");
+                    let j = json!(Frag { id: id.into(), html });
+                    let msg = format!("id: {}\nevent: frag\ndata: {j}\n\n", w.seen.unwrap_or(0));
                     lock(&self.clients).retain(|c| c.1.is_some() != paired || c.0.send(msg.clone()).is_ok());
                 }
             }
@@ -1074,12 +1068,11 @@ impl<'a> Server<'a> {
         } else if act {
             self.act(ctx, &dev, &body(f))
         } else {
-            match body(f) {
-                crate::api::Send {
-                    setup: Some(p), text, ..
-                } => crate::setup::send(ctx, self.r, &p, &text),
-                s => self.prompt(ctx, &dev, &s),
-            }
+            let s = body::<crate::api::Send>(f);
+            s.setup.as_deref().map_or_else(
+                || self.prompt(ctx, &dev, &s),
+                |p| crate::setup::send(ctx, self.r, p, &s.text),
+            )
         };
         if pick || act {
             self.purge();
@@ -1216,16 +1209,13 @@ impl<'a> Server<'a> {
             let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
             let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
             let page = window(&all[..all.len().saturating_sub(before)], lines, 32);
-            let (before, more) = (before + page.len(), all.len() > before + page.len());
-            return Some(
-                json!(Chat {
-                    lines: page.to_vec(),
-                    before,
-                    more,
-                    ..Chat::default()
-                })
-                .to_string(),
-            );
+            return serde_json::to_string(&Chat {
+                lines: page.to_vec(),
+                before: before + page.len(),
+                more: all.len() > before + page.len(),
+                ..Chat::default()
+            })
+            .ok();
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
         let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
@@ -1261,22 +1251,20 @@ impl<'a> Server<'a> {
             &["stop", "kill", "clean"]
         };
         let older = win.zip(said.as_ref()).is_some_and(|(w, s)| w.len() < s.len());
-        Some(
-            json!(Chat {
-                said: win.map(<[_]>::to_vec),
-                older,
-                notices,
-                harness: l.harness.clone(),
-                acts: acts.iter().map(|&a| a.into()).collect(),
-                pane: l.pane.clone().filter(|_| l.role == "other"),
-                lines: page.to_vec(),
-                live: if before == 0 { live.min(page.len()) } else { 0 },
-                status,
-                before: before + page.len(),
-                more: end > page.len()
-            })
-            .to_string(),
-        )
+        serde_json::to_string(&Chat {
+            said: win.map(<[_]>::to_vec),
+            older,
+            notices,
+            harness: l.harness.clone(),
+            acts: acts.iter().map(|&a| a.into()).collect(),
+            pane: l.pane.clone().filter(|_| l.role == "other"),
+            lines: page.to_vec(),
+            live: if before == 0 { live.min(page.len()) } else { 0 },
+            status,
+            before: before + page.len(),
+            more: end > page.len(),
+        })
+        .ok()
     }
 
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
@@ -2011,10 +1999,8 @@ impl<'a> Server<'a> {
                 .map(|l| {
                     let (title, tone, shown, a) = view(ctx, l, &waits);
                     // #239: a fix round's lane has role impl; the issue's state says it is fixing.
-                    let is = l
-                        .issue
-                        .and_then(|i| st.get(&(f?.clone(), i)))
-                        .map_or("", |s| s.state.as_str());
+                    let is = l.issue.and_then(|i| st.get(&(f?.clone(), i)));
+                    let is = is.map_or("", |s| s.state.as_str());
                     let act = match (act(&l.role, &l.state), act(&l.role, is)) {
                         ("impl", b @ ("fix" | "update")) => b,
                         (a, _) => a,
@@ -2086,18 +2072,17 @@ impl<'a> Server<'a> {
                 ..Host::default()
             },
         );
-        let host = HerdHost {
-            load: h.load_per_cpu,
-            limit: lim.load_per_cpu,
-            gate: host::admit(&h, lim).err(),
-            pressure: h.pressure,
-            swapouts: h.swapout,
-            swap_limit: lim.swapout_rate,
-        };
         Ok(Herd {
             fleets,
             others: lanes(None),
-            host,
+            host: HerdHost {
+                load: h.load_per_cpu,
+                limit: lim.load_per_cpu,
+                gate: host::admit(&h, lim).err(),
+                pressure: h.pressure,
+                swapouts: h.swapout,
+                swap_limit: lim.swapout_rate,
+            },
         })
     }
 
