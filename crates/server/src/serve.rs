@@ -1334,6 +1334,7 @@ impl<'a> Server<'a> {
                 format!("{} {}", g("host"), if on { "on" } else { "off" })
             }
             "unpair" => {
+                let _g = devices::lock();
                 let mut all = devices::load(ctx);
                 all.retain(|d| d.hash != g("hash"));
                 devices::store(ctx, &all)?;
