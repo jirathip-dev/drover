@@ -1138,6 +1138,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 g.unwrap_or_default()
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
+                            for &i in &issues {
+                                let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
+                            }
                             if let Some(g) = g {
                                 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
                             }
