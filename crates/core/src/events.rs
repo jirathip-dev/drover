@@ -439,6 +439,7 @@ pub const PASSIVE: &[&str] = &[
     "account-capped",
     "agent-unavailable",
     "spawn-failed",
+    "spawn-started",
     "fallback",
     "ask-waiting",
     "driven",

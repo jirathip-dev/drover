@@ -1581,6 +1581,65 @@ fn auto_update_runs_in_a_pass_with_no_merge() {
     assert!(r.called(&format!("git -C {} push -q origin HEAD:issue-12", wt.display())));
 }
 
+/// #373: an auto-update re-runs the premerge checks on the updated head before it pushes; a failure is a fix round.
+#[test]
+fn auto_update_rechecks_premerge_before_its_push() {
+    for fails in [false, true] {
+        let c = setup(if fails {
+            "drive-update-premerge-red"
+        } else {
+            "drive-update-premerge"
+        });
+        let cfg = CONFIG.replace(
+            "integration = \"staging\"",
+            "integration = \"staging\"\npremerge = [\"make lint\"]",
+        );
+        std::fs::write(&c.config, cfg).unwrap();
+        strict(&c);
+        lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+        let head = sha("a1");
+        ev(
+            &c,
+            30,
+            "verdict",
+            json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+        );
+        let wt = c.state.with_file_name("update-sendmeter");
+        let check = format!("sh -c cd \"$0\" && make lint {}", wt.display());
+        let push = format!("git -C {} push -q origin HEAD:issue-12", wt.display());
+        let r = fake(NO_AGENTS)
+            .once(&check, i32::from(fails), "lint: error: unused import\n")
+            .reply("gh pr view issue-12", &pr(&head, "pending"))
+            .reply(
+                "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+                &format!("{head}\n"),
+            )
+            .reply("git -C /tmp/does-not-matter/sendmeter rev-parse", &format!("{head}\n"))
+            .reply(
+                &format!("git -C {} rev-parse HEAD", wt.display()),
+                &format!("{}\n", sha("b2")),
+            )
+            .reply("git -C", "");
+        let (out, _) = drive(&c, &r);
+        assert!(r.called(&check), "{out}");
+        assert!(!r.called("gh pr merge"), "{out}");
+        if !fails {
+            assert!(r.index(&check) < r.index(&push), "{out}");
+            continue;
+        }
+        assert!(!r.called(&push), "{out}");
+        assert!(
+            out.contains("REFUSED STAGING_WOULD_BREAK: make lint: lint: error: unused import"),
+            "{out}"
+        );
+        let ev = read(&c.state).unwrap();
+        assert!(ev.iter().any(|e| e.kind == "premerge-failed"), "{out}");
+        let v = ev.iter().rfind(|e| e.kind == "verdict").unwrap();
+        assert_eq!((v.str("verdict"), v.str("sha")), (Some("FAIL"), Some(head.as_str())));
+        assert!(state(&c).starts_with("fix(1)"), "{}", state(&c));
+    }
+}
+
 #[test]
 fn an_exited_reviewer_without_a_verdict_gets_a_new_review_round() {
     let c = setup("drive-rev-lost");
