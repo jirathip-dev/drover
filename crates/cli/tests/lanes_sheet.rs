@@ -278,9 +278,9 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         rc == 0 && out.starts_with("paired iPhone Safari ") && out.len() == 26,
         "{out}"
     );
-    // The live stream's unpaired Events frag carries the approval: the waiting page claims on it.
+    // The approval is logged: the Events tab (#266: API v1's events, an `ev` on the live stream) shows it.
     assert!(
-        req(&s, "GET", "/frags", "", "", T + 60).contains("pair-approve"),
+        req(&s, "GET", "/api/v1/events?since=0", "", "", T + 60).contains("pair-approve"),
         "the Events tab shows the approval"
     );
     let (_, _, other) = ask_pair(&s, "10.0.0.3", T + 60);
@@ -543,12 +543,11 @@ fn page_has_no_dash_placeholders() {
     let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/?all=1", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
-    // #60: and the parts the page loads on demand ([config] sheet, Events).
+    // #60: and the parts the page loads on demand ([config] sheet; #266: the board's Events).
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    for part in ["/frag?id=config&fleet=sendmeter", "/frag?id=events"] {
-        let p = req(&s, "GET", part, "", "", T);
-        html += &p[p.find("\r\n\r\n").unwrap()..];
-    }
+    let p = req(&s, "GET", "/frag?id=config&fleet=sendmeter", "", "", T);
+    html += &p[p.find("\r\n\r\n").unwrap()..];
+    html += &events_tab(&s, ADDR, T, "{}").unwrap_or_default();
     assert!(
         !html.contains(" - ") && !html.contains(">-<") && !html.contains(" · -") && !html.contains('—'),
         "{html}"

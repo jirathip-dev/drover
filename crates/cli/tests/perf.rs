@@ -253,12 +253,18 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     assert!(warm < 300.0, "first contentful paint {warm:.0} ms (target < 300)");
 }
 
-/// #351: after a part's first copy on a stream, `/live` sends only its changed pieces: a new event is one `patch` for
-/// Events (the new row, its group and count lines), no lane row, under 5 KB, on the 30-lane board served by `serve_on`.
+/// #351: after a part's first copy on a stream, `/live` sends only its changed pieces: an ask is one `patch` for the
+/// needs-you cards (#266: Events, the old probe, is the TypeScript board's), no lane row and no other card, under
+/// 5 KB, on the 30-lane board served by `serve_on`.
 #[test]
 fn a_steady_state_live_change_is_a_patch_under_5kb() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let ask = |id: String, q: String| json!({"id": id, "question": q, "options": ["yes", "no"], "recommend": null});
+    for i in 0..10 {
+        let d = ask(format!("s{i}"), format!("seed-{i}?"));
+        append(&c.state, &Event::new(NOW - 60, "sendmeter", None, "needs-decision", d)).unwrap();
+    }
     let before = r.2.load(Relaxed);
     let (c, r, addr) = serve(c, r);
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -267,8 +273,8 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
     s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
     drain(&mut s, 2_500);
     let note = |i: u64| {
-        let d = json!({"reason": format!("probe-{i}")});
-        append(&c.state, &Event::new(NOW + i, "sendmeter", None, "note", d)).unwrap();
+        let d = ask(format!("q{i}"), format!("probe-{i}?"));
+        append(&c.state, &Event::new(NOW + i, "sendmeter", None, "needs-decision", d)).unwrap();
     };
     note(1);
     let first = drain(&mut s, 2_500);
@@ -290,7 +296,7 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
         .map(|m| serde_json::from_str(m.split("\n\n").next().unwrap()).unwrap())
         .collect();
     let ids: Vec<&str> = patches.iter().map(|p| p["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["events"], "{got}");
+    assert_eq!(ids, ["needs"], "{got}");
     let (p, set) = (&patches[0], patches[0]["set"].as_object().unwrap());
     assert!(
         set.len() <= 4 && p["n"].as_u64().unwrap() > set.len() as u64 + 4,
@@ -298,7 +304,7 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
     );
     assert!(set.values().any(|v| v.as_str().unwrap().contains("probe-2")), "{p}");
     assert!(
-        !got.contains("probe-1") && !got.contains("sendmeter-impl-"),
+        !got.contains("seed-") && !got.contains("sendmeter-impl-"),
         "unchanged rows stay home: {got}"
     );
     assert!(
@@ -314,14 +320,14 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
         let mut msgs = m
             .split("\n\n")
             .filter_map(|x| x.split_once(&format!("event: {ev}\ndata: ")));
-        msgs.find(|x| x.1.contains("\"id\":\"events\"")).unwrap().1.to_string()
+        msgs.find(|x| x.1.contains("\"id\":\"needs\"")).unwrap().1.to_string()
     };
     let src = include_str!("../../server/assets/serve.js");
     let part = &src[src.find("  const got = ").unwrap()..src.find("  es.addEventListener('herd'").unwrap()];
     let js = format!(
         "let P = {{}}, out = {{}}; const h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }}, at = () => 0;\n\
          const frag = (id, html) => (out[id] = html), sync = () => 0, pulse = () => 0, claim = () => 0, refresh = () => 0;\n\
-         {part}\nh.frag({{ data: {} }}); h.patch({{ data: {} }}); process.stdout.write(out.events);",
+         {part}\nh.frag({{ data: {} }}); h.patch({{ data: {} }}); process.stdout.write(out.needs);",
         json!(data(&first, "frag")),
         json!(data(&got, "patch"))
     );
@@ -330,10 +336,10 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let mut now = std::net::TcpStream::connect(addr).unwrap();
-    now.write_all(format!("GET /frags?tab=events HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+    now.write_all(format!("GET /frags?tab=queue HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
         .unwrap();
     let mut res = String::new();
     now.read_to_string(&mut res).unwrap();
     let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    assert_eq!(String::from_utf8_lossy(&o.stdout), j["events"].as_str().unwrap());
+    assert_eq!(String::from_utf8_lossy(&o.stdout), j["needs"].as_str().unwrap());
 }

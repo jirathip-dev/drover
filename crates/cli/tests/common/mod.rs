@@ -347,3 +347,37 @@ pub fn chat_scene(open: bool) -> String {
         l = fx["lines"]
     )
 }
+
+/// #266: the Events tab as the TypeScript board draws it: web/src/events.ts under node, from `s`'s `/api/v1/state` and
+/// `/api/v1/events` at `now`; `opts` (a JS object) overrides the draw's `all`, `shown` or `f`. None where node is missing.
+pub fn events_tab(s: &herdsman::serve::Server, host: &str, now: u64, opts: &str) -> Option<String> {
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping: no node here");
+        return None;
+    }
+    let get = |p: &str| {
+        let r = s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
+        let r = String::from_utf8_lossy(&r).into_owned();
+        assert!(r.starts_with("HTTP/1.1 200"), "{p}: {r}");
+        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
+    let d = tmpdir("events-ts");
+    std::fs::write(d.join("state.json"), get("/api/v1/state")).unwrap();
+    std::fs::write(d.join("events.json"), get("/api/v1/events?since=0")).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/events.ts");
+    let js = format!(
+        "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
+         const st = JSON.parse(fs.readFileSync({:?})), ev = JSON.parse(fs.readFileSync({:?}));\n\
+         process.stdout.write(tab(ev.list, {{ now: st.now, tz: st.tz, fleets: st.fleets, all: false, \
+         shown: {{ imp: 100, all: 100 }}, f: {{ k: 'imp', fl: [] }}, ...{opts} }}));",
+        d.join("state.json"),
+        d.join("events.json")
+    );
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    Some(String::from_utf8(o.stdout).unwrap())
+}

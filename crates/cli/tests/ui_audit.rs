@@ -65,8 +65,13 @@ fn fixture() -> (String, String) {
         )
         .replace(
             "<section id=events></section>",
-            &format!("<section id=events>{}</section>", part("/frag?id=events")),
+            // #266: the board's Events as it draws them, without the board (it would read this file's base server).
+            &format!(
+                "<section id=events>{}</section>",
+                events_tab(&s, ADDR, T, "{}").unwrap_or_default()
+            ),
         );
+    let html = html[..html.find("<script type=module").unwrap()].to_string() + "</body></html>\n";
     assert!(
         html.contains("▲ up") && html.contains("class=pick") && html.contains("<select name=model"),
         "fixture has arrows, a menu and pickers"

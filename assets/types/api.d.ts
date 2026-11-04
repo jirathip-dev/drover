@@ -62,11 +62,12 @@ export type Setup = { host: string, name: string, };
 
 /**
  * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
- * `mtime` a POST sends back (STALE when fleet.toml changed since).
+ * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
+ * the Events tab's time groups.
  */
-export type State = { seq: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
 
-export type Fleet = { name: string, color: string, paused: boolean, };
+export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
 export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, };
 
@@ -83,14 +84,16 @@ export type Ask = { id: string, fleet: string, issue?: number | null, question: 
 export type Row = { name: string, tone: string, detail: string, fix: string, };
 
 /**
- * #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+ * #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
  */
 export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 
 /**
- * One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+ * One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
+ * (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
+ * agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
  */
-export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, };
+export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
 
 /**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

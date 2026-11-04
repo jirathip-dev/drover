@@ -1,9 +1,10 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`,
 //! `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the board's. A
 //! breaking change is `/v2`.
-use super::{board, moment, BTreeMap, Event, JSON, PAIRED_OPS};
+use super::{act, board, coat, gh, moment, words, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
+use crate::events::plain;
 use serde::Serialize;
 
 type Res = (&'static str, &'static str, Vec<u8>);
@@ -30,12 +31,11 @@ impl Server<'_> {
                 |s| out("200 OK", &s),
             ),
             ("GET", Some("events")) => {
-                let ev = read(&ctx.state).unwrap_or_default();
-                let since = f.get("since").and_then(|n| n.parse().ok()).unwrap_or(0);
-                let after: Vec<_> = ev.iter().filter(|e| e.seq > since).collect();
-                let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > 500);
-                let list = after.into_iter().filter(|_| !refresh).map(ev_of).collect();
-                out("200 OK", &Events { seq, refresh, list })
+                let n = |k: &str| f.get(k).and_then(|n| n.parse().ok());
+                out(
+                    "200 OK",
+                    &events(ctx, n("since").unwrap_or(0), n("until").unwrap_or(u64::MAX), 500),
+                )
             }
             ("GET", _) if lane.is_some() && !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             ("GET", _) if lane.is_some() => {
@@ -83,7 +83,7 @@ impl Server<'_> {
         Ok(format!("{op} started for {fleet}"))
     }
 
-    fn state(&self, ctx: &Ctx) -> Result<State> {
+    pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
         let (cfg, events) = (Config::load(&ctx.config)?, read(&ctx.state)?);
         let (st, r) = (fold(&events), &self.cached(ctx.now, 60));
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
@@ -143,6 +143,7 @@ impl Server<'_> {
         let (t, d) = crate::timer::phone(ctx, Some(&cfg), &events);
         let fleet = |(f, fc): (&String, &crate::config::Fleet)| Fleet {
             name: f.clone(),
+            repo: fc.repo.clone(),
             color: fc.color(f).into(),
             paused: fc.paused,
         };
@@ -153,6 +154,10 @@ impl Server<'_> {
             .flat_map(|f| crate::queue::view(&events, &st, f).into_iter().map(move |i| (f, i)));
         Ok(State {
             seq: events.last().map_or(0, |e| e.seq),
+            now: ctx.now,
+            tz: crate::usage::date(self.r, ctx.now, "+%z")
+                .parse::<i64>()
+                .map_or(0, |z| z / 100 * 3600 + z % 100 * 60),
             age: (snap > 0).then(|| ctx.now.saturating_sub(snap)),
             mtime: super::mtime(ctx),
             theme: super::active(ctx),
@@ -170,14 +175,53 @@ impl Server<'_> {
     }
 }
 
-fn ev_of(e: &Event) -> Ev {
-    Ev {
-        seq: e.seq,
-        ts: e.ts,
-        fleet: e.fleet.clone(),
-        issue: e.issue,
-        kind: e.kind.clone(),
-        data: e.data.clone(),
-        k: moment(e).map(String::from),
-    }
+/// #259: the events with `since < seq <= until`; over `cap`, none and `refresh`. #266: each as the Events tab says it.
+pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
+    let (ev, cfg) = (read(&ctx.state).unwrap_or_default(), Config::load(&ctx.config).ok());
+    let after: Vec<_> = ev.iter().filter(|e| e.seq > since && e.seq <= until).collect();
+    let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > cap);
+    let mut prs = BTreeMap::new();
+    let list = (after.into_iter().filter(|_| !refresh))
+        .map(|e| {
+            let fc = cfg.as_ref().and_then(|c| c.fleet.get(&e.fleet));
+            let (glyph, tone, text, imp) = words(e, fc.map_or("serial", |f| f.serial_label()));
+            let pr = e
+                .data
+                .get("pr")
+                .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()));
+            let (pr, run) = e.issue.filter(|_| fc.is_some()).map_or((None, None), |n| {
+                let pr = pr.or_else(|| {
+                    *prs.entry(n)
+                        .or_insert_with(|| gh::cached_pr(ctx, &e.fleet, n)["number"].as_u64())
+                });
+                (pr, pr.is_none().then(|| gh::cached_run(ctx, &e.fleet, n)).flatten())
+            });
+            let act = match (e.kind.as_str(), tone) {
+                ("spawn", _) if e.data.get("check") == Some(&serde_json::json!(true)) => "rev",
+                ("spawn", _) => act(e.str("role").unwrap_or_default(), "working"),
+                (_, "r") => "blocked",
+                (_, "g") => "done",
+                _ => "idle",
+            };
+            Ev {
+                seq: e.seq,
+                ts: e.ts,
+                fleet: e.fleet.clone(),
+                issue: e.issue,
+                kind: e.kind.clone(),
+                data: e.data.clone(),
+                k: moment(e).map(String::from),
+                glyph: glyph.into(),
+                tone: tone.into(),
+                text,
+                imp,
+                act: act.into(),
+                coat: e.str("agent").filter(|a| !a.is_empty()).map_or(String::new(), coat),
+                plain: plain(e),
+                pr,
+                run,
+            }
+        })
+        .collect();
+    Events { seq, refresh, list }
 }
