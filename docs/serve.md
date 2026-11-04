@@ -297,6 +297,34 @@ client), ts-rs behind the `ts` feature for the board's TS types (#375, never in 
 berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md). CI's deps gate fails on any
 other direct dependency.
 
+## JSON API v1 (#265)
+
+Beside the HTML board, `herdsman serve` answers JSON under `/api/v1/`, for the TypeScript board in `web/` and later
+the native app. Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
+transcript, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host) refuse an unpaired one.
+
+| route | answer |
+|---|---|
+| `GET state` | the board in one read: `seq` (newest event), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets`, `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
+| `GET events?since=N` | #259's contract: the events after `N` in `list`; over 500, `refresh: true` and none (read `state` again) |
+| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |
+
+Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 403 `FORBIDDEN`, 405
+`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
+choice (localStorage), as on the HTML board: `state.theme` is the board's default, and no route writes it. The service worker
+never caches `api/`. A breaking change is `/api/v2/`.
+
+The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
+`assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
+`crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`.
+
+`web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
+`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev
+dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is committed and embedded in the binary
+(`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
+build` after a UI edit.
+
 ## Host tab (#141)
 
 Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,

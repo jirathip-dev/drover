@@ -2,3 +2,4 @@ target/
 .brief.md
 .role-prompt.md
 /site/
+web/node_modules/
