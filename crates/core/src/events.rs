@@ -422,6 +422,16 @@ pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
         .find(|e| e.kind == "spawn" && e.str("agent") == Some(agent))
 }
 
+/// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since).
+pub fn held_on(events: &[Event], s: &IssueState) -> Option<u64> {
+    let kinds = ["held", "released", "spawn"];
+    let e = events
+        .iter()
+        .rev()
+        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind))?;
+    e.data.get("on").filter(|_| e.kind == "held")?.as_u64()
+}
+
 /// #173: a check stage's spawn (logs before #173: a `rev` one).
 pub fn checks(e: &Event) -> bool {
     e.data
