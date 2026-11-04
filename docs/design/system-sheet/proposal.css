@@ -1,0 +1,121 @@
+/* #440 design: the System sheet (proposal.js). Phase 2 folds this into serve.css. The board's own parts keep their
+   rules: the sheet box (.sh), the config groups (.cg, .kv2, .chips), the Host groups (.grp, .hcd) and the look rows (.lko). */
+
+/* [⚙] in [◐]'s place, the same one-width bracket control; the dot sits on its top right corner, red, 8 px. */
+#sysb{font-size:15px}
+#sysb .sd,.sxi .sd{position:absolute;top:1px;right:-3px;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--r);box-shadow:0 0 0 2px var(--bg)}
+#sysb .sd[hidden],.sxi .sd[hidden]{display:none}
+
+/* Three tabs share the bar. */
+nav a{flex:1 1 0}
+
+/* The sheet: its own layer under #sheet (z 3), at the full detent; the index between its head and its scroller. */
+#sys{position:fixed;inset:0;z-index:2;overscroll-behavior:contain}
+#sys[hidden]{display:none}
+#sys>.sbd{position:absolute;inset:0;background:var(--scrim)}
+#sys>.sh{transform:none;transition:none;border-top:1px solid var(--edge)}
+html.sysopen{overflow:hidden}
+.sh.sys .hd p{display:flex;align-items:center;gap:var(--s2)}
+.sh.sys .hd b{flex:1;font-size:15px}
+.sh.sys .hd .sxc{flex:none}
+
+/* The section index: one line of bracket chips that scrolls sideways at 390, the current one filled like the tab bar. */
+.sxi{flex:none;display:flex;gap:var(--s3);overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--s3));padding:0 var(--s3) var(--s2);border-bottom:1px solid var(--line);
+  mask-image:linear-gradient(90deg,#000 calc(100% - 3ch),transparent)}
+.sxi::-webkit-scrollbar{display:none}
+.sxi a{position:relative;flex:none;display:flex;align-items:center;min-height:var(--ctl);color:var(--mute);text-decoration:none;white-space:nowrap}
+.sxi a>span::before{content:"["}.sxi a>span::after{content:"]"}
+.sxi a>span{display:inline-flex;align-items:center;height:var(--ctl);padding:0 .3ch}
+.sxi a.on>span{background:var(--l);color:var(--bg)}
+.sxi a .sd{top:2px;right:-4px}
+
+/* The scroller: every section in one column; a section's head is the tab line's style (bold, its theme word first). */
+.sh.sys .top{position:relative;flex:1 1 auto;min-height:0;max-height:none;border:0;padding-bottom:calc(var(--s4) * 4)}
+.sy{padding:var(--s2) 0 var(--s3);border-bottom:1px solid var(--line);scroll-margin-top:0}
+.syh{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2);margin:var(--s2) 0 var(--s1);padding:var(--s1) var(--s1);font-size:15px;font-weight:700;letter-spacing:0}
+.syh .syt{flex:none}
+.syh .sym{flex:1 1 14ch;min-width:0;font-size:var(--fs-meta);font-weight:400;color:var(--mute);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sy[data-t=r]>.syh{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent);border-radius:4px}
+.sy[data-t=r]>.syh .sym{color:inherit}
+.sy[data-t=a]>.syh .sym{color:var(--a)}
+.syf{margin:var(--s3) 0;font-size:var(--fs-meta);color:var(--mute);text-align:center}
+/* The moved tabs drop their own first line (the section head says it) and their bottom-bar padding. */
+#sys :is(#host,#events){display:block;padding:0;margin:0}
+#sys :is(#host,#events)>.tsub{display:none}
+
+/* Agent providers: a card per provider (the host card's box), an account or key per row. */
+.pvg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:var(--s3);align-items:start}
+.pvc{box-shadow:inset 0 0 0 1px var(--line);border-radius:6px;padding:0 var(--s2) var(--s2);min-width:0}
+.pvch{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-bottom:1px solid var(--line)}
+.pvch>b{font-size:15px}
+.pvch .pvo{margin-left:auto;font-size:var(--fs-meta)}
+.pvr{padding:var(--s2) 0;border-bottom:1px solid var(--line)}
+.pvr p{margin:0}
+.pvh{display:flex;align-items:center;gap:var(--s2);min-height:var(--ctl)}
+.pvn{font-size:15px;min-width:2ch}
+.pvs{margin-left:auto;font-weight:700;text-align:right}
+.pvs.g{color:var(--g)}.pvs.a{color:var(--a)}.pvs.r{color:var(--r)}
+.pvr[data-t=r]{box-shadow:inset 3px 0 var(--r);padding-left:var(--s2)}
+.pvm{font-size:var(--fs-meta);color:var(--mute)}
+.pvu{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3);margin-top:var(--s1)!important}
+.pm{display:inline-flex;align-items:center;gap:var(--s1);white-space:nowrap}
+.pm .k,.pvl .k{color:var(--mute);font-size:var(--fs-meta);min-width:2.5ch}
+.pvc .bar{font-size:var(--fs-meta)}.pvc .bar.g{color:var(--g)}.pvc .bar.a{color:var(--a)}.pvc .bar.r{color:var(--r)}.pvc .bar i{font-style:normal;opacity:.45}
+.pvu .mt,.pvq .mt{font-size:var(--fs-meta);color:var(--mute)}
+.pvb{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);margin-top:var(--s1)!important}
+.pva{margin:var(--s2) 0 0}
+.pvk{margin:var(--s2) 0 0;font-size:var(--fs-meta)}
+.pvf{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
+/* [use]'s scope, the move prompt and [+ add key]: an inset panel under the row (no second sheet). */
+.pvq{margin:var(--s2) 0 0;padding:var(--s2);border:1px solid var(--edge);border-radius:6px;background:color-mix(in srgb,var(--l) 6%,transparent)}
+.pvq p{margin:0}.pvq>*+*{margin-top:var(--s2)!important}
+.pvq .chips{padding:0;gap:var(--s2) var(--s4)}
+.pvl{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--ctl)}
+.pvl button[aria-pressed=true]{color:var(--l);box-shadow:inset 0 -2px var(--l)}
+.pvl input{flex:1;min-width:0;height:var(--hit);font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:0 var(--s2)}
+.pvq .ml{margin:0;padding-left:2ch;font-size:var(--fs-meta)}
+.pvq .st{margin:0;font-size:var(--fs-meta)}.pvq .st.r{color:var(--r)}
+.pmv{border-color:var(--a);background:color-mix(in srgb,var(--a) 8%,transparent)}
+.pmv .pvqh b{color:var(--a)}
+
+/* Fleets: a row per fleet in its colour; it opens to the [config] content (.cs keeps its rules). */
+.sfl{border-top:1px solid var(--line)}.sfl:first-child{border-top:0}
+.sfl>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:0 var(--s1);list-style:none;white-space:nowrap}
+.sfl>summary::-webkit-details-marker{display:none}
+.sfl>summary .fq{flex:none;font-style:normal;color:var(--fk)}
+.sfl>summary b{flex:none;color:var(--fk)}
+.sfl>summary .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta)}
+.sfl>summary .cv::before{content:"▸"}.sfl[open]>summary .cv::before{content:"▾"}
+.sfl[open]{box-shadow:inset 3px 0 var(--fk);padding-left:var(--s2)}
+.sfl>.cs{padding:0 0 var(--s2)}
+
+/* Notifications and Conductor reuse the config groups. */
+.sy .cs .cg:first-child{border-top:0}
+.role2{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-top:1px solid var(--line)}
+.role2:first-of-type{border-top:0}
+.role2>span{flex:1;min-width:0}
+.sy code{color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit}
+.sy .chips{padding:var(--s1) 0;gap:var(--s2) var(--s4)}
+.sy .chips>b{min-width:8ch;font-weight:400;font-size:var(--fs-meta)}
+.sy a.go{margin-left:var(--s1)}
+
+/* At 900 px and over: the index is a rail on the left, the sections a column on the right. */
+@media (min-width:900px){
+  .sh.sys{display:grid;grid-template-columns:26ch minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:calc(2 * var(--s4))}
+  .sh.sys>.hd{grid-column:1/-1}
+  .sxi{flex-direction:column;align-items:stretch;gap:var(--s1);margin:0;padding:var(--s2) 0;border:0;border-right:1px solid var(--line);overflow:visible;mask-image:none}
+  .sxi a>span{padding:0 .5ch}
+  .sxi a .sd{position:static;margin-left:var(--s2)}
+  .sh.sys .top{padding-right:var(--s2)}
+  .sy .look{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}
+  .sy .look .lkn{grid-column:1/-1}
+  .sy>.syb>.cs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 calc(2 * var(--s4))}
+  .sy>.syb>.cs>.cg:nth-child(2){border-top:0}
+}
+.sy .mt{font-size:var(--fs-meta);color:var(--mute)}
+.role2>span>.mt{display:block}
+.sy .pva+.mt{margin:var(--s1) 0 0}
+/* A host card's [sign in ▾] keeps one line beside the name (its list now gh, codex: Claude's sign-in is in Providers). */
+#sys .hhd>.su>summary{white-space:nowrap}
+/* An account name keeps its case inside a (lowercase) button: [use B for every role]. */
+button .an{font-style:normal;text-transform:none}

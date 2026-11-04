@@ -1,0 +1,240 @@
+{
+ "shots": [
+  "tab-queue-390.png",
+  "tab-queue-1440.png",
+  "tab-lanes-390.png",
+  "tab-lanes-1440.png",
+  "tab-chat-390.png",
+  "tab-chat-1440.png",
+  "gear-dot-390.png",
+  "gear-calm-390.png",
+  "system-providers-390.png",
+  "system-fleets-390.png",
+  "system-hosts-390.png",
+  "system-activity-390.png",
+  "system-notifications-390.png",
+  "system-conductor-390.png",
+  "system-appearance-390.png",
+  "system-all-390.png",
+  "system-providers-1440.png",
+  "system-fleets-1440.png",
+  "system-hosts-1440.png",
+  "system-activity-1440.png",
+  "system-notifications-1440.png",
+  "system-all-1440.png",
+  "providers-use-390.png",
+  "providers-move-390.png",
+  "providers-addkey-390.png",
+  "providers-signin-390.png",
+  "providers-signin-1440.png"
+ ],
+ "checks": {
+  "tab queue": {
+   "tabs": [
+    "queue",
+    "lanes",
+    "chat"
+   ],
+   "gear": true,
+   "look": false,
+   "dot": true
+  },
+  "tab lanes": {
+   "tabs": [
+    "queue",
+    "lanes",
+    "chat"
+   ],
+   "gear": true,
+   "look": false,
+   "dot": true
+  },
+  "tab chat": {
+   "tabs": [
+    "queue",
+    "lanes",
+    "chat"
+   ],
+   "gear": true,
+   "look": false,
+   "dot": true
+  },
+  "gear-dot-390.png": {
+   "dot": true,
+   "label": "system (host alert: mini: disk under floor)",
+   "hostsChipDot": true
+  },
+  "gear-calm-390.png": {
+   "dot": false,
+   "label": "system",
+   "hostsChipDot": false
+  },
+  "gear opens": {
+   "open": true,
+   "hash": "#system/providers",
+   "current": "providers",
+   "top": 0
+  },
+  "moved": {
+   "hosts: host cards": 2,
+   "hosts: charts (rows with history)": 10,
+   "hosts: [sign in ▾] logins": [
+    "gh",
+    "codex",
+    "gh",
+    "codex"
+   ],
+   "hosts: [on]/[off]": [
+    "studio off"
+   ],
+   "hosts: groups": [
+    "HOSTS",
+    "FLEET DISK",
+    "SERVICES",
+    "FLEETS"
+   ],
+   "activity: rows": 114,
+   "activity: chips": 6,
+   "fleets: rows": [
+    "acme-api",
+    "acme-web",
+    "acme-ios",
+    "docs"
+   ],
+   "fleets: config groups": [
+    "General",
+    "Pipeline",
+    "Limits",
+    "Roles",
+    "Conductor",
+    "Alerts",
+    "Hosts / needs"
+   ],
+   "fleets: role pickers": 21,
+   "fleets: conductor choices (#401)": 12,
+   "appearance: theme rows": 3,
+   "appearance: colour rows": 8,
+   "appearance: style rows": 2,
+   "notifications: push, enable, alert devices, paired devices, telegram": [
+    2,
+    1,
+    1,
+    3,
+    true
+   ],
+   "providers: cards, rows": [
+    2,
+    5
+   ],
+   "not left elsewhere": {
+    "look": false,
+    "hostTab": false,
+    "eventsTab": false,
+    "hostInMain": false,
+    "eventsInMain": false
+   }
+  },
+  "appearance pick": {
+   "theme": "kitchen",
+   "open": true
+  }
+ },
+ "routes": {
+  "#host": {
+   "hash": "#system/hosts",
+   "tab": "queue",
+   "open": true,
+   "current": "hosts",
+   "fleetOpen": []
+  },
+  "#events": {
+   "hash": "#system/activity",
+   "tab": "queue",
+   "open": true,
+   "current": "activity",
+   "fleetOpen": []
+  },
+  "#config/acme-web": {
+   "hash": "#system/fleets/acme-web",
+   "tab": "queue",
+   "open": true,
+   "current": "fleets",
+   "fleetOpen": [
+    "acme-web"
+   ]
+  },
+  "#system/conductor": {
+   "hash": "#system/conductor",
+   "tab": "queue",
+   "open": true,
+   "current": "conductor",
+   "fleetOpen": []
+  },
+  "#system/fleets/docs": {
+   "hash": "#system/fleets/docs",
+   "tab": "queue",
+   "open": true,
+   "current": "fleets",
+   "fleetOpen": [
+    "docs"
+   ]
+  },
+  "stored tab host": {
+   "tab": "queue",
+   "hash": "#queue",
+   "open": false
+  },
+  "[config] tap": {
+   "hash": "#system/fleets/acme-api",
+   "open": true,
+   "fleetOpen": [
+    "acme-api"
+   ]
+  }
+ },
+ "overflow": {
+  "providers": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "fleets": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "hosts": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "activity": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "notifications": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "conductor": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  },
+  "appearance": {
+   "pageWidth": 390,
+   "sheetScrollWidth": 374,
+   "sheetWidth": 366,
+   "wider": []
+  }
+ },
+ "errors": []
+}

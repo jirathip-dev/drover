@@ -1,0 +1,63 @@
+{
+  "_": "#440 design fixture: what the System sheet's new parts read. `providers` is #441's proposed API v1 shape; `alerts` and `conductor` are read from fleet.toml and the state dir today. All names and numbers are made up.",
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "sub": "Claude",
+      "kind": "accounts",
+      "add": "+ add account",
+      "rows": [
+        { "name": "A", "order": 1, "roles": ["impl", "rev", "sec", "conductor"], "lanes": 3, "state": "ok", "meters": [{ "label": "5h", "pct": 58 }, { "label": "7d", "pct": 34 }], "ago": "2m" },
+        { "name": "B", "order": 2, "roles": ["rev"], "lanes": 0, "state": "capped", "until": "14:20", "meters": [{ "label": "5h", "pct": 100 }, { "label": "7d", "pct": 81 }], "ago": "41m" },
+        { "name": "C", "order": 3, "roles": [], "lanes": 0, "state": "invalid", "meters": [], "ago": "" }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "sub": "API keys",
+      "kind": "keys",
+      "add": "+ add key",
+      "how": "https://platform.deepseek.com/api_keys",
+      "rows": [
+        { "name": "main", "order": 1, "roles": ["impl"], "lanes": 2, "state": "ok", "balance": "$12.40", "ago": "12m" },
+        { "name": "spare", "order": 2, "roles": [], "lanes": 0, "state": "invalid", "ago": "1h" }
+      ]
+    }
+  ],
+  "running": [
+    { "agent": "acme-api-impl-17", "account": "A" },
+    { "agent": "acme-api-rev-15", "account": "A" },
+    { "agent": "conductor · acme-api", "account": "A" }
+  ],
+  "scopes": { "acme-api": ["impl", "rev", "sec", "conductor"], "acme-web": ["impl", "rev"], "docs": ["impl"], "acme-ios": ["impl"] },
+  "alerts": {
+    "push": { "tone": "g", "detail": "on · last alert 14m ago" },
+    "key": "BDemoKey",
+    "subs": [{ "id": "s1", "label": "iPhone · home screen", "created": 1209600 }],
+    "devices": [
+      { "hash": "d1", "label": "iPhone · home screen", "created": 1209600, "used": 40 },
+      { "hash": "d2", "label": "iPhone · Safari", "created": 2592000, "used": 86400 },
+      { "hash": "d3", "label": "Mac · Safari", "created": 604800, "used": 7200 }
+    ],
+    "notify": [["web push", "default events"], ["command", "stall, lane-dead"]],
+    "telegram": { "on": true, "chat": "fleet-ops", "owner": "set", "topics": 6, "polled": "4s" }
+  },
+  "conductor": {
+    "set": true,
+    "harness": "claude",
+    "harnesses": ["claude", "hermes", "dsh"],
+    "model": "opus",
+    "models": ["opus", "sonnet"],
+    "effort": "high",
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "accounts": ["A"],
+    "fleets": [
+      ["acme-api", "set · claude · opus"],
+      ["acme-web", "default: impl · claude"],
+      ["docs", "default: impl · claude"],
+      ["acme-ios", "default: impl · claude"]
+    ]
+  }
+}
