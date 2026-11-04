@@ -566,12 +566,12 @@
       if (!rows().length || rows().length === all || rows().some(r => !r.textContent.includes('past one')) || n() !== `(${rows().length} of 100)`) early.push(`search: ${rows().length} rows, ${n()}`);
       Object.assign(q, { value: '' }).dispatchEvent(new Event('input', { bubbles: true }));
       b.querySelector('[data-bf="90"]').click();
-      const old = Number(document.body.dataset.ts) - 90 * 86400;
-      if (!rows().length || rows().some(r => +r.dataset.c > old + 86400) || b.querySelector('[data-bf="90"]').getAttribute('aria-pressed') !== 'true') early.push(`>90 days: ${rows().length} rows`);
+      const is = JSON.parse(b.dataset.bl), old = Number(document.body.dataset.ts) - 90 * 86400;
+      if (!rows().length || rows().some(r => Date.parse(is[r.dataset.n].created) / 1000 > old + 86400) || b.querySelector('[data-bf="90"]').getAttribute('aria-pressed') !== 'true') early.push(`>90 days: ${rows().length} rows`);
       b.querySelector('[data-bf="90"]').click();
       const sel = b.querySelector('.bfs select');
       Object.assign(sel, { value: 'phone' }).dispatchEvent(new Event('change', { bubbles: true }));
-      if (!rows().length || rows().some(r => !JSON.parse(r.dataset.l).includes('phone')) || !sel.closest('.pk').textContent.startsWith('phone')) early.push(`label phone: ${rows().length} rows`);
+      if (!rows().length || rows().some(r => !JSON.parse(b.dataset.bl)[r.dataset.n].labels.includes('phone')) || !sel.closest('.pk').textContent.startsWith('phone')) early.push(`label phone: ${rows().length} rows`);
       Object.assign(sel, { value: '' }).dispatchEvent(new Event('change', { bubbles: true }));
       const [x, y, z] = rows();
       for (const r of [z, x, y]) r.querySelector('input').click();

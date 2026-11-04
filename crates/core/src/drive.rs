@@ -440,15 +440,6 @@ pub fn drive(
         ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
         res = Err(e);
     };
-    // #365: the tick's pass refreshes each fleet's backlog (issues updated since the last read).
-    for name in fleets
-        .iter()
-        .filter(|_| !fast && KICK.get().is_none() && only.is_none())
-    {
-        if let Err(e) = crate::gh::backlog(ctx, r, cfg.fleet(name)?, name) {
-            writeln!(out, "backlog: {e:#}")?;
-        }
-    }
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
     let mut seen = if fleets.is_empty() {
@@ -491,7 +482,7 @@ pub fn drive(
     if fast {
         let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
     }
-    for name in fleets {
+    for &name in &fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
         if !fast && KICK.get().is_none() {
             let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
@@ -508,8 +499,11 @@ pub fn drive(
             "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`.
+    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
     if !fast && KICK.get().is_none() {
+        for n in &fleets {
+            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
+        }
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));

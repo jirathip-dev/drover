@@ -102,8 +102,9 @@ for f, ns in fleets.items():
         json.dump({"title": t, "body": "", "updatedAt": "2026-01-01T00:00:00Z"}, open(f"{d}/cache/issue-{f}-{n}.json", "w"))
 # #365: acme-api's backlog, 100 open issues from 0 to 198 days old, some labelled, with AC or in a closed PR.
 labels = [["bug"], ["ui", "phone"], [], ["docs"], ["infra", "ci"]]
+iso = lambda t: __import__("datetime").datetime.fromtimestamp(t, __import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 iss = {str(n): {"title": f"acme-api backlog {n}: " + ("a title that runs well past one phone line, cut by CSS" if n % 7 == 0 else "one line"),
-    "labels": labels[n % 5], "created": ts - (599 - n) * 2 * 86400, "updated": ts - (599 - n) * 2 * 86400, "ac": n % 3 == 0, "pr": n % 10 == 0}
+    "labels": labels[n % 5], "created": iso(ts - (599 - n) * 2 * 86400), "updated": iso(ts - (599 - n) * 2 * 86400), "ac": n % 3 == 0, "pr": n % 10 == 0}
     for n in range(500, 600)}
 json.dump({"ts": ts, "since": "2026-01-01T00:00:00Z", "issues": iss}, open(f"{d}/cache/backlog-acme-api-0.json", "w"))
 EOF

@@ -14,7 +14,7 @@ pub const PR_FIELDS: &str =
 pub const PR_TTL: u64 = 60;
 const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
 
-pub(crate) fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
+pub fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
     ctx.state
         .parent()
         .unwrap_or(&ctx.state)
@@ -129,64 +129,44 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
     }
 }
 
-/// #365: a repo's issues in one paginated GraphQL call (`STATES` OPEN the first time, then OPEN and CLOSED updated since).
 const ISSUES_QUERY: &str = "query($owner:String!,$name:String!,$since:DateTime,$endCursor:String){repository(owner:$owner,\
 name:$name){issues(states:STATES,filterBy:{since:$since},first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{\
 number title state body createdAt updatedAt labels(first:20){nodes{name}} timelineItems(itemTypes:[CROSS_REFERENCED_EVENT],\
 first:20){nodes{...on CrossReferencedEvent{source{...on PullRequest{state}}}}}}}}}";
-const ISSUES_JQ: &str = ".data.repository.issues.nodes[] | .labels = [.labels.nodes[].name] | .prs = \
-[.timelineItems.nodes[].source.state // empty] | del(.timelineItems)";
+const ISSUES_JQ: &str =
+    ".data.repository.issues.nodes[] | {number, title, state, created: .createdAt, updated: .updatedAt, \
+labels: [.labels.nodes[].name], ac: (.body | test(\"acceptance criteria|(^|\\\\n)#+ *ac *(\\\\n|$)\"; \"i\")), \
+pr: any(.timelineItems.nodes[].source.state?; . == \"MERGED\" or . == \"CLOSED\")}";
 
-/// #365: the repo's open issues (the board's backlog) in `backlog-<fleet>-0.json`: every open one on the first read,
-/// then only those updated since the newest seen (a closed one drops out); the count kept. A failed read keeps the last.
-pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<usize> {
+/// #365: the repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those
+/// updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
+pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> {
     let p = cache_path(ctx, "backlog", fleet, 0);
     let mut c = load::<Value>(&p).unwrap_or_else(|| json!({"issues": {}}));
     let since = c["since"].as_str().map(|s| format!("since={s}"));
     let q = ISSUES_QUERY.replace("STATES", if since.is_some() { "[OPEN,CLOSED]" } else { "OPEN" });
     let (owner, name) = f.repo.split_once('/').unwrap_or_default();
     let v = [format!("owner={owner}"), format!("name={name}"), format!("query={q}")];
-    let mut a = vec![
-        "api",
-        "graphql",
-        "--paginate",
-        "--jq",
-        ISSUES_JQ,
-        "-f",
-        &v[0],
-        "-f",
-        &v[1],
-        "-f",
-        &v[2],
-    ];
-    a.extend(since.iter().flat_map(|s| ["-f", s.as_str()]));
-    for i in ok(r, "gh", &a)?
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-    {
-        let n = i["number"].to_string();
-        if i["updatedAt"].as_str() > c["since"].as_str() {
-            c["since"] = i["updatedAt"].clone();
+    let mut a = vec!["api", "graphql", "--paginate", "--jq", ISSUES_JQ];
+    for x in v.iter().chain(&since) {
+        a.extend(["-f", x]);
+    }
+    let out = ok(r, "gh", &a)?;
+    for i in out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        if i["updated"].as_str() > c["since"].as_str() {
+            c["since"] = i["updated"].clone();
         }
-        if i["state"] != "OPEN" {
-            c["issues"].as_object_mut().map(|m| m.remove(&n));
-            continue;
-        }
-        let body = i["body"].as_str().unwrap_or_default().to_lowercase();
-        let ac = body.contains("acceptance criteria") || body.lines().any(|l| l.trim_start_matches('#').trim() == "ac");
-        let t = |k: &str| i[k].as_str().and_then(crate::usage::epoch);
-        let pr = i["prs"].as_array().into_iter().flatten().any(|s| s != "OPEN");
-        let row = json!({"title": i["title"], "labels": i["labels"], "created": t("createdAt"), "updated": t("updatedAt"), "ac": ac, "pr": pr});
-        c["issues"][n] = row;
+        let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
+        m.map(|m| {
+            if i["state"] == "OPEN" {
+                m.insert(n, i)
+            } else {
+                m.remove(&n)
+            }
+        });
     }
     c["ts"] = json!(ctx.now);
-    store(&p, &c)?;
-    Ok(c["issues"].as_object().map_or(0, serde_json::Map::len))
-}
-
-/// #365: the last backlog read (`{ts, since, issues: {n: …}}`); never calls GitHub.
-pub fn cached_backlog(ctx: &Ctx, fleet: &str) -> Value {
-    load(&cache_path(ctx, "backlog", fleet, 0)).unwrap_or_default()
+    store(&p, &c)
 }
 
 /// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open

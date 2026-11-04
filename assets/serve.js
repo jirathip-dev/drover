@@ -773,27 +773,40 @@ const inph = (s, t) => `in ${s.replace(/^⏸\s*/, '').split(/[\s(:]/)[0]} ${dur(
 // chain waits on next: the root's open blocker, else the root.
 const qsum = st => [`#${st[0].n} → #${st[1].n} · `, st[0].title, ` (${st.length} steps) · next: #${st[0].b || st[0].n}`];
 // queue:end
-// #365 backlog: pure from here to `backlog:end` (tests/backlog.rs runs it under node). A row d = {n, title, labels,
-// age (s), ac, pr} shows when it has the picked label, every pressed quick filter and every search word; ticks keep
-// their order ([queue N] queues them so).
+// #365 backlog: pure from here to `backlog:end` (tests/backlog.rs runs it under node). The server's last read {n: {title,
+// labels, created, updated, ac, pr}} as rows newest first, `stale` when untouched for 90 days; a row shows when it has
+// the picked label, every pressed quick filter and every search word; ticks keep their order ([queue N] queues so).
+const BQ = [['new', 'new'], ['30', '>30 days'], ['90', '>90 days'], ['ac', 'has AC'], ['pr', 'in a closed PR']];
 const BF = { new: d => d.age < 7 * 86400, 30: d => d.age > 30 * 86400, 90: d => d.age > 90 * 86400, ac: d => d.ac, pr: d => d.pr };
+const brows = (is, now) => Object.entries(is).map(([n, i]) => ({ n, title: i.title || '', labels: i.labels || [], ac: !!i.ac, pr: !!i.pr,
+  age: now - Date.parse(i.created) / 1000, stale: now - Date.parse(i.updated) / 1000 > 90 * 86400 })).sort((a, b) => b.n - a.n);
 const bpass = (d, s) => (!s.label || d.labels.includes(s.label)) && s.on.every(k => BF[k](d)) &&
   s.q.toLowerCase().split(/\s+/).every(w => `#${d.n} ${d.title} ${d.labels.join(' ')}`.toLowerCase().includes(w));
 const btick = (ticks, n, on) => [...ticks.filter(x => x !== n), ...(on ? [n] : [])];
 // backlog:end
 // #365: each repo's backlog state (search, filters, label, ticks) lives here, so a /live patch never drops it; a
-// ticked issue that left the backlog (queued) drops its tick.
+// ticked issue that left the backlog (queued) drops its tick. bdraw builds a fresh copy's rows (tidy), bshow applies it.
 const BS = {}, bst = b => (BS[qname(b.closest('.fc'))] ??= { q: '', on: [], label: '', ticks: [] });
+const bx = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`), bnow = () => Date.now() / 1000 + SKEW;
+function bdraw(root) {
+  for (const b of root.querySelectorAll('.bl')) {
+    const rs = brows(JSON.parse(b.dataset.bl), bnow()), ls = [...new Set(rs.flatMap(r => r.labels))].sort();
+    b.querySelector('summary').insertAdjacentHTML('afterend', `<p class=bs><input type=search placeholder="search #, title, label" aria-label="search the backlog"></p>
+<p class="chips bfs">${BQ.map(([k, l]) => `<button type=button data-bf=${k}>${bx(l)}</button>`).join('')}<select aria-label=label><option value="">any label</option>${ls.map(l => `<option>${bx(l)}</option>`).join('')}</select></p>`);
+    b.querySelector('.bls').innerHTML = rs.map(r => `<label class=bi data-n=${r.n}><input type=checkbox value=${r.n}><span>#${r.n}</span><span class=tl>${bx(r.title)}</span><span class=m>${bx(r.labels.join(' '))}${r.stale ? ' <span class="tag m">stale</span>' : ''} ${dur(Math.max(0, Math.round(r.age)))}</span></label>`).join('');
+  }
+}
 function bshow(root) {
   for (const b of root.querySelectorAll('.bl')) {
-    const s = bst(b), rs = [...b.querySelectorAll('.bi')], now = Date.now() / 1000 + SKEW, f = b.querySelector('.bbar');
-    s.ticks = s.ticks.filter(n => rs.some(r => +r.dataset.n === n));
-    for (const r of rs) {
-      const d = { n: r.dataset.n, title: r.querySelector('.tl').textContent, labels: JSON.parse(r.dataset.l), age: now - r.dataset.c, ac: 'ac' in r.dataset, pr: 'pr' in r.dataset };
+    const s = bst(b), rs = brows(JSON.parse(b.dataset.bl), bnow()), f = b.querySelector('.bbar');
+    s.ticks = s.ticks.filter(n => rs.some(r => +r.n === n));
+    for (const d of rs) {
+      const r = b.querySelector(`.bi[data-n="${d.n}"]`);
+      if (!r) continue;
       r.hidden = !bpass(d, s);
       r.querySelector('input').checked = s.ticks.includes(+d.n);
     }
-    const shown = rs.filter(r => !r.hidden).length, i = b.querySelector('.bs input'), sel = b.querySelector('.bfs select');
+    const shown = rs.filter(d => bpass(d, s)).length, i = b.querySelector('.bs input'), sel = b.querySelector('.bfs select');
     b.querySelector('summary>.m').textContent = shown === rs.length ? `(${rs.length})` : `(${shown} of ${rs.length})`;
     if (i.value !== s.q) i.value = s.q;
     if (sel.value !== s.label) { sel.value = s.label; sel.dispatchEvent(new Event('change')); }
@@ -912,6 +925,7 @@ document.addEventListener('pointerup', e => {
 });
 document.addEventListener('click', e => { if (qswiped && e.target.closest('#queue')) { qswiped = false; e.preventDefault(); e.stopPropagation(); } }, true);
 function tidy(root) {
+  bdraw(root);
   qsplit(root);
   graph(root);
   qfold(root);

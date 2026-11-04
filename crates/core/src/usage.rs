@@ -62,7 +62,7 @@ fn dir(ctx: &Ctx) -> PathBuf {
     ctx.state.parent().unwrap_or(&ctx.state).join("usage")
 }
 
-pub(crate) fn load<T: DeserializeOwned>(p: &Path) -> Option<T> {
+pub fn load<T: DeserializeOwned>(p: &Path) -> Option<T> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 

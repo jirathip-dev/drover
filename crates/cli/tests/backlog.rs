@@ -1,7 +1,8 @@
-//! #365 step 1: the Queue tab's backlog. The tick's pass (and [↻ read again]) reads a repo's open issues in one GraphQL
+//! #365 step 1: the Queue tab's backlog. The tick's pass (and [Drive now]) reads a repo's open issues in one GraphQL
 //! call, then only those updated since; the board renders it from that read with no GitHub call; [queue N] queues the
-//! ticked issues in tick order, each row marked `needs-check`. serve.js's pure backlog part (search, quick filters,
-//! tick order) runs under node; the 390 px view with 100 issues is gate 2's `queue/queue-backlog` (docs/ui.md).
+//! ticked issues in tick order, each row marked `needs-check`. The read's `--jq` runs under jq on a raw GraphQL page;
+//! serve.js's pure backlog part (rows, search, quick filters, tick order) under node; the 390 px view with 100 issues
+//! is gate 2's `queue/queue-backlog` (docs/ui.md).
 mod common;
 use common::*;
 use herdsman::events::read;
@@ -9,30 +10,23 @@ use herdsman::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-/// 1970-04-26T17:46:40Z: an issue last touched on 1970-01-02 is 104 days stale.
 const NOW: u64 = 10_000_000;
 const READ: &str = "gh api graphql --paginate --jq .data.repository.issues";
 
-fn issue(n: u64, state: &str, updated: &str, labels: &[&str], body: &str, prs: &[&str]) -> String {
-    let i = json!({"number": n, "title": format!("issue {n} title"), "state": state, "body": body,
-        "createdAt": updated, "updatedAt": updated, "labels": labels, "prs": prs});
+/// One issue as the read's `--jq` prints it.
+fn issue(n: u64, state: &str, updated: &str, labels: &[&str], ac: bool, pr: bool) -> String {
+    let i = json!({"number": n, "title": format!("issue {n} title"), "state": state, "created": updated,
+        "updated": updated, "labels": labels, "ac": ac, "pr": pr});
     format!("{i}\n")
 }
 
 fn first_read() -> String {
     [
-        issue(12, "OPEN", "1970-01-02T00:00:00Z", &["bug"], "", &["MERGED"]),
-        issue(
-            15,
-            "OPEN",
-            "1970-04-20T00:00:00Z",
-            &["ui", "phone"],
-            "## AC\n- works",
-            &["OPEN"],
-        ),
-        issue(17, "OPEN", "1970-04-25T00:00:00Z", &[], "Acceptance criteria: x", &[]),
-        issue(20, "OPEN", "1970-04-21T00:00:00Z", &[], "", &[]),
-        issue(21, "OPEN", "1970-04-21T00:00:00Z", &[], "", &[]),
+        issue(12, "OPEN", "1970-01-02T00:00:00Z", &["bug"], false, true),
+        issue(15, "OPEN", "1970-04-20T00:00:00Z", &["ui", "phone"], true, false),
+        issue(17, "OPEN", "1970-04-25T00:00:00Z", &[], true, false),
+        issue(20, "OPEN", "1970-04-21T00:00:00Z", &[], false, false),
+        issue(21, "OPEN", "1970-04-21T00:00:00Z", &[], false, false),
     ]
     .concat()
 }
@@ -60,20 +54,32 @@ fn cache(c: &herdsman::Ctx) -> Value {
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
+fn keys(v: &Value) -> Vec<String> {
+    v.as_object().unwrap().keys().cloned().collect()
+}
+
+fn agents() -> Fake {
+    Fake::default().reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
+}
+
 /// The tick's pass reads every open issue once; a fast step never does. The next read asks only for issues updated
-/// since the newest one seen, open or closed: a closed one leaves, a changed one is replaced, a new one joins.
+/// since the newest one seen, open or closed: a closed one leaves, a changed one is replaced, a new one joins. A failed
+/// read keeps the last one and the pass goes on.
 #[test]
 fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let c = ctx(&tmpdir("backlog-tick"), CONFIG);
-    let r = Fake::default()
-        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
-        .once(READ, 0, &first_read());
+    let r = agents().once(READ, 0, &first_read());
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count(READ), 0, "a fast step reads no backlog");
-    run(&c, &r, &["drive"]);
-    let calls = r.calls.borrow().clone();
-    let first: Vec<_> = calls.iter().filter(|l| l.starts_with(READ)).collect();
-    assert_eq!(first.len(), 1, "{calls:?}");
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
+    let first: Vec<_> = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|l| l.starts_with(READ))
+        .cloned()
+        .collect();
+    assert_eq!(first.len(), 1, "{:?}", r.calls.borrow());
     assert!(
         first[0].contains("issues(states:OPEN,") && !first[0].contains("since="),
         "{}",
@@ -81,62 +87,81 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     );
     let b = cache(&c);
     assert_eq!(b["since"], "1970-04-25T00:00:00Z");
-    let ns: Vec<&String> = b["issues"].as_object().unwrap().keys().collect();
-    assert_eq!(ns, ["12", "15", "17", "20", "21"]);
-    assert_eq!(b["issues"]["12"]["pr"], true, "mentioned in a merged PR");
-    assert_eq!(b["issues"]["15"]["pr"], false, "an open PR says nothing yet");
-    assert_eq!(
-        (b["issues"]["15"]["ac"].clone(), b["issues"]["17"]["ac"].clone()),
-        (json!(true), json!(true))
-    );
-    assert_eq!(b["issues"]["20"]["ac"], false);
-    assert_eq!(b["issues"]["12"]["updated"], 86_400, "epoch seconds");
+    assert_eq!(keys(&b["issues"]), ["12", "15", "17", "20", "21"]);
+    assert_eq!(b["issues"]["15"]["labels"], json!(["ui", "phone"]));
 
-    let r = Fake::default().once(
-        READ,
-        0,
-        &[
-            issue(12, "CLOSED", "1970-04-26T00:00:00Z", &["bug"], "", &[]),
-            issue(15, "OPEN", "1970-04-26T01:00:00Z", &["ui"], "", &[]),
-            issue(30, "OPEN", "1970-04-26T02:00:00Z", &[], "", &[]),
-        ]
-        .concat(),
-    );
-    assert_eq!(
-        herdsman::gh::backlog(
-            &c,
-            &r,
-            &herdsman::config::Config::load(&c.config).unwrap().fleet["sendmeter"],
-            "sendmeter"
-        )
-        .unwrap(),
-        5
-    );
-    let call = r.calls.borrow()[0].clone();
+    let next = [
+        issue(12, "CLOSED", "1970-04-26T00:00:00Z", &["bug"], false, false),
+        issue(15, "OPEN", "1970-04-26T01:00:00Z", &["ui"], false, false),
+        issue(30, "OPEN", "1970-04-26T02:00:00Z", &[], false, false),
+    ];
+    let r = agents().once(READ, 0, &next.concat());
+    assert_eq!(run(&c, &r, &["drive"]).0, 0);
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     assert!(
         call.contains("issues(states:[OPEN,CLOSED],") && call.ends_with("-f since=1970-04-25T00:00:00Z"),
         "{call}"
     );
     let b = cache(&c);
-    let ns: Vec<&String> = b["issues"].as_object().unwrap().keys().collect();
-    assert_eq!(ns, ["15", "17", "20", "21", "30"]);
-    assert_eq!(b["issues"]["15"]["labels"], json!(["ui"]));
-    assert_eq!(b["issues"]["15"]["ac"], false, "replaced by the newer read");
+    assert_eq!(keys(&b["issues"]), ["15", "17", "20", "21", "30"]);
+    assert_eq!(
+        (b["issues"]["15"]["labels"].clone(), b["issues"]["15"]["ac"].clone()),
+        (json!(["ui"]), json!(false))
+    );
     assert_eq!(b["since"], "1970-04-26T02:00:00Z");
 
-    // A failed read keeps the last one.
-    assert!(herdsman::gh::backlog(
-        &c,
-        &Fake::default().once_err(READ, 1, "HTTP 502"),
-        &herdsman::config::Config::load(&c.config).unwrap().fleet["sendmeter"],
-        "sendmeter"
-    )
-    .is_err());
-    assert_eq!(cache(&c)["since"], "1970-04-26T02:00:00Z");
+    let r = agents().once_err(READ, 1, "HTTP 502");
+    assert_eq!(run(&c, &r, &["drive"]).0, 0, "a failed read never fails the pass");
+    assert_eq!(r.count(READ), 1);
+    assert_eq!(cache(&c)["issues"], b["issues"], "the last read kept");
 }
 
-/// [↻ read again] reads on demand; the page and every live fragment render from that read alone (no `gh` call), newest
-/// first, leaving out queued issues and those with a lane, a `stale` tag on one untouched for 90 days.
+/// The read's `--jq` (taken from the call the pass made) on a raw GraphQL page, under jq: each issue flattened, `ac`
+/// when the body has acceptance criteria (the words or an `AC` heading), `pr` when a merged or closed PR mentions it.
+#[test]
+fn the_reads_jq_flattens_each_issue() {
+    if std::process::Command::new("jq").arg("--version").output().is_err() {
+        return eprintln!("skipping: no jq here");
+    }
+    let c = ctx(&tmpdir("backlog-jq"), CONFIG);
+    let r = agents();
+    run(&c, &r, &["drive"]);
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
+    let jq = &call[call.find("--jq ").unwrap() + 5..call.find(" -f owner=").unwrap()];
+    let node = |n: u64, body: &str, labels: &[&str], refs: Value| {
+        let labels: Vec<_> = labels.iter().map(|l| json!({"name": l})).collect();
+        json!({"number": n, "title": format!("t{n}"), "state": "OPEN", "body": body, "createdAt": "c", "updatedAt": "u",
+            "labels": {"nodes": labels}, "timelineItems": {"nodes": refs}})
+    };
+    let page = json!({"data": {"repository": {"issues": {"nodes": [
+        node(1, "Intro\n## AC\n- works", &["bug", "ui"], json!([{"source": {"state": "OPEN"}}, {"source": {"state": "MERGED"}}])),
+        node(2, "Has Acceptance Criteria below", &[], json!([{"source": {"state": "CLOSED"}}])),
+        node(3, "an ACME thing, nothing more", &[], json!([{"source": {}}, {}, {"source": {"state": "OPEN"}}])),
+    ]}}}});
+    let d = tmpdir("backlog-jq-page");
+    std::fs::write(d.join("page.json"), page.to_string()).unwrap();
+    let o = std::process::Command::new("jq")
+        .args(["-c", jq])
+        .arg(d.join("page.json"))
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let got: Vec<Value> = String::from_utf8_lossy(&o.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(
+        got,
+        [
+            json!({"number": 1, "title": "t1", "state": "OPEN", "created": "c", "updated": "u", "labels": ["bug", "ui"], "ac": true, "pr": true}),
+            json!({"number": 2, "title": "t2", "state": "OPEN", "created": "c", "updated": "u", "labels": [], "ac": true, "pr": true}),
+            json!({"number": 3, "title": "t3", "state": "OPEN", "created": "c", "updated": "u", "labels": [], "ac": false, "pr": false}),
+        ]
+    );
+}
+
+/// The page and every live fragment carry the backlog from the last read alone (no `gh` call per view), leaving out
+/// queued issues and those with a lane; before any read there is no backlog section.
 #[test]
 fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let c = ctx(&tmpdir("backlog-board"), CONFIG);
@@ -149,52 +174,34 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
         json!({"agent": "sendmeter-impl-21", "role": "impl"}),
     );
     herdsman::events::append(&c.state, &ev).unwrap();
-    let r = Fake::default().once(READ, 0, &first_read());
+    let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = get(&s, "/", &cookie);
-    assert!(!page.contains("class=bl>"), "never read: no backlog section");
-    let res = post(
-        &s,
-        &cookie,
-        &format!("op=backlog&fleet=sendmeter&mtime={}", mtime(&page)),
+    assert!(
+        !get(&s, "/", &cookie).contains("class=bl"),
+        "never read: no backlog section"
     );
-    assert!(res.contains("msg=sendmeter%20backlog%3A%205%20open%20issues"), "{res}");
-    assert_eq!(r.count("gh"), 1);
-
+    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
     for out in [
         get(&s, "/", &cookie),
         get(&s, "/?frag=all", &cookie),
         get(&s, "/frags?tab=queue", &cookie),
     ] {
         let out = out.replace("\\\"", "\"");
-        assert!(out.contains("<span>backlog</span><span class=m>(3)</span>"), "{out}");
-        let rows: Vec<&str> = out.split("<label class=bi data-n=").skip(1).collect();
-        let ns: Vec<&str> = rows.iter().map(|r| &r[..2]).collect();
-        assert_eq!(
-            ns,
-            ["17", "15", "12"],
-            "newest first; #20 queued and #21 with a lane left out"
-        );
+        let at = out
+            .find("<details class=bl data-bl=\"")
+            .unwrap_or_else(|| panic!("{out}"))
+            + 27;
+        let bl = &out[at..at + out[at..].find('"').unwrap()];
+        let bl: Value = serde_json::from_str(&bl.replace("&quot;", "\"").replace("&amp;", "&")).unwrap();
+        assert_eq!(keys(&bl), ["12", "15", "17"], "#20 queued and #21 with a lane left out");
+        assert_eq!(bl["12"], cache(&c)["issues"]["12"]);
         assert!(
-            rows[2].contains(" data-pr>") && rows[2].contains("bug <span class=\"tag m\">stale</span>"),
-            "{}",
-            rows[2]
+            out.contains("class=bbar hidden><input type=hidden name=op value=bqueue>"),
+            "{out}"
         );
-        assert!(
-            rows[1].contains(" data-ac>") && !rows[1].contains("stale"),
-            "{}",
-            rows[1]
-        );
-        assert!(
-            rows[1].contains("data-l=\"[&quot;ui&quot;,&quot;phone&quot;]\""),
-            "{}",
-            rows[1]
-        );
-        assert!(out.contains("<option>bug</option><option>phone</option><option>ui</option>"));
-        assert!(out.contains("class=bbar hidden><input type=hidden name=op value=bqueue>"));
     }
-    assert_eq!(r.count("gh"), 1, "no GitHub call per view: {:?}", r.calls.borrow());
+    assert_eq!(r.count("gh"), 0, "no GitHub call per view: {:?}", r.calls.borrow());
 }
 
 /// [queue N] queues the ticked issues in the order they were ticked (serve.js sends `issues` so), behind the queue;
@@ -211,7 +218,7 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
     let cookie = pair(&s, &c, "", NOW);
     let res = post(&s, &cookie, &body);
     assert!(
-        res.contains("msg=queued%20%2317%20%2312%20%2315%20%28needs%2Dcheck%29"),
+        res.contains("%2320%20%2317%20%2312%20%2315%20%28needs%2Dcheck%29"),
         "{res}"
     );
     let (_, out) = run(&c, &r, &["queue", "sendmeter", "ls", "--json"]);
@@ -233,7 +240,7 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
     for n in [17, 12, 15] {
         let row = row(n);
         assert!(
-            row.contains(" data-ck") && row.contains("needs-check: queued from the backlog"),
+            row.contains(" data-ck") && row.contains("needs-check: from the backlog"),
             "#{n}: {row}"
         );
     }
@@ -264,33 +271,40 @@ fn node(js: &str) -> Option<Value> {
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }
 
+/// The server's read as rows: newest first, ages from `created`, `stale` past 90 days untouched. Then search (number,
+/// title, label; every word, any case), each quick filter, a label, and ticks kept in tick order.
 #[test]
-fn search_filters_and_ticks_in_serve_js() {
-    let js = "(() => { const day = 86400, rows = [
-        {n: '1', title: 'Fix the login page', labels: ['bug'], age: 2 * day, ac: true, pr: false},
-        {n: '2', title: 'Phone layout', labels: ['ui', 'phone'], age: 40 * day, ac: false, pr: true},
-        {n: '3', title: 'Old idea', labels: [], age: 120 * day, ac: true, pr: false}];
-      const s = (o) => ({q: '', on: [], label: '', ...o}), pick = o => rows.filter(d => bpass(d, s(o))).map(d => d.n);
+fn rows_search_filters_and_ticks_in_serve_js() {
+    let js = "(() => { const now = Date.parse('2026-06-01T00:00:00Z') / 1000;
+      const is = {'9': {title: 'Old idea', labels: [], created: '2026-01-01T00:00:00Z', updated: '2026-02-01T00:00:00Z', ac: true},
+        '10': {title: 'Phone layout', labels: ['ui', 'phone'], created: '2026-04-20T00:00:00Z', updated: '2026-05-30T00:00:00Z', pr: true},
+        '12': {title: 'Fix the login page', labels: ['bug'], created: '2026-05-30T00:00:00Z', updated: '2026-05-30T00:00:00Z', ac: true}};
+      const rows = brows(is, now), s = o => ({q: '', on: [], label: '', ...o}), pick = o => rows.filter(d => bpass(d, s(o))).map(d => d.n);
       let t = btick([], 3, true); t = btick(t, 1, true); t = btick(t, 2, true); t = btick(t, 1, false); t = btick(t, 1, true);
-      return [pick({}), pick({q: 'LOGIN'}), pick({q: '#2'}), pick({q: 'phone layout'}), pick({q: 'ui'}), pick({label: 'bug'}),
-        pick({on: ['new']}), pick({on: ['30']}), pick({on: ['90']}), pick({on: ['ac']}), pick({on: ['pr']}),
-        pick({on: ['ac', '30']}), pick({q: 'zzz'}), t]; })()";
+      return [rows.map(d => [d.n, Math.round(d.age / 86400), d.stale, d.ac, d.pr]), pick({}), pick({q: 'LOGIN'}), pick({q: '#10'}),
+        pick({q: 'phone layout'}), pick({q: 'ui'}), pick({label: 'bug'}), pick({on: ['new']}), pick({on: ['30']}),
+        pick({on: ['90']}), pick({on: ['ac']}), pick({on: ['pr']}), pick({on: ['ac', '30']}), pick({q: 'zzz'}), t]; })()";
     let Some(got) = node(js) else { return };
     assert_eq!(
         got,
         json!([
-            ["1", "2", "3"],
-            ["1"],
-            ["2"],
-            ["2"],
-            ["2"],
-            ["1"],
-            ["1"],
-            ["2", "3"],
-            ["3"],
-            ["1", "3"],
-            ["2"],
-            ["3"],
+            [
+                ["12", 2, false, true, false],
+                ["10", 42, false, false, true],
+                ["9", 151, true, true, false]
+            ],
+            ["12", "10", "9"],
+            ["12"],
+            ["10"],
+            ["10"],
+            ["10"],
+            ["12"],
+            ["12"],
+            ["10", "9"],
+            ["9"],
+            ["12", "9"],
+            ["10"],
+            ["9"],
             [],
             [3, 2, 1]
         ])
