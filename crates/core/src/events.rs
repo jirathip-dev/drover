@@ -511,8 +511,13 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             ..Default::default()
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
-        // A merged issue never leaves `merged`, whatever is logged after it; a closed one only for a new spawn.
-        if PASSIVE.contains(&e.kind.as_str()) || s.state == "merged" || s.state == "closed" && e.kind != "spawn" {
+        // A merged issue never leaves `merged`, whatever is logged after it (#350: but for its landing reverted or
+        // fixed forward); a closed one only for a new spawn.
+        let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
+        if PASSIVE.contains(&e.kind.as_str())
+            || s.state == "merged" && !back
+            || s.state == "closed" && e.kind != "spawn"
+        {
             continue;
         }
         // Design lanes are the owner's: they never move the issue through review or merge.
@@ -582,6 +587,8 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                 };
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            // #350: the FAIL verdict logged right after it starts the fix round.
+            "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
                 // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.

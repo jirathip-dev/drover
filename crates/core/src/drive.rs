@@ -525,6 +525,11 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
+    if KICK.get().is_none() {
+        if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
+            writeln!(out, "{fleet} land: {e:#}")?;
+        }
+    }
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
@@ -554,8 +559,9 @@ fn pass(
         // #212: the fast and slow steps never act on one issue at once.
         let lock = state_dir(ctx).join(format!("drive-{fleet}-{}.lock", s.issue));
         let Some(_mine) = take(r, &lock, fleet) else { continue };
-        let pr = gh::cached_pr(ctx, fleet, s.issue);
-        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
+        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
+        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
+        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
         let n = s.issue.to_string();
         // #294: a PR's diff joins its serial groups; an issue waiting for a slot does nothing else this pass.
         if pr["state"] == "OPEN" && !f.serial.is_empty() && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)? {
@@ -592,7 +598,8 @@ fn pass(
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
-            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && f.merge_label.is_none();
+            let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
+            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             if step == "verdict" && code.is_none() && args[3] == "PASS" && green {
                 merge = true;
                 code = if pr["mergeable"] == "CONFLICTING" {
@@ -875,9 +882,11 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let num = pr["number"].to_string();
         let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
+        // #350: the PR of a landing reverted (or fixed forward) stays merged; its issue is in a fix round.
+        let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
         let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
         let (kind, mut d) = match pr["state"].as_str() {
-            Some("MERGED") => {
+            Some("MERGED") if !events.iter().any(back) => {
                 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
                 ("merged", m)
             }
@@ -986,11 +995,13 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         tree(&["add", "-f", "--detach", &wts, &from])?;
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
+        // #350: a behind fast-first PR is always caught up: it lands only on the integration its fast checks ran on.
+        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
+        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let res = if !clean {
             update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if to != from && gh::update_ready(ctx, Some(r), f, fleet) {
+        } else if to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet)) {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
-                let mut pr = gh::cached_pr(ctx, fleet, s.issue);
                 gh::forget_pr(ctx, fleet, s.issue);
                 writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
                 let d = json!({"from": from, "to": to});

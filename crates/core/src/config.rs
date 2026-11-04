@@ -225,6 +225,18 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<String>>,
+    /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
+    pub land: Option<Land>,
+}
+
+/// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
+/// for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Land {
+    pub mode: String,
+    pub fast: Vec<String>,
+    pub full_first_paths: Vec<String>,
 }
 
 /// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.
@@ -442,8 +454,11 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
+    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says.
     pub fn wants(&self, kind: &str) -> bool {
-        self.on.iter().any(|k| k == kind) || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+        self.on.iter().any(|k| k == kind)
+            || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+            || matches!(kind, "land-paused" | "reverted" | "revert-failed")
     }
 }
 
@@ -625,6 +640,17 @@ impl Fleet {
             .unwrap_or_else(|| limits.deny_commands.clone());
         d.extend(self.deny_commands_add.iter().cloned());
         d
+    }
+    /// #350: the `[land]` table when this fleet lands fast-first.
+    pub fn fast_first(&self) -> Option<&Land> {
+        self.land.as_ref().filter(|l| l.mode == "fast-first")
+    }
+    /// #350: the checks `pr` lands on: the `fast` ones once `land::mark` marked it fast-first, else `required_checks`.
+    pub fn checks(&self, pr: &serde_json::Value) -> &[String] {
+        match self.fast_first() {
+            Some(l) if pr["landing"] == "fast-first" => &l.fast,
+            _ => &self.required_checks,
+        }
     }
     pub fn serial_label(&self) -> &str {
         self.serial.first().map_or("serial", |g| &g.name)

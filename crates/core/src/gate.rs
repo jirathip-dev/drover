@@ -230,7 +230,8 @@ pub fn sync_label(
     let (Some(label), Some(num)) = (&f.merge_label, pr["number"].as_u64()) else {
         return Ok(());
     };
-    if s.done() || pr["state"] != "OPEN" || head.is_empty() {
+    // #350: a fast-first PR lands without its full run.
+    if s.done() || pr["state"] != "OPEN" || head.is_empty() || pr["landing"] == "fast-first" {
         return Ok(());
     }
     // #285: a pure merge of the PASS head with integration (#207's carry) keeps the PASS, so the label stays.
@@ -335,8 +336,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
             return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}{of})")));
         }
     }
-    ci_green(&pr["statusCheckRollup"], &f.required_checks)
-        .map_err(|m| refuse("CI_NOT_GREEN", format!("{m} at {head}")))?;
+    ci_green(&pr["statusCheckRollup"], f.checks(pr)).map_err(|m| refuse("CI_NOT_GREEN", format!("{m} at {head}")))?;
     Ok(head)
 }
 
@@ -489,7 +489,7 @@ pub fn merge(
         return Ok(());
     }
     let branch = branch_of(st.as_ref(), issue);
-    let pr = if is_main(&f.integration) {
+    let mut pr = if is_main(&f.integration) {
         json!({"baseRefName": f.integration})
     } else {
         match gh::pr(ctx, r, f, (fleet, issue), &branch, ctx.now)? {
@@ -497,6 +497,8 @@ pub fn merge(
             _ => json!({"error": "no-pr"}),
         }
     };
+    crate::land::mark(ctx, Some(r), f, (fleet, issue), &events, &mut pr);
+    let fast = pr["landing"] == "fast-first";
     // #129: an auto-update (a merge of integration that adds nothing) keeps the PASS of the head it updated.
     let h = pr["headRefOid"].as_str().unwrap_or_default();
     let st = st.map(|mut s| {
@@ -523,6 +525,17 @@ pub fn merge(
         },
         res => res,
     };
+    // #350: swap-if-unchanged: a fast-first PR lands only on the integration its fast checks ran against.
+    let res = match res {
+        Ok(h) if fast && !crate::land::based(r, f, &h) => Err(refuse(
+            "BEHIND",
+            format!(
+                "{} moved past {h:.7}; drive catches it up, its fast checks run again",
+                f.integration
+            ),
+        )),
+        res => res,
+    };
     let res = match res {
         Ok(h) => premerge(ctx, f, r, (fleet, issue), &h)?.map(|s| (h, s)),
         Err(rf) => Err(rf),
@@ -532,8 +545,9 @@ pub fn merge(
         // #148: CI not reported yet or still running is no block; the item stays ready, waiting for CI.
         Err(rf)
             if rf.code == "STAGING_MOVED"
+                || rf.code == "BEHIND"
                 || rf.code == "CI_NOT_GREEN"
-                    && gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "pending" =>
+                    && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
         {
             return Err(rf.into());
         }
@@ -587,6 +601,24 @@ pub fn merge(
         (d["by"], d["override"]) = (json!("owner"), json!("ROUND_LIMIT"));
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
+    if f.land.is_some() {
+        // #350: what `land::watch` and `stats land` read: the landing's mode and how long its gating checks took.
+        let checks = gh::required(&pr["statusCheckRollup"], f.checks(&pr));
+        let at = |k: &'static str| {
+            checks
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |c| crate::usage::epoch(c[k].as_str()?))
+        };
+        let secs = at("completedAt")
+            .max()
+            .zip(at("startedAt").min())
+            .map(|(b, a)| b.saturating_sub(a));
+        let mode = if fast { "fast-first" } else { "full-first" };
+        let d = json!({"mode": mode, "sha": merge_sha, "pr": num, "checks_secs": secs});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
+    }
     // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha.
     let evidence = format!(
         "Merged via `herdsman merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}",

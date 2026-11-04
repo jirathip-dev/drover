@@ -94,7 +94,7 @@ const PRS_QUERY: &str = "query($owner:String!,$name:String!,$endCursor:String){r
 pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state \
 baseRefName headRefName headRefOid mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
 commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion startedAt \
-detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
+completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
 const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
 [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
 

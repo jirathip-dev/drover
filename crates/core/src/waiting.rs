@@ -70,7 +70,7 @@ pub fn waiting_on(
     fc: &Fleet,
     rev: Option<(&str, &str)>,
 ) -> Waiting {
-    let (f, n, req, p) = (&s.fleet, s.issue, &fc.required_checks, fc.flow());
+    let (f, n, req, p) = (&s.fleet, s.issue, fc.checks(pr), fc.flow());
     // The role an outcome of `stage` goes to (a build for a fix, a check for a review).
     let to = |stage: &str, o: &str| {
         p.next(stage, o)
@@ -106,7 +106,8 @@ pub fn waiting_on(
             None,
         );
     }
-    if s.state == "merged" || pr["state"] == "MERGED" {
+    // #350: a reverted landing's issue is in a fix round while its old PR stays merged.
+    if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
         return w("none", "nothing to do (merged): clean me", s.last_ts, None);
     }
     if s.state == "closed" || pr["state"] == "CLOSED" {
@@ -359,12 +360,13 @@ pub fn scan(
             out.extend(s.lanes.values().filter(|l| !busy(l)).map(|l| (s.clone(), w.on(l))));
             continue;
         }
-        let pr = match (s.state.as_str(), live) {
+        let mut pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
             (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now)
                 .unwrap_or_else(|_| gh::cached_pr(ctx, &s.fleet, s.issue)),
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
+        crate::land::mark(ctx, None, f, (&s.fleet, s.issue), events, &mut pr);
         let sp = last_spawn(events, &lane);
         let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
         let on = crate::hosts::On::of(r, sp);
@@ -444,7 +446,7 @@ pub fn scan(
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
         if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
-            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "green";
+            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
             let merge = format!("herdsman merge {} {}", s.fleet, s.issue);
             (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
             w.what = format!("PASS · behind {} (not required) · merging when CI green", f.integration);
