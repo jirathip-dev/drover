@@ -19,6 +19,8 @@ p{margin:var(--s2) 0}
 .msg{padding:var(--s2);border:1px solid currentColor;border-radius:6px}
 /* #66: an action's toast, one line under the sticky header; the demo banner (.msg.a) stays in the flow. */
 .msg.g,.msg.r{position:fixed;z-index:2;top:calc(var(--hit) + var(--s2));left:var(--s3);right:var(--s3);margin:0;padding:var(--s1) var(--s2);background:var(--bg);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:opacity .4s}
+/* #397: an error stays until tapped, in full: it wraps and holds its place in the flow, under the header once scrolled. */
+.msg.r{position:sticky;margin:var(--s2) var(--s3);white-space:normal;overflow:visible}
 .msg.out{opacity:0}
 details,.ev,.kv{border-bottom:1px solid var(--line)}
 summary{display:grid;grid-template-columns:7ch minmax(0,1fr) auto;gap:var(--s2);align-items:center;min-height:var(--hit);cursor:pointer;list-style:none}
