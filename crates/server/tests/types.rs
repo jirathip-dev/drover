@@ -35,6 +35,18 @@ macro_rules! each {
             Lane,
             Ask,
             Row,
+            HostTab,
+            HostCard,
+            Cell,
+            Bar,
+            Disk,
+            Leftovers,
+            Account,
+            Meter,
+            Balance,
+            FleetRow,
+            Sub,
+            Paired,
             Events,
             Ev,
             Reply,
@@ -100,6 +112,8 @@ fn serde_json_fits_the_types() {
     let file = |p: &Path| serde_json::from_str::<Value>(&std::fs::read_to_string(p).unwrap()).unwrap();
     // (type, JSON): the demo's real payloads, then each type's default (nulls, empty lists).
     let mut checks = vec![("Herd", same::<Herd>(&file(&site.join("herd.json"))))];
+    // #267: the Host tab's data, its cards' rows (gauges, sparklines, charts inline) included.
+    checks.push(("HostTab", same::<HostTab>(&file(&site.join("api/v1/host")))));
     for l in std::fs::read_dir(site.join("lane")).unwrap() {
         checks.push(("Chat", same::<Chat>(&file(&l.unwrap().path()))));
     }
@@ -172,6 +186,18 @@ fn serde_json_fits_the_types() {
         Lane,
         Ask,
         Row,
+        HostTab,
+        HostCard,
+        Cell,
+        Bar,
+        Disk,
+        Leftovers,
+        Account,
+        Meter,
+        Balance,
+        FleetRow,
+        Sub,
+        Paired,
         Events,
         Ev,
         Reply

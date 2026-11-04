@@ -29,7 +29,7 @@ run() { # url, extra args
 fail=0
 # #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
 # #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
-# mini's load/cpu chart open.
+# mini's load/cpu chart open. #267: the chart and the busy and healthy fixtures at 1440 too.
 # #367: `queue/queue-repos` and `queue/queue-chain` (also @1440): the Queue fixture's chips, groups, chain and `+ N more`.
 # #370: every tab at 1440 in farm, kitchen and terminal; `row-loop` (a row sprite's two frames, the same node across a
 # patch), `moment-row` (a moment on its row, once, resumed after a patch), each `-still` under reduced motion; `empty`.
@@ -39,7 +39,7 @@ fail=0
 # #405: `chat-new`, `chat-archive`, `chat-archived`, `chat-thumbs`: the empty new thread, a row swiped left to [archive],
 # the archived fold and three images waiting above the box.
 # #365: `queue/queue-backlog`: acme-api's 100-issue backlog searched, filtered and ticked.
-for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-send chat-long chat-kb chat-back chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs \
+for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet hosts/host-chart@1440 busy/host-ranked@1440 healthy/host-ranked@1440 events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-send chat-long chat-kb chat-back chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs \
   queue-rows events-rows events@1440 events-rows@1440 events-open events-open@1440 events-all queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still loading@1440 loading~kitchen@1440 loading~terminal@1440 \
   $(for v in queue lanes host events loading; do echo "ascii-$v ascii-$v~kitchen"; done) ascii-queue~terminal ascii-lanes~terminal \
   $(for v in queue lanes host events; do echo "$v@1440 $v~kitchen@1440 $v~terminal@1440"; done) row-loop row-loop~kitchen row-loop-still moment-row moment-row~kitchen moment-row-still empty empty~kitchen empty~terminal \

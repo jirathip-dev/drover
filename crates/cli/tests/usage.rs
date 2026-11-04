@@ -215,9 +215,7 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
 
     // Cached for 10 min: the page re-reads nothing, and shows the bars.
     let n = r.0.count("curl");
-    let page =
-        String::from_utf8_lossy(&Server::new(&c, &r, None).respond("GET /?all=1 HTTP/1.1\r\nHost: x\r\n\r\n", c.now))
-            .into_owned();
+    let page = host_tab(&Server::new(&c, &r, None), "", c.now);
     assert_eq!(r.0.count("curl"), n);
     assert!(
         page.contains("<meter min=0 max=100 low=75 high=89.9 optimum=0 value=50>")
@@ -297,9 +295,7 @@ fn expired_login_refreshes_or_falls_back_to_login_needed() {
         "{out}"
     );
     assert!(!r.0.called("security -i"), "a failed refresh writes nothing");
-    let page =
-        String::from_utf8_lossy(&Server::new(&c, &r, None).respond("GET /?all=1 HTTP/1.1\r\nHost: x\r\n\r\n", c.now))
-            .into_owned();
+    let page = host_tab(&Server::new(&c, &r, None), "", c.now);
     assert!(page.contains("usage: login needed"), "{page}");
     assert_no_leaks(&c, &r, &[&out], &page);
 }
@@ -417,10 +413,7 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
         out.contains(&format!("deepseek · key not found in {}", missing.display())),
         "{out}"
     );
-    let page = String::from_utf8_lossy(
-        &Server::new(&c, &Fake::default(), None).respond("GET /?all=1 HTTP/1.1\r\nHost: x\r\n\r\n", c.now),
-    )
-    .into_owned();
+    let page = host_tab(&Server::new(&c, &Fake::default(), None), "", c.now);
     assert!(
         page.contains(&format!(
             "<span class=k>deepseek</span><span class=w>key not found in {}</span>",

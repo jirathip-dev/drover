@@ -519,7 +519,7 @@ function frag(id, html) {
   nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
-  rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); });
+  if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
   last = Date.now();
   sput('c:' + id, html);
   alerts();
@@ -737,6 +737,7 @@ function connect() {
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
+  es.addEventListener('host', e => (at(e), dispatchEvent(new CustomEvent('herd-host', { detail: JSON.parse(e.data) })))); // #267: the TypeScript board draws it
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
