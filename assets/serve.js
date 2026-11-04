@@ -1638,6 +1638,9 @@ document.addEventListener('click', async e => {
   if (q) { e.preventDefault(); return byName(q); }
   const b = e.target.closest('.lane .lr, .ask .pick, .ask .rp');
   if (!b) return;
+  // #422: a conductor's row opens its thread in the chat tab (a message there wakes an asleep one).
+  const th = b.classList.contains('lr') && b.parentNode.dataset.thread;
+  if (th) { tab('chat'); if (es) connect(); chatOpen(th); return history.pushState({ thr: th }, ''); }
   if (b.classList.contains('lr')) return open(b.parentNode);
   const a = b.closest('.ask'), lane = laneOf(a.dataset.ask);
   if (b.classList.contains('rp')) return lane && open(lane);
