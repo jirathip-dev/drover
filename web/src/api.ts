@@ -18,7 +18,7 @@ export type Ev = { seq: number, ts: number, fleet: string, issue: number | null,
 
 export type Reply = { ok: boolean, code: string, message: string, };
 
-export type Transcript = { harness: string, lines: Array<string>, live: number, before: number, more: boolean, acts: Array<string>, pane: string | null, status: string | null, said: Array<JsonValue> | null, notices: Array<Notice>, };
+export type Transcript = { harness: string, lines: Array<string>, live: number, before: number, more: boolean, acts: Array<string>, pane: string | null, status: string | null, said: Array<JsonValue> | null, older: boolean, notices: Array<Notice>, };
 
 export type Notice = { at: number, text: string, };
 

@@ -122,6 +122,7 @@ api! {
         pub pane: Option<String>,
         pub status: Option<String>,
         pub said: Option<Vec<serde_json::Value>>,
+        pub older: bool,
         pub notices: Vec<Notice>,
     }
 

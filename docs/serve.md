@@ -8,7 +8,10 @@ Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed 
 slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
 every 15 s, for ages) it re-renders the needs-you cards and the four tabs and pushes only
-the changed ones as `event: frag` (`{id, html}`), rendered per audience (paired or not; a stream whose device was removed is closed at the next
+the changed ones as `event: frag` (`{id, html}`) the first time on a stream, then (#351) only as `event: patch`
+(`{id, n, p, set}`: the part cut before each `<d`, its new piece count, the common prefix and the changed pieces by index;
+a piece past the prefix not in `set` is the old one shifted by the count change; serve.js rebuilds the HTML and swaps it
+as before, and a patch it has no copy for refreshes), rendered per audience (paired or not; a stream whose device was removed is closed at the next
 tick, and the page reconnects unpaired), swapped in place: open rows stay open,
 changed rows flash. #259: every event in `events.jsonl` has a monotonic `seq` (written under the log's lock;
 old rows are numbered by line), each new one goes out as `event: ev` (`{seq, ts, k}`, `k` the moment), and every
@@ -29,7 +32,7 @@ something is read: a verdict file only until its verdict is recorded, `git log` 
 `status`/`hosts` replay the snapshot: a remote read it lacks fails, it never runs on a request; only a lane's chat
 (`/lane`) reads that one pane live (5 s cache). Its age shows above every tab once it is over 2 minutes old (`as of the
 step's look 5m ago`), and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
-watcher pushes on each new snapshot instead of polling herdr. `tests/perf.rs` is the gate: 30 lanes on 2 hosts, +300 ms
+watcher pushes on each new snapshot instead of polling herdr. `tests/perf.rs` is the gate (budgets: [performance.md](performance.md)): 30 lanes on 2 hosts, +300 ms
 per remote call, at most one remote call per host per step, `GET /` < 150 ms (< 40 KB), `/herd.json` < 100 ms,
 `status` < 300 ms, first paint in WebKit < 300 ms (warm); a miss fails CI and the numbers go to the job summary.
 
@@ -52,7 +55,9 @@ no taps, the header stays clear, `[↻]` spins its plain ↻ meanwhile, and it g
 pause while the app is in the background. `GET /` also leaves out what the first paint does not show. A fleet's `roles` row is empty
 until opened; opening it reads `GET /frag?id=roles&fleet=<fleet>` (the model/effort forms; kept across
 live swaps, re-read on ↻). The Events tab body is read from `GET /frag?id=events` when the tab opens
-(`/?all=1` still renders it in the page; `/frags` and the live stream still carry it). No compression:
+(`/?all=1` still renders it in the page; `/frags` and the live stream still carry it). #351: each Events view opens with its
+last 100 rows; its **older** button reads the next 100 (`GET /frag?id=events&skip=100`, …) under them, kept across live
+swaps. No compression:
 a repeat visit downloads the page HTML only, the assets come from the service worker's cache. A
 `serve --export` inlines both, so the static demo needs no `/frag`.
 
@@ -79,14 +84,16 @@ PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
 56 px handle, or from the conversation's top; snaps to 50 %, 78 % or full by position and flick; below 50 %, a
 down flick, the backdrop or Esc slide it closed) with
-its details card and a transcript: `/lane?agent=&lines=200&before=<n>` returns up to 200 masked
+its details card and a transcript: `/lane?agent=&lines=200&turns=10&before=<n>` returns up to 200 masked
 lines with their terminal colours (the cap is server-side), `live` (how many end lines are the screen's
 still-changing last block) and `status` (the spinner line, shown under the chat). #138: herdr keeps only
 the recent screen (Claude draws in the alternate screen), so herdsman keeps a **rolling transcript** per
 lane, `<state dir>/transcripts/<agent>.log` (mode 0600, the last 5,000 lines): every read (the sheet,
 `herdsman check`) appends the lines above the last block past their longest overlap with the file's tail,
 or after a `┄ not captured: scrolled past between reads ┄` line when the reads do not meet. `clean` and
-`kill` delete it. **Load more** pages back through it (`more` while older lines exist). The sheet groups
+`kill` delete it. **Load more** (or scrolling to the top) pages back through it (`more` while older lines exist). #351: a chat opens
+bounded: the lines that fit in 32 KB and the session's last `turns` (10) within 3.2 KB a turn, ~64 KB in all; each
+Load more asks 10 turns more (`older` while the session has more). The sheet groups
 the lines into Corral-style blocks (docs/design/chat-blocks): you, the assistant (minimal markdown:
 bold, `code`, lists, headings; escaped, never HTML), tool runs (`$ cmd` collapsed, output in a tinted
 panel capped at 20 lines, the head and tail on a failure, `exit N`, `running`) and quiet status lines;
