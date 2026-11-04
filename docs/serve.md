@@ -97,7 +97,9 @@ Lanes are grouped like Corral: state sections blocked → working → idle → d
 split into fleet subgroups (alphabetical, Others last), newest-changed first. A lane the log has open
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
-when work is at risk. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
+when work is at risk. #422: a thread's conductor (`conductor-<thread>`) is a lane of the thread's repo (an
+`all` thread's in `all repos`), role `conductor`, first in its subgroup, named `<thread title> · <thread>`; once
+its pane closed it stays, dimmed, as `asleep`, and its row opens the thread in the chat tab. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
 PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
 56 px handle, or from the conversation's top; snaps to 50 %, 78 % or full by position and flick; below 50 %, a
