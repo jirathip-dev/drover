@@ -116,6 +116,12 @@ non-container test path, or ask the conductor.` `[fleet.<n>] deny_commands` repl
 it off, noted on every config load), `deny_commands_add` extends whichever applies. The board's [config]
 sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the message) and shows on Events.
 
+Per host (#256): spawn exports `HERDSMAN_HOST=<[hosts] name>`, and the hook applies that host's rules on top:
+`[hosts.<n>] deny_commands` replaces the fleet's list, `deny_commands_add` extends it, and `allow_commands` drops
+entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker compose` and `supabase start` (a disposable
+machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. `hosts bootstrap` writes that host's rules, its
+cloud default spelled out, into the config it leaves there, since the lane's hook reads that host's fleet.toml.
+
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `herdsman hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,

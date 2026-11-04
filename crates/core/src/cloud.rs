@@ -312,7 +312,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
     if !on.exists(Path::new(&conf)) {
         // Only the `[fleet.*]` tables, without their notifiers (a notify command may hold a token).
-        let mut t: toml::Table = toml::from_str(&std::fs::read_to_string(&ctx.config)?)?;
+        let all: toml::Table = toml::from_str(&std::fs::read_to_string(&ctx.config)?)?;
+        let mut t = all.clone();
         t.retain(|k, _| k == "fleet");
         for (_, f) in t
             .iter_mut()
@@ -321,6 +322,24 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         {
             f.as_table_mut().map(|f| f.remove("notify"));
         }
+        // #256: its lanes' hook resolves `HERDSMAN_HOST` there: only this host's command rules, its cloud default spelled out.
+        let mut rules = toml::Table::new();
+        rules.insert("allow_commands".into(), h.allow().into());
+        if let Some(mine) = all
+            .get("hosts")
+            .and_then(|t| t.get(name))
+            .and_then(toml::Value::as_table)
+        {
+            rules.extend(
+                mine.iter()
+                    .filter(|r| r.0.starts_with("deny_"))
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+        t.insert(
+            "hosts".into(),
+            toml::Table::from_iter([(name.to_string(), rules.into())]).into(),
+        );
         on.write(Path::new(&conf), &t.to_string())?;
     }
     let tags = [h.tags.clone(), tags].concat();
