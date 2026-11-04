@@ -451,11 +451,19 @@ pub fn drive(
     }
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
-    let seen = if fleets.is_empty() {
+    let mut seen = if fleets.is_empty() {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused: nothing to look at
     } else {
         crate::snapshot::take(ctx, cfg, r)
     };
+    // #376: lane-shaped panes no spawn logged are adopted (or closed, stale) before any step reads the lanes.
+    if !fleets.is_empty() && KICK.get().is_none() {
+        match crate::spawn::orphans(ctx, cfg, (r, &seen), out) {
+            Ok(true) => seen = crate::snapshot::take(ctx, cfg, r),
+            Ok(false) => {}
+            Err(e) => writeln!(out, "orphans: {e:#}")?,
+        }
+    }
     let grew = log();
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
