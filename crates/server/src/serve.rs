@@ -772,7 +772,6 @@ impl<'a> Server<'a> {
                 )
                 .map(|d| d.hash),
             ));
-            // #391: the build first, so a page of another one (the service worker's copy) loads again.
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
             );
@@ -3169,10 +3168,9 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
 /// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     // #391: a row queued from the backlog has its title in the last read until its spec is cached.
-    let spec = gh::cached_title(ctx, fleet, issue).or_else(|| {
-        let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", fleet, 0))?;
-        bl["issues"][issue.to_string()]["title"].as_str().map(String::from)
-    });
+    let bl = || crate::usage::load::<serde_json::Value>(&gh::cache_path(ctx, "backlog", fleet, 0));
+    let spec = gh::cached_title(ctx, fleet, issue)
+        .or_else(|| Some(bl()?["issues"][issue.to_string()]["title"].as_str()?.into()));
     let pr = gh::cached_pr(ctx, fleet, issue);
     let pr = pr["number"]
         .as_u64()
