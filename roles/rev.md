@@ -31,8 +31,24 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT
   verify.
 
+## Tests that don't count
+
+FAIL any change whose proof relies on tests that:
+
+- re-implement production logic instead of exercising it;
+- have no meaningful assertion, or assert only mock calls or values their own mocks supplied;
+- claim behaviour their setup never exercises (e.g. a fixture that bypasses the real server path);
+- claim pixel or interaction coverage from static markup;
+- check persistence at a path the code never writes;
+- assert a capability flag instead of delivery or acknowledgement;
+- pass a negative case without hitting the real rejection path;
+- wait on real time or networks instead of fake clocks.
+
+Production code added only for tests counts against the change too.
+
 ## Output
 
 Write `verdict.md` in your worktree: first line `PASS`, `FAIL` or `FAIL (form-only)`, then the
-findings; tag each blocking one `blocking [<category>]`. It must carry a `Reviewed head: <40-hex>` line: the sha actually checked out (`git rev-parse HEAD`). A review that finds nothing is suspect; one that names its
+findings; tag each blocking one `blocking [<category>]`. It must carry a `Reviewed head: <40-hex>` line: the sha actually checked out (`git rev-parse HEAD`),
+and a `Tests checked against anti-patterns: yes` (or `no`) line. A review that finds nothing is suspect; one that names its
 blind spots is trustworthy.
