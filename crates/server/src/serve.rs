@@ -1,7 +1,8 @@
 //! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
-    body, BacklogIssue, Chat, Frag, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, Moment, Notice, Patch,
+    body, Account, BacklogIssue, Balance, Bar, Cell, Chat, Disk, FleetRow, Frag, Herd, HerdFleet, HerdHost, HerdLane,
+    HerdQueued, HostCard, HostTab, Leftovers, Meter, Moment, Notice, Paired, Patch, Row, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, fold, read, Event, IssueState, States};
@@ -257,6 +258,8 @@ struct Watch {
     /// The last `herd` push: (time, hash of the body).
     herd: (u64, u64),
     frags: BTreeMap<(bool, &'static str), u64>,
+    /// #267: the hash of the last Host tab data (its `now` left out).
+    host: u64,
     /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
     driving: bool,
     /// #241, #259: the log's last seq at the last look (none yet: nothing to play).
@@ -911,6 +914,16 @@ impl<'a> Server<'a> {
             return;
         }
         w.rendered = now;
+        // #267: the Host tab is the TypeScript board's: a change (like a frag's, never the first render) sends its
+        // data (`host`), the same to every device.
+        let mut h = self.host_tab(at);
+        h.now = 0;
+        let j = hash(&json!(h).to_string());
+        if ![0, j].contains(&std::mem::replace(&mut w.host, j)) {
+            h.now = now;
+            let msg = format!("id: {}\nevent: host\ndata: {}\n\n", w.seen.unwrap_or(0), json!(h));
+            lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
+        }
         for paired in [false, true] {
             for (id, html) in self.frags(at, paired, None).unwrap_or_default() {
                 if w.frags
@@ -1469,7 +1482,7 @@ impl<'a> Server<'a> {
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let agents = || self.herdr_json(ctx.now, "agent").map(|j| j["result"]["agents"].clone());
         let agents = || agents().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-        let parts: [(&'static str, &dyn Fn() -> String); 5] = [
+        let parts: [(&'static str, &dyn Fn() -> String); 4] = [
             ("needs", &|| {
                 let n = chat::choosing(ev);
                 self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
@@ -1479,7 +1492,6 @@ impl<'a> Server<'a> {
             ("chat", &|| {
                 chat::tab(ctx, cfg, ev, &agents(), paired && self.addr.is_some())
             }),
-            ("host", &|| self.host_tab(ctx, cfg, ev)),
         ];
         let want = |id: &str| tab.is_none_or(|t| id == "needs" || id == t);
         Ok(parts
@@ -1614,10 +1626,10 @@ impl<'a> Server<'a> {
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
-             <section id=queue>{}</section><section id=lanes>{}</section><section id=chat>{}</section><section id=host>{}</section>\
+             <section id=queue>{}</section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
              <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
              <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("chat"), f("host"), f("events")
+            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("chat"), f("events")
         ))
     }
 
@@ -2354,32 +2366,39 @@ impl<'a> Server<'a> {
         lock(&self.host).clone()
     }
 
-    /// #141: four groups, MACHINE, SERVICES, FLEETS and ALERTS, of rows with a status (`data-t`); serve.js ranks them.
-    fn host_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> String {
-        let (hs, r, dl) = (self.sample(), &self.cached(ctx.now, 60), Limits::default());
+    /// #141: the Host tab as data (API v1's `host`; web/src/host.ts draws it): the host cards, then FLEET DISK, SERVICES,
+    /// FLEETS and ALERTS rows with a status; serve.js ranks them.
+    fn host_tab(&self, ctx: &Ctx) -> HostTab {
+        let (cfg, events) = (Config::load(&ctx.config).ok(), read(&ctx.state).unwrap_or_default());
+        let (cfg, events) = (cfg.as_ref(), &events);
+        let (hs, r, dl, dc) = (
+            self.sample(),
+            &self.cached(ctx.now, 60),
+            Limits::default(),
+            Config::default(),
+        );
         let lim = cfg.map_or(&dl, |c| &c.limits);
-        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
-        let (mut m, mut s, mut f, mut a) = (String::new(), String::new(), String::new(), String::new());
-        let dc = Config::default();
-        let hosts = self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs);
+        let live = self.addr.is_some() && self.export.is_none();
+        let mut d = HostTab {
+            now: ctx.now,
+            rw: self.addr.is_some(),
+            live,
+            mtime: mtime(ctx),
+            hosts: self.cards(ctx, cfg.unwrap_or(&dc), r, events, &hs),
+            ..HostTab::default()
+        };
         // #164: the worktree total from the last walk (and its age, #160) against the budget, and folders of no
         // fleet under the worktree root, removed only from here (paired) or `clean --orphans --yes`.
         if let Some(c) = cfg {
             let budget = lim.worktree_budget_gb;
             let (gb, at) = crate::check::worktree_du(ctx).unzip();
-            let (t, bar, pct) = gauge(gb.unwrap_or(0.0) / budget, "▏");
-            let o = if t == "r" { "▶ " } else { "" };
-            let x = gb.map_or("?".into(), |gb| format!("{gb:.1}"));
-            let at = at.flatten().map_or(String::new(), |at| {
-                format!(" <span class=\"mt fx\">· {} ago</span>", ago(ctx.now, at))
+            d.disk = Some(Disk {
+                bar: gauge(gb.unwrap_or(0.0) / budget),
+                gb: gb.map_or("?".into(), |gb| format!("{gb:.1}")),
+                budget,
+                ago: at.flatten().map(|at| ago(ctx.now, at)),
             });
-            let val = format!("{bar} <b class={t}>{o}{x}</b> <span class=m>/ {budget} GB</span>{pct}{at}");
-            m += &kv("fleet disk", t, &val);
-            let n = crate::check::orphan_dirs(ctx, c).len();
-            if n > 0 && self.addr.is_some() {
-                let (hid, s) = (hidden("orphans", "", &mtime(ctx)), if n == 1 { "" } else { "s" });
-                m += &format!("<form method=post>{hid}<button data-confirm=\"Remove {n} orphan folder{s} under the worktree root?\">remove orphans</button> <span class=m>{n} folder{s} from no project</span></form>");
-            }
+            d.orphans = crate::check::orphan_dirs(ctx, c).len();
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
         let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
@@ -2390,91 +2409,80 @@ impl<'a> Server<'a> {
             let kb: f64 = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pids]).map_or(0.0, |s| {
                 s.split_whitespace().filter_map(|k| k.parse::<f64>().ok()).sum()
             });
-            let n = left.len();
-            let btn = format!("<form method=post>{}<button data-confirm=\"TERM, then KILL, {n} leftover process(es)?\">reap</button></form>", hidden("reap", "", &mtime(ctx)));
-            let btn = if self.addr.is_some() { btn } else { String::new() };
-            let val = format!(
-                "<b class=a>{n}</b> processes left in closed lanes <span class=mt>· {:.0} MB</span>{btn}",
-                kb / 1024.0
-            );
-            m += &kv("leftovers", "a", &val);
+            let mb = format!("{:.0}", kb / 1024.0);
+            d.leftovers = Some(Leftovers { n: left.len(), mb });
         }
         // #333: spawns starting against `max_parallel_spawns`, and the stale markers swept in the last day.
         if let Some(c) = cfg {
-            let line = crate::drive::spawns_line(ctx, c, r, events);
-            let (k, v) = line.split_once(' ').unwrap_or_default();
-            m += &kv(k, ["g", "a"][usize::from(line.contains(" · stale"))], &esc(v));
+            let sl = crate::drive::spawns_line(ctx, c, r, events);
+            let (k, v) = sl.split_once(' ').unwrap_or_default();
+            d.spawns = Some(Row {
+                name: k.into(),
+                tone: ["g", "a"][usize::from(sl.contains(" · stale"))].into(),
+                detail: v.into(),
+                ..Row::default()
+            });
         }
         // #98: green, amber or red per service, what clears it otherwise.
-        let svc = |s: &&crate::timer::Row| ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str());
-        for (k, t, d, fix) in rows.iter().filter(svc) {
-            let fix = [String::new(), format!(" <span class=\"mt fx\">→ {}</span>", chips(fix))];
-            s += &kv(
-                k,
-                t,
-                &format!("<b class={t}>{}</b>{}", esc(d), fix[usize::from(*t != "g")]),
-            );
-        }
+        let svc = |s: &crate::timer::Row| ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str());
+        let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
+        let row = |(name, t, detail, fix): crate::timer::Row| Row {
+            name,
+            tone: t.into(),
+            detail,
+            fix,
+        };
+        d.services = rows.into_iter().filter(svc).map(row).collect();
         // #172: the board's theme; amber when its theme.json is invalid (farm shows), with the first problem (#241).
         let name = active(ctx);
-        s += &match theme(ctx, &name, "theme.json").1 {
-            Ok(()) => kv("theme", "g", &format!("<b>{}</b>", esc(&name))),
-            Err(e) => kv(
-                "theme",
-                "a",
-                &format!(
-                    "<b class=a>farm</b> <span class=mt>`{}`: {}</span>",
-                    esc(&name),
-                    esc(&e)
+        let err = theme(ctx, &name, "theme.json").1.err();
+        d.theme = Row {
+            tone: ["g", "a"][usize::from(err.is_some())].into(),
+            detail: err.unwrap_or_default(),
+            name,
+            ..Row::default()
+        };
+        for (c, name) in cfg
+            .into_iter()
+            .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
+        {
+            let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
+            let login = c.accounts.usage.get(name).map_or("", String::as_str);
+            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
+                .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
+            let (meters, pace, hint) = match usage {
+                Some(Ok((parts, pace))) => (
+                    parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
+                    pace,
+                    None,
                 ),
-            ),
-        };
-        if let Some(c) = cfg.filter(|c| !c.accounts.names.is_empty()) {
-            let capped = |a: &&String| crate::access::capped_until(c, events, a, ctx.now).is_some();
-            let all = c.accounts.names.len();
-            let n = c.accounts.names.keys().filter(capped).count();
-            let t = ["g", "a", "r"][usize::from(n > 0) + usize::from(n == all)];
-            let mut sub = String::new();
-            for name in c.accounts.names.keys() {
-                let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
-                let login = c.accounts.usage.get(name).map_or("", String::as_str);
-                let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
-                    .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
-                let usage = match usage {
-                    Some(Ok((parts, pace))) => {
-                        let bar = |(t, p): &(String, f64)| {
-                            format!(
-                                " · {} <meter min=0 max=100 low=75 high=89.9 optimum=0 value={p:.0}></meter>",
-                                esc(t)
-                            )
-                        };
-                        parts.iter().map(bar).collect::<String>()
-                            + &pace.map_or(String::new(), |p| format!(" · <b class=a>{}</b>", esc(&p)))
-                    }
-                    Some(Err(hint)) => format!(" · <span class=a>{}</span>", esc(&hint)),
-                    None => String::new(),
-                };
-                let hours = crate::usage::lane_hours(events, name, ctx.now);
-                sub += &format!(
-                    "<p>{} · <b class={}>{}</b>{usage} <span class=mt>{}</span></p>",
-                    esc(name),
-                    tone(cap.split(' ').next().unwrap_or_default()),
-                    esc(&cap),
-                    esc(&hours)
-                );
-            }
-            let x = format!("<span class=x><b class={t}>{n} of {all} capped</b></span>");
-            s += &hrow("accounts", t, &x, "", &format!("<div class=sub>{sub}</div>"));
+                Some(Err(hint)) => (vec![], None, Some(hint)),
+                None => (vec![], None, None),
+            };
+            d.accounts.push(Account {
+                name: name.clone(),
+                capped: crate::access::capped_until(c, events, name, ctx.now).is_some(),
+                tone: tone(cap.split(' ').next().unwrap_or_default()).into(),
+                hours: crate::usage::lane_hours(events, name, ctx.now),
+                cap,
+                meters,
+                pace,
+                hint,
+            });
         }
-        s += &match cfg.and_then(|c| crate::usage::deepseek(ctx, c, self.r)) {
-            Some(Ok((b, low))) => {
-                let (t, word) = if low { ("a", "low") } else { ("g", "ok") };
-                let d = format!("{} {:.2}", esc(&b.currency), b.total);
-                kv("deepseek", t, &format!("{d} · <b class={t}>{word}</b>"))
-            }
-            Some(Err(hint)) => kv("deepseek", "a", &esc(&hint)),
-            None => String::new(),
-        };
+        d.deepseek = cfg
+            .and_then(|c| crate::usage::deepseek(ctx, c, self.r))
+            .map(|b| match b {
+                Ok((b, low)) => Balance {
+                    balance: Some(format!("{} {:.2}", b.currency, b.total)),
+                    low,
+                    hint: String::new(),
+                },
+                Err(hint) => Balance {
+                    hint,
+                    ..Balance::default()
+                },
+            });
         // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
@@ -2483,86 +2491,62 @@ impl<'a> Server<'a> {
                 Some(e) => in_words(e, fc.serial_label()),
                 None => ("m", "nothing yet", String::new()),
             };
-            let sep = [" · ", " "][usize::from(t == "g" || x.is_empty())];
-            let val = format!("<span class=x><b class={t}>{w}</b>{sep}{}</span>", chips(&x));
             let e = last.filter(|_| !fc.paused);
-            let ago = e.map_or(String::new(), |e| age(ctx.now.saturating_sub(e.ts)));
-            let raw = e
-                .and_then(|e| e.str("result"))
-                .map(|r| format!("<pre>{}</pre>", esc(r)));
-            f += &hrow(name, t, &val, &ago, &raw.unwrap_or_default());
+            d.fleets.push(FleetRow {
+                name: name.clone(),
+                tone: t.into(),
+                word: w.into(),
+                text: x,
+                ago: e.map_or(String::new(), |e| age(ctx.now.saturating_sub(e.ts))),
+                raw: e.and_then(|e| e.str("result")).map(String::from),
+            });
         }
         // #87: on/off from fleet.toml; the last `push-sent`, unless a webpush `notify-failed` is newer.
-        let (t, d) = crate::timer::phone(ctx, cfg, events);
-        a += &kv("push", t, &format!("<b class={t}>{}</b>", esc(&d)));
-        if self.addr.is_some() && self.export.is_none() {
+        let (t, detail) = crate::timer::phone(ctx, cfg, events);
+        d.push = Row {
+            name: "push".into(),
+            tone: t.into(),
+            detail,
+            ..Row::default()
+        };
+        if live {
             // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
             let key = crate::webpush::vapid(&ctx.state)
                 .map(|k| crate::webpush::public(&k))
                 .unwrap_or_default();
-            let key = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key);
-            a += &format!("<button id=push type=button hidden data-key={key}>Enable alerts</button>");
-            for s in crate::webpush::load(&ctx.state) {
-                a += &format!(
-                    "<form method=post action=/push/unsubscribe class=role><input type=hidden name=id value={}><span>{} <span class=mt>alerts on {} ago</span></span><button>Remove</button></form>",
-                    s.id(),
-                    esc(&s.label),
-                    age(ctx.now.saturating_sub(s.created))
-                );
-            }
-            let (all, mt) = (
-                devices::load(ctx)
-                    .into_iter()
-                    .filter(|d| d.code.is_none())
-                    .collect::<Vec<_>>(),
-                mtime(ctx),
-            );
-            if all.is_empty() {
-                a += "<p class=mt>no paired device yet: tap Pair this phone, then `herdsman serve approve &lt;code&gt;` here</p>";
-            }
-            for d in all {
-                let when = format!(
-                    "paired {} ago · used {} ago",
-                    age(ctx.now.saturating_sub(d.created)),
-                    age(ctx.now.saturating_sub(d.used))
-                );
-                a += &format!("<form method=post class=role>{}<input type=hidden name=hash value={}><span>{} <span class=m>{when}</span></span><button>Remove</button></form>", hidden("unpair", "", &mt), esc(&d.hash), esc(&d.label));
-            }
+            d.key = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, key);
+            let sub = |s: crate::webpush::Sub| Sub {
+                id: s.id(),
+                label: s.label,
+                created: s.created,
+            };
+            d.subs = crate::webpush::load(&ctx.state).into_iter().map(sub).collect();
+            let paired = |d: devices::Device| Paired {
+                hash: d.hash,
+                label: d.label,
+                created: d.created,
+                used: d.used,
+            };
+            d.devices = devices::load(ctx)
+                .into_iter()
+                .filter(|d| d.code.is_none())
+                .map(paired)
+                .collect();
         }
-        // #183: the label column is the longest label's width, at most 11ch (serve.css `--kw`).
-        let ks = [&hosts, &m, &s, &f, &a].map(|g| {
-            g.split("<span class=k>")
-                .skip(1)
-                .map(|k| k.split('<').next().unwrap_or_default().chars().count())
-                .max()
-                .unwrap_or(0)
-        });
-        let head = "<details class=grp style=--kw:@ch><summary><i class=dt></i><span class=gn>{}</span><span class=gs></span><i class=cv></i></summary>";
-        let head = head.replace('@', &ks.iter().max().map_or(0, |k| *k.min(&11)).to_string());
-        let grp = |(n, rows): (&str, String)| format!("{}{rows}</details>", head.replace("{}", n));
-        // #234: a fixed order: HOSTS (a card per host), FLEET DISK (the worktree budget, orphans, leftovers), the rest.
-        let hosts = format!("<div class=hgd>{hosts}</div>");
-        let gs = [
-            ("HOSTS", hosts),
-            ("FLEET DISK", m),
-            ("SERVICES", s),
-            ("FLEETS", f),
-            ("ALERTS", a),
-        ];
-        gs.into_iter().filter(|g| !g.1.is_empty()).map(grp).collect()
+        d
     }
 
     /// #234: one card per host (main first, then A→Z), each with the same rows: the state, why its dot is amber or red
     /// and [off]/[on] in its head, then load/cpu, swap-out, memory, disk, top memory, lanes and tags. A row with history
-    /// carries its 24 h sparkline (`data-s`, worst per bucket); a tap loads its chart (`frag?id=hist`, an export inline).
-    fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> String {
+    /// carries its 24 h sparkline (worst per bucket); a tap loads its chart (`frag?id=hist`, an export inline).
+    fn cards(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], hs: &Host) -> Vec<HostCard> {
         let (lim, seen, hist, now) = (
             &cfg.limits,
             crate::hosts::cached(ctx),
             crate::hosts::history(ctx),
             ctx.now,
         );
-        let mut out = String::new();
+        let mut out = vec![];
         for (name, h) in crate::hosts::cards(cfg, r) {
             let (main, on) = (h.is_none_or(|h| h.machine.is_none()), h.is_none_or(|h| h.enabled));
             let mut mem = vec![];
@@ -2594,10 +2578,9 @@ impl<'a> Server<'a> {
                 for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
                     let mb: u64 = host::held(r, &ours).iter().sum();
-                    let gb = format!("{}.{}", mb / 1024, mb % 1024 * 10 / 1024);
+                    let gb = format!("{}.{} GB", mb / 1024, mb % 1024 * 10 / 1024);
                     let (w, d) = (n("working"), n("done"));
-                    let ls = format!("({} lanes: working {w} / done {d})", ours.len());
-                    mem.push((h, format!("<b>{gb} GB</b> <span class=mt>{ls}</span>")));
+                    mem.push((h, gb, format!("({} lanes: working {w} / done {d})", ours.len())));
                 }
                 s.pressure = hs.pressure.as_deref().map(crate::hosts::level);
             }
@@ -2614,86 +2597,135 @@ impl<'a> Server<'a> {
                 };
             }
             let grey = |x: &'static str| if on && s.up { x } else { "m" };
-            let x = self.export.is_some();
-            let row = |k: &str, key: &str, t: &str, val: &str, l: &str| {
+            let inline = self.export.is_some();
+            let row = |k: &str, key: &str, t: &str, v: Cell, l: Option<f64>| {
                 let sr = |k: &str| crate::hosts::series(&hist, &name, k, now, false);
-                let p = [String::new(), format!(" data-p=\"{}\"", sr("pressure"))][usize::from(key == "mem")].clone();
-                let c = crate::hosts::chart(&hist, &name, key, now);
-                let c = [String::new(), format!(" data-x=\"{c}\"")][usize::from(x)].clone();
-                format!("<details class=rw data-t={t} data-k={key} data-s=\"{}\"{l}{p}{c}><summary><span class=k>{k}</span><span class=w>{val}</span><span class=t><i class=cv></i></span><span class=sp><svg class=spk></svg><i>24h</i></span></summary></details>", sr(key))
+                let x = [String::new(), crate::hosts::chart(&hist, &name, key, now)];
+                Cell {
+                    k: k.into(),
+                    t: t.into(),
+                    key: key.into(),
+                    s: sr(key),
+                    p: [String::new(), sr("pressure")][usize::from(key == "mem")].clone(),
+                    l,
+                    x: x[usize::from(inline)].clone(),
+                    ..v
+                }
             };
-            // A gauge row's value, one line (an offline host's age is in its head): (status, html). `used`: (used, size) when the bar shows the used part (free
+            // A gauge row's value, one line (an offline host's age is in its head): (status, cell). `used`: (used, size) when the bar shows the used part (free
             // space, its status from the floor `l`); else the bar is the value against the limit `l`.
             let val = |x: Option<f64>,
                        g: Option<f64>,
                        l: f64,
                        used: Option<(f64, f64)>,
-                       (p, pre, unit, after): (usize, &str, &str, String)| {
+                       (p, pre, unit, of, notes): (usize, &str, &str, String, Vec<String>)| {
                 let Some(x) = x else {
-                    return ("m", format!("{} <b>{pre}?{unit}</b>{after}", gauge(0.0, "▏").1));
+                    let b = Some(format!("{pre}?{unit}"));
+                    return (
+                        "m",
+                        Cell {
+                            bar: Some(gauge(0.0)),
+                            b,
+                            of,
+                            notes,
+                            ..Cell::default()
+                        },
+                    );
                 };
                 let g = g.unwrap_or(x);
-                let (t, mut bar, pct) = gauge(if used.is_some() { l / g } else { g / l }, "▏");
+                let mut bar = gauge(if used.is_some() { l / g } else { g / l });
                 if let Some((u, n)) = used {
-                    let (ut, ub, _) = gauge(u / n, "▏");
-                    bar = ub.replacen(&format!("bar {ut}"), &format!("bar {t}"), 1);
+                    bar.n = gauge(u / n).n;
                 }
-                let o = if t == "r" { "▶ " } else { "" };
-                (t, format!("{bar} <b class={t}>{o}{pre}{x:.p$}{unit}</b>{after}{pct}"))
+                let (t, b) = (
+                    ["g", "a", "r"]["gar".find(bar.t.as_str()).unwrap_or(0)],
+                    format!("{pre}{x:.p$}{unit}"),
+                );
+                (
+                    t,
+                    Cell {
+                        bt: bar.t.clone(),
+                        bar: Some(bar),
+                        b: Some(b),
+                        of,
+                        notes,
+                        ..Cell::default()
+                    },
+                )
             };
-            let of = |l: f64| format!(" <span class=m>/ {l}</span>");
+            let of = |l: f64| format!("/ {l}");
             let (lt, lv) = val(
                 s.load,
                 s.load,
                 lim.load_per_cpu,
                 None,
-                (2, "", "", of(lim.load_per_cpu)),
+                (2, "", "", of(lim.load_per_cpu), vec![]),
             );
             // #168: swap-out's status is the window's median (the rule, with pressure warn/critical); `now` is one sample.
-            let avg = gate
-                .swap_median
-                .map_or(String::new(), |m| format!(" <span class=mt>· {m:.0} avg</span>"));
-            let sw = (0, "", "", of(lim.swapout_rate) + &avg);
+            let avg = gate.swap_median.map(|m| format!("· {m:.0} avg"));
+            let sw = (0, "", "", of(lim.swapout_rate), avg.into_iter().collect());
             let (st, sv) = val(s.swap, gate.swap_median.or(s.swap), lim.swapout_rate, None, sw);
-            let size =
-                |n: Option<f64>, p: usize| n.map_or(String::new(), |n| format!(" <span class=mt>of {n:.p$}</span>"));
+            let size = |n: Option<f64>, p: usize| n.map(|n| format!("of {n:.p$}"));
             let pw = word(s.pressure).unwrap_or("?");
             let used = |f: Option<f64>, n: Option<f64>| f.zip(n).map(|(f, n)| (n - f, n));
             // The pressure word only when it is up, so the value stays one line at 390.
-            let pr = [format!(" <span class=mt>· {pw}</span>"), String::new()][usize::from(pw == "normal")].clone();
-            let mm = (1, "free ", " GB", size(s.mem_total, 0) + &pr);
+            let pr = (pw != "normal").then(|| format!("· {pw}"));
+            let mm = (
+                1,
+                "free ",
+                " GB",
+                String::new(),
+                size(s.mem_total, 0).into_iter().chain(pr).collect(),
+            );
             let (mt, mv) = val(s.mem, s.mem, lim.min_free_mem_gb, used(s.mem, s.mem_total), mm);
             let mt = ["g", "a", "r"][[mt, tone(pw)]
                 .map(|t| "gar".find(t).unwrap_or(0))
                 .into_iter()
                 .max()
                 .unwrap_or(0)];
-            let dd = (0, "free ", " GB", size(s.disk_total, 0));
+            let dd = (
+                0,
+                "free ",
+                " GB",
+                String::new(),
+                size(s.disk_total, 0).into_iter().collect(),
+            );
             let (dt, dv) = val(s.disk, s.disk, lim.min_free_gb, used(s.disk, s.disk_total), dd);
-            let dl = |l: f64| format!(" data-l={l}");
-            let mut rows = row("load/cpu", "load", grey(lt), &lv, &dl(lim.load_per_cpu));
-            rows += &row("swap-out", "swap", grey(st), &sv, &dl(lim.swapout_rate));
-            rows += &row("memory", "mem", grey(mt), &mv, &dl(lim.min_free_mem_gb));
-            rows += &mem.iter().map(|(h, c)| kv(h, grey("g"), c)).collect::<String>();
-            rows += &row("disk", "disk", grey(dt), &dv, &dl(lim.min_free_gb));
+            let plain = |k: &str, t: &str, b: Option<String>, text: String, notes: Vec<String>| Cell {
+                k: k.into(),
+                t: t.into(),
+                b,
+                text,
+                notes,
+                ..Cell::default()
+            };
+            let mut rows = vec![
+                row("load/cpu", "load", grey(lt), lv, Some(lim.load_per_cpu)),
+                row("swap-out", "swap", grey(st), sv, Some(lim.swapout_rate)),
+                row("memory", "mem", grey(mt), mv, Some(lim.min_free_mem_gb)),
+            ];
+            rows.extend(
+                mem.into_iter()
+                    .map(|(h, gb, ls)| plain(&h, grey("g"), Some(gb), String::new(), vec![ls])),
+            );
+            rows.push(row("disk", "disk", grey(dt), dv, Some(lim.min_free_gb)));
             // #223: the top memory users and their owner, so a hog outside the lanes shows at a glance.
             if !s.top.is_empty() {
-                let at = [
-                    format!(" <span class=mt>· {} ago</span>", age(now.saturating_sub(s.seen))),
-                    String::new(),
-                ];
-                rows += &kv(
+                let at = (!main).then(|| format!("· {} ago", age(now.saturating_sub(s.seen))));
+                rows.push(plain(
                     "top memory",
                     grey("g"),
-                    &(esc(&s.top.join(" · ")) + &at[usize::from(main)]),
-                );
+                    None,
+                    s.top.join(" · "),
+                    at.into_iter().collect(),
+                ));
             }
-            rows += &cloud.map_or(String::new(), |c| kv("cloud", &c[1], &esc(&c[2])));
+            rows.extend(cloud.map(|c| plain("cloud", &c[1], None, c[2].clone(), vec![])));
             let ls = [lanes.join(" · "), "none".into()][usize::from(lanes.is_empty())].clone();
-            let ls = format!("<b>{}</b> <span class=mt>{}</span>", lanes.len(), esc(&ls));
-            rows += &row("lanes", "lanes", grey("g"), &ls, "");
+            let ln = plain("", "", Some(lanes.len().to_string()), String::new(), vec![ls]);
+            rows.push(row("lanes", "lanes", grey("g"), ln, None));
             let tags = h.map_or(s.tags.clone(), |h| crate::hosts::tags(h, Some(&s))).join(" ");
-            rows += &kv("tags", "m", &format!("<span class=mt>{}</span>", esc(&tags)));
+            rows.push(plain("tags", "m", None, String::new(), vec![tags]));
             // Why the dot is amber or red, in words: the rows at the worst status.
             let rank = |t: &str| "gar".find(t).unwrap_or(0);
             let worst = [lt, st, mt, dt].map(rank).into_iter().max().unwrap_or(0);
@@ -2716,58 +2748,37 @@ impl<'a> Server<'a> {
             if dot != "m" && !held && !why.is_empty() {
                 (t, words) = (dot, format!("{words} · {}", why.join(", ")));
             }
-            let to = if on { "off" } else { "on" };
-            let btn = h.filter(|_| self.addr.is_some() && self.export.is_none() && !(main && on)).map_or(String::new(), |_| format!("<form method=post>{}<input type=hidden name=host value=\"{}\"><input type=hidden name=to value={to}><button data-confirm=\"turn {1} {to}?{}\">{to}</button></form>", hidden("host", "", &mtime(ctx)), esc(&name), if on { format!(" no new lanes; {} running lanes finish", lanes.len()) } else { String::new() }));
-            let tag = ["", "<span class=\"tag m\">main</span>"][usize::from(main)];
-            let (n, ln) = (esc(&name), crate::hosts::series(&hist, &name, "lanes", now, false));
-            // #303: [sign in ▾]: the configured logins by name; the sheet runs one in a pane on this host.
-            let su = crate::setup::all(cfg).into_iter().map(|(s, _)| {
-                format!(
-                    "<button type=button data-su=\"{0}\" data-host=\"{n}\">{0}</button>",
-                    esc(&s)
-                )
+            out.push(HostCard {
+                n: crate::hosts::series(&hist, &name, "lanes", now, false),
+                main,
+                dot: dot.into(),
+                tone: t.into(),
+                words,
+                rows,
+                to: h
+                    .filter(|_| !(main && on))
+                    .map(|_| ["on", "off"][usize::from(on)].into()),
+                lanes: lanes.len(),
+                // #303: [sign in ▾]: the configured logins by name; the sheet runs one in a pane on this host.
+                setups: crate::setup::all(cfg).into_iter().map(|(s, _)| s).collect(),
+                name,
             });
-            let su = format!(
-                "<details class=su><summary>sign in ▾</summary><div>{}</div></details>",
-                su.collect::<String>()
-            );
-            let su = [String::new(), su][usize::from(self.addr.is_some() && self.export.is_none())].clone();
-            out += &format!("<article class=hcd data-h=\"{n}\" data-c={dot} data-n=\"{ln}\"><div class=hhd><span class=hnm><i class=\"dt {dot}\"></i><b>{n}</b>{tag}<span class=\"hw {t}\">{}</span></span>{su}{btn}</div>{rows}</article>", esc(&words));
         }
         out
     }
 }
 
-/// #141: a 12-cell text gauge of `x` (value ÷ limit; disk: floor ÷ free): (status, the bar, how far past the limit).
-/// Green under 80 %, amber to 100 %, red past it (the value then leads with `▶`); `end` closes it (disk's floor tick).
-fn gauge(x: f64, end: &str) -> (&'static str, String, String) {
+/// #141: a 12-cell text gauge of `x` (value ÷ limit; disk: floor ÷ free): its status, cells full, how far past the limit.
+/// Green under 80 %, amber to 100 %, red past it (the value then leads with `▶`).
+fn gauge(x: f64) -> Bar {
     let t = ["g", "a", "r"][usize::from(x >= 0.8) + usize::from(x > 1.0)];
     let n = (1..=12).filter(|i| f64::from(*i) <= x * 12.0 + 0.5).count();
-    let (full, empty) = ("█".repeat(n), "░".repeat(12 - n));
-    let pct = Some(x).filter(|x| *x > 1.0).map(|x| format!(" ({:.0}%)", x * 100.0));
-    let bar = format!("<span class=\"bar {t}\">▕{full}<i>{empty}</i>{end}</span>");
-    (t, bar, pct.unwrap_or_default())
-}
-
-/// #141: a Host row with status `t`: its label, then `cells`; with `more` (a raw line, the accounts) it opens on tap.
-fn hrow(k: &str, t: &str, cells: &str, age: &str, more: &str) -> String {
-    let k = format!("<span class=k>{}</span>", esc(k));
-    if more.is_empty() {
-        return format!("<p class=gr data-t={t}>{k}{cells}</p>");
+    let pct = Some(x).filter(|x| *x > 1.0).map(|x| format!("{:.0}", x * 100.0));
+    Bar {
+        t: t.into(),
+        n,
+        pct: pct.unwrap_or_default(),
     }
-    let t = format!("data-t={t}><summary>{k}{cells}<span class=t>{age}<i class=cv></i></span>");
-    format!("<details class=rw {t}</summary>{more}</details>")
-}
-
-/// A Host row of a label and one value.
-fn kv(k: &str, t: &str, val: &str) -> String {
-    hrow(k, t, &format!("<span class=w>{val}</span>"), "", "")
-}
-
-/// Escaped text with each `command` as a code chip.
-fn chips(s: &str) -> String {
-    let part = |(i, p): (usize, &str)| [esc(p), format!("<code>{}</code>", esc(p))][i % 2].clone();
-    s.split('`').enumerate().map(part).collect()
 }
 
 /// #141: a `driven` result as the Host tab says it, by code (`ok:<step>` when it ran): status, word, the plain rest with
@@ -3110,18 +3121,19 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         page
     };
     std::fs::create_dir_all(dir.join("lane"))?;
-    // #266: the API reads the TypeScript board makes (Events), as files: every event, whatever the query.
+    // #266: the API reads the TypeScript board makes (Events, #267 Host), as files: every event, whatever the query.
     let (state, all) = (
         json!(s.state(ctx)?).to_string(),
         json!(v1::events(ctx, 0, u64::MAX, usize::MAX)),
     );
-    let all = all.to_string();
+    let (all, host) = (all.to_string(), json!(s.host_tab(ctx)).to_string());
     let files = [
         ("index.html", page.as_bytes()),
         ("herd.json", herd.as_bytes()),
         ("sw.js", sw.as_bytes()),
         ("api/v1/state", state.as_bytes()),
         ("api/v1/events", all.as_bytes()),
+        ("api/v1/host", host.as_bytes()),
     ]
     .map(|(n, b)| (n.to_string(), b));
     for (name, body) in files

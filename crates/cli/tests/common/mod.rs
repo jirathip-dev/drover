@@ -381,3 +381,31 @@ pub fn events_tab(s: &herdsman::serve::Server, host: &str, now: u64, opts: &str)
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     Some(String::from_utf8(o.stdout).unwrap())
 }
+
+/// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now`
+/// (`host` the request's Host: a read-only server takes an empty one).
+pub fn host_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+    let r = s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
+    let r = String::from_utf8_lossy(&r).into_owned();
+    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/host: {r}");
+    host_html(&r[r.find("\r\n\r\n").unwrap() + 4..])
+}
+
+/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node.
+pub fn host_html(json: &str) -> String {
+    let d = tmpdir("host-ts");
+    std::fs::write(d.join("host.json"), json).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts");
+    let js = format!(
+        "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
+         process.stdout.write(tab(JSON.parse(fs.readFileSync({:?}))));",
+        d.join("host.json")
+    );
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/host.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout).unwrap()
+}

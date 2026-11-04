@@ -241,8 +241,9 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     // An unpaired page has the Pair button; a request sets a short-lived HttpOnly cookie and shows a 6-digit code.
     let page = req(&s, "GET", "/?all=1", "", "", T);
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
+    let host = host_tab(&s, ADDR, T);
     assert!(
-        page.contains("`herdsman serve approve &lt;code&gt;` here") && !page.contains("<code>"),
+        host.contains("`herdsman serve approve &lt;code&gt;` here") && !(page.clone() + &host).contains("<code>"),
         "the hint is text, never an open tag"
     );
     let res = req(
@@ -477,13 +478,12 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
     assert!(r.called("herdr agent prompt sendmeter-impl-12 --wait\nline two"));
     // The Host tab lists the device; Remove unpairs it and its next send is 401.
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let host = section(&page, "host");
+    let host = host_tab(&s, ADDR, T);
     assert!(
         host.contains(&format!("<span>{label} <span class=m>paired ")) && host.contains("<button>Remove</button>"),
         "{host}"
     );
-    let mt = &page[page.find("name=mtime value=").unwrap() + 17..];
+    let mt = &host[host.find("name=mtime value=").unwrap() + 17..];
     let mt: String = mt.chars().take_while(char::is_ascii_digit).collect();
     let hash = herdsman::devices::sha256(tok.as_bytes());
     let unpair = format!("op=unpair&fleet=&hash={hash}&mtime={mt}");

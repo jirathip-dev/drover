@@ -1,7 +1,8 @@
 // #265: the TypeScript board's start, a typed client for the JSON API v1 (`/api/v1/`, docs/serve.md). The tabs move
-// here one PR each (Events, Host, Queue, Lanes); #266: Events is drawn here, the other tabs are still the HTML board's.
-import type { Chat, Ev, Events, Reply, State } from '../../assets/types/api';
+// here one PR each (Events, Host, Queue, Lanes); #266: Events is drawn here, #267 Host; the other tabs are still the HTML board's.
+import type { Chat, Ev, Events, HostTab, Reply, State } from '../../assets/types/api';
 import { rows, tab, type Filter } from './events';
+import { tab as hostTab } from './host';
 
 /** serve.js's: paint a section's new HTML (rows keep their open state, changed ones flash, row sprites drawn). */
 declare function frag(id: string, html: string): void;
@@ -18,6 +19,7 @@ export const api = {
   state: () => get<State>('state'),
   /** #259: the events after `since` (#266: up to `until`); `refresh` means read `state` again. */
   events: (since: number, until?: number) => get<Events>(`events?since=${since}${until == null ? '' : `&until=${until}`}`),
+  host: () => get<HostTab>('host'),
   lane: (agent: string, before = 0) => get<Chat>(`lane/${encodeURIComponent(agent)}?before=${before}`),
   /** A form op (`answer`, `drive`, `pause`, `extend`, …) with the HTML form's fields; `mtime` is `State.mtime`. */
   async post(op: string, fields: Record<string, string>): Promise<Reply> {
@@ -70,5 +72,11 @@ document.addEventListener('click', e => {
 addEventListener('herd-ev', () => run(since));
 addEventListener('herd-refresh', () => run(load));
 setInterval(draw, 60_000); // the ages and time groups move on
+
+// #267: the Host tab, read with the rest (`herd-refresh`) and drawn again from each `host` on `/live` (`herd-host`).
+const host = (d: HostTab) => frag('host', hostTab(d));
+const hostLoad = () => api.host().then(host).catch(() => {});
+addEventListener('herd-host', e => host((e as CustomEvent<HostTab>).detail));
+addEventListener('herd-refresh', hostLoad);
 /** ui-audit.js waits for the first draw. */
-(window as unknown as { boardReady: Promise<unknown> }).boardReady = run(load);
+(window as unknown as { boardReady: Promise<unknown> }).boardReady = Promise.all([run(load), hostLoad()]);

@@ -89,6 +89,18 @@ fn live_pushes_one_frag_per_changed_section() {
         got.contains("event: ev\ndata: {\"f\":\"sendmeter\",\"k\":null,\"n\":null,\"seq\":2,"),
         "{got}"
     );
+    // #267: a drive pass's result changes the Host tab's FLEETS row: its data arrives as `host`, once.
+    let d = json!({"step": "start", "result": "REFUSED HOST_BUSY: load 9", "code": "HOST_BUSY"});
+    append(&c.state, &Event::new(T + 6, "sendmeter", Some(7), "driven", d)).unwrap();
+    let got = drain(&mut s, 2_500);
+    assert_eq!(got.matches("event: host").count(), 1, "{got}");
+    let line = got
+        .lines()
+        .find(|l| l.starts_with("data: {\"accounts\""))
+        .expect("the host data");
+    let v: serde_json::Value = serde_json::from_str(&line[6..]).unwrap();
+    assert_eq!(v["fleets"][0]["word"], "held", "{v}");
+    assert_eq!(v["now"].as_u64().map(|n| n > 0), Some(true), "{v}");
 }
 
 #[test]
@@ -116,10 +128,11 @@ fn live_caps_clients_and_checks_host() {
     });
     let all = all.unwrap();
     let j: serde_json::Value = serde_json::from_str(&all[all.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    for id in ["needs", "queue", "lanes", "host"] {
+    for id in ["needs", "queue", "lanes"] {
         assert!(j[id].is_string(), "{id} in ?frag=all");
     }
     assert!(j["events"].is_null(), "#266: the board draws Events from the API");
+    assert!(j["host"].is_null(), "#267: and Host");
 }
 
 const MENU: &str = "⏺ I need to pick a database.\n\n Which database should the meter use?\n\n❯ 1. SQLite\n  2. Postgres\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n";
