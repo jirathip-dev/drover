@@ -621,41 +621,85 @@
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) early.push('reduced motion not forced');
       if (!o || o.hidden || getComputedStyle(o).animationName !== 'none') early.push(`moment: ${o ? getComputedStyle(o).animationName : 'none shown'}, not a still frame`);
     },
-    // #337 gate 2: a wait in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still` with reduced motion
-    // forced; `-1440` at the desktop width): [↻] keeps its box and spins its plain ↻ (no sprite in the header, idle or
-    // busy); the overlay's sprite is 96 px, centred near the top of the content under the header, over a light scrim that
-    // takes no taps; terminal: a spinning glyph; reduced motion: one still frame. A strip holds the sprite's first four
-    // frames (8 fps: 0, 125, 250, 375 ms) for the shot.
-    loading: () => {
-      tab('queue');
+    // #450 gate 2: a wait in the phone's theme (`loading~kitchen`, `loading~terminal`; `loading-still` with reduced motion
+    // forced; `-1440` at the desktop width): no overlay. A load through wait() under 300 ms shows nothing; a slower one the
+    // strip under the header, one thin row: the chat's inline mark (the theme's sprite at 24 px; terminal: a spinning
+    // glyph; reduced motion: one still frame) + `loading`, gone when the load ends; [↻] keeps its box and spins its plain ↻.
+    // The shot is a load that never ends.
+    loading: async () => {
+      tab('lanes');
       const box = () => [rf, rf.firstChild, $('header')].map(e => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(); }).join(' ');
-      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches, ov = $('#ld'), svg = ov.querySelector('svg'), g = ov.querySelector('i');
-      if (rf.matches('.spin') || seen(ov)) early.push('busy before the refresh');
+      const idle = box(), still = matchMedia('(prefers-reduced-motion: reduce)').matches, ov = $('#ld'), svg = ov.querySelector('svg'), g = ov.querySelector('i'), sp = $('#strip');
+      const ms = n => new Promise(r => setTimeout(r, n));
+      if (rf.matches('.spin') || seen(ov) || sp.offsetHeight) early.push(`busy before the load (strip ${sp.offsetHeight} px)`);
       if ($('header svg.lds, header use[href="#hload"]')) early.push('a loading sprite in the header');
+      let fast = 0;
+      const mo = new MutationObserver(() => { fast += seen(ov); });
+      mo.observe(ov, { attributes: true });
+      await window.wait(ms(100));
+      await ms(300);
+      mo.disconnect();
+      if (fast) early.push('a 100 ms load showed the strip');
+      const half = window.wait(ms(600));
+      await ms(400);
+      if (!seen(ov)) early.push('a 600 ms load: no strip at 400 ms');
+      await half;
+      if (seen(ov) || sp.offsetHeight) early.push(`the strip stayed after the load (${sp.offsetHeight} px)`);
       busy = true;
       sync('a');
-      loading(true);
+      window.wait(new Promise(() => {}));
+      await ms(400);
       if (box() !== idle) early.push(`[↻] busy moved: ${idle} → ${box()}`);
       if (V === 'loading-still' && !still) early.push('reduced motion not forced');
       if (rf.querySelector('svg') || rf.textContent !== '↻') early.push('[↻] is not the plain ↻');
       const spin = getComputedStyle(rf.firstChild).animationName;
       if (spin !== (still ? 'none' : 's')) early.push(`[↻] ${spin}, not spinning`);
-      if (getComputedStyle(ov).pointerEvents !== 'none') early.push('the overlay takes taps');
-      const hb = $('header').getBoundingClientRect(), t = document.documentElement.dataset.theme, term = t === 'terminal';
-      if (ov.getBoundingClientRect().top < hb.bottom - 1) early.push('the overlay covers the header');
-      if (term ? seen(svg) || !seen(g) : !ov.matches('.ld') || !$('#hload') || !seen(svg) || seen(g)) early.push(`${t}: not its loading animation (#hload ${!!$('#hload')})`);
+      const hb = $('header').getBoundingClientRect(), sr = sp.getBoundingClientRect(), t = document.documentElement.dataset.theme, term = t === 'terminal';
+      if (Math.abs(sr.top - hb.bottom) > 1 || sr.height > 36) early.push(`the strip: ${sr.top - hb.bottom | 0} px under the header, ${sr.height} px tall`);
+      if ($('#strip .ldw').textContent !== 'loading' || !seen($('#strip .ldw'))) early.push('the strip does not say loading');
+      if ([...$$('body *')].some(e => getComputedStyle(e).position === 'fixed' && seen(e) && e.getBoundingClientRect().height > innerHeight / 2 && e.contains(ov))) early.push('a full-screen loading overlay');
+      if (term ? seen(svg) || !seen(g) : !ov.matches('.ld') || !$('#hload') || !seen(svg) || seen(g)) early.push(`${t}: not its loading mark (#hload ${!!$('#hload')})`);
       const el = term ? g : svg, r = el.getBoundingClientRect(), cs = getComputedStyle(el);
-      if (!term && (Math.round(r.width) !== 96 || Math.round(r.height) !== 96)) early.push(`${t}: loading sprite ${r.width}×${r.height}, not 96×96`);
-      if (Math.abs(r.left + r.width / 2 - innerWidth / 2) > 2) early.push(`${t}: loading animation off centre (${r.left}+${r.width} in ${innerWidth})`);
-      if (r.top < hb.bottom || r.top > hb.bottom + 160) early.push(`${t}: loading animation ${r.top - hb.bottom | 0} px under the header, not near the top`);
-      if (cs.animationName !== (still ? 'none' : term ? 's' : 'ldg, ldk')) early.push(`${t}: loading animation ${cs.animationName}`);
-      if (term) return;
-      const strip = B.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;z-index:3;bottom:calc(var(--hit) + var(--ctl) + var(--s3));left:0;right:0;display:flex;justify-content:center;gap:var(--s2);padding:var(--s1);background:var(--card);pointer-events:none' }));
-      [0, 1, 2, 3].forEach(i => {
-        const c = strip.appendChild(svg.cloneNode(true));
-        c.style.cssText += ';width:48px;height:48px;image-rendering:pixelated;shape-rendering:crispEdges;animation:' + cs.animation;
-        c.getAnimations().forEach(a => { a.pause(); a.currentTime = i * 125; });
-      });
+      if (!term && (Math.round(r.width) !== 24 || Math.round(r.height) !== 24)) early.push(`${t}: loading sprite ${r.width}×${r.height}, not the chat's 24×24`);
+      if (cs.animationName !== (still ? 'none' : term ? 's' : 'ldg, ldk')) early.push(`${t}: loading mark ${cs.animationName}`);
+    },
+    // #450: during a load that never ends, a tap on a lane (whatever is at its point on screen) opens its sheet.
+    'loading-tap': async () => {
+      tab('lanes');
+      window.wait(new Promise(() => {}));
+      await new Promise(r => setTimeout(r, 400));
+      const l = $('#lanes .lane:not([data-thread]) .lr'), r = l.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!seen($('#ld'))) early.push('no strip while loading');
+      if (!l.contains(hit)) early.push(`the lane is covered by ${hit && hit.outerHTML.slice(0, 60)}`);
+      else hit.click();
+      if (!shown()) early.push('a tap during the load opened no sheet');
+    },
+    // #450: data 3 min old: `as of 3m ago` in the strip, small and dim; with a load as well, both on its one row.
+    stale: () => {
+      tab('lanes');
+      last = Date.now() - 180000;
+      age();
+      const a = $('#stale'), hb = $('header').getBoundingClientRect(), sr = $('#strip').getBoundingClientRect();
+      if (!seen(a) || a.textContent !== 'as of 3m ago') early.push(`the age: "${a.textContent}" ${seen(a) ? 'shown' : 'hidden'}`);
+      if (Math.abs(sr.top - hb.bottom) > 1 || sr.height > 36) early.push(`the strip: ${sr.top - hb.bottom | 0} px under the header, ${sr.height} px tall`);
+      if (getComputedStyle(a).fontSize !== getComputedStyle($('.tlv') || a).fontSize) early.push(`the age at ${getComputedStyle(a).fontSize}`);
+      loading(true);
+      if (Math.round(a.getBoundingClientRect().top) !== Math.round($('#strip .ldw').getBoundingClientRect().top) || $('#strip').getBoundingClientRect().height > 36) early.push('loading and the age are not on one row');
+      last = Date.now() - 60000;
+      age();
+      if (seen(a)) early.push('a copy 1 min old shows its age');
+      last = Date.now() - 180000;
+      age();
+    },
+    // #450: a first load with nothing cached: the strip and the tab's empty outlines, no text, no chef.
+    'first-load': () => {
+      $('#lanes').replaceChildren();
+      tab('lanes');
+      loading(true);
+      const o = getComputedStyle($('#lanes'), '::before');
+      if (o.content === 'none' || parseFloat(o.height) < 40 || o.borderTopStyle === 'none') early.push(`no outline: ${o.content} ${o.height} ${o.borderTopStyle}`);
+      if ($('#lanes').textContent) early.push('text in the outlines');
+      if (!seen($('#ld'))) early.push('no strip');
     },
     'loading-still': () => VIEWS.loading(),
     // #335 gate 2: ascii style (the look sheet's STYLE): the rows, Lanes, Host and the wait in the theme's ASCII figures.
@@ -663,7 +707,7 @@
     'ascii-lanes': () => { style('ascii'); return VIEWS.lanes(); },
     'ascii-host': () => { style('ascii'); return VIEWS.host(); },
     'ascii-events': () => { style('ascii'); return VIEWS.events(); },
-    // The overlay runs its frames by CSS alone: no node or text changes while it shows (#334), [↻] stays the plain ↻.
+    // The strip's mark runs its frames by CSS alone: no node or text changes while it shows (#334), [↻] stays the plain ↻.
     'ascii-loading': () => {
       style('ascii');
       tab('queue');
@@ -677,7 +721,7 @@
       if (!a || !seen(a) || seen(ov.querySelector('svg')) || seen(ov.querySelector('i'))) early.push('ascii: not the ascii loading frames');
       if (a && (a.children.length !== 2 || getComputedStyle(a.lastChild).animationName !== 'f')) early.push(`ascii: ${a.children.length} loading frames, ${getComputedStyle(a.lastChild).animationName}`);
       if (rf.querySelector('svg') || rf.textContent !== '↻') early.push('[↻] is not the plain ↻');
-      setTimeout(() => { mo.disconnect(); if (n) early.push(`${n} changes to the loading overlay while it ran`); }, 1100);
+      setTimeout(() => { mo.disconnect(); if (n) early.push(`${n} changes to the loading mark while it ran`); }, 1100);
     },
     herd1: () => { herd(true); light = 'day'; ranch(); }, // #71: day shots, whatever the runner's clock says
     herd2: () => { herd(true); light = 'day'; ranch(); },
@@ -861,7 +905,7 @@
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { look: () => [$('#sheet')], 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.

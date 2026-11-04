@@ -139,7 +139,7 @@ function theme(name) {
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
     sym('hfan', T.load_scene?.fan); // #239: an idle lane's sprite while the heat is held
-    sym('hload', T.loading); // #337: the loading overlay's sprite; none (terminal): a spinning glyph
+    sym('hload', T.loading); // #337: the loading strip's sprite; none (terminal): a spinning glyph
     $('#ld').classList.toggle('ld', !!defs.querySelector('#hload'));
     Object.keys(PAL).forEach(k => H.style.removeProperty(k));
     PAL = T.scene.palette || {};

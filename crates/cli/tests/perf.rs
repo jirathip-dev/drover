@@ -212,6 +212,43 @@ fn the_page_and_frags_carry_one_tab() {
     assert_eq!(ids, ["chat", "needs"]);
 }
 
+/// #450: no full-screen loader: one strip right under the header holds the loading mark (the chat's `.tld`), its word and
+/// the age; the needs cards carry the step's look as a time for it, never the old `as of the step's look` box.
+#[test]
+fn the_loader_and_the_age_are_one_strip_under_the_header() {
+    let (c, r) = fixture();
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
+    let res = s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW + 600);
+    let page = String::from_utf8_lossy(&res);
+    let (head, rest) = page.split_once("</header>").unwrap();
+    assert!(!head.contains("id=stale") && !head.contains("id=ld"), "{head}");
+    let strip = rest
+        .split_once("<div id=strip>")
+        .unwrap()
+        .1
+        .split_once("</div>")
+        .unwrap()
+        .0;
+    assert!(rest.starts_with("<i id=ptr hidden>↻</i><div id=strip>"), "{rest}");
+    assert!(
+        strip.starts_with("<span id=ld class=tld hidden aria-hidden=true><svg class=lds"),
+        "{strip}"
+    );
+    assert!(
+        strip.ends_with("<span class=ldw>loading</span><span id=stale hidden></span>"),
+        "{strip}"
+    );
+    assert_eq!(page.matches("id=ld ").count(), 1);
+    let needs = page.split_once("<div id=needs>").unwrap().1;
+    let ts = herdsman::snapshot::load(&c).unwrap().ts;
+    assert!(
+        ts > 0 && needs.starts_with(&format!("<i id=sts hidden data-ts={ts}></i>")),
+        "{needs}"
+    );
+    assert!(!page.contains("as of the step's look"));
+}
+
 /// #337: the first contentful paint in WebKit (warm: the second load in one WebKit, its caches and service worker up;
 /// the cold one, a new WebKit process, is reported) of the page a real board serves from the snapshot, under 300 ms. Runs where WebKit is at hand (the macOS CI job).
 #[test]

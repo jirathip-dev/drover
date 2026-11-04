@@ -1463,7 +1463,7 @@ impl<'a> Server<'a> {
         let parts: [(&'static str, &dyn Fn() -> String); 3] = [
             ("needs", &|| {
                 let n = chat::choosing(ev);
-                self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
+                self.age() + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
             }),
             ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
             ("chat", &|| {
@@ -1478,13 +1478,9 @@ impl<'a> Server<'a> {
             .collect())
     }
 
-    /// #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
-    fn age(&self, ctx: &Ctx) -> String {
-        let t = self.snapshot().1.ts;
-        let old = (t > 0 && ctx.now > t + 120).then(|| age(ctx.now - t));
-        old.map_or(String::new(), |a| {
-            format!("<p class=\"msg a\">as of the step's look {a} ago</p>")
-        })
+    /// #337: the snapshot's time (the step's look); #450: serve.js folds its age into the strip under the header.
+    fn age(&self) -> String {
+        format!("<i id=sts hidden data-ts={}></i>", self.snapshot().1.ts)
     }
 
     /// #60: a part the page loads on demand: a Host chart's series (`id=hist&host=&k=`, #234). #266: the Events tab is
@@ -1585,8 +1581,8 @@ impl<'a> Server<'a> {
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
-             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
-             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
+             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<i id=dot class=a></i>\
+             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=strip><span id=ld class=tld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></span><span class=ldw>loading</span><span id=stale hidden></span></div>{msg}<div id=needs>{}</div><main>\
              <section id=queue></section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
              <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
              <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
