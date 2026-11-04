@@ -145,6 +145,13 @@
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // #406: the image viewer over t4 from a tap on its first image: fitted, zoomed (a double tap on its middle), and
+    // several images (the thread's two, on the second).
+    // (The zoom's easing is finished at once: headless Chrome's virtual time never runs it. The thread is scrolled to
+    // the top first, as chat-thread: a scrolled view shoots blank, the viewer over it too.)
+    'chat-viewer': () => { VIEWS['chat-thread'](); $('#chat .cvp[data-t="t4"] .im img').click(); },
+    'chat-viewer-zoom': () => { VIEWS['chat-viewer'](); ivTap(innerWidth / 2, innerHeight / 2); IVI.getAnimations().forEach(a => a.finish()); },
+    'chat-viewer-multi': () => { VIEWS['chat-thread'](); const l = [...$$('#chat .cvp[data-t="t4"] .im img')].map(i => [i.src, i.alt]); iv(l, l[1][0]); },
     // #403 gate 2: [send] clears the box before the POST answers and shows the message `sending…` (no #ld overlay, ever);
     // ✓ once accepted; failed, red with [retry] and the text back in the box. The shot: ✓, sending… and failed in t3.
     'chat-send': async () => {
@@ -730,7 +737,7 @@
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -764,6 +771,13 @@
       if (!m || m.textContent !== ERR) res.outliers.push(`error banner reads "${m && m.textContent}"`);
       else if (m.scrollWidth > m.clientWidth || m.scrollHeight > m.clientHeight) res.outliers.push(`error banner clipped: ${m.scrollWidth}x${m.scrollHeight} in ${m.clientWidth}x${m.clientHeight}`);
       else if (m.getBoundingClientRect().bottom > row.getBoundingClientRect().top) res.outliers.push(`error banner covers "${label(row)}"`);
+    }
+    // #406: the viewer is open over the thread, its image loaded; fitted inside the screen, zoomed past it; 2 / 2 of two.
+    if (V.startsWith('chat-viewer')) {
+      const i = $('#iv>img'), r = i.getBoundingClientRect(), fit = r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1;
+      if ($('#iv').hidden || !i.complete || !i.naturalWidth) res.outliers.push(`viewer ${$('#iv').hidden ? 'closed' : 'open'}, image ${i.naturalWidth ? 'loaded' : 'not loaded'}`);
+      if (fit !== (V !== 'chat-viewer-zoom')) res.outliers.push(`image ${r.left | 0}..${r.right | 0} × ${r.top | 0}..${r.bottom | 0}: ${fit ? 'fitted' : 'past the screen'}`);
+      if (V === 'chat-viewer-multi' && $('.ivn').textContent !== '2 / 2') res.outliers.push(`count "${$('.ivn').textContent}", not 2 / 2`);
     }
     const out = document.createElement('pre');
     out.id = 'audit';
