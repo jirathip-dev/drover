@@ -78,7 +78,7 @@ its steps. Titles start in one column at every depth.
 Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
 queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
 (every 5 min) reads the repo's open issues in one GraphQL call, then only those updated since (a closed one drops out);
-`[↻ read again]` reads now. The board renders the last read only, never GitHub. A search box and quick filters (`new`,
+`[Drive now]` reads it again at once. The board renders the last read only, never GitHub. A search box and quick filters (`new`,
 `>30 days`, `>90 days`, `has AC`, `in a closed PR`, a label) narrow it on the phone. Ticking issues shows `[queue N]`
 above the tab bar: it queues them in tick order, each marked `needs-check` (its spec not checked yet). Picking an issue
 starts nothing; only queueing does.
