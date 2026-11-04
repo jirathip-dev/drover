@@ -483,3 +483,51 @@ fn path_traversal_is_refused() {
         );
     }
 }
+
+/// #370: the board's labels pair a theme's own words with the plain ones; a word the theme lacks is the plain word
+/// alone, never farm's (terminal: none, today's board). The Queue and Events rows by kind and the Host load minis
+/// are in each sheet, and `row_sprites` takes those kinds and no other.
+#[test]
+fn theme_words_are_the_themes_own_and_fall_back_to_plain() {
+    let (c, r) = server(None, &[("plain", "theme.json", r#"{"words": {"merged": "shipped"}}"#)]);
+    let w = |t: &str| json(&c, &r, &format!("/themes/{t}/theme.json"))["words"].clone();
+    let (f, k) = (w("farm"), w("kitchen"));
+    for (key, farm, kitchen) in [
+        ("needs", "at the gate", "the bell"),
+        ("working", "on the trail", "on the line"),
+        ("idle", "grazing", "standing by"),
+        ("done", "in the stable", "at the pass"),
+        ("queued", "in the paddock", "tickets"),
+        ("impl", "plough", "cook"),
+        ("fix", "farrier", "chop"),
+        ("rev", "vet", "taste"),
+        ("update", "haul", "carry"),
+        ("merged", "over the fence", "order up"),
+        ("tab-events", "logbook", "the rail"),
+        ("tab-host", "barn", "the kitchen"),
+        ("empty-queue", "the paddock is empty", "the kitchen's quiet: no tickets"),
+    ] {
+        assert_eq!((f[key].as_str(), k[key].as_str()), (Some(farm), Some(kitchen)), "{key}");
+    }
+    assert_eq!(
+        w("plain"),
+        json!({"merged": "shipped"}),
+        "farm's words never fill a theme's gaps"
+    );
+    assert_eq!(w("terminal"), json!({}));
+    for (t, sheet) in [("farm", FARM_SPRITES), ("kitchen", KITCHEN_SPRITES)] {
+        let j = json(&c, &r, &format!("/themes/{t}/theme.json"));
+        let ids = ["queued", "needs", "merged", "fail"]
+            .map(|x| j["row_sprites"][x].clone())
+            .into_iter()
+            .chain(["calm", "busy", "held"].map(|l| j["load_scene"]["minis"][l].clone()));
+        for id in ids {
+            let id = id.as_str().unwrap().to_string();
+            assert!(sheet.contains(&format!("<g id=\"{id}\"")), "{t} {id}");
+        }
+    }
+    assert_eq!(
+        validate(br#"{"row_sprites": {"merged": "a", "bogus": "b"}}"#).unwrap_err(),
+        "`row_sprites.bogus` must be a sprite id (keys: impl, fix, rev, update, idle, done, blocked, queued, needs, merged, fail)"
+    );
+}
