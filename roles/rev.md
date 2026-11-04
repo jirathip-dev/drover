@@ -26,6 +26,15 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
 - The implementer's standing answers (staging re-merges, a minimal "staging build fix", one
   host-tool retry, amendment text for the cap or shared files) are not findings.
 - Label every finding `blocking` or `non-blocking` with `file:line`.
+- A finding blocks only with proof; anything else is a `non-blocking` note. Right under each
+  `- blocking [<category>] file:line: what` line goes a `Proof:` block, one of:
+  - `Proof: run`, then the exact command in a fenced block, then its output pasted from a run at
+    the reviewed head, showing the wrong behaviour next to what the acceptance criteria require.
+    Verify-stage screenshots listed by path count as run proof.
+  - `Proof: spec`, then a `>` quoted line from the issue's acceptance criteria, its `## Amendments`,
+    or a named rule in `roles/rev.md` or `docs/ui.md`, plus the `file:line` that breaks it (the PR
+    body as `PR#<n>:<line>`). Form categories (`pr-body`, `trailer`, `format`) use this form.
+  `herdsman verdict` refuses a FAIL with `NO_PROOF` when a blocker's proof is missing or malformed.
 - Verdict is PASS or FAIL. `FAIL (form-only)` only if every blocker is in a form category (the
   brief lists them; e.g. `trailer`, `pr-body`, `format`); one substantive blocker makes it a
   plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT
@@ -33,7 +42,8 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
 
 ## Tests that don't count
 
-FAIL any change whose proof relies on tests that:
+FAIL any change whose proof relies on tests that (prove it: a run proof that the test still passes
+on the old code, or a spec proof quoting the rule below plus the test's `file:line`):
 
 - re-implement production logic instead of exercising it;
 - have no meaningful assertion, or assert only mock calls or values their own mocks supplied;
@@ -50,5 +60,5 @@ Production code added only for tests counts against the change too.
 
 Write `verdict.md` in your worktree: first line `PASS`, `FAIL` or `FAIL (form-only)`, then the
 findings; tag each blocking one `blocking [<category>]`. It must carry a `Reviewed head: <40-hex>` line: the sha actually checked out (`git rev-parse HEAD`),
-and a `Tests checked against anti-patterns: yes` (or `no`) line. A review that finds nothing is suspect; one that names its
-blind spots is trustworthy.
+and a `Tests checked against anti-patterns: yes` (or `no`) line. No findings is a valid result; on PASS, name what you could
+not verify.
