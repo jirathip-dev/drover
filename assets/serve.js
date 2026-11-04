@@ -20,8 +20,9 @@ function tab(t) {
   // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
-  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined).
-  if (!$('#' + t).childElementCount && sget('c:' + t)) queueMicrotask(() => frag(t, sget('c:' + t)));
+  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined); #268:
+  // after the first frame, so the page paints first (the Queue tab, the TypeScript board's, is never in the page).
+  if (!$('#' + t).childElementCount && sget('c:' + t)) requestAnimationFrame(() => setTimeout(() => $('#' + t).childElementCount || frag(t, sget('c:' + t))));
   wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
 }
 // #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
