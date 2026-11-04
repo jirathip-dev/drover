@@ -143,8 +143,7 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
     let file = dir.join("state/webpush/subs.json");
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
-    let page = String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
-        .into_owned();
+    let page = host_tab(&s, ADDR, 1_000_000);
     assert!(
         page.contains("Enable alerts") && page.contains(&subs[0].id()),
         "Host tab lists the device"
@@ -166,7 +165,7 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     assert!(webpush::load(&c.state).is_empty());
 }
 
-/// A fake `curl` on PATH: saves its stdin, logs its args to `<dir>/calls`, answers the status in `<dir>/code`.
+/// A fake `curl` on PATH: saves its stdin (also as `body-<n>`, the n-th call's), logs its args to `<dir>/calls`, answers the status in `<dir>/code`.
 /// Held for the test: PATH is process-wide.
 fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
     static PATH: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -174,7 +173,7 @@ fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = format!(
-        "#!/bin/sh\ncat > '{0}/body'\necho \"$@\" > '{0}/args'\necho \"$@\" >> '{0}/calls'\ncat '{0}/code'\n",
+        "#!/bin/sh\ncat > '{0}/body'\necho \"$@\" > '{0}/args'\necho \"$@\" >> '{0}/calls'\ncp '{0}/body' \"{0}/body-$(wc -l < '{0}/calls' | tr -d ' ')\"\ncat '{0}/code'\n",
         dir.display()
     );
     std::fs::write(bin.join("curl"), script).unwrap();
@@ -365,8 +364,7 @@ const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example
 
 /// The Host tab's Alerts row at `now`.
 fn host(s: &Server, now: u64) -> String {
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), now)).into_owned();
+    let page = host_tab(s, ADDR, now);
     let row = page
         .split("<span class=k>push</span><span class=w><b class=")
         .nth(1)
@@ -491,6 +489,81 @@ fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     std::fs::write(&c.config, format!("{CONFIG}\n{PUSH}")).unwrap();
     webpush::subscribe(&c.state, &f("https://push.example/two"), "iPad", 2, None).unwrap();
     assert_eq!(check(), (0, String::new()), "a notifier: no warning");
+}
+
+/// #370: each device's push title is its own theme's words (`Order up: #7 merged`, `The bell: sendmeter #7 needs
+/// you`); a device that sent none (terminal) keeps today's title; a quiet subscribe updates the words without a push.
+#[test]
+fn push_titles_use_each_devices_theme_words() {
+    let dir = tmpdir("wp-words");
+    let _path = fake_curl(&dir);
+    std::fs::write(dir.join("code"), "201").unwrap();
+    let c = ctx(&dir, CONFIG);
+    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
+    let form = |ep: &str, extra: &str| -> std::collections::BTreeMap<String, String> {
+        (sub_form(&ua, ep) + extra)
+            .split('&')
+            .map(|kv| kv.split_once('=').unwrap())
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect()
+    };
+    webpush::subscribe(&c.state, &form("https://push.example/plain", ""), "Mac", 1, None).unwrap();
+    let words = r#"&words={"merged":"Over the fence","needs":"At the gate"}"#;
+    webpush::subscribe(&c.state, &form("https://push.example/phone", words), "iPhone", 1, None).unwrap();
+    // The phone switches to the kitchen: its words are replaced quietly, nothing is pushed.
+    let kitchen = form(
+        "https://push.example/phone",
+        r#"&words={"merged":"Order up","needs":"The bell"}&quiet=1"#,
+    );
+    let said = webpush::subscribe(&c.state, &kitchen, "iPhone", 1, Some("mailto:owner@example.com")).unwrap();
+    assert_eq!((said.as_str(), dir.join("calls").exists()), (webpush::OFF, false));
+    let titles = |kind: &str| {
+        let ev = Event::new(
+            1,
+            "sendmeter",
+            Some(7),
+            kind,
+            serde_json::json!({"reason": "r", "id": "q1", "question": "Split?", "options": ["yes", "no"], "recommend": 1, "agent": "a"}),
+        );
+        let n = std::fs::read_to_string(dir.join("calls")).map_or(0, |c| c.lines().count());
+        webpush::send(&c.state, "mailto:owner@example.com", &ev, None).unwrap();
+        let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
+        let mut t: Vec<(String, String)> = calls
+            .lines()
+            .enumerate()
+            .skip(n)
+            .map(|(i, l)| {
+                let body = std::fs::read(dir.join(format!("body-{}", i + 1))).unwrap();
+                let j: serde_json::Value = serde_json::from_slice(&decrypt(&body, &ua, &d(AUTH)).unwrap()).unwrap();
+                (
+                    l.rsplit('/').next().unwrap().into(),
+                    j["title"].as_str().unwrap().into(),
+                )
+            })
+            .collect();
+        t.sort();
+        t
+    };
+    let pair = |a: &str, b: &str| {
+        vec![
+            ("phone".to_string(), a.to_string()),
+            ("plain".to_string(), b.to_string()),
+        ]
+    };
+    assert_eq!(titles("merged"), pair("Order up: #7 merged", "herdsman"));
+    assert_eq!(
+        titles("needs-human"),
+        pair("The bell: sendmeter #7 needs you", "#7 needs you: r")
+    );
+    assert_eq!(
+        titles("needs-decision"),
+        pair("The bell: sendmeter #7 needs you", "herdsman")
+    );
+    assert_eq!(
+        titles("blocked"),
+        pair("herdsman", "herdsman"),
+        "no theme words for other events"
+    );
 }
 
 /// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both

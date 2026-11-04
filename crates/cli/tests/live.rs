@@ -67,7 +67,9 @@ fn live_pushes_one_frag_per_changed_section() {
         quiet.lines().all(|l| l.is_empty() || l == ": ping"),
         "no change: pings only: {quiet}"
     );
-    append(&c.state, &Event::new(T + 5, "sendmeter", None, "note", json!({}))).unwrap();
+    // #266: a queued issue changes the Queue tab only (the Events tab is the board's, read on the event's `ev`).
+    let q = json!({"op": "add", "issues": [99]});
+    append(&c.state, &Event::new(T + 5, "sendmeter", None, "queue", q)).unwrap();
     let t0 = Instant::now();
     let mut got = String::new();
     while !got.contains("\n\n") && t0.elapsed() < Duration::from_millis(1_500) {
@@ -81,8 +83,24 @@ fn live_pushes_one_frag_per_changed_section() {
     let frags: Vec<&str> = got.lines().filter(|l| l.starts_with("data: {\"html")).collect();
     assert_eq!(got.matches("event: frag").count(), 1, "{got}");
     let v: serde_json::Value = serde_json::from_str(&frags[0][6..]).unwrap();
-    assert_eq!(v["id"], "events", "{v}");
-    assert!(v["html"].as_str().unwrap().contains("aria-label=\"filter events\""));
+    assert_eq!(v["id"], "queue", "{v}");
+    assert!(v["html"].as_str().unwrap().contains("#99"), "{v}");
+    assert!(
+        got.contains("event: ev\ndata: {\"f\":\"sendmeter\",\"k\":null,\"n\":null,\"seq\":2,"),
+        "{got}"
+    );
+    // #267: a drive pass's result changes the Host tab's FLEETS row: its data arrives as `host`, once.
+    let d = json!({"step": "start", "result": "REFUSED HOST_BUSY: load 9", "code": "HOST_BUSY"});
+    append(&c.state, &Event::new(T + 6, "sendmeter", Some(7), "driven", d)).unwrap();
+    let got = drain(&mut s, 2_500);
+    assert_eq!(got.matches("event: host").count(), 1, "{got}");
+    let line = got
+        .lines()
+        .find(|l| l.starts_with("data: {\"accounts\""))
+        .expect("the host data");
+    let v: serde_json::Value = serde_json::from_str(&line[6..]).unwrap();
+    assert_eq!(v["fleets"][0]["word"], "held", "{v}");
+    assert_eq!(v["now"].as_u64().map(|n| n > 0), Some(true), "{v}");
 }
 
 #[test]
@@ -110,9 +128,11 @@ fn live_caps_clients_and_checks_host() {
     });
     let all = all.unwrap();
     let j: serde_json::Value = serde_json::from_str(&all[all.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    for id in ["needs", "queue", "lanes", "host", "events"] {
+    for id in ["needs", "queue", "lanes"] {
         assert!(j[id].is_string(), "{id} in ?frag=all");
     }
+    assert!(j["events"].is_null(), "#266: the board draws Events from the API");
+    assert!(j["host"].is_null(), "#267: and Host");
 }
 
 const MENU: &str = "⏺ I need to pick a database.\n\n Which database should the meter use?\n\n❯ 1. SQLite\n  2. Postgres\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n";
@@ -562,10 +582,15 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
     append(&c.state, &Event::new(T + 1, "sendmeter", Some(7), "merged", json!({}))).unwrap();
     let got = drain(&mut s, 1_500);
     assert!(
-        got.contains("id: 2\nevent: ev\ndata: {\"k\":\"merged\",\"seq\":2,\"ts\":1000001}\n\n"),
+        got.contains(
+            "id: 2\nevent: ev\ndata: {\"f\":\"sendmeter\",\"k\":\"merged\",\"n\":7,\"seq\":2,\"ts\":1000001}\n\n"
+        ),
         "{got}"
     );
-    assert!(got.contains("id: 2\nevent: frag\n"), "a frag carries the seq: {got}");
+    assert!(
+        !got.contains("\"id\":\"events\""),
+        "#266: no Events frag, the board reads the API: {got}"
+    );
     // Gate 2: the phone drops at seq 2; three events land; it comes back with Last-Event-ID: 2.
     drop(s);
     for i in 0..3 {
@@ -586,7 +611,7 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         .unwrap();
     s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
     let back = drain(&mut s, 2_500);
-    let ids: Vec<&str> = back.lines().filter(|l| l.starts_with("data: {\"k\"")).collect();
+    let ids: Vec<&str> = back.lines().filter(|l| l.starts_with("data: {\"f\"")).collect();
     assert_eq!(
         ids.len(),
         3,
@@ -601,13 +626,15 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         1,
         "the build alone (#391)"
     );
-    // Every missed Events row is on the tab once.
-    let tab = String::from_utf8_lossy(
-        &Server::new(&c, &Fake::default(), None)
-            .respond(&format!("GET /frag?id=events HTTP/1.1\r\nHost: {addr}\r\n\r\n"), T + 20),
-    )
-    .into_owned();
+    // Every missed Events row is on the tab once (#266: the board's, from `/api/v1/events`).
+    let tab = events_tab(
+        &Server::new(&c, &Fake::default(), Some(addr.to_string())),
+        &addr.to_string(),
+        T + 20,
+        "{ f: { k: 'all', fl: [] } }",
+    );
     for i in 0..3 {
+        let Some(tab) = &tab else { break };
         assert_eq!(tab.matches(&format!(">note · missed-{i}<")).count(), 1, "{tab}");
     }
     // Past the 500-event bound: one `refresh`, no replay.
@@ -631,17 +658,21 @@ fn the_board_dedupes_by_seq_and_skips_stale_moments() {
     let src = include_str!("../../../assets/serve.js");
     let part = &src[src.find("  const at = e").unwrap()..src.find("  es.addEventListener('refresh'").unwrap()];
     let js = format!(
-        "let seq = 0; const played = [], h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }};\n\
-         const moment = k => played.push(k);\n{part}\n\
+        "let seq = 0; const played = [], told = [], h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }};\n\
+         const rmoment = k => played.push(k), dispatchEvent = e => told.push(e.type);\n{part}\n\
          const now = Math.floor(Date.now() / 1e3), ev = (s, ts, k) => h.ev({{ lastEventId: String(s), data: JSON.stringify({{ seq: s, ts, k }}) }});\n\
          ev(1, now, 'merged'); ev(1, now, 'merged'); ev(2, now - 300, 'fail'); ev(3, now, null); ev(2, now, 'fail'); ev(4, now, 'needs-you');\n\
-         console.log(played.join(','), seq);"
+         console.log(played.join(','), seq, told.join());"
     );
     let d = tmpdir("dedupe-js");
     std::fs::write(d.join("t.js"), js).unwrap();
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "merged,needs-you 4");
+    // #266: and tells the board (its Events tab) once per new seq.
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout).trim(),
+        "merged,needs-you 4 herd-ev,herd-ev,herd-ev,herd-ev"
+    );
 }
 
 /// Pane text (the question, its options, the tail) only reaches a paired device: GET /,

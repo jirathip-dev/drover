@@ -530,6 +530,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "state-write-failed",
     "wip-blocked",
     "spawn-held",
+    "cap-near",
 ];
 
 impl Notify {
