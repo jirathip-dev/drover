@@ -125,21 +125,25 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let file = d.join("page.html");
     std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
     // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
+    // #367: each group draws its own trees, so the running #1 stands alone and its queued followers carry `! #1`.
     let want = [
-        "#1 ● impl ▼after7",
-        "#2 ├─○ queued ▼after6",
-        "#3 │ └─○ queued",
-        "#4 │ └─○ queued after #3",
-        "#5 │ └─○ queued after #4",
-        "#6 └─○ queued ▲before2",
-        "#7 ○ queued ! #99 ▲before1 ▼after8",
+        "#1 ● impl",
+        "#2 ○ queued ! #1 ▼after6",
+        "#3 └─○ queued",
+        "#4   └─○ queued",
+        "#5   └─○ queued after #4",
+        "#6 ○ queued ! #1 ▲before2 ▼after7",
+        "#7 ○ queued ! #99 ▲before6 ▼after8",
         "#8 ○ queued 🔒db ▲before7",
         "#21 ○ queued 🔒db",
         "#22 └─○ queued 🔒db",
     ]
     .join("|");
+    // #367: every repo's card shown and the chain opened, so every row is measured.
     let graph = format!(
-        "const got = [...document.querySelectorAll('#queue details.q')].map(d => [d.querySelector('summary>span').textContent, \
+        "document.querySelectorAll('#queue .fc').forEach(c => {{ c.hidden = false; }}); \
+         document.querySelectorAll('#queue details.qc').forEach(d => {{ d.open = true; }}); \
+         const got = [...document.querySelectorAll('#queue details.q')].map(d => [d.querySelector('summary>span').textContent, \
          [...d.querySelector('.gt').children].map(n => n.dataset.g ?? n.textContent).join('') + ' ' + d.querySelector('summary>span:nth-of-type(2)').textContent, \
          ...[...d.querySelectorAll('[name=before],[name=after]')].map(i => (i.name === 'before' ? '▲' : '▼') + i.name + i.value)].join(' ')).join('|'); \
          if (got !== '{want}') throw new Error('graph: ' + got); \

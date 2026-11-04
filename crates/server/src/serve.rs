@@ -1780,6 +1780,10 @@ impl<'a> Server<'a> {
                     coat
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
+                // #367: the time it counts from too (fixed, so /live sends no patch a second); serve.js writes `in impl 1h 47m`.
+                let t = st.get(&(f.clone(), n)).map_or(now, |s| s.last_ts);
+                let age = format!("<span class=m>{a}</span></summary>");
+                let row = row.replacen(&age, &format!("<span class=m data-t={t}>{a}</span></summary>"), 1);
                 let row = match (qls, row.strip_suffix("</details>")) {
                     (Some(q), Some(r)) => format!("{r}{q}</details>"),
                     _ => row,

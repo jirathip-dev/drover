@@ -92,6 +92,12 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    miniature, Lanes avatar), a row figure not in the 24 px box of the same 28 px slot, or, in terminal, anything but
    glyphs. `ascii-loading` (and `~kitchen`) fails unless the overlay runs the theme's two ascii frames by CSS alone (no
    node or text change while it shows) with `[↻]` the plain ↻. `look` also picks ascii, then pixel, in place.
+   #367: the `queue` fixture (`scripts/host-fixtures.sh`: 3 repos, 40 queued rows, a 6-step chain) at 390 and 1440 px.
+   `queue-repos` fails unless a chip tap, ←, → and a sideways drag each switch repos (only the picked card shows, the pick
+   stored; `[all]` only needs-you groups), the groups read `needs you (1), in progress (2), queued (40)` with the running
+   rows above the fold, the chain is one closed row `#302 → #303 · decoupling… (6 steps) · next: #400`, `+ 30 more` is
+   closed, and every title line is ≥ 4.5:1 on what is under it. `queue-chain` opens both: the 6 steps (depth ≤ 2) and the
+   30 rows right under their rows, every title starting at one x, and scrolled to the end the last row clears the tab bar.
    `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
    one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
    must toast `drive started for <fleet>` with `location` unchanged (no navigation).
