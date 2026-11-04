@@ -1,5 +1,6 @@
 //! #351: bounded history on first open: a lane's chat carries its last 10 turns within ~64 KB (10 more a scroll),
-//! the Events tab its last 100 rows a view, then 100 a page (`frag?id=events&skip=`).
+//! the Events tab its last 100 rows a view, then 100 a page (#266: the TypeScript board's `shown`, from API v1's
+//! `events?since=&until=` windows).
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
@@ -75,8 +76,8 @@ fn a_chat_opens_with_its_last_10_turns_within_64kb() {
     assert!(!older.is_empty() && j["before"].as_u64() > Some(lines as u64), "{j}");
 }
 
-/// 250 events: each view opens with its last 100 rows and an [older] button; `skip=100` is the next 100, `skip=200`
-/// the last 50 with no [older].
+/// 250 events: each view opens with its last 100 rows and an [older] button; 200 shown is the next 100, then the last
+/// 50 with no [older]. The board reads the log back in windows: `since=&until=` is the events between.
 #[test]
 fn events_open_with_100_rows_then_page() {
     let c = ctx(&tmpdir("events-pages"), CONFIG);
@@ -86,25 +87,28 @@ fn events_open_with_100_rows_then_page() {
     }
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let view = |skip: u64| {
-        let h = get(&s, &format!("/frag?id=events&skip={skip}"), "");
+    let w: Value = serde_json::from_str(&get(&s, "/api/v1/events?since=100&until=150", "")).unwrap();
+    let seqs: Vec<u64> = w["list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!((seqs.len(), seqs[0], seqs[49], &w["seq"]), (50, 101, 150, &json!(250)));
+    let view = |shown: u64| {
+        let h = events_tab(&s, ADDR, T, &format!("{{ shown: {{ imp: 100, all: {shown} }} }}"))?;
         let all = h[h.find("<div data-v=all").unwrap()..].to_string();
-        (all.matches("<details class=\"er").count(), all)
+        Some((all.matches("<details class=\"er").count(), all))
     };
-    let (n, first) = view(0);
+    let Some((n, first)) = view(100) else { return };
     assert_eq!(n, 100, "{first}");
-    assert!(first.contains("n-249") && !first.contains("n-149<") && first.contains("data-skip=100"));
-    let (n, page) = view(100);
-    assert_eq!(n, 100);
-    assert!(page.contains("n-149") && !page.contains("n-150<") && page.contains("data-skip=200"));
-    let (n, last) = view(200);
-    assert_eq!(n, 50);
-    assert!(last.contains("n-0<") && !last.contains("data-skip"));
-    // The page and `/frags` carry the first page only.
-    let tab = get(&s, "/frags?tab=events", "");
-    assert_eq!(
-        tab.matches("details class=\\\"er").count(),
-        100,
-        "notes are not important: the all view's 100"
-    );
+    assert!(first.contains("n-249") && !first.contains("n-149<") && first.contains("class=eo"));
+    let (n, page) = view(200).unwrap();
+    assert_eq!(n, 200);
+    assert!(page.contains("n-50<") && !page.contains("n-49<") && page.contains("class=eo"));
+    let (n, last) = view(300).unwrap();
+    assert_eq!(n, 250);
+    assert!(last.contains("n-0<") && !last.contains("class=eo"));
+    // The page and `/frags` carry no Events rows: the board draws them.
+    assert!(!get(&s, "/frags?tab=events", "").contains("details class=\\\"er"));
 }

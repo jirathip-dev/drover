@@ -148,9 +148,12 @@ pub struct Setup {
 }
 
 /// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
-/// `mtime` a POST sends back (STALE when fleet.toml changed since).
+/// `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
+/// the Events tab's time groups.
 pub struct State {
     pub seq: u64,
+    pub now: u64,
+    pub tz: i64,
     pub age: Option<u64>,
     pub mtime: String,
     pub theme: String,
@@ -165,6 +168,7 @@ pub struct State {
 
 pub struct Fleet {
     pub name: String,
+    pub repo: String,
     pub color: String,
     pub paused: bool,
 }
@@ -210,14 +214,145 @@ pub struct Row {
     pub fix: String,
 }
 
-/// #259's contract: the events after `since` (`list`); over 500, none and `refresh` (read `state` again).
+/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`),
+/// SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live
+/// board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
+/// forms are inert); `mtime` the forms send back.
+pub struct HostTab {
+    pub now: u64,
+    pub rw: bool,
+    pub live: bool,
+    pub mtime: String,
+    pub hosts: Vec<HostCard>,
+    pub disk: Option<Disk>,
+    pub orphans: usize,
+    pub leftovers: Option<Leftovers>,
+    pub spawns: Option<Row>,
+    pub services: Vec<Row>,
+    pub theme: Row,
+    pub accounts: Vec<Account>,
+    pub deepseek: Option<Balance>,
+    pub fleets: Vec<FleetRow>,
+    pub push: Row,
+    pub key: String,
+    pub subs: Vec<Sub>,
+    pub devices: Vec<Paired>,
+}
+
+/// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
+/// its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
+pub struct HostCard {
+    pub name: String,
+    pub main: bool,
+    pub dot: String,
+    pub tone: String,
+    pub words: String,
+    pub n: String,
+    pub rows: Vec<Cell>,
+    pub to: Option<String>,
+    pub lanes: usize,
+    pub setups: Vec<String>,
+}
+
+/// #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and
+/// muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an
+/// export, its chart `x` inline.
+pub struct Cell {
+    pub k: String,
+    pub t: String,
+    pub key: String,
+    pub bar: Option<Bar>,
+    pub b: Option<String>,
+    pub bt: String,
+    pub text: String,
+    pub of: String,
+    pub notes: Vec<String>,
+    pub s: String,
+    pub p: String,
+    pub l: Option<f64>,
+    pub x: String,
+}
+
+/// #141: a 12-cell text gauge: its status `t`, `n` cells full, and how far past the limit (`pct`, else empty).
+pub struct Bar {
+    pub t: String,
+    pub n: usize,
+    pub pct: String,
+}
+
+/// #164: the worktree total (`gb`, `?` unread) against the budget, and how long ago it was walked.
+pub struct Disk {
+    pub bar: Bar,
+    pub gb: String,
+    pub budget: f64,
+    pub ago: Option<String>,
+}
+
+/// #186: processes still running in closed lanes' worktrees, and the memory they hold.
+pub struct Leftovers {
+    pub n: usize,
+    pub mb: String,
+}
+
+/// An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
+pub struct Account {
+    pub name: String,
+    pub capped: bool,
+    pub tone: String,
+    pub cap: String,
+    pub meters: Vec<Meter>,
+    pub pace: Option<String>,
+    pub hint: Option<String>,
+    pub hours: String,
+}
+
+pub struct Meter {
+    pub label: String,
+    pub pct: f64,
+}
+
+/// The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
+pub struct Balance {
+    pub balance: Option<String>,
+    pub low: bool,
+    pub hint: String,
+}
+
+/// #141: a fleet's last `driven` result in words (`word` in `tone`, the plain rest `text`), its age and `raw` line.
+pub struct FleetRow {
+    pub name: String,
+    pub tone: String,
+    pub word: String,
+    pub text: String,
+    pub ago: String,
+    pub raw: Option<String>,
+}
+
+/// #18: a webpush subscription, removable by `id`.
+pub struct Sub {
+    pub id: String,
+    pub label: String,
+    pub created: u64,
+}
+
+/// #59: a paired device, removable by `hash`.
+pub struct Paired {
+    pub hash: String,
+    pub label: String,
+    pub created: u64,
+    pub used: u64,
+}
+
+/// #259's contract: the events after `since` (#266: up to `until`) in `list`; over 500, none and `refresh` (read `state` again).
 pub struct Events {
     pub seq: u64,
     pub refresh: bool,
     pub list: Vec<Ev>,
 }
 
-/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you).
+/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
+/// (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
+/// agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
 pub struct Ev {
     pub seq: u64,
     pub ts: u64,
@@ -227,6 +362,15 @@ pub struct Ev {
     pub kind: String,
     pub data: serde_json::Map<String, Value>,
     pub k: Option<String>,
+    pub glyph: String,
+    pub tone: String,
+    pub text: String,
+    pub imp: bool,
+    pub act: String,
+    pub coat: String,
+    pub plain: String,
+    pub pr: Option<u64>,
+    pub run: Option<String>,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

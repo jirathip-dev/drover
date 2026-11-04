@@ -412,11 +412,7 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     std::fs::create_dir_all(&old).unwrap();
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
-    let get = |cookie: &str| {
-        let res = s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
-        String::from_utf8_lossy(&res).into_owned()
-    };
-    let page = get("");
+    let page = host_tab(&s, ADDR, NOW);
     assert!(
         page.contains(
             "<button data-confirm=\"Remove 1 orphan folder under the worktree root?\">remove orphans</button>"
@@ -440,5 +436,5 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let cookie = pair(&s, &c, "", NOW);
     let res = post(&cookie);
     assert!(res.contains("removed%201%20orphan"), "{res}");
-    assert!(!old.exists() && !get(&cookie).contains("remove orphans"));
+    assert!(!old.exists() && !host_tab(&s, ADDR, NOW).contains("remove orphans"));
 }

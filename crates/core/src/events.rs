@@ -432,6 +432,13 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Option<u64> {
     e.data.get("on").filter(|_| e.kind == "held")?.as_u64()
 }
 
+/// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged
+/// without a pane (before #424, after the new spawn) ends none.
+pub fn ends(e: &Event, sp: &Event) -> bool {
+    let pane = e.str("pane").map(|p| sp.str("pane") == Some(p));
+    e.str("agent") == sp.str("agent") && pane.unwrap_or(e.str("reason") != Some("superseded"))
+}
+
 /// #173: a check stage's spawn (logs before #173: a `rev` one).
 pub fn checks(e: &Event) -> bool {
     e.data

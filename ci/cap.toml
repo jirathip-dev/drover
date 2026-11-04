@@ -1,4 +1,6 @@
 # The src/ line cap `herdsman cap-check --config ci/cap.toml` enforces in CI (#129). Raising it needs the
-# owner's OK in an issue; record each change as docs/cap-history/<date>-<issue>.md.
+# owner's OK in an issue; record each change as docs/cap-history/<date>-<issue>.md. #429: under `warn_within`
+# lines of headroom (default 500) cap-check warns and `herdsman check` alerts `cap-near`.
 [fleet.herdsman]
-line_cap = 22435
+line_cap = 24500
+warn_within = 500
