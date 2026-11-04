@@ -85,7 +85,8 @@ fn size(n: u64) -> String {
     }
 }
 
-/// A message's files: an image inline at the bubble's width, any other file a row; both open `thread/<t>/<name>`.
+/// A message's files: an image inline at the bubble's width (#406: a tap opens serve.js's viewer, never a page),
+/// any other file a row that opens `thread/<t>/<name>`.
 fn files(id: &str, e: &Event) -> String {
     let each = |f: &Value| {
         let name = f["name"].as_str().unwrap_or_default();
@@ -95,7 +96,10 @@ fn files(id: &str, e: &Event) -> String {
         );
         let cap = format!("{} · {n}", esc(name));
         if ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext(name).as_str()) {
-            format!("<figure class=im><a href=\"{url}\"><img src=\"{url}\" alt=\"{}\" loading=lazy></a><figcaption>{cap}</figcaption></figure>", esc(name))
+            format!(
+                "<figure class=im><img src=\"{url}\" alt=\"{}\" loading=lazy><figcaption>{cap}</figcaption></figure>",
+                esc(name)
+            )
         } else {
             format!(
                 "<a class=tf href=\"{url}\"><span>▤ {}</span><span class=m>{n}</span></a>",

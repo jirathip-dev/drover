@@ -1795,7 +1795,78 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
   else if (t.closest('#chat .att button')) { ATT.el.remove(); ATT = null; }
   else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
+  else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
 });
+// #406: an image tap opens the viewer over the page (the URL stays): black, the image fitted; pinch or double-tap to
+// zoom, drag to pan; swipe down or [×] to close; left/right through the message's images; [save] shares or downloads.
+const IV = B.appendChild(Object.assign(document.createElement('div'), { id: 'iv', hidden: true }));
+IV.innerHTML = '<img alt=""><div class=ivb><button type=button class=ivx aria-label=close>×</button><span class=ivn></span><button type=button class=ivs>save</button></div>';
+const IVI = IV.querySelector('img'), PT = new Map();
+let ivl = [], ivn = 0, ivz = { s: 1, x: 0, y: 0 }, ivg = null, ivt = -1e4;
+const ivDraw = () => { IVI.style.transform = `translate(${ivz.x}px,${ivz.y}px) scale(${ivz.s})`; };
+function ivShow(i) {
+  ivn = Math.max(0, Math.min(ivl.length - 1, i));
+  [IVI.src, IVI.alt] = ivl[ivn];
+  IV.querySelector('.ivn').textContent = ivl.length > 1 ? `${ivn + 1} / ${ivl.length}` : '';
+  ivz = { s: 1, x: 0, y: 0 };
+  ivDraw();
+}
+function iv(list, src) { ivl = list; ivShow(list.findIndex(l => l[0] === src)); IV.hidden = false; }
+// Pointer positions from the viewer's centre (the image's transform origin); their mean, their spread.
+const ivAt = ps => { const r = IV.getBoundingClientRect(); return [ps.reduce((a, p) => a + p[0], 0) / ps.length - r.width / 2, ps.reduce((a, p) => a + p[1], 0) / ps.length - r.height / 2]; };
+const ivSpan = ps => Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]);
+// A double tap zooms 2.5× on that point, or back to fitted.
+function ivTap(x, y) {
+  const [px, py] = ivAt([[x, y]]), s = ivz.s > 1 ? 1 : 2.5;
+  ivz = s > 1 ? { s, x: px * (1 - s), y: py * (1 - s) } : { s: 1, x: 0, y: 0 };
+  ivDraw();
+}
+IV.addEventListener('click', async e => {
+  if (e.target.closest('.ivx')) IV.hidden = true;
+  if (!e.target.closest('.ivs')) return;
+  const [src, name] = ivl[ivn], b = await fetch(src).then(r => r.blob()).catch(() => null);
+  if (!b) return toast('error: could not read ' + name);
+  const f = new File([b], name, { type: b.type });
+  if (navigator.canShare?.({ files: [f] })) return navigator.share({ files: [f] }).catch(() => {});
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(b), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1e3);
+});
+IV.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
+  PT.set(e.pointerId, [e.clientX, e.clientY]);
+  ivg = { z: ivz, p: [...PT.values()], moved: PT.size > 1 };
+  IV.classList.add('dr');
+});
+IV.addEventListener('pointermove', e => {
+  if (!PT.has(e.pointerId)) return;
+  PT.set(e.pointerId, [e.clientX, e.clientY]);
+  const p = [...PT.values()], [x0, y0] = ivAt(ivg.p), [x, y] = ivAt(p), dx = x - x0, dy = y - y0;
+  if (p.length > 1 && ivg.p.length > 1) {
+    const s = Math.min(6, Math.max(1, ivg.z.s * ivSpan(p) / ivSpan(ivg.p))), k = s / ivg.z.s;
+    ivz = { s, x: x - (x0 - ivg.z.x) * k, y: y - (y0 - ivg.z.y) * k };
+  } else if (ivg.z.s > 1) ivz = { s: ivg.z.s, x: ivg.z.x + dx, y: ivg.z.y + dy };
+  else ivz = Math.abs(dy) > Math.abs(dx) ? { s: 1, x: 0, y: Math.max(0, dy) } : { s: 1, x: dx, y: 0 };
+  ivg.moved ||= Math.hypot(dx, dy) > 10;
+  ivDraw();
+});
+const ivUp = e => {
+  if (!PT.delete(e.pointerId)) return;
+  if (PT.size) return void (ivg = { z: ivz, p: [...PT.values()], moved: true }); // one finger of a pinch lifted: it pans on
+  IV.classList.remove('dr');
+  if (ivz.s === 1) { // fitted again: a swipe from fitted closes or turns; any other ends centred (a pinch back out too)
+    if (ivg.z.s === 1 && ivz.y > 80) return void (IV.hidden = true);
+    if (ivg.z.s === 1 && Math.abs(ivz.x) > 60) return ivShow(ivn + (ivz.x < 0 ? 1 : -1));
+    ivz = { s: 1, x: 0, y: 0 };
+    ivDraw();
+  }
+  if (ivg.moved) return;
+  const now = performance.now();
+  if (now - ivt < 300) { ivt = -1e4; ivTap(e.clientX, e.clientY); } else ivt = now;
+};
+IV.addEventListener('pointerup', ivUp);
+IV.addEventListener('pointercancel', ivUp);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') IV.hidden = true; });
 document.addEventListener('change', e => {
   const i = e.target;
   if (!i.matches('#chat .tw input[type=file]') || !i.files[0]) return;

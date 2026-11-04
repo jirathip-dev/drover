@@ -1593,6 +1593,13 @@ impl<'a> Server<'a> {
             b["color-scheme"].as_str().unwrap_or("dark")
         );
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
+        // #406: the page opened at any other path (the SW's copy) moves to the root before the body, so its
+        // relative URLs (a thread's files) resolve there.
+        let home = if root.is_empty() {
+            ""
+        } else {
+            ";if(location.pathname!=='/')history.replaceState(null,'','/'+location.search+location.hash)"
+        };
         let badge = if demo {
             "<span class=tag id=demo>demo</span>"
         } else {
@@ -1605,7 +1612,7 @@ impl<'a> Server<'a> {
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
-             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb</script></head>\
+             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
              <section id=queue>{}</section><section id=lanes>{}</section><section id=chat>{}</section><section id=host>{}</section>\

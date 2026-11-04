@@ -586,8 +586,16 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .blk>summary .ct{flex:none;color:var(--mute)}
 /* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
 .im{margin:var(--s2) 0 0}
-.im img{display:block;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.im img{display:block;cursor:zoom-in;max-width:100%;max-height:320px;object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
 .im figcaption{margin-top:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+/* #406: the image viewer: black in every scheme (a photo's backdrop), the image fitted (the page's gestures off: pinch
+   and swipe are its own); [×], the count and [save] in a bar over its top. `.dr`: a finger is down, the image follows it without easing. */
+#iv{position:fixed;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden;background:black;touch-action:none;-webkit-user-select:none;user-select:none}
+#iv>img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .2s;-webkit-user-drag:none}
+#iv.dr>img{transition:none}
+.ivb{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;min-height:var(--hit);padding:env(safe-area-inset-top) var(--s3) 0;background:color-mix(in srgb,black 50%,transparent);color:white}
+.ivb button{color:white}
+.ivn{font-size:var(--fs-meta)}
 .tf{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin-top:var(--s2);padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;color:var(--fg);text-decoration:none}
 .tf>span:first-of-type{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tf .m{font-size:var(--fs-meta)}
