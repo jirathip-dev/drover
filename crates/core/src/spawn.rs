@@ -899,6 +899,9 @@ pub fn spawn(
     res
 }
 
+/// #393: the longest a spawn runs between `spawn-started` and `spawn`: the start and two confirm windows.
+const SPAWN_SECS: u64 = 3 * herdr::CONFIRM_SECS;
+
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
 const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
@@ -1197,14 +1200,18 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
 /// verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`).
 /// True when it logged any.
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
+    // #393: the log is read after the (slow, remote) listing, so a lane spawned meanwhile is logged.
+    let agents = crate::hosts::all_agents(cfg, seen)?;
     let events = read(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
-    for a in crate::hosts::all_agents(cfg, seen)? {
+    for a in agents {
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
         let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
-        let logged = events.iter().filter(|e| e.kind == "spawn").any(|e| at(&e));
+        // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
+        let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
+        let logged = events.iter().filter(|e| e.kind == "spawn" || young(e)).any(|e| at(&e));
         let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
             continue;
         };

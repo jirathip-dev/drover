@@ -264,3 +264,58 @@ fn a_remote_orphan_is_adopted_on_its_host() {
     );
     assert!(!r.called("herdr agent rename"), "never renamed on this host");
 }
+
+/// #393: a runner that, while drive lists the remote host's agents, logs `spawn-started` as a concurrent spawn does
+/// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
+struct Racing<'a>(&'a Fake, &'a herdsman::Ctx, &'a str);
+
+impl herdsman::runner::Runner for Racing<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        if line.contains("bazzite") && line.contains("list") && kinds(self.1, "spawn-started").is_empty() {
+            let d = json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": self.2, "pane": "w3:p1",
+                "host": "bazzite", "machine": "bazzite"});
+            ev(self.1, self.1.now, "spawn-started", d);
+        }
+        self.0.run(prog, args)
+    }
+}
+
+/// #393: a remote lane whose spawn is still running when the sweep lists it is not adopted; an unlogged one is.
+#[test]
+fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
+    let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
+    let c = ctx(&tmpdir("orphan-race"), &cfg);
+    ev(&c, 10, "queued", json!({}));
+    append(&c.state, &Event::new(10, "sendmeter", Some(13), "queued", json!({}))).unwrap();
+    let (wt, wt13) = (
+        "/home/me/.herdr/worktrees/sendmeter/issue-12",
+        "/home/me/.herdr/worktrees/sendmeter/issue-13",
+    );
+    let list = agents(&[
+        ("sendmeter-impl-12", "working", wt, "w3:p1"),
+        ("sendmeter-impl-13", "working", wt13, "w3:p2"),
+    ]);
+    let f = fake(NO_AGENTS)
+        .reply("herdr --machine bazzite agent list", &list)
+        .reply("herdr --machine bazzite pane get w3:p1", &harness("w3:p1"))
+        .reply("herdr --machine bazzite agent rename w3:p1 sendmeter-impl-12", "{}")
+        .reply("herdr --machine bazzite pane get w3:p2", &harness("w3:p2"))
+        .reply("herdr --machine bazzite agent rename w3:p2 sendmeter-impl-13", "{}");
+    let (code, out) = run(&c, &Racing(&f, &c, wt), &["drive", "--fast"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "spawn-started").len(), 1, "logged during the listing");
+    assert!(
+        !f.called("herdr --machine bazzite agent rename w3:p1"),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let spawns = kinds(&c, "spawn");
+    assert_eq!(
+        spawns.iter().map(|e| (e.issue, e.str("why"))).collect::<Vec<_>>(),
+        [(Some(13), Some("orphan"))],
+        "{out}"
+    );
+    let adopted = kinds(&c, "spawn-adopted");
+    assert_eq!(adopted.iter().map(|e| e.issue).collect::<Vec<_>>(), [Some(13)]);
+}
