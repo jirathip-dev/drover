@@ -120,6 +120,7 @@ done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is lo
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
 max_pushes_per_pass = 3   # herdsman check pushes at most this many alerts a pass, then one summary
 # fallback_rest_minutes = 60   # #302: an unavailable agent rests this long when its message names no reset
+# rotate_mb = 20   # #343: an event log over this moves events older than 30 days to events-YYYYMM.jsonl.gz (kept)
 transcript_days = 30      # Claude lanes' cleanupPeriodDays; lanes share ~/.claude, so below 30 (Claude's default) also prunes your own transcripts
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample

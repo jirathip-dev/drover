@@ -241,10 +241,9 @@ pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u
     Some((e.str("code")?, e.str("result")?.split_once(": ").map_or("", |w| w.1)))
 }
 
-pub fn ls_json(events: &[Event], fleet: &str) -> Value {
-    let st = fold(events);
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(&st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs});
-    Value::Array(view(events, &st, fleet).iter().enumerate().map(row).collect())
+pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs});
+    Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 
 pub const WIDTH: usize = 60;

@@ -84,3 +84,38 @@ fn last_seen_is_written_at_most_hourly() {
     assert!(found.is_some());
     assert_eq!(used(&c), t0 + 3600);
 }
+
+#[test]
+fn concurrent_device_updates_all_land_without_a_write_failure() {
+    let c = ctx(&tmpdir("state-write-race"), CONFIG);
+    // Unlocked plain stores race on the temp file alone: each gets its own name.
+    std::thread::scope(|s| {
+        for _ in 0..16 {
+            s.spawn(|| (0..20).for_each(|_| devices::store(&c, &[]).unwrap()));
+        }
+    });
+    std::thread::scope(|s| {
+        for i in 0..16 {
+            let c = &c;
+            s.spawn(move || {
+                let _g = devices::lock();
+                let mut all = devices::load(c);
+                all.push(devices::Device {
+                    hash: format!("h{i}"),
+                    ..Default::default()
+                });
+                devices::store(c, &all).unwrap();
+            });
+        }
+    });
+    let mut hashes: Vec<_> = devices::load(&c).into_iter().map(|d| d.hash).collect();
+    hashes.sort();
+    let mut want: Vec<_> = (0..16).map(|i| format!("h{i}")).collect();
+    want.sort();
+    assert_eq!(hashes, want, "all 16 updates present");
+    let failed = read(&c.state)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.kind == "state-write-failed");
+    assert_eq!(failed.count(), 0);
+}
