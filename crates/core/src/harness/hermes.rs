@@ -24,6 +24,7 @@ static DIALECT: Dialect = Dialect {
     edits: &["patch", "write_file"],
     post: "post_tool_call",
     stop: "on_session_end",
+    blocked: "",
     deny: |reason| json!({"action": "block", "message": reason}),
 };
 

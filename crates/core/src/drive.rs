@@ -413,6 +413,12 @@ pub fn drive(
             writeln!(out, "host history: {e:#}")?;
         }
     }
+    // #298: berth's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
+    if let Some(b) = r.berth().filter(|_| !fast) {
+        if let Err(e) = crate::berth::intake(ctx, cfg, &b.wire) {
+            writeln!(out, "berth events: {e:#}")?;
+        }
+    }
     // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
     if only.is_none() {
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {

@@ -32,6 +32,7 @@ static DIALECT: Dialect = Dialect {
     edits: &["Edit", "Write", "MultiEdit", "NotebookEdit"],
     post: "PostToolUse",
     stop: "Stop",
+    blocked: "Notification",
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
 };
 

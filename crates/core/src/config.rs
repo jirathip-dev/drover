@@ -25,6 +25,8 @@ pub struct Config {
     pub hosts: BTreeMap<String, HostCfg>,
     /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
+    /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
+    pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     pub conductor: ConductorCfg,
 }
@@ -37,6 +39,36 @@ pub struct ConductorCfg {
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeKind {
+    #[default]
+    Herdr,
+    Berth,
+}
+
+/// #298: `kind`, herdr or berth; berth's `socket` (default its per-user one), and an ACP agent id its lanes run
+/// instead of the harness's terminal UI (`berth run --acp`), with berth's permission `acp_policy` (default `ask`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Runtime {
+    pub kind: RuntimeKind,
+    pub socket: Option<String>,
+    pub acp: Option<String>,
+    pub acp_policy: Option<String>,
+}
+
+impl Runtime {
+    /// The berth runtime, when it is the kind.
+    pub fn berth(&self) -> Option<crate::berth::Berth> {
+        (self.kind == RuntimeKind::Berth).then(|| crate::berth::Berth {
+            wire: crate::berth::Wire::Socket(self.socket.as_deref().map_or_else(crate::berth::default_socket, expand)),
+            acp: self.acp.clone(),
+            policy: self.acp_policy.clone().unwrap_or_else(|| "ask".into()),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]

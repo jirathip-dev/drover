@@ -116,10 +116,21 @@ impl Runner for On<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
+    /// #298: berth on another host is its own server there, through `berth connect` over ssh.
+    fn berth(&self) -> Option<crate::berth::Berth> {
+        let b = self.r.berth()?;
+        let wire = if self.machine.is_some() {
+            crate::berth::Wire::Connect
+        } else {
+            b.wire
+        };
+        Some(crate::berth::Berth { wire, ..b })
+    }
 }
 
 /// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability,
 /// load/cpu, free memory and disk in GB.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostSeen"))]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Seen {
@@ -682,6 +693,7 @@ pub fn cards<'a>(cfg: &'a Config, r: &dyn Runner) -> Vec<(String, Option<&'a Hos
 }
 
 /// #234: one row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostRow"))]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Row {
