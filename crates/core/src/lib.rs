@@ -142,13 +142,21 @@ pub fn now() -> u64 {
 /// Apply one queue change and log it (`herdsman queue`, and the page's ▲/▼ with `via`); the new order as shown.
 pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<&str>) -> Result<String> {
     cfg.fleet(fleet)?;
-    let mut q = queue::replay(&read(&ctx.state)?, fleet);
+    let events = read(&ctx.state)?;
+    let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
+    // #425: blocking an issue with a lane holds that lane until the blocker merges.
+    let n = d["issues"][0].as_u64().filter(|_| d["op"] == "block");
+    let s = n.and_then(|n| events::fold(&events).remove(&(fleet.into(), n)));
+    let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": d["on"]})));
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, "queue", with_via(d, via)),
     )?;
+    if let Some(h) = held {
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, n, "held", h))?;
+    }
     let order: Vec<String> = q.iter().map(|i| format!("#{}", i.issue)).collect();
     let order = if order.is_empty() {
         "empty".into()
@@ -334,22 +342,11 @@ pub fn answer(
         .and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
         .unwrap_or(choice);
     if text.trim().is_empty() || text.chars().any(char::is_control) || text.chars().count() > 2000 {
-        return gate::refused(
-            "BAD_VALUE",
-            "an answer is an option number or one line of text, at most 2,000 chars",
-        );
+        let why = "an answer is an option number or one line of text, at most 2,000 chars";
+        return gate::refused("BAD_VALUE", why);
     }
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(
-            ctx.now,
-            fleet,
-            ask.issue,
-            "decision",
-            with_via(json!({"id": id, "choice": text, "by": by}), via),
-        ),
-    )?;
+    let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     let why = via.map_or("answer", |_| "board");
     if let Some(n) = ask.issue {
         let _ = crate::drive::kick(ctx, r, fleet, n, why); // #304: after the decision is logged
@@ -359,19 +356,16 @@ pub fn answer(
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
     if let Some(t) = ask.str("thread") {
         let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
+        let q = ask.str("question").unwrap_or_default();
+        conductor::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
-        let open = ask
-            .issue
-            .filter(|_| events::closed(&events, ask) != Some("closed: merged"));
-        let next = open.map_or(String::new(), |n| {
-            format!("; the next lane on #{n} gets it in its brief")
-        });
-        return Ok(writeln!(
-            out,
-            "{fleet} {id}: {text} recorded; asking agent gone, not prompted{next}"
-        )?);
+        let merged = events::closed(&events, ask) == Some("closed: merged");
+        let open = ask.issue.filter(|_| !merged);
+        let next = open.map(|n| format!("; the next lane on #{n} gets it in its brief"));
+        let gone = format!("recorded; asking agent gone, not prompted{}", next.unwrap_or_default());
+        return Ok(writeln!(out, "{fleet} {id}: {text} {gone}")?);
     };
     Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?)
 }
@@ -380,7 +374,7 @@ pub fn answer(
 fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
     let open = |sp: &&Event| {
         let lane = ["lane-closed", "lane-killed", "lane-reaped"];
-        let ends = |e: &Event| lane.contains(&e.kind.as_str()) && e.str("agent") == sp.str("agent");
+        let ends = |e: &Event| lane.contains(&e.kind.as_str()) && events::ends(e, sp);
         let mut later = events.iter().skip_while(|e| !std::ptr::eq(*e, *sp));
         !later.any(|e| e.fleet == ask.fleet && (ends(e) || e.kind == "merged" && e.issue == ask.issue))
     };
@@ -393,17 +387,28 @@ fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, first: bool) -> Result<Option<String>> {
     let events = read(&ctx.state)?;
     let sp = answer_lane(&events, ask);
-    let agent = sp.and_then(|e| e.str("agent")).unwrap_or_default();
-    let on = &crate::hosts::On::of(r, sp);
+    // #424: no open lane, but the asking agent still runs in its lane's worktree: typed into that pane.
+    let was = ask.str("agent").and_then(|a| events::last_spawn(&events, a));
+    let agent = sp.or(was).and_then(|e| e.str("agent")).unwrap_or_default();
+    let on = &crate::hosts::On::of(r, sp.or(was));
+    let wt = sp.map_or(was.and_then(|e| e.str("worktree")), |_| None);
+    let all = wt.and_then(|_| crate::host::agents(on).ok()).unwrap_or_default();
+    let inside = crate::host::live_in(&all, "", std::path::Path::new(wt.unwrap_or_default()));
+    let live = inside.into_iter().find(|a| a["name"] == agent);
+    let pane = sp.and_then(|e| e.str("pane")).or_else(|| live?["pane_id"].as_str());
     let typed = |p| herdr::prompt(on, agent, msg).and_then(|_| herdr::keys(on, p, "Enter"));
-    let why = match sp.and_then(|e| e.str("pane")).map(|p| (p, typed(p))) {
+    let why = match pane.map(|p| (p, typed(p))) {
         None => "no open lane for this ask".into(),
         Some((_, Err(e))) => format!("{e:#}"),
         Some((p, Ok(_))) if first && !herdr::landed(on, agent, p, msg) => "the agent did not pick it up".into(),
         Some(_) => String::new(),
     };
-    let kind = ["answer-delivered", "answer-undelivered"][usize::from(!why.is_empty())];
-    let d = json!({"id": ask.str("id"), "agent": sp.and(Some(agent)), "reason": why, "text": msg});
+    let kind = match (why.is_empty(), live) {
+        (false, _) => "answer-undelivered",
+        (_, Some(_)) => "answer-delivered-live",
+        _ => "answer-delivered",
+    };
+    let d = json!({"id": ask.str("id"), "agent": pane.and(Some(agent)), "reason": why, "text": msg});
     if first || why.is_empty() {
         emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, ask.issue, kind, d))?;
     }
@@ -412,7 +417,7 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
 
 /// #325: answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
-    let tries = |e: &&Event| e.fleet == fleet && matches!(e.kind.as_str(), "answer-delivered" | "answer-undelivered");
+    let tries = |e: &&Event| e.fleet == fleet && e.kind.starts_with("answer-");
     let mut seen = std::collections::BTreeSet::new();
     let last = events.iter().rev().filter(tries).filter(|e| seen.insert(e.str("id")));
     last.filter(|e| e.kind == "answer-undelivered").collect()

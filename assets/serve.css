@@ -28,6 +28,8 @@ summary::-webkit-details-marker{display:none}
 summary>span{min-width:0}
 details>p{margin:0 0 var(--s2);padding-left:var(--s1)}
 .lane{border-bottom:1px solid var(--line)}
+/* #422: an asleep conductor (its pane closed) is dimmed; a tap still opens its thread. */
+.lane[data-thread][data-gone]>.lr{opacity:.55}
 /* #205: an open Queue card's lanes, newest first: one-line 44 px tap rows; `+N older` expands. */
 .ql{display:block;max-width:100%;min-height:var(--hit);line-height:var(--hit);text-decoration:none;color:inherit}
 /* #218: a lane line in the card: the name ellipsises first, `state age` stays at the right (the inline line overflowed the card). */
@@ -127,6 +129,30 @@ details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * 
 #mo svg{width:100%;height:100%}#mo.mo-shake{animation-name:shake}#mo.mo-pulse{animation-name:pulse}
 @keyframes hop{50%{translate:0 calc(-1 * var(--s2))}}@keyframes shake{25%{translate:calc(-1 * var(--s1)) 0}75%{translate:var(--s1) 0}}@keyframes pulse{50%{scale:1.2}}
 @media (prefers-reduced-motion:reduce){#mo{animation:none}}
+/* #370: a label's theme word keeps the label's colour and size, its plain word is the muted part in --fs-meta; each tab's
+   own first line; an Events kind's word in the row's tone; an empty tab's theme line over the plain one; the loading word */
+.pw{color:var(--mute);font-size:var(--fs-meta);font-weight:400;white-space:nowrap}h2 .pw,.tsub .pw{text-transform:none;letter-spacing:0}
+.tsub{margin:var(--s2) 0 0;padding:0 var(--s1);font-weight:600}
+.thw.ev{font-weight:600}details.er:has(.t-g) .thw.ev{color:var(--g)}details.er:has(.t-r) .thw.ev{color:var(--r)}details.er:has(.t-l) .thw.ev{color:var(--l)}
+p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.empty .pw{white-space:normal}
+#ld .ldw{position:absolute;top:calc(var(--s4) * 9 + var(--s2));margin:0;padding:0 var(--s2);border-radius:var(--s1);background:var(--bg);font-size:var(--fs-meta)}#ld .ldw:empty,.tld .ldw{display:none}
+/* the Host card's load: its 48 × 16 mini at 1.5×, two frames, and the level word */
+.lsm{display:inline-flex;align-items:center;gap:var(--s1);margin-left:auto;padding-left:var(--s2);font-size:var(--fs-meta)}
+.lsm svg{width:calc(var(--s4) * 3);height:var(--s4);image-rendering:pixelated;shape-rendering:crispEdges;animation:kfr 1.2s infinite}
+.hhd .hnm:has(.lsm){display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s1)}
+/* every row sprite loops its .kf1/.kf2 frames (herd.css's kfr, 0.6 s a frame): a hidden tab is display:none and html.bg
+   pauses the rest; the <use> inherits --o1/--o2, so no node is replaced. A moment on its row, 2.4 s, once: merged hops, a
+   FAIL shakes the row, a new ask pulses; a rebuilt row resumes it by --mo-d (a negative delay) */
+.rsp{animation:kfr 1.2s infinite}
+[data-mo] .rsp{animation:kfr 1.2s infinite,mo-hop .8s ease-in-out 3 var(--mo-d,0ms)}
+[data-mo=fail]{animation:mo-shake .4s ease-in-out 6 var(--mo-d,0ms)}[data-mo=fail] .rsp{animation:kfr 1.2s infinite}
+[data-mo=needs-you]{animation:mo-tint 2.4s ease-out 1 var(--mo-d,0ms)}[data-mo=needs-you] .rsp{animation:kfr 1.2s infinite,mo-pulse .8s ease-in-out 3 var(--mo-d,0ms)}
+[data-mo]{position:relative}[data-mo]:is(summary)>:is(.ag,span.m:nth-of-type(3)){visibility:hidden}
+.mot{position:absolute;right:0;top:calc((var(--hit) - var(--s4)) / 2);font-style:normal;font-weight:700;font-size:var(--fs-meta);padding:0 var(--s1);border-radius:var(--s1);color:var(--bg);background:var(--g);white-space:nowrap;animation:mo-tag 2.4s ease-out 1 both var(--mo-d,0ms)}
+[data-mo=fail] .mot,[data-mo=needs-you] .mot{background:var(--r)}
+@keyframes mo-hop{50%{translate:0 calc(-1 * var(--s1))}}@keyframes mo-shake{25%{translate:calc(-1 * var(--s1) / 2) 0}75%{translate:calc(var(--s1) / 2) 0}}
+@keyframes mo-pulse{50%{scale:1.25}}@keyframes mo-tint{from{background:color-mix(in srgb,var(--r) 18%,transparent)}}@keyframes mo-tag{0%{opacity:0}8%,85%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.rsp,.lsm svg,[data-mo],[data-mo] .rsp,.mot{animation:none!important}}
 .gl{font-style:normal;font-size:20px}
 .px{width:48px;height:36px}
 .av .asc{font:10px/1 ui-monospace,Menlo,monospace;white-space:pre;font-style:normal}
@@ -567,12 +593,14 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .tr>.ta{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap}
 .tr>.tp{grid-column:2/-1;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tr>.tp b{font-weight:400;margin-right:1ch}
+/* #413: a linked row's chip, `from t5` / `continued in t6`: a tap opens that thread. */
+/* `.lk` is the event card's link line; this chip is inline. */
+.lc{display:inline;margin:0;color:var(--link);border:1px solid var(--edge);border-radius:6px;padding:0 .5ch;cursor:pointer}
 .fc>.done>summary{min-height:var(--hit)}
-/* New thread: a title and [start], in its card. */
-.nt{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;padding:var(--s2) 0;border-top:1px solid var(--line)}
-.nt[hidden]{display:none}
-.nt input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
-.nt .ns{flex-basis:100%;margin:0;color:var(--mute);font-size:var(--fs-meta)}
+/* #405: a thread row on one line with its [archive] (shown once the row is swiped left) or, archived, its [restore]. */
+.sw{display:flex;align-items:center;gap:var(--s4);border-top:1px solid var(--line)}
+.sw>.tr{flex:1;min-width:0;border-top:0;touch-action:pan-y}
+.sw:not(.op)>.sb[name=archive]{display:none}
 /* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. */
 .th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
 .th>div{flex:1;min-width:0}
@@ -604,6 +632,10 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .blk:has(>.md+.chq){--k:var(--a)}
 /* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
 .df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
+/* #409: a fenced block in a message: its exact text in a box that scrolls sideways, [copy] in its top corner (no
+   scrollbar: WebKit leaves a classic one out of the box's height inside a flex column). */
+.cb{position:relative}.cb pre{margin:0;padding:var(--ctl) var(--s2) var(--s2);overflow-x:auto;scrollbar-width:none;white-space:pre;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px}
+.cb .cpy{position:absolute;top:0;right:var(--s2)}
 :is(.chc,.chs){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
 .chs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
 .blk:has(>.md+:is(.chc,.chs)){--k:var(--a)}
@@ -617,11 +649,13 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .tlv b{font-weight:400;color:var(--a)}.tlv b.g{color:var(--g)}
 .tw{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .tw textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
-/* The composer, sticky above the tab bar: [+] attach, the text, [send]; a picked file waits above as a 56 px thumbnail. */
+/* The composer, sticky above the tab bar: [+] attach, the text, [send]; #405: the picked files wait above it, a row of
+   56 px thumbnails (a file's name in its place), [×] under each. */
 .cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));margin-bottom:var(--hit);background:var(--bg);border-top:1px solid var(--line)}
-.att{flex-basis:100%;display:flex;align-items:center;gap:var(--s2);min-width:0}
-.att img{width:calc(var(--hit) + var(--s3));height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
-.att>span{flex:1;min-width:0;font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ats{flex-basis:100%;display:flex;gap:var(--s4);overflow-x:auto;padding:0 var(--s2) var(--s2)}
+.att{flex:none;display:flex;flex-direction:column;align-items:center;gap:var(--s2);width:calc(var(--hit) + var(--s3))}
+.att>:is(img,span){width:100%;height:calc(var(--hit) + var(--s3));object-fit:cover;object-position:top;border:1px solid var(--edge);border-radius:6px}
+.att>span{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* #403: the box grows with its text to 6 lines, then scrolls inside; with the keyboard up (the box focused) a phone
    hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
    delivery's system line is red too. A working thread's mark is the loading overlay's art (#ld), 24 px, inline. */

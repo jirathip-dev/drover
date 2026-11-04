@@ -36,6 +36,11 @@ fn raw(c: &herdsman::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)
 }
 
+/// #267: the Host tab as the board draws it.
+fn host(c: &herdsman::Ctx, r: &Fake) -> String {
+    host_tab(&Server::new(c, r, Some(ADDR.into())), ADDR, 1_000_000)
+}
+
 fn get(c: &herdsman::Ctx, r: &Fake, path: &str) -> String {
     String::from_utf8_lossy(&raw(c, r, path)).into_owned()
 }
@@ -163,8 +168,10 @@ fn default_theme_is_farm() {
         get(&c, &r, "/themes/farm/scene.svg").starts_with("HTTP/1.1 404 "),
         "farm draws its scene in herd.js"
     );
+    assert!(
+        host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>")
+    );
     let page = get(&c, &r, "/?all=1");
-    assert!(page.contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>"));
     // The picker: this phone's choice, else the board's default, set before the first paint.
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
     // #290: one `[◐]` opens the look sheet (serve.js); no native select for theme or colours.
@@ -195,8 +202,9 @@ fn lookup_is_user_then_built_in_then_farm() {
     let k: Value = serde_json::from_str(KITCHEN).unwrap();
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json"), resolve(&k, &farm()));
     assert_eq!(body(&get(&c, &r, "/themes/kitchen/scene.svg")), KITCHEN_SCENE);
-    assert!(get(&c, &r, "/?all=1")
-        .contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>"));
+    assert!(
+        host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>")
+    );
     // Any phone may pick another theme than the board's.
     assert_eq!(json(&c, &r, "/themes/farm/theme.json"), resolve(&farm(), &farm()));
     // A user theme named like a built-in wins, file by file; what it lacks is the built-in's.
@@ -363,7 +371,7 @@ fn invalid_theme_json_falls_back_to_farm_with_a_host_warning() {
             FARM_SPRITES,
             "{name}"
         );
-        let page = get(&c, &r, "/?all=1");
+        let page = host(&c, &r);
         let warn = format!(
             "<p class=gr data-t=a><span class=k>theme</span><span class=w><b class=a>farm</b> <span class=mt>`{name}`: {}</span></span></p>",
             why.replace('"', "&quot;")
@@ -482,4 +490,52 @@ fn path_traversal_is_refused() {
             "{p}: {res}"
         );
     }
+}
+
+/// #370: the board's labels pair a theme's own words with the plain ones; a word the theme lacks is the plain word
+/// alone, never farm's (terminal: none, today's board). The Queue and Events rows by kind and the Host load minis
+/// are in each sheet, and `row_sprites` takes those kinds and no other.
+#[test]
+fn theme_words_are_the_themes_own_and_fall_back_to_plain() {
+    let (c, r) = server(None, &[("plain", "theme.json", r#"{"words": {"merged": "shipped"}}"#)]);
+    let w = |t: &str| json(&c, &r, &format!("/themes/{t}/theme.json"))["words"].clone();
+    let (f, k) = (w("farm"), w("kitchen"));
+    for (key, farm, kitchen) in [
+        ("needs", "at the gate", "the bell"),
+        ("working", "on the trail", "on the line"),
+        ("idle", "grazing", "standing by"),
+        ("done", "in the stable", "at the pass"),
+        ("queued", "in the paddock", "tickets"),
+        ("impl", "plough", "cook"),
+        ("fix", "farrier", "chop"),
+        ("rev", "vet", "taste"),
+        ("update", "haul", "carry"),
+        ("merged", "over the fence", "order up"),
+        ("tab-events", "logbook", "the rail"),
+        ("tab-host", "barn", "the kitchen"),
+        ("empty-queue", "the paddock is empty", "the kitchen's quiet: no tickets"),
+    ] {
+        assert_eq!((f[key].as_str(), k[key].as_str()), (Some(farm), Some(kitchen)), "{key}");
+    }
+    assert_eq!(
+        w("plain"),
+        json!({"merged": "shipped"}),
+        "farm's words never fill a theme's gaps"
+    );
+    assert_eq!(w("terminal"), json!({}));
+    for (t, sheet) in [("farm", FARM_SPRITES), ("kitchen", KITCHEN_SPRITES)] {
+        let j = json(&c, &r, &format!("/themes/{t}/theme.json"));
+        let ids = ["queued", "needs", "merged", "fail"]
+            .map(|x| j["row_sprites"][x].clone())
+            .into_iter()
+            .chain(["calm", "busy", "held"].map(|l| j["load_scene"]["minis"][l].clone()));
+        for id in ids {
+            let id = id.as_str().unwrap().to_string();
+            assert!(sheet.contains(&format!("<g id=\"{id}\"")), "{t} {id}");
+        }
+    }
+    assert_eq!(
+        validate(br#"{"row_sprites": {"merged": "a", "bogus": "b"}}"#).unwrap_err(),
+        "`row_sprites.bogus` must be a sprite id (keys: impl, fix, rev, update, idle, done, blocked, queued, needs, merged, fail)"
+    );
 }

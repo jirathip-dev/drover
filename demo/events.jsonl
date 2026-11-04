@@ -62,6 +62,7 @@
 {"ts":1793380000,"fleet":"acme-api","type":"thread-new","thread":"t2","title":"OpenAPI spec at /v1/openapi.json, versioned per release and served from the edge cache"}
 {"ts":1793380060,"fleet":"acme-api","type":"thread-msg","thread":"t2","from":"owner","text":"Serve the OpenAPI spec, versioned per release."}
 {"ts":1793380100,"fleet":"acme-api","type":"conductor-start","thread":"t2","agent":"conductor-t2","pane":"w8:p1","workspace":"w8","harness":"claude","session":"5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f","resumed":false,"confirmed":true}
+{"ts":1793380800,"fleet":"acme-api","type":"thread-msg","thread":"t2","from":"conductor","text":"Check it locally once #22 lands:\n\n```sh\ncurl -s localhost:8080/v1/openapi.json\n```\n\nAnd the edge cache rule for it:\n\n```toml\n[[edge.cache]]\npath = \"/v1/openapi.json\"\nheaders = { \"Cache-Control\" = \"public, max-age=86400, stale-while-revalidate=604800\", \"Vary\" = \"Accept-Encoding\" }\n```"}
 {"ts":1793380900,"fleet":"acme-api","type":"thread-cmd","thread":"t2","cmd":"gh issue create -R acme-example/acme-api -t \"Serve /v1/openapi.json per release\" -F -","lane":"acme-api:-:conductor"}
 {"ts":1793381000,"fleet":"acme-api","type":"thread-msg","thread":"t2","from":"conductor","text":"Filed #22 and queued it after #17."}
 {"ts":1793381100,"fleet":"acme-api","type":"thread-read","thread":"t2"}
@@ -89,3 +90,4 @@
 {"ts":1793428000,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"system","text":"⇄ switched to account B (A resting until 18:40) · same session"}
 {"ts":1793429400,"fleet":"acme-api","type":"thread-msg","thread":"t4","from":"conductor","text":"Last one."}
 {"ts":1793429410,"fleet":"acme-api","type":"needs-decision","id":"q33","question":"Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?","options":["both: Retry-After on a 429, X-RateLimit-Limit, -Remaining and -Reset on every response","Retry-After only","headers only behind a ?debug flag"],"recommend":1,"agent":"conductor-t4","kind":"owner","thread":"t4"}
+{"ts":1793429410,"fleet":"all","type":"thread-archive","thread":"t1"}

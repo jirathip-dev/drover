@@ -32,22 +32,159 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-/// `herdsman thread new <fleet|all> <title>`: print its id.
-pub fn new(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, repo: &str, title: &str) -> Result<()> {
+/// `herdsman thread new <fleet|all> <title>`: its id.
+pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
     if repo != "all" {
         cfg.fleet(repo)?;
     }
-    if title.trim().is_empty() || title.chars().any(char::is_control) {
-        return refused("BAD_VALUE", "a thread starts with a one-line title");
-    }
+    title_ok(title)?;
     let events = read(&ctx.state)?;
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
     let d = json!({"thread": id, "title": title});
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
-    Ok(writeln!(out, "{id}")?)
+    Ok(id)
 }
 
-fn text_ok(text: &str) -> Result<()> {
+fn title_ok(title: &str) -> Result<()> {
+    if title.trim().is_empty() || title.chars().any(char::is_control) {
+        return refused("BAD_VALUE", "a thread has a one-line title");
+    }
+    Ok(())
+}
+
+/// #405: the thread's title: its last `thread title`, else the one it started with.
+pub fn title<'a>(events: &'a [Event], id: &str) -> &'a str {
+    let t = events
+        .iter()
+        .rfind(|e| matches!(e.kind.as_str(), "thread-new" | "thread-title") && e.str("thread") == Some(id));
+    t.and_then(|e| e.str("title")).unwrap_or_default()
+}
+
+/// #405: `herdsman thread title <id> <title>`: the conductor's short summary title, once after its first reply.
+pub fn retitle(ctx: &Ctx, cfg: &Config, id: &str, title: &str) -> Result<()> {
+    title_ok(title)?;
+    let t = find(&read(&ctx.state)?, id)?.clone();
+    let d = json!({"thread": id, "title": title});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-title", d))
+}
+
+/// #405: the thread is archived (its last archive or restore an archive).
+pub fn archived(events: &[Event], id: &str) -> bool {
+    let a = of(events, id).rfind(|e| matches!(e.kind.as_str(), "thread-archive" | "thread-restore"));
+    a.is_some_and(|e| e.kind == "thread-archive")
+}
+
+/// #405: `thread archive` (`on`) closes the thread's live conductor (`conductor-sleep`; its folder, uploads and log
+/// stay) and folds the thread; `thread restore` unfolds it, and its next message resumes the same session.
+pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let t = find(&events, id)?;
+    let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    if let Some(s) = last.filter(|s| on && s.kind == "conductor-start") {
+        if herdr::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
+            herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
+        }
+        let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &t.fleet, None, "conductor-sleep", d),
+        )?;
+    }
+    let kind = ["thread-restore", "thread-archive"][usize::from(on)];
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, kind, json!({"thread": id})),
+    )
+}
+
+pub fn files_ok(files: &[(String, Vec<u8>)]) -> Result<()> {
+    if files.len() > 10 {
+        return refused("BAD_VALUE", "at most 10 files a message");
+    }
+    if files
+        .iter()
+        .any(|(n, b)| n.trim_start_matches('.').is_empty() || b.len() > 10 << 20)
+    {
+        return refused("BAD_VALUE", "a file has a name and is at most 10 MB");
+    }
+    Ok(())
+}
+
+/// #405: a message's files (name, bytes) into thread `id`'s `uploads/`, as the thread logs them: at most 10, each
+/// named and at most 10 MB (checked before any is written); a name repeated in the message gets its place in front.
+pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) -> Result<Vec<Value>> {
+    files_ok(files)?;
+    let dir = dir(ctx, cfg, id).join("uploads");
+    std::fs::create_dir_all(&dir)?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = vec![];
+    for (i, (name, bytes)) in files.iter().enumerate() {
+        let name = if seen.insert(name) {
+            name.clone()
+        } else {
+            format!("{}-{name}", i + 1)
+        };
+        let path = dir.join(format!("{}-{name}", ctx.now));
+        std::fs::write(&path, bytes)?;
+        out.push(json!({"name": name, "path": path, "size": bytes.len()}));
+    }
+    Ok(out)
+}
+
+/// #413: `thread handoff`: a new thread in `to` (a repo or `all`) or thread `to`, linked; wakes its conductor as `from`.
+pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
+    text_ok(text)?;
+    let events = read(&ctx.state)?;
+    let t = find(&events, from)?;
+    // The target's conductor is checked first: no thread or link is left behind without delivery.
+    let to = if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        to.to_string()
+    } else {
+        role(cfg, to)?;
+        new(ctx, cfg, to, title)?
+    };
+    if to == from {
+        return refused("BAD_VALUE", "a thread hands off to another thread");
+    }
+    let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text});
+    let e = Event::new(ctx.now, &t.fleet, None, "thread-handoff", d);
+    emit(&ctx.state, cfg, e)?;
+    say(ctx, cfg, r, (&to, text, &[]), (from, false))?;
+    Ok(to)
+}
+
+/// #413: a one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
+pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let to_id = |e: &&Event| e.kind == "thread-handoff" && e.str("to") == Some(id);
+    let srcs: std::collections::BTreeSet<_> = events.iter().filter(to_id).filter_map(|e| e.str("from")).collect();
+    for s in srcs {
+        let d = json!({"thread": s, "from": "system", "via": id, "text": text});
+        let e = Event::new(ctx.now, &find(&events, s)?.fleet, None, "thread-msg", d);
+        emit(&ctx.state, cfg, e)?;
+    }
+    Ok(())
+}
+
+/// A thread id: `t` and a number.
+fn is_id(s: &str) -> bool {
+    s.len() > 1 && s.starts_with('t') && s[1..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// #413: a linked row's chip: `from t5` (a message or flow-back row from t5) or `continued in t6` (a handoff).
+pub fn link(e: &Event) -> Option<(&'static str, &str)> {
+    match (e.kind.as_str(), e.str("from")) {
+        ("thread-handoff", _) => Some(("continued in", e.str("to")?)),
+        ("thread-msg", Some("system")) => Some(("from", e.str("via")?)),
+        ("thread-msg", Some(f)) if is_id(f) => Some(("from", f)),
+        _ => None,
+    }
+}
+
+pub fn text_ok(text: &str) -> Result<()> {
     if text.trim().is_empty() || text.chars().count() > 20_000 {
         return refused("BAD_VALUE", "a message is non-empty text, at most 20,000 chars");
     }
@@ -385,8 +522,14 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             if let Some(f) = e.data.get("files") {
                 m["files"] = f.clone();
             }
+            if let Some((w, t)) = link(e) {
+                m["link"] = json!(format!("{w} {t}"));
+            }
             Some(m)
         }
+        "thread-handoff" => Some(
+            json!({"ts": e.ts, "from": "system", "text": e.str("title"), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
+        ),
         "needs-decision" => {
             let all = e.data["options"].as_array().cloned().unwrap_or_default();
             let mut opts: Vec<Value> = all
@@ -414,7 +557,8 @@ fn render(items: &[Value]) -> String {
         None => {
             let files = i["files"].as_array().into_iter().flatten();
             let files: String = files.map(|f| format!(" [file {}]", s(f, "path"))).collect();
-            format!("{}: {}{files}\n", s(i, "from"), s(i, "text"))
+            let who = i["link"].as_str().unwrap_or(i["from"].as_str().unwrap_or_default());
+            format!("{who}: {}{files}\n", s(i, "text"))
         }
         Some(q) => {
             let rec = |o: &Value| if o["n"] == i["recommend"] { " (recommended)" } else { "" };
@@ -452,10 +596,10 @@ pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: boo
     let items = items(&events, id);
     mark_read(ctx, cfg, &events, t)?;
     if as_json {
-        let v = json!({"thread": id, "repo": t.fleet, "title": t.str("title"), "items": items});
+        let v = json!({"thread": id, "repo": t.fleet, "title": title(&events, id), "items": items});
         return Ok(writeln!(out, "{}", serde_json::to_string_pretty(&v)?)?);
     }
-    writeln!(out, "{id} {}: {}", t.fleet, t.str("title").unwrap_or_default())?;
+    writeln!(out, "{id} {}: {}", t.fleet, title(&events, id))?;
     Ok(write!(out, "{}", render(&items))?)
 }
 
@@ -474,7 +618,7 @@ pub fn ls(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool) ->
         let lane = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
         let state = lane.map_or("none", |e| if e.kind == "conductor-start" { "awake" } else { "asleep" });
         rows.push(
-            json!({"thread": id, "repo": t.fleet, "title": t.str("title"), "last": last,
+            json!({"thread": id, "repo": t.fleet, "title": title(&events, id), "last": last,
             "at": items.last().map_or(t.ts, |i| i["ts"].as_u64().unwrap_or(t.ts)), "unread": unread(&events, id),
             "conductor": state}),
         );

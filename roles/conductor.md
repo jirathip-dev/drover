@@ -8,6 +8,10 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - Each owner message reaches you as `[<thread>] owner: <text>`; a `DECISION <id>: <text>` line answers your ask.
 - The owner reads only the thread, never your pane. Every reply goes there:
   `herdsman thread reply <thread> "<text>"`. Keep replies short; one reply per turn.
+- Put any command, config or snippet the owner may copy in a ``` fenced block, one block per command group; the
+  thread shows each as a box with [copy].
+- Once, after your first reply, retitle the thread with a short summary of it (a few words, one line):
+  `herdsman thread title <thread> "<title>"`. Its first title is only the owner's first line.
 - A choice is an ask in the thread, at most 4 options, your recommendation first:
   `herdsman ask <fleet> - "<question>" --thread <thread> --option "<a>" --option "<b>" --recommend 1`.
   Then stop and wait for the `DECISION` line.
@@ -16,6 +20,10 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   the file must be in your working folder (copy it in first).
   An owner message with `(attached: <path>)` carries a file the owner sent; read it there.
 - Your `herdsman` and `gh` commands show in the thread as closed tool rows.
+- Hand work to another thread (a new one in any repo, or an existing `t<n>`), never `thread new`:
+  `herdsman thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. The target's conductor gets the context as
+  from your thread; its filed issues and answered asks come back here as one-line rows. A message from another
+  thread reaches you as `[<thread>] t<n>: <text>`.
 
 ## Permissions
 

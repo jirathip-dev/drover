@@ -11,6 +11,10 @@ pub struct Policy {
     pub reviewer: bool,
     /// #216: the fleet's `deny_commands`.
     pub deny: Vec<Deny>,
+    /// #410: a conductor lane (`HERDSMAN_LANE`'s role): it may spawn design lanes.
+    pub conductor: bool,
+    /// #410: the conductor's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
+    pub own: Option<String>,
 }
 
 /// git subcommands that make commits or move refs; denied to reviewers.
@@ -56,7 +60,7 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
-    if let Some(pp) = protected_path(file, p) {
+    if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
             "{file} is protected ({pp}); change it only through `herdsman` (e.g. `herdsman set`)"
         ));
@@ -65,13 +69,30 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
         .then(|| format!("reviewers are read-only: only verdict.md may be written, not {file}"))
 }
 
-fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
+fn expand_home(s: &str) -> String {
     let home = crate::config::home().to_string_lossy().into_owned();
-    let s = s.replace("$HOME", &home).replace('~', &home);
+    s.replace("$HOME", &home).replace('~', &home)
+}
+
+fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
+    let s = expand_home(s);
     p.paths.iter().map(String::as_str).find(|pp| s.contains(pp))
 }
 
+/// #410: `file` lies in the conductor's own thread folder and is not one herdsman writes there.
+fn own_file(file: &str, p: &Policy) -> bool {
+    use std::path::{Component, Path};
+    let Some(own) = &p.own else { return false };
+    let file = expand_home(file);
+    let Ok(rel) = Path::new(&file).strip_prefix(own) else {
+        return false;
+    };
+    let normal = rel.components().all(|c| matches!(c, Component::Normal(_)));
+    normal && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
+}
+
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let cmd = &unquote(cmd);
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
     }
@@ -79,14 +100,14 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     for seg in cmd.split(seg_breaks) {
         let toks: Vec<String> = seg
             .split_whitespace()
-            .map(|t| t.trim_matches(['"', '\'']).to_string())
+            .map(|t| t.replace(['"', '\''], ""))
             .filter(|t| !t.is_empty())
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
         let found = gh(&t)
             .or_else(|| git_push(&t, cwd, p, cur_branch))
             .or_else(|| reviewer_git(&t, p));
-        if let Some(r) = found.or_else(|| design_spawn(&t)) {
+        if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
         if let Some(pp) = protected_path(seg, p) {
@@ -101,6 +122,112 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
+/// bodies fed to `cat` or `tee`, comments, and the quoted text of `herdsman thread reply|say` and `herdsman ask`
+/// (the question, each `--option`).
+fn unquote(cmd: &str) -> String {
+    let (mut out, mut cur) = (String::new(), String::new());
+    // Pending heredocs: delimiter, quoted, body dropped.
+    let mut docs = Vec::<(String, bool, bool)>::new();
+    // The current command's unquoted words so far.
+    let mut words: Vec<String> = vec![];
+    let mut cs = cmd.chars().peekable();
+    while let Some(c) = cs.next() {
+        if (c.is_whitespace() || "<;|&()`".contains(c)) && !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+        match c {
+            '\'' | '"' => {
+                // Only when `herdsman` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
+                let i = words.iter().position(|w| matches!(word(w), "herdsman" | "fleet"));
+                let i = i.filter(|&i| {
+                    words[..i]
+                        .iter()
+                        .all(|w| w.contains('=') || matches!(word(w), "command" | "time"))
+                });
+                let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
+                let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
+                // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
+                let ansi = c == '\'' && out.ends_with('$');
+                out.push(c);
+                let (mut span, mut live, mut closed) = (String::new(), false, false);
+                while let Some(q) = cs.next() {
+                    if q == c {
+                        closed = true;
+                        break;
+                    }
+                    let esc = ((c == '"' || ansi) && q == '\\').then(|| cs.next()).flatten();
+                    // `$(…)` and backticks still run inside double quotes.
+                    live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
+                    span.extend(Some(q).into_iter().chain(esc));
+                }
+                if !text || live || ansi || !closed {
+                    cur.push_str(&span);
+                    out.push_str(&span);
+                }
+                out.push(c);
+            }
+            '\\' => {
+                out.push(c);
+                out.extend(cs.next());
+            }
+            '<' if cs.next_if_eq(&'<').is_some() => {
+                out.push_str("<<");
+                if cs.next_if_eq(&'<').is_some() {
+                    out.push_str("< ");
+                    continue;
+                }
+                while cs.next_if(|n| matches!(n, '-' | ' ' | '\t')).is_some() {}
+                let (mut delim, mut quoted) = (String::new(), false);
+                while let Some(n) = cs.next_if(|n| !n.is_whitespace() && !";|&()<>".contains(*n)) {
+                    quoted |= matches!(n, '\'' | '"' | '\\');
+                    delim.extend((!matches!(n, '\'' | '"' | '\\')).then_some(n));
+                }
+                // Only a text sink's body is never run: `bash <<EOF` and `eval $(cat <<EOF` run theirs.
+                let top = out.matches('(').count() == out.matches(')').count() && out.matches('`').count() % 2 == 0;
+                let sink = top && words.first().is_some_and(|w| matches!(word(w), "cat" | "tee"));
+                docs.push((delim, quoted, sink));
+            }
+            '#' if out.is_empty() || out.ends_with(|l: char| l.is_whitespace() || ";|&()`".contains(l)) => {
+                while cs.next_if(|n| *n != '\n').is_some() {}
+            }
+            '\n' | ';' | '|' | '&' | '(' | ')' | '`' => {
+                out.push(c);
+                words.clear();
+                // `cat <<EOF | sh` and `cat <<EOF > >(sh)` run the body too.
+                for d in docs.iter_mut().filter(|_| matches!(c, '|' | '(')) {
+                    d.2 = false;
+                }
+                // A heredoc's body starts on the next line and ends at its delimiter's line.
+                // An unquoted delimiter's body still runs `$(…)` and backticks, so those lines stay.
+                for (d, quoted, drop) in docs.drain(..).filter(|_| c == '\n') {
+                    let mut line = String::new();
+                    for n in cs.by_ref() {
+                        if n != '\n' {
+                            line.push(n);
+                        } else if line.trim() == d {
+                            break;
+                        } else {
+                            if !drop || (!quoted && (line.contains('`') || line.contains("$("))) {
+                                out.push_str(&line);
+                                out.push('\n');
+                            }
+                            line.clear();
+                        }
+                    }
+                }
+            }
+            c => {
+                out.push(c);
+                if !c.is_whitespace() {
+                    cur.push(c);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Words that run the next word as a command (`sh -c`, `sudo`, `env`, `then`, …); `-flags`, `VAR=…` and numbers
@@ -167,9 +294,9 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// `herdsman spawn … design` (or pre-rename `fleet`), `setup`, `serve approve|unpair|devices --revoke`, `config
-/// apply|discard` and `secret ls|rm`: owner-only.
-fn design_spawn(t: &[&str]) -> Option<String> {
+/// `herdsman spawn … design` (or pre-rename `fleet`; a conductor's too, #410), `setup`, `serve
+/// approve|unpair|devices --revoke`, `config apply|discard` and `secret ls|rm`: owner-only.
+fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     let i = t
         .iter()
         .position(|w| matches!(w.rsplit('/').next(), Some("herdsman" | "fleet")))?;
@@ -186,11 +313,21 @@ fn design_spawn(t: &[&str]) -> Option<String> {
                 .into(),
         );
     }
+    // #425: a lane may hold its own issue (`queue <fleet> block --on N <issue>`), never another one.
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
+    let block = r.first() == Some(&"queue") && r.get(2) == Some(&"block") && own.is_some();
+    let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
+    if block && r.iter().enumerate().skip(3).any(other) {
+        return Some("REFUSED OWN_ISSUE: a lane may `queue block` only its own issue (#425)".into());
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }
-    (t.get(i + 1) == Some(&"spawn") && t[i + 2..].contains(&"design"))
-        .then(|| "design lanes are owner-only: only the owner runs `herdsman spawn … design`, never a lane".into())
+    (!conductor && t.get(i + 1) == Some(&"spawn") && t[i + 2..].contains(&"design")).then(|| {
+        "design lanes are owner-only: the owner or a conductor thread runs `herdsman spawn … design`, never a lane"
+            .into()
+    })
 }
 
 /// `gh api` sends a write: a non-GET method, or fields/input (which default to POST).
@@ -309,6 +446,25 @@ pub fn fleet_cmd(input: &Value) -> Option<&str> {
     let first = cmd.split_whitespace().next().map(word)?;
     (dialects().any(|d| d.shell == tool) && ["herdsman", "gh"].contains(&first) && !cmd.contains("thread reply"))
         .then_some(cmd)
+}
+
+/// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
+pub fn issue_filed(input: &Value) -> Option<String> {
+    let cmd = fleet_cmd(input).filter(|c| after(input) && c.contains("gh issue create"))?;
+    let title = [" -t ", " --title ", " --title="].iter().find_map(|f| {
+        let rest = &cmd[cmd.find(f)? + f.len()..];
+        let q = rest.chars().next().filter(|c| matches!(c, '"' | '\''));
+        let rest = q.map_or(rest, |q| &rest[q.len_utf8()..]);
+        let end = rest.find(|c: char| q.map_or(c.is_whitespace(), |q| c == q));
+        Some(rest[..end.unwrap_or(rest.len())].to_string()).filter(|t| !t.is_empty())
+    });
+    let res = input["tool_response"].to_string() + &input["result"].to_string();
+    let n = res.split("/issues/").nth(1).and_then(|r| {
+        let d: String = r.chars().take_while(char::is_ascii_digit).collect();
+        d.parse().ok()
+    });
+    let head = n.map_or("filed".into(), |n: u64| format!("filed #{n}"));
+    title.map(|t| format!("{head}: {t}")).or(n.map(|_| head))
 }
 
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.

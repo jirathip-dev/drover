@@ -156,9 +156,7 @@ fn inbound(ctx: &Ctx, cfg: &Config, bot: &Bot, m: &Value) -> Result<()> {
             .filter(|f| name.starts_with(f.as_str()))
             .max_by_key(|f| f.len())
             .map_or("all", String::as_str);
-        let mut out = vec![];
-        conductor::new(ctx, cfg, &mut out, repo, &name)?;
-        let id = String::from_utf8_lossy(&out).trim().to_string();
+        let id = conductor::new(ctx, cfg, repo, &name)?;
         let d = json!({"thread": id, "topic": topic});
         emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "telegram-topic", d))?;
         id

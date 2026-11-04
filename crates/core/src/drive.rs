@@ -537,8 +537,35 @@ fn pass(
     fast: bool,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
     let agents = crate::hosts::all_agents(cfg, seen)?;
+    // #425: a lane held on an issue that merged is woken once (`released`): prompted in its pane, or respawned
+    // `--supersede` when its pane is gone (a slow pass's).
+    let ev = read(&ctx.state)?;
+    let st = fold(&ev);
+    for s in st.values().filter(|s| s.fleet == fleet) {
+        let (Some(on), Some((role, lane))) = (crate::events::held_on(&ev, s), s.active_lane()) else {
+            continue;
+        };
+        let sp = crate::events::last_spawn(&ev, lane);
+        let live = agents.iter().any(|a| a["name"] == lane);
+        let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
+        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live {
+            continue;
+        }
+        let text = format!("#{on} merged; rebase on {} and continue", f.integration);
+        let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
+        let c = ["spawn", fleet, &n, role, "--supersede"];
+        let woke = match pane {
+            Some(p) => crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
+            None => act(ctx, cfg, r, out, &ev, (fleet, None, "respawn"), &c)?.is_none(),
+        };
+        let d = json!({"agent": lane, "on": on, "respawn": !live});
+        let e = Event::new(ctx.now, fleet, Some(s.issue), "released", d);
+        if woke {
+            emit(&ctx.state, cfg, e)?;
+        }
+    }
+    let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
