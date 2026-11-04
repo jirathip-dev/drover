@@ -54,7 +54,7 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
 | `status` / `board` / `waiting` / `serve` | per-issue state; compact board; what waits on whom; phone page |
 | `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
 | `check` / `ask` / `answer` / `asks` | alerts; ask for a decision, answer it, list the open ones |
-| `clean` / `stop` / `kill` / `close` | reclaim done lanes; Esc an agent; close its pane, unpushed work to `wip/` first |
+| `clean` / `reclaim` / `stop` / `kill` / `close` | reclaim done lanes; idle lanes' build folders; Esc an agent; close its pane, unpushed work to `wip/` first |
 | `set` / `profiles` / `accounts` / `hosts` | switch a role's model; per-role folders and hooks; accounts; hosts |
 | `setup` / `doctor` / `protection` | install the jobs; host check; branch protection on? |
 | `help --agent` | the usage doc agents get; refusals exit 3 with `REFUSED <CODE>: why` |
@@ -86,7 +86,7 @@ Lanes on more than one machine, placed by tags and load: [docs/hosts.md](docs/ho
 ## Disk
 
 `[limits] worktree_budget_gb` caps the worktrees; over it, drive frees the idlest lanes' build folders
-first ([docs/lanes.md](docs/lanes.md)).
+first; `herdsman reclaim` previews, then frees, those of worktrees idle 7 days ([docs/lanes.md](docs/lanes.md)).
 
 ## Config
 
