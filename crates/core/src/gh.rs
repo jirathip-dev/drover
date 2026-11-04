@@ -437,7 +437,8 @@ pub fn missing(x: &Ctx, r: Option<&dyn Runner>, c: &Config, k: (&str, u64), e: &
     let head = pr["headRefOid"].as_str().filter(|_| pr["state"] == "OPEN")?;
     let named = |e: &&Event| e.fleet == fleet && e.issue == Some(issue) && e.str("sha").or(e.str("to")) == Some(head);
     let since = e.iter().filter(named).map(|e| e.ts).min()?;
-    (pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty) && x.now >= since + g).then_some(())?;
+    let labelled = f.merge_label.as_deref().is_none_or(|l| has_label(pr, l));
+    (labelled && x.now >= since + g && pr["statusCheckRollup"].as_array().is_none_or(Vec::is_empty)).then_some(())?;
     let p = cache_path(x, "runs", fleet, issue);
     let api = format!("repos/{}/actions/runs", f.repo);
     let c = load::<Value>(&p).filter(|c| c["head"] == head);

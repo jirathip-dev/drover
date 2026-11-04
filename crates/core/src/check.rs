@@ -1,6 +1,6 @@
 //! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
 
-use crate::config::Config;
+use crate::config::{Config, Fleet};
 use crate::events::{age, emit, fold, last_spawn, open_asks, plain, read, Event, IssueState};
 use crate::gate::gate;
 use crate::host;
@@ -10,18 +10,17 @@ use crate::spawn::{changes, dirty, OWN_FILES};
 use crate::Ctx;
 use crate::{gh, herdr};
 use anyhow::{Context, Result};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
-/// Head sha of an open PR that passes every merge gate, if any.
-fn mergeable(ctx: &Ctx, r: &dyn Runner, cfg: &Config, s: &IssueState) -> Option<String> {
-    let f = cfg.fleet(&s.fleet).ok()?;
+/// A ready issue's open PR.
+fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
+    let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
     let branch = crate::gate::branch_of(Some(s), s.issue);
     let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now).ok()?;
-    (pr["state"] == "OPEN").then_some(())?;
-    gate(f, &pr, Some(s), false).ok()
+    (pr["state"] == "OPEN").then_some((f, pr))
 }
 
 /// `(url, prompt)` when the issue's latest amendment is missing from the lane's `.brief.md` (#101).
@@ -195,23 +194,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
         }
-        // #388: a PASS whose head never got a check, once per head.
-        if let Some(f) = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready") {
-            let b = crate::gate::branch_of(Some(s), s.issue);
-            let pr = gh::pr(ctx, r, f, (&s.fleet, s.issue), &b, ctx.now).unwrap_or_default();
-            let labelled = f.merge_label.as_deref().is_none_or(|l| gh::has_label(&pr, l));
-            let why = labelled.then(|| gh::missing(ctx, Some(r), cfg, (&s.fleet, s.issue), &events, &pr));
-            if let Some(why) = why.flatten() {
+        if let Some((f, pr)) = ready(ctx, r, cfg, s) {
+            // #388: a PASS whose head never got a check, once per head.
+            if let Some(why) = gh::missing(ctx, Some(r), cfg, (&s.fleet, s.issue), &events, &pr) {
                 hits.push(("ci-missing", pr["headRefOid"].as_str().unwrap_or_default().into(), why));
             }
-        }
-        if s.state == "ready" && idle > stall {
-            if let Some(head) = mergeable(ctx, r, cfg, s) {
-                let why = format!(
-                    "PASS @ {} with green CI, unmerged for {}; run `herdsman merge`",
-                    &head[..7.min(head.len())],
-                    age(idle)
-                );
+            if let Some(head) = gate(f, &pr, Some(s), false).ok().filter(|_| idle > stall) {
+                let (short, ago) = (&head[..7.min(head.len())], age(idle));
+                let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `herdsman merge`");
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
             }
         }
