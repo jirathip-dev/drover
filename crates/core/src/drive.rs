@@ -482,7 +482,7 @@ pub fn drive(
     if fast {
         let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
     }
-    for name in fleets {
+    for &name in &fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
         if !fast && KICK.get().is_none() {
             let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
@@ -499,8 +499,11 @@ pub fn drive(
             "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`.
+    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
     if !fast && KICK.get().is_none() {
+        for n in &fleets {
+            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
+        }
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
@@ -944,15 +947,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
             .filter(merged)
             .any(|e| left(&e))
     {
-        act(
-            ctx,
-            cfg,
-            r,
-            out,
-            &events,
-            (fleet, None, "clean"),
-            &["clean", fleet, "--yes"],
-        )?;
+        let c = (fleet, None, "clean");
+        act(ctx, cfg, r, out, &events, c, &["clean", fleet, "--yes"])?;
     }
     Ok(go)
 }

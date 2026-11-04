@@ -668,17 +668,14 @@ pub fn merge(
     let comment = ["issue", "comment", &n, "-R", &f.repo, "--body", &evidence];
     if let Err(e) = ok(r, "gh", &comment).or_else(|_| ok(r, "gh", &comment)) {
         let reason = format!("PR #{num} merged @ {merge_sha}, but the evidence comment failed twice: {e:#}");
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(
-                ctx.now,
-                fleet,
-                Some(issue),
-                "evidence-missing",
-                json!({"reason": reason}),
-            ),
-        )?;
+        let e = Event::new(
+            ctx.now,
+            fleet,
+            Some(issue),
+            "evidence-missing",
+            json!({"reason": reason}),
+        );
+        emit(&ctx.state, cfg, e)?;
         bail!("{reason}; issue #{issue} left open");
     }
     // Already closed by `Closes #N` is fine.

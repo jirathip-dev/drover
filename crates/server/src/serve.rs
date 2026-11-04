@@ -194,16 +194,7 @@ impl Runner for Memo<'_> {
             )
         });
         cache().insert(key, (t, out.clone()));
-        Ok(out.map_or(
-            Out {
-                code: 1,
-                ..Out::default()
-            },
-            |stdout| Out {
-                stdout,
-                ..Out::default()
-            },
-        ))
+        Ok(crate::snapshot::out(out))
     }
 }
 
@@ -510,7 +501,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host",
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -1355,6 +1346,12 @@ impl<'a> Server<'a> {
                 crate::hosts::toggle(ctx, &mut out, g("host"), on, "web")?;
                 format!("{} {}", g("host"), if on { "on" } else { "off" })
             }
+            "bqueue" => {
+                let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                let mut d = queue::op("add", &ns, false, None, None, None);
+                d["check"] = json!(true);
+                crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))? + " (needs-check)"
+            }
             "unpair" => {
                 let _g = devices::lock();
                 let mut all = devices::load(ctx);
@@ -1772,6 +1769,8 @@ impl<'a> Server<'a> {
                 if let Some(b) = blocked_by {
                     card.push(format!("<span class=r>blocked by #{b}</span>"));
                 }
+                let ck = k.is_some_and(|k| q[k].check);
+                card.extend(ck.then(|| "<span class=m>needs-check: from the backlog, spec not checked</span>".into()));
                 if let Some(w) = crate::land::note(events, f, n) {
                     card.push(format!("<span class=r>{}</span>", esc(&w)));
                 }
@@ -1809,8 +1808,9 @@ impl<'a> Server<'a> {
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
-                    "class=\"q\"{}{b}{} data-act={}{}",
+                    "class=\"q\"{}{}{b}{} data-act={}{}",
                     if k.is_some() { " data-q" } else { "" },
+                    if ck { " data-ck" } else { "" },
                     s.unwrap_or_default(),
                     act(["", "update"][usize::from(up)], state),
                     coat
@@ -1883,6 +1883,20 @@ impl<'a> Server<'a> {
                 body += &format!(
                     "<details class=done><summary><i class=cv></i><span>done today: {}</span></summary>{rows}</details>",
                     done.len()
+                );
+            }
+            // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
+            let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
+            let mut open = bl["issues"].as_object().cloned().unwrap_or_default();
+            open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
+            if bl["issues"].is_object() {
+                body += &format!(
+                    "<details class=bl data-bl=\"{}\"><summary><i class=cv></i><span>backlog</span><span class=m></span></summary>\
+                     <div class=bls></div><p class=m>read {} ago · [Drive now] reads it again</p><form method=post class=bbar \
+                     hidden>{}<input type=hidden name=issues><button>queue</button></form></details>",
+                    esc(&json!(open).to_string()),
+                    age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+                    hidden("bqueue", f, &mt)
                 );
             }
             let button = |op: &str, label: &str| {
@@ -3396,14 +3410,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if [
-            "stall",
-            "orphan-lane",
-            "conflict-predicted",
-            "heads-up",
-            "ready-unmerged",
-        ]
-        .contains(&k)
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged"
+            .split(' ')
+            .any(|x| x == k)
             || k.starts_with("orch-") =>
         {
             ("!", "a", format!("{k}{r}"), false)
