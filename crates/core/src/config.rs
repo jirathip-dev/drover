@@ -196,6 +196,9 @@ pub struct Fleet {
     /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// #361: build caches shared by the fleet's lanes, exported like `env`; opt-in.
+    #[serde(default)]
+    pub shared_cache: BTreeMap<String, String>,
     /// #185: build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
     #[serde(default)]
     pub clone_build: Vec<String>,
@@ -224,7 +227,37 @@ pub struct Fleet {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
-    pub premerge: Option<Vec<String>>,
+    pub premerge: Option<Vec<Premerge>>,
+    /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
+    pub land: Option<Land>,
+}
+
+/// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
+/// for the full set); integration's own CI then runs the full suite, and `land::watch` reverts a red landing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Land {
+    pub mode: String,
+    pub fast: Vec<String>,
+    pub full_first_paths: Vec<String>,
+}
+
+/// #373: a plain command, or a named check: runs if the PR changes `when` paths, refuses with `code`, briefs `fix`.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum Premerge {
+    Cmd(String),
+    Named(Check),
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct Check {
+    pub name: String,
+    pub run: String,
+    #[serde(default)]
+    pub when: Vec<String>,
+    pub code: Option<String>,
+    pub fix: Option<String>,
 }
 
 /// #294: a serial group; `name` (≤ 8 chars) is also its Queue mark.
@@ -442,8 +475,11 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
+    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says.
     pub fn wants(&self, kind: &str) -> bool {
-        self.on.iter().any(|k| k == kind) || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+        self.on.iter().any(|k| k == kind)
+            || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
+            || matches!(kind, "land-paused" | "reverted" | "revert-failed")
     }
 }
 
@@ -626,6 +662,17 @@ impl Fleet {
         d.extend(self.deny_commands_add.iter().cloned());
         d
     }
+    /// #350: the `[land]` table when this fleet lands fast-first.
+    pub fn fast_first(&self) -> Option<&Land> {
+        self.land.as_ref().filter(|l| l.mode == "fast-first")
+    }
+    /// #350: the checks `pr` lands on: the `fast` ones once `land::mark` marked it fast-first, else `required_checks`.
+    pub fn checks(&self, pr: &serde_json::Value) -> &[String] {
+        match self.fast_first() {
+            Some(l) if pr["landing"] == "fast-first" => &l.fast,
+            _ => &self.required_checks,
+        }
+    }
     pub fn serial_label(&self) -> &str {
         self.serial.first().map_or("serial", |g| &g.name)
     }
@@ -707,12 +754,8 @@ pub fn home() -> PathBuf {
 
 /// Set `key = "val"` in `[fleet.<fleet>.role.<role>]`, touching only the value bytes (or adding one line).
 pub fn set_value(text: &str, fleet: &str, role: &str, key: &str, val: &str) -> Result<String> {
-    set_in(
-        text,
-        &format!("[fleet.{fleet}.role.{role}]"),
-        key,
-        &format!("\"{val}\""),
-    )
+    let h = format!("[fleet.{fleet}.role.{role}]");
+    set_in(text, &h, key, &format!("\"{val}\""))
 }
 
 /// Set `key = <lit>` (a TOML literal) in the table `header`, as `set_value` does.

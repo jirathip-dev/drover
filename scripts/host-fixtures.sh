@@ -70,3 +70,43 @@ EOF
   "$bin" serve --export "$site/$fx" --demo
   rm -rf "${d:?}"
 done
+# #367 gate 2: <site>/queue, the Queue tab's fixture: 3 repos (acme-core: 2 running, 1 needing you, 40 queued with a 6-step
+# chain at #3; acme-api 3 queued and a 100-issue backlog; docs 1), every row titled; herdr lists the 2 running lanes alone.
+d=$(mktemp -d)
+cp -R demo/. "$d"
+python3 - "$d" <<'EOF'
+import json, sys
+d = sys.argv[1]
+ts = max(json.loads(l)["ts"] for l in open(f"{d}/events.jsonl") if l.strip())
+fleets = {"acme-core": list(range(300, 340)), "acme-api": [51, 52, 53], "docs": [7]}
+toml = open(f"{d}/fleet.toml").read().split("[fleet.")[0]
+for f in fleets:
+    toml += f'[fleet.{f}]\nrepo = "acme-example/{f}"\nlocal = "/srv/acme/{f}"\nintegration = "staging"\n\n'
+open(f"{d}/fleet.toml", "w").write(toml)
+ev = lambda t, f, kind, issue=None, **k: {"ts": ts - t, "fleet": f, **({"issue": issue} if issue else {}), "type": kind, **k}
+evs = [ev(9000, f, "queue", issues=ns, op="add") for f, ns in fleets.items()]
+# the chain: 302 → 303 → 304 → 305 → 306 → 307, its root blocked by the running #400
+evs += [ev(8900, "acme-core", "queue", issues=[n], on=n - 1, op="block") for n in range(303, 308)]
+evs.append(ev(8900, "acme-core", "queue", issues=[302], on=400, op="block"))
+evs += [ev(6420, "acme-core", "spawn", 400, role="impl", agent="acme-core-impl-400", harness="claude"),
+        ev(1500, "acme-core", "spawn", 401, role="rev", agent="acme-core-rev-401", harness="claude"),
+        ev(3600, "acme-core", "needs-human", 402, code="ROUND_LIMIT", reason="review rounds ran out (4/3)")]
+open(f"{d}/events.jsonl", "w").write("".join(json.dumps(e) + "\n" for e in evs))
+r = json.load(open(f"{d}/runner.json"))
+r["herdr agent list"] = json.dumps({"result": {"agents": [{"name": a, "agent_status": "working", "pane_id": f"w1:p{i}", "agent": "claude",
+    "cwd": f"/srv/acme/worktrees/{a}"} for i, a in enumerate(["acme-core-impl-400", "acme-core-rev-401"], 2)]}})
+json.dump(r, open(f"{d}/runner.json", "w"))
+for f, ns in fleets.items():
+    for n in ns + ([400, 401, 402] if f == "acme-core" else []):
+        t = "decoupling: split the serve module" if 302 <= n <= 307 else f"{f} issue {n}: one line of title text"
+        json.dump({"title": t, "body": "", "updatedAt": "2026-01-01T00:00:00Z"}, open(f"{d}/cache/issue-{f}-{n}.json", "w"))
+# #365: acme-api's backlog, 100 open issues from 0 to 198 days old, some labelled, with AC or in a closed PR.
+labels = [["bug"], ["ui", "phone"], [], ["docs"], ["infra", "ci"]]
+iso = lambda t: __import__("datetime").datetime.fromtimestamp(t, __import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+iss = {str(n): {"title": f"acme-api backlog {n}: " + ("a title that runs well past one phone line, cut by CSS" if n % 7 == 0 else "one line"),
+    "labels": labels[n % 5], "created": iso(ts - (599 - n) * 2 * 86400), "updated": iso(ts - (599 - n) * 2 * 86400), "ac": n % 3 == 0, "pr": n % 10 == 0}
+    for n in range(500, 600)}
+json.dump({"ts": ts, "since": "2026-01-01T00:00:00Z", "issues": iss}, open(f"{d}/cache/backlog-acme-api-0.json", "w"))
+EOF
+HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl" "$bin" serve --export "$site/queue" --demo
+rm -rf "${d:?}"

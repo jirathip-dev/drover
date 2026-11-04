@@ -6,6 +6,7 @@
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string></dict>
 <key>{when}
 <key>RunAtLoad</key><true/>
+<key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{log}</string>
 <key>StandardErrorPath</key><string>{log}</string>
 </dict></plist>

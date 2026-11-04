@@ -68,7 +68,22 @@ view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and a
 each state word's title on Queue, Lanes and Herd), the dots, and each fleet's serial paths. ▲/▼ move a row among its
 siblings.
 
-Its only writes are ▲/▼ (`queue mv`), Pause/Resume and a role's model/effort (`set`, choices
+One repo at a time (#367): chips on top, `[repo n]` with a red dot when it needs you, and `[all]` for every repo's
+needs-you rows. A tap, a sideways swipe or ←/→ switches; the pick is kept per phone. A repo's rows are grouped (needs
+you, in progress, queued), each tree drawn inside its group. A running row's time reads `in impl 1h 47m`, a needs-you row's `1h 47m`. Queued rows
+show their place (`#1`…); after the first 5, `+ N more` opens the rest in place. A blocked chain is one row,
+`#265 → #270 · <root's title> (6 steps) · next: #266` (next: the root's open blocker, else the root), and `▾` opens
+its steps. Titles start in one column at every depth.
+
+Backlog (#365): under a repo's queue, `backlog (N)` (closed by default) lists every open issue of the repo that is not
+queued and has no lane, newest first, with its labels, age and a `stale` tag when untouched for 90 days. The tick's pass
+(every 5 min) reads the repo's open issues in one GraphQL call, then only those updated since (a closed one drops out);
+`[Drive now]` reads it again at once. The board renders the last read only, never GitHub. A search box and quick filters (`new`,
+`>30 days`, `>90 days`, `has AC`, `in a closed PR`, a label) narrow it on the phone. Ticking issues shows `[queue N]`
+above the tab bar: it queues them in tick order, each marked `needs-check` (its spec not checked yet). Picking an issue
+starts nothing; only queueing does.
+
+Its only writes are ▲/▼ (`queue mv`), `[queue N]` (`queue add`, paired), Pause/Resume and a role's model/effort (`set`, choices
 from `models = [...]`), each through the CLI's own code path, logged with `"via":"web"`.
 
 A POST must name the bind address (or a `[serve].allowed_hosts` name, e.g. the

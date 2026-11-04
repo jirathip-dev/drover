@@ -35,6 +35,9 @@ local = "~/Projects/herdsman"
 integration = "staging"
 # exported into every lane: one shared cargo build cache per fleet, not one target/ per lane
 env = { CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman" }
+# or, opt-in (#361): the same, under its own key. New lanes skip full rebuilds; lanes
+# building at once queue on cargo's lock on the shared dir (docs/lanes.md).
+# shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/herdsman/target" }
 
 [fleet.herdsman.role.impl]
 harness = "claude"
@@ -68,6 +71,21 @@ integration = "staging"
 [[fleet.web.serial]]
 name = "db"   # ≤ 8 characters; also the Queue mark 🔒db and `queue add N --serial db`
 paths = ["supabase/migrations/**"]
+
+# #373: a named premerge check (instead of the list form above): it runs at merge and before an auto-update's push,
+# only when the PR changes `when` paths; a failure refuses with `code` and starts a fix round briefed with `fix`.
+# [[fleet.web.premerge]]
+# name = "migration-order"
+# run  = "node scripts/check-migrations.mjs --base origin/staging --ledger"   # secrets from the host env, never here
+# when = ["supabase/migrations/**"]
+# code = "BACKDATED_MIGRATION"
+# fix  = "Rename the migration so its version is after {min}; output: {output}"   # {output}: last 20 lines, {min}: a min_version= line
+
+# #350: fast-first landing (docs/config.md); unset or mode = "full-first" = land on the full suite, as before.
+# [fleet.web.land]
+# mode = "fast-first"   # a PASS lands once its `fast` checks are green; integration's own CI runs the full suite after
+# fast = ["lint", "unit"]   # names of existing CI checks; `doctor` warns about names no recent PR reports
+# full_first_paths = ["supabase/migrations/**", ".github/workflows/**"]   # a PR touching these waits for the full suite
 
 # Per-fleet notifiers replace the global [[notify]] for this fleet's events (same fields).
 [[fleet.web.notify]]

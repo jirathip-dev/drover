@@ -508,6 +508,77 @@
       hide();
       $$('.hnv, .hdt button').forEach(b => { if (getComputedStyle(b).cursor !== 'pointer') early.push(`${label(b)}: cursor ${getComputedStyle(b).cursor}`); });
     },
+    // #367 gate 2 (the `queue` fixture: 3 repos, 40 queued, a 6-step chain): a tap, ←/→ and a sideways drag switch repos
+    // (only the picked card shows, the pick stored); back on acme-core its running rows are above the fold, the chain one
+    // closed row with its summary, `+ 30 more` closed, and every title line ≥ 4.5:1 on what is under it.
+    'queue-repos': () => {
+      tab('queue');
+      const vis = () => [...$$('#queue .fc')].filter(seen).map(qname).join(), chip = n => $(`.qch [data-qr="${n}"]`);
+      const tries = [['tap', () => chip('docs').click(), 'docs'], ['→', () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })), 'all'],
+        ['←', () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })), 'docs'],
+        ['swipe', () => { const t = $('#queue .fc:not([hidden]) .qg'), o = { bubbles: true, pointerId: 7, clientY: 300 }; t.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 300 })); t.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: 150 })); t.click(); }, 'all']]; // a mouse drag ends in a click, which opens nothing
+      for (const [how, act, want] of tries) {
+        act();
+        const shows = want === 'all' ? [...$$('#queue .fc')].filter(c => c.querySelector('.qg[data-g=need]')).map(qname).join() : want;
+        if (vis() !== shows || get('queue:repo') !== want || chip(want).getAttribute('aria-pressed') !== 'true') early.push(`${how}: shows "${vis()}", stored ${get('queue:repo')}, not ${want}`);
+      }
+      if ([...$$('.fc.qa .qg')].some(g => seen(g) && g.dataset.g !== 'need')) early.push('[all] shows a group that is not needs you');
+      chip('acme-core').click();
+      const nav = $('nav').getBoundingClientRect().top, prog = [...$$('.qg[data-g=prog]>details.q')].filter(seen);
+      if (!prog.length || prog.some(d => d.getBoundingClientRect().bottom > nav)) early.push(`running rows not above the fold (tab bar at ${nav})`);
+      const gs = [...$$('#queue .qg>h3')].filter(seen).map(h => h.textContent).join(', ');
+      if (gs !== 'needs you (1), in progress (2), queued (40)') early.push(`groups "${gs}"`);
+      const c = $('#queue .qc'), x = $('#queue .qx');
+      if (!c || c.open || c.querySelector('summary').textContent !== '#302 → #303 · decoupling: split the serve module (6 steps) · next: #400#3' || [...c.querySelectorAll('details.q')].some(seen)) early.push(`chain row: ${c && c.querySelector('summary').textContent}`);
+      if (!x || x.open || x.querySelector('summary').textContent !== '+ 30 more' || [...x.querySelectorAll('details.q')].some(seen)) early.push(`more row: ${x && x.querySelector('summary').textContent}`);
+      const rgb = s => s.match(/[\d.]+/g).map(Number), bg = e => { for (; e; e = e.parentElement) { const v = rgb(getComputedStyle(e).backgroundColor); if (v[3] !== 0) return v.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };
+      for (const t of [...$$('#queue summary>.tl')].filter(seen)) if (ratio(rgb(getComputedStyle(t).color), bg(t)) < 4.5) early.push(`title "${t.textContent.slice(0, 20)}" under 4.5:1`);
+    },
+    // #367: the chain and `+ 30 more` opened in place (the steps right under the chain row, depth ≤ 2, the rest right under
+    // `+ 30 more`), every title starting at one x; scrolled to the end, the last row clears the tab bar.
+    'queue-chain': () => {
+      tab('queue');
+      $('.qch [data-qr="acme-core"]').click();
+      const c = $('#queue .qc'), x = $('#queue .qx');
+      c.open = x.open = true;
+      const steps = [...c.querySelectorAll(':scope>details.q')], rest = [...x.querySelectorAll(':scope>*:not(summary)')];
+      if (steps.length !== 6 || !steps.every(seen) || steps.some(d => !/\bd[012]\b/.test(d.className))) early.push(`chain opened ${steps.filter(seen).length} of ${steps.length} steps`);
+      const under = (a, b) => Math.abs(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom) > 1;
+      if (under(c.querySelector('summary'), steps[0]) || rest.length !== 30 || !rest.every(seen) || under(x.querySelector('summary'), rest[0])) early.push('chain or more not opened in place');
+      const xs = new Set([...$$('#queue summary>.tl')].filter(seen).map(t => Math.round(t.getBoundingClientRect().left + parseFloat(getComputedStyle(t).paddingLeft))));
+      if (xs.size !== 1) early.push(`titles start at ${[...xs].join(', ')}`);
+      scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+      const last = [...$$('#queue .fc:not([hidden]) summary')].filter(seen).at(-1).getBoundingClientRect().bottom, nav = $('nav').getBoundingClientRect().top;
+      if (last > nav) early.push(`last row ends at ${last}, under the tab bar at ${nav}`);
+      scrollTo({ top: 0, behavior: 'instant' }); // a scrolled view shoots blank: the shot is the top, the needs cards hidden
+      if (!DBG.get('check')) $('#needs').hidden = true;
+    },
+    // #365 gate 2 (the `queue` fixture: 100 open issues in acme-api's backlog): search, a quick filter and a label narrow
+    // the rows; three ticks show [queue 3] above the tab bar with the issues in tick order; no row is wider than the screen.
+    'queue-backlog': () => {
+      tab('queue');
+      $('.qch [data-qr="acme-api"]').click();
+      const b = $('#queue .fc:not([hidden]) .bl'), rows = () => [...b.querySelectorAll('.bi')].filter(seen), n = () => b.querySelector('summary>.m').textContent;
+      b.open = true;
+      const all = rows().length, q = b.querySelector('.bs input'), f = b.querySelector('.bbar'), nav = $('nav').getBoundingClientRect().top;
+      if (all !== 100 || n() !== '(100)') early.push(`backlog shows ${all} rows, ${n()}`);
+      Object.assign(q, { value: 'past one' }).dispatchEvent(new Event('input', { bubbles: true }));
+      if (!rows().length || rows().length === all || rows().some(r => !r.textContent.includes('past one')) || n() !== `(${rows().length} of 100)`) early.push(`search: ${rows().length} rows, ${n()}`);
+      Object.assign(q, { value: '' }).dispatchEvent(new Event('input', { bubbles: true }));
+      b.querySelector('[data-bf="90"]').click();
+      const is = JSON.parse(b.dataset.bl), old = Number(document.body.dataset.ts) - 90 * 86400;
+      if (!rows().length || rows().some(r => Date.parse(is[r.dataset.n].created) / 1000 > old + 86400) || b.querySelector('[data-bf="90"]').getAttribute('aria-pressed') !== 'true') early.push(`>90 days: ${rows().length} rows`);
+      b.querySelector('[data-bf="90"]').click();
+      const sel = b.querySelector('.bfs select');
+      Object.assign(sel, { value: 'phone' }).dispatchEvent(new Event('change', { bubbles: true }));
+      if (!rows().length || rows().some(r => !JSON.parse(b.dataset.bl)[r.dataset.n].labels.includes('phone')) || !sel.closest('.pk').textContent.startsWith('phone')) early.push(`label phone: ${rows().length} rows`);
+      Object.assign(sel, { value: '' }).dispatchEvent(new Event('change', { bubbles: true }));
+      const [x, y, z] = rows();
+      for (const r of [z, x, y]) r.querySelector('input').click();
+      const want = [z, x, y].map(r => r.dataset.n).join();
+      if (!seen(f) || f.elements.issues.value !== want || f.querySelector('button').textContent !== 'queue 3') early.push(`bar: ${seen(f)} "${f.elements.issues.value}" (want ${want}) "${f.querySelector('button').textContent}"`);
+      if (f.getBoundingClientRect().bottom > nav + 1) early.push(`[queue 3] ends at ${f.getBoundingClientRect().bottom}, under the tab bar at ${nav}`);
+    },
     'queue-scroll': () => { tab('queue'); $$('#queue details.q').forEach(d => { d.open = true; }); },
     // #66: a fixture ▲ POST (the redirect a live server sends), through the page's fetch-submit path;
     // #140: then [Drive now], which must toast too and never navigate.
@@ -562,7 +633,7 @@
     // #331: every Queue row at every depth (the demo has a 4-deep chain) shows its whole title on one ellipsised line.
     if (V === 'queue') {
       if (![...$$('#queue summary .m')].some(e => e.textContent.startsWith('after #'))) res.outliers.push('no clamped (4-deep) chain row');
-      for (const s of $$('#queue details.q>summary')) {
+      for (const s of [...$$('#queue details.q>summary')].filter(seen)) { // #367: the picked repo's, outside closed chains
         const t = s.querySelector(':scope>.tl');
         if (!t || !seen(t) || t.title !== t.textContent || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight)) res.outliers.push(`no one-line title: ${label(s)}`);
       }

@@ -134,7 +134,7 @@ fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
     assert!(
-        brief.contains("Carry-over:") && brief.contains("Continue; don't redo."),
+        brief.contains(HONEST) && brief.contains("Continue; don't redo."),
         "{brief}"
     );
     let ev = read(&c.state).unwrap();
@@ -158,7 +158,11 @@ fn a_harness_that_wont_start_twice_rests() {
         let r = fake(&c, 12).once_err("herdr agent start", 1, "claude: command not found");
         assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "impl"]).0, 1);
     }
-    let ev = read(&c.state).unwrap();
+    let ev: Vec<_> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind != "spawn-started")
+        .collect();
     let kinds: Vec<_> = ev.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["spawn-failed", "agent-unavailable"]);
     assert_eq!(
@@ -181,10 +185,164 @@ fn default_config_is_unchanged() {
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
-    assert!(!brief.contains("Carry-over:"), "{brief}");
+    // #353: a superseded lane's successor still gets the handover note.
+    assert!(brief.contains(HONEST), "{brief}");
     let ev = read(&c.state).unwrap();
     assert!(!ev
         .iter()
         .any(|e| matches!(e.kind.as_str(), "fallback" | "agent-unavailable")));
     assert!(ev.iter().rfind(|e| e.kind == "spawn").unwrap().data["resting"].is_null());
+}
+
+/// #353: the sentence every handover note carries.
+const HONEST: &str = "Summary of the previous lane; its tool state and approvals are not carried over.";
+
+/// The brief of issue 12's lane.
+fn brief12(c: &herdsman::Ctx) -> String {
+    std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap()
+}
+
+/// Lane `sendmeter-impl-12` signed out (via `herdsman check`), then superseded by the next entry with `r` as the fake.
+fn sign_out_and_supersede(c: &herdsman::Ctx, r: &Fake) {
+    assert!(check(c, "API Error: 401 · Please run /login").contains("signed out"));
+    let (code, out) = run(c, r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+fn ask(c: &herdsman::Ctx, kind: &str, mut d: Value) {
+    if kind == "needs-decision" {
+        d["agent"] = json!("sendmeter-impl-12");
+        d["recommend"] = json!(1);
+        d["options"] = json!(["a", "b"]);
+    }
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(12), kind, d)).unwrap();
+}
+
+#[test]
+fn the_fallback_brief_carries_a_capped_handover_from_the_transcript() {
+    let d = tmpdir("ho-transcript");
+    let c = ctx(&d, &config(&d, CHAIN));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12, &[]);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let dir = c.home.join(".claude/projects").join(
+        wt.to_str()
+            .unwrap()
+            .replace(|ch: char| !ch.is_ascii_alphanumeric(), "-"),
+    );
+    std::fs::create_dir_all(&dir).unwrap();
+    let (long, exact) = (format!("Pushed   the\n\nfix. {}", "x".repeat(300)), "y".repeat(240));
+    let rows = [
+        json!({"type": "user", "message": {"content": "Read the brief\n  and execute it."}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "cargo test  -q"}}]}}),
+        json!({"type": "user", "message": {"content": exact}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": long}]}}),
+    ];
+    let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
+    ask(&c, "needs-decision", json!({"id": "q1", "question": "which way?"}));
+    ask(&c, "decision", json!({"id": "q1", "choice": "a", "by": "owner"}));
+    let diff = format!("git -C {} diff --name-only origin/staging", wt.display());
+    sign_out_and_supersede(&c, &fake(&c, 12).once(&diff, 0, "src/a.rs\nsrc/b.rs\n"));
+
+    let brief = brief12(&c);
+    let note = &brief[brief.find("Handover:").expect(&brief)..];
+    let capped = format!("- Pushed the fix. {}...", "x".repeat(237 - "Pushed the fix. ".len()));
+    let want = [
+        &format!("Handover: {HONEST}"),
+        "Issue: t",
+        "Prompts:\n- Read the brief and execute it.",
+        &format!("- {exact}"),
+        &format!("Final replies:\n{capped}"),
+        "Commands run:\n- cargo test -q",
+        "Files changed:\n- src/a.rs\n- src/b.rs",
+        "Asks and answers:\n- sendmeter #12 needs you (sendmeter-impl-12 asks q1): which way? 1) a (recommended) 2) b",
+        "sendmeter #12 decision q1 by owner: a",
+    ];
+    for w in want {
+        assert!(note.contains(w), "{w:?} not in {note}");
+    }
+    let order: Vec<usize> = [
+        "Issue:",
+        "Prompts:",
+        "Final replies:",
+        "Commands run:",
+        "Files changed:",
+        "Asks and answers:",
+    ]
+    .iter()
+    .map(|h| note.find(h).unwrap())
+    .collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{note}");
+    assert!(note.lines().all(|l| l.chars().count() <= 242), "{note}");
+    // The note is logged on the spawn: the next handover lists it among the prior notes.
+    let ev = read(&c.state).unwrap();
+    let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
+    assert!(sp.str("handover").unwrap().starts_with("Handover: "), "{sp:?}");
+}
+
+#[test]
+fn without_a_transcript_the_handover_reads_the_pane_log() {
+    let d = tmpdir("ho-panelog");
+    let c = ctx(&d, &config(&d, CHAIN));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12, &[]);
+    let log = herdsman::lanes::log(&c.state, "sendmeter-impl-12").unwrap();
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(
+        &log,
+        "❯ Read the brief\n⏺ Bash(cargo build)\n  ⎿ ok\n\n⏺ Built it\n  and pushed.\n\n❯ \n",
+    )
+    .unwrap();
+    // check rolls the pane into the log too; the lines above are what it had before.
+    assert!(check(&c, "API Error: 401 · Please run /login").contains("signed out"));
+    let (code, out) = run(&c, &fake(&c, 12), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out}");
+    let brief = brief12(&c);
+    for w in [
+        HONEST,
+        "Prompts:\n- Read the brief\n",
+        "Final replies:\n- Built it and pushed.",
+        "Commands run:\n- cargo build",
+    ] {
+        assert!(brief.contains(w), "{w:?} not in {brief}");
+    }
+}
+
+#[test]
+fn an_entry_that_ran_before_gets_only_the_delta() {
+    let d = tmpdir("ho-delta");
+    let mut c = ctx(&d, &config(&d, CHAIN));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12, &[]); // claude:A
+    ask(&c, "needs-decision", json!({"id": "early", "question": "q?"}));
+    c.now += 60;
+    sign_out_and_supersede(&c, &fake(&c, 12)); // claude:B: A never handed over before, the full note
+    let full = brief12(&c);
+    assert!(
+        full.contains("asks early") && !full.contains("Only what happened since"),
+        "{full}"
+    );
+
+    c.now += 4000; // A's rest is over; B goes unavailable
+    ask(&c, "needs-decision", json!({"id": "late", "question": "q?"}));
+    ask(
+        &c,
+        "agent-unavailable",
+        json!({"agent": "sendmeter-impl-12", "harness": "claude", "account": "B", "until": c.now + 99_999}),
+    );
+    let (code, out) = run(&c, &fake(&c, 12), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    assert_eq!(
+        ev.iter().rfind(|e| e.kind == "spawn").unwrap().str("account"),
+        Some("A")
+    );
+    let delta = brief12(&c);
+    assert!(delta.contains(HONEST), "{delta}");
+    assert!(
+        delta.contains("Only what happened since claude:A's last lane on this issue was replaced"),
+        "{delta}"
+    );
+    assert!(delta.contains("asks late") && !delta.contains("asks early"), "{delta}");
 }

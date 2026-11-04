@@ -152,17 +152,7 @@ pub fn install_pre_push(r: &dyn Runner, exe: &str, wt: &Path, role: &str) -> Res
     )?;
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
     ok(r, "git", &["-C", &w, "config", "extensions.worktreeConfig", "true"])?;
-    ok(
-        r,
-        "git",
-        &[
-            "-C",
-            &w,
-            "config",
-            "--worktree",
-            "core.hooksPath",
-            &dir.to_string_lossy(),
-        ],
-    )?;
+    let hooks = dir.to_string_lossy();
+    ok(r, "git", &["-C", &w, "config", "--worktree", "core.hooksPath", &hooks])?;
     Ok(())
 }

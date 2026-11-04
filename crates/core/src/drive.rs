@@ -192,23 +192,15 @@ thread_local! {
 }
 
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid.
+/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
+/// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
-    let a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
+    let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
     if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
         return None;
     }
-    let (exe, args, log) = (&ctx.exe, a.join(" "), state_dir(ctx).join("kick.log"));
-    let sh = format!(
-        "nohup '{exe}' {args} --now >> '{}' 2>&1 < /dev/null & echo $!",
-        log.display()
-    );
-    r.run("sh", &crate::runner::argv(&["-c", &sh]))
-        .ok()?
-        .stdout
-        .trim()
-        .parse()
-        .ok()
+    a.push("--now".into());
+    r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
 }
 
 /// #304: `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s
@@ -450,11 +442,19 @@ pub fn drive(
     };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
-    let seen = if fleets.is_empty() {
+    let mut seen = if fleets.is_empty() {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused: nothing to look at
     } else {
         crate::snapshot::take(ctx, cfg, r)
     };
+    // #376: lane-shaped panes no spawn logged are adopted (or closed, stale) before any step reads the lanes.
+    if !fleets.is_empty() && KICK.get().is_none() {
+        match crate::spawn::orphans(ctx, cfg, (r, &seen), out) {
+            Ok(true) => seen = crate::snapshot::take(ctx, cfg, r),
+            Ok(false) => {}
+            Err(e) => writeln!(out, "orphans: {e:#}")?,
+        }
+    }
     let grew = log();
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
@@ -482,7 +482,7 @@ pub fn drive(
     if fast {
         let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
     }
-    for name in fleets {
+    for &name in &fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
         if !fast && KICK.get().is_none() {
             let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
@@ -499,8 +499,11 @@ pub fn drive(
             "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`.
+    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
     if !fast && KICK.get().is_none() {
+        for n in &fleets {
+            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
+        }
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
@@ -525,6 +528,11 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
+    if KICK.get().is_none() {
+        if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
+            writeln!(out, "{fleet} land: {e:#}")?;
+        }
+    }
     if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
@@ -554,8 +562,9 @@ fn pass(
         // #212: the fast and slow steps never act on one issue at once.
         let lock = state_dir(ctx).join(format!("drive-{fleet}-{}.lock", s.issue));
         let Some(_mine) = take(r, &lock, fleet) else { continue };
-        let pr = gh::cached_pr(ctx, fleet, s.issue);
-        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
+        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
+        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
+        let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
         let n = s.issue.to_string();
         // #294: a PR's diff joins its serial groups; an issue waiting for a slot does nothing else this pass.
         if pr["state"] == "OPEN" && !f.serial.is_empty() && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)? {
@@ -592,7 +601,8 @@ fn pass(
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
-            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && f.merge_label.is_none();
+            let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
+            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             if step == "verdict" && code.is_none() && args[3] == "PASS" && green {
                 merge = true;
                 code = if pr["mergeable"] == "CONFLICTING" {
@@ -875,9 +885,11 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         let num = pr["number"].to_string();
         let seen = |e: &Event| e.is("blocked", fleet, s.issue) && e.str("pr") == Some(&num);
+        // #350: the PR of a landing reverted (or fixed forward) stays merged; its issue is in a fix round.
+        let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
         let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
         let (kind, mut d) = match pr["state"].as_str() {
-            Some("MERGED") => {
+            Some("MERGED") if !events.iter().any(back) => {
                 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
                 ("merged", m)
             }
@@ -935,15 +947,8 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
             .filter(merged)
             .any(|e| left(&e))
     {
-        act(
-            ctx,
-            cfg,
-            r,
-            out,
-            &events,
-            (fleet, None, "clean"),
-            &["clean", fleet, "--yes"],
-        )?;
+        let c = (fleet, None, "clean");
+        act(ctx, cfg, r, out, &events, c, &["clean", fleet, "--yes"])?;
     }
     Ok(go)
 }
@@ -977,6 +982,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (dir, wt) = (f.local_path(), ctx.state.with_file_name(format!("update-{fleet}")));
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"])?;
+    let checks = crate::gate::premerge_checks(ctx, f);
     // A scratch `git worktree`, not a herdr one: no pane, no lane.
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for (_, s) in prs {
@@ -986,11 +992,20 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
         tree(&["add", "-f", "--detach", &wts, &from])?;
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
+        // #350: a behind fast-first PR is always caught up: it lands only on the integration its fast checks ran on.
+        let mut pr = gh::cached_pr(ctx, fleet, s.issue);
+        crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
+        let push = to != from && (pr["landing"] == "fast-first" || gh::update_ready(ctx, Some(r), f, fleet));
+        // #373: the premerge checks re-run on the updated head before it is pushed; a failure is its fix round.
+        let fail = crate::gate::run_checks(r, &wt, &into, if clean && push { &checks[..] } else { &[] });
         let res = if !clean {
             update_lane(ctx, cfg, r, out, &events, fleet, s.issue).map(drop)
-        } else if to != from && gh::update_ready(ctx, Some(r), f, fleet) {
+        } else if let Some((c, o)) = fail {
+            let at = format!("{from:.7} updated onto {into}");
+            let rf = crate::gate::premerge_failed(ctx, cfg, r, out, (fleet, s.issue), (&from, &at), (c, &o));
+            rf.and_then(|rf| Ok(writeln!(out, "{fleet} #{n} {rf}")?))
+        } else if push {
             git(r, &wt, &["push", "-q", "origin", &format!("HEAD:{branch}")]).and_then(|_| {
-                let mut pr = gh::cached_pr(ctx, fleet, s.issue);
                 gh::forget_pr(ctx, fleet, s.issue);
                 writeln!(out, "{fleet} #{n} auto-updated: {from:.7} → {to:.7}")?;
                 let d = json!({"from": from, "to": to});

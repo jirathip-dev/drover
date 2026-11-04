@@ -92,9 +92,12 @@ host's `[hosts]` name must also work as an SSH name on every other host (an `~/.
 That host's own `events.jsonl` is never written; herdsman warns when it finds one. Each `check` imports the asks a lane
 left in a remote host's own log (lanes started before this) under a new id, with `from` naming the old one.
 
-An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` fails
-`agent_name_not_found` (on any host, the main one under load too), herdsman names the harness if one came up, else
-starts it once more; it never closes the pane or workspace of a harness that came up.
+An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` gives up
+(`timeout`, `agent_name_not_found`, `agent_launch_pending`; on any host, the main one under load too), herdsman
+confirms the pane over 120 s (#359): the harness's process runs there and its startup title (Claude: `✳`) or a
+reported state has been seen; any change restarts the window. A confirmed pane is named (`agent_launch_pending` on
+the rename waits and retries) and adopted (`spawn-adopted`); one that never confirms is closed and started once more
+on a fresh pane, and closed again if that fails too. It never closes the pane or workspace of a harness that came up.
 
 ## Turn a host off
 
@@ -121,6 +124,10 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
   about 180 KB a host. Each row on a card has a 24 h sparkline; a tap opens a 1 h / 6 h / 24 h chart with the limit
   dashed and the lane count as a step line. Downsampling keeps the worst row of each bucket (the max; free space the
   min), so a peak is never hidden.
+- Watched sampling (#352): only while a board has the Host tab open (its `/live?tab=host` stream stamps
+  `<state dir>/host-watch.at`; seen in the last 2 min) does the main host's row also carry `procs`: the MB `ps` sees
+  in five fixed groups (lanes, CI/Colima, browsers, herdsman, other), never per PID. With nobody watching the fast
+  step never walks the process table. The file is also capped at 1,600 rows a host on rewrite.
 - Each lane card, and each horse in the Herd, shows its host name.
 
 ## Health (#235)

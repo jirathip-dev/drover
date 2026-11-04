@@ -16,6 +16,7 @@ pub mod herdr;
 pub mod hook;
 pub mod host;
 pub mod hosts;
+pub mod land;
 pub mod lanes;
 pub mod overlap;
 pub mod pipeline;
@@ -144,14 +145,12 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
         Event::new(ctx.now, fleet, None, "queue", with_via(d, via)),
     )?;
     let order: Vec<String> = q.iter().map(|i| format!("#{}", i.issue)).collect();
-    Ok(format!(
-        "{fleet} queue: {}",
-        if order.is_empty() {
-            "empty".into()
-        } else {
-            order.join(" ")
-        }
-    ))
+    let order = if order.is_empty() {
+        "empty".into()
+    } else {
+        order.join(" ")
+    };
+    Ok(format!("{fleet} queue: {order}"))
 }
 
 /// `herdsman set` (and the page's model/effort dropdowns, with `via`): `wanted` is (key, new value).

@@ -171,6 +171,10 @@ pub trait Harness: Sync {
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         None
     }
+    /// #359: what its startup terminal title (OSC 0) contains, confirming a lane came up (generic: none).
+    fn startup_title(&self) -> Option<&'static str> {
+        None
+    }
     /// The herdr agent labels of its panes, for the Host tab's memory row (generic: an agent's own label is its row).
     fn process_names(&self) -> &'static [&'static str] {
         &[]

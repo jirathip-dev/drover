@@ -397,7 +397,8 @@ fn a_new_lane_brief_carries_the_issue_decisions() {
 // --- #13: herdr start timeout under load ---
 
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
-const PANE_HERMES: &str = r#"{"result":{"pane":{"pane_id":"w9:p1","workspace_id":"w9","agent":"hermes"}}}"#;
+const PANE_HERMES: &str =
+    r#"{"result":{"pane":{"pane_id":"w9:p1","workspace_id":"w9","agent":"hermes","agent_status":"idle"}}}"#;
 const PANE_SHELL: &str = r#"{"result":{"pane":{"pane_id":"w9:p1","workspace_id":"w9","agent":null}}}"#;
 
 #[test]
@@ -426,18 +427,115 @@ fn start_timeout_with_running_harness_registers_lane() {
     assert!(st.contains("sendmeter-impl-12"), "{st}");
 }
 
+/// #359: a pane that never confirms within the window is closed and started once more on a fresh pane; a second
+/// failure closes that one too: no stale pane, nothing logged.
 #[test]
-fn start_timeout_without_harness_closes_pane_and_logs_nothing() {
+fn start_timeout_without_harness_closes_pane_and_retries_once() {
     let d = tmpdir("timeout-none");
     let c = ctx(&d, CONFIG);
     let r = happy(&c, NO_AGENTS)
         .once_err("herdr agent start", 1, TIMEOUT)
-        .once("herdr pane get w9:p1", 0, PANE_SHELL);
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once("herdr pane get w9:p1", 0, PANE_SHELL)
+        .once(
+            "herdr pane split w9:p1",
+            0,
+            r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+        );
     let (exit, out) = spawn(&c, &r, &[]);
     assert_eq!(exit, 1, "{out}");
-    assert!(r.called("herdr pane close w9:p1"), "{:?}", r.calls.borrow());
+    assert_eq!(r.count("herdr agent start"), 2, "retried once");
+    assert!(r.called("herdr pane close w9:p1") && r.called("herdr pane close w9:p2"));
+    assert_eq!(r.count("sleep 5"), 2 * 24, "a 120 s window each, never one read");
     assert!(!r.called("herdr agent rename"));
-    assert!(read(&c.state).unwrap().is_empty(), "nothing logged");
+    assert!(
+        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        "nothing but the intent (#376) logged"
+    );
+}
+
+/// #359: the retried start succeeds: the lane runs on the fresh pane.
+#[test]
+fn a_never_confirming_pane_is_replaced_by_one_more_start() {
+    let d = tmpdir("timeout-retry");
+    let c = ctx(&d, CONFIG);
+    let r = happy(&c, NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT).once(
+        "herdr pane split w9:p1",
+        0,
+        r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+    );
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+    assert!(r.called("herdr pane close w9:p1"));
+    let ev = read(&c.state).unwrap();
+    assert_eq!(
+        ev.iter().find(|e| e.kind == "spawn").unwrap().str("pane"),
+        Some("w9:p2")
+    );
+}
+
+/// #359: Claude's startup title arrives 40 s after its start gave up: the pane is confirmed, named and adopted.
+#[test]
+fn a_late_startup_title_confirms_and_adopts_the_lane() {
+    let d = tmpdir("late-title");
+    let c = ctx(&d, &CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let pane = |title: &str| {
+        json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "terminal_title": title}}}).to_string()
+    };
+    let mut r = happy(&c, NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT);
+    for _ in 0..8 {
+        r = r.once("herdr pane get w9:p1", 0, &pane("zsh"));
+    }
+    let r = r
+        .once("herdr pane get w9:p1", 0, &pane("✳ Claude Code"))
+        .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(r.count("sleep 5"), 8, "confirmed at 40 s");
+    assert_eq!(r.count("herdr agent start"), 1);
+    assert!(!r.called("herdr pane close"), "{:?}", r.calls.borrow());
+    let rename = r.index("herdr agent rename").unwrap();
+    assert!(
+        rename
+            > r.calls
+                .borrow()
+                .iter()
+                .rposition(|c| c.starts_with("herdr pane get"))
+                .unwrap()
+    );
+    let ev = read(&c.state).unwrap();
+    let a = ev
+        .iter()
+        .find(|e| e.kind == "spawn-adopted")
+        .expect("spawn-adopted logged");
+    assert_eq!(a.str("pane"), Some("w9:p1"));
+    assert_eq!(
+        ev.iter().find(|e| e.kind == "spawn").unwrap().str("pane"),
+        Some("w9:p1")
+    );
+}
+
+/// #359: `agent_launch_pending` on the rename waits and retries; it is never a failure.
+#[test]
+fn agent_launch_pending_on_rename_is_retried_then_succeeds() {
+    let d = tmpdir("launch-pending");
+    let c = ctx(&d, CONFIG);
+    let pending =
+        r#"{"error":{"code":"agent_launch_pending","message":"agent name cannot change while startup is pending"}}"#;
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once("herdr pane get w9:p1", 0, PANE_HERMES)
+        .once_err("herdr agent rename w9:p1 sendmeter-impl-12", 1, pending)
+        .once_err("herdr agent rename w9:p1 sendmeter-impl-12", 1, pending)
+        .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(r.count("herdr agent rename"), 3);
+    assert!(!r.called("herdr pane close"));
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "spawn-adopted"));
+    assert_eq!(ev.iter().find(|e| e.kind == "spawn").unwrap().data["confirmed"], true);
 }
 
 #[test]
@@ -556,7 +654,10 @@ fn agent_name_taken_elsewhere_is_refused_as_before() {
     let (exit, out) = spawn(&c, &r, &[]);
     assert_eq!(exit, 1, "{out}");
     assert!(!r.called("herdr agent rename"));
-    assert!(read(&c.state).unwrap().is_empty(), "nothing logged");
+    assert!(
+        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        "nothing but the intent (#376) logged"
+    );
 }
 
 #[test]
@@ -620,7 +721,10 @@ fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
     let (exit, out) = spawn(&c, &r, &[]);
     assert_eq!(exit, 1, "{out}");
     assert!(r.called("herdr pane close w9:p1"), "{:?}", r.calls.borrow());
-    assert!(read(&c.state).unwrap().is_empty(), "nothing logged");
+    assert!(
+        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        "nothing but the intent (#376) logged"
+    );
     // The pane is gone: the next pass spawns, no LANE_LIVE.
     let (exit, out) = spawn(&c, &happy(&c, NO_AGENTS), &[]);
     assert_eq!(exit, 0, "{out}");

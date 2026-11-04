@@ -110,6 +110,17 @@ pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
     out.split_once("MEM")
         .map_or(vec![], |(_, t)| t.lines().filter_map(row).collect())
 }
+/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, herdsman, other.
+pub fn groups(r: &dyn Runner) -> [u64; 5] {
+    const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd"];
+    let (ps, mut kb) = (stdout(r, "ps", &["-axo", "rss=,command="]).unwrap_or_default(), [0; 5]);
+    for (k, cmd) in ps.to_lowercase().lines().filter_map(|l| l.trim().split_once(' ')) {
+        let lane = crate::harness::all().any(|h| h.1.process_names().iter().any(|w| cmd.contains(w)));
+        let i = G.iter().position(|g| g.split(' ').any(|w| cmd.contains(w)));
+        kb[if lane { 0 } else { i.map_or(4, |i| i + 1) }] += k.parse::<u64>().unwrap_or(0);
+    }
+    kb.map(|k| k / 1024)
+}
 const TOP: [&str; 8] = ["-l", "1", "-o", "mem", "-stats", "pid,command,mem", "-n", "3"];
 
 #[derive(Debug, Default, Clone)]

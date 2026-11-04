@@ -59,6 +59,12 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
+/// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
+pub fn reviewed_head(t: &str) -> Option<&str> {
+    let l = t.lines().find(|l| l.contains("Reviewed head"))?;
+    l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40)
+}
+
 /// Pure: the issue's wait reason. `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
@@ -70,7 +76,7 @@ pub fn waiting_on(
     fc: &Fleet,
     rev: Option<(&str, &str)>,
 ) -> Waiting {
-    let (f, n, req, p) = (&s.fleet, s.issue, &fc.required_checks, fc.flow());
+    let (f, n, req, p) = (&s.fleet, s.issue, fc.checks(pr), fc.flow());
     // The role an outcome of `stage` goes to (a build for a fix, a check for a review).
     let to = |stage: &str, o: &str| {
         p.next(stage, o)
@@ -106,7 +112,8 @@ pub fn waiting_on(
             None,
         );
     }
-    if s.state == "merged" || pr["state"] == "MERGED" {
+    // #350: a reverted landing's issue is in a fix round while its old PR stays merged.
+    if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
         return w("none", "nothing to do (merged): clean me", s.last_ts, None);
     }
     if s.state == "closed" || pr["state"] == "CLOSED" {
@@ -359,12 +366,13 @@ pub fn scan(
             out.extend(s.lanes.values().filter(|l| !busy(l)).map(|l| (s.clone(), w.on(l))));
             continue;
         }
-        let pr = match (s.state.as_str(), live) {
+        let mut pr = match (s.state.as_str(), live) {
             ("merged" | "closed", _) => Value::Null,
             (_, true) => gh::pr(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now)
                 .unwrap_or_else(|_| gh::cached_pr(ctx, &s.fleet, s.issue)),
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
+        crate::land::mark(ctx, None, f, (&s.fleet, s.issue), events, &mut pr);
         let sp = last_spawn(events, &lane);
         let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
         let on = crate::hosts::On::of(r, sp);
@@ -387,10 +395,12 @@ pub fn scan(
         let path = spawn
             .and_then(|e| e.str("worktree"))
             .map(|wt| format!("{wt}/verdict.md"));
+        // #376: an adopted orphan's verdict counts from its `spawn-started` (none logged: any).
+        let since = spawn.map_or(0, |e| e.data.get("since").and_then(Value::as_u64).unwrap_or(e.ts));
         let fresh = |p: &String| {
             std::fs::metadata(p)
                 .and_then(|m| m.modified())
-                .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(spawn.map_or(0, |e| e.ts)))
+                .is_ok_and(|t| t > std::time::UNIX_EPOCH + std::time::Duration::from_secs(since))
         };
         // #157: on another host the rev spawn removed any older verdict.md, so one there is this round's.
         let there = crate::hosts::On::of(r, spawn);
@@ -415,8 +425,7 @@ pub fn scan(
             .or_else(|| kept.and_then(|e| e.str("verdict")).map(String::from));
         let named = text
             .as_deref()
-            .and_then(|t| t.lines().find(|l| l.contains("Reviewed head")))
-            .and_then(|l| l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40))
+            .and_then(reviewed_head)
             .or_else(|| kept.and_then(|e| e.str("sha")));
         // In review, `head` is the sha verdict.md names (#293), or the rev spawn head (#92; else its worktree's).
         let at = spawn
@@ -444,7 +453,7 @@ pub fn scan(
         let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
         if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
-            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)) == "green";
+            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
             let merge = format!("herdsman merge {} {}", s.fleet, s.issue);
             (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
             w.what = format!("PASS · behind {} (not required) · merging when CI green", f.integration);

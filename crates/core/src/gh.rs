@@ -14,7 +14,7 @@ pub const PR_FIELDS: &str =
 pub const PR_TTL: u64 = 60;
 const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
 
-pub(crate) fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
+pub fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
     ctx.state
         .parent()
         .unwrap_or(&ctx.state)
@@ -94,7 +94,7 @@ const PRS_QUERY: &str = "query($owner:String!,$name:String!,$endCursor:String){r
 pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state \
 baseRefName headRefName headRefOid mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
 commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion startedAt \
-detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
+completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
 const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
 [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
 
@@ -127,6 +127,40 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
         Some(e) => anyhow::bail!("open PRs of {}: {e}", f.repo),
         None => Ok(c["prs"].clone()),
     }
+}
+
+const ISSUES_QUERY: &str = "query($owner:String!,$name:String!,$since:DateTime,$endCursor:String){repository(owner:$owner,\
+name:$name){issues(states:STATES,filterBy:{since:$since},first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{\
+number title state body createdAt updatedAt labels(first:20){nodes{name}} timelineItems(itemTypes:[CROSS_REFERENCED_EVENT],\
+first:20){nodes{...on CrossReferencedEvent{source{...on PullRequest{state}}}}}}}}}";
+const ISSUES_JQ: &str =
+    ".data.repository.issues.nodes[] | {number, title, state, created: .createdAt, updated: .updatedAt, \
+labels: [.labels.nodes[].name], ac: (.body | test(\"acceptance criteria|(^|\\\\n)#+ *ac *(\\\\n|$)\"; \"i\")), \
+pr: any(.timelineItems.nodes[].source.state?; . == \"MERGED\" or . == \"CLOSED\")}";
+
+/// #365: the repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those
+/// updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
+pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> {
+    let p = cache_path(ctx, "backlog", fleet, 0);
+    let mut c = load::<Value>(&p).unwrap_or_else(|| json!({"issues": {}}));
+    let since = c["since"].as_str().map(|s| format!("since={s}"));
+    let q = ISSUES_QUERY.replace("STATES", if since.is_some() { "[OPEN,CLOSED]" } else { "OPEN" });
+    let (owner, name) = f.repo.split_once('/').unwrap_or_default();
+    let v = [format!("owner={owner}"), format!("name={name}"), format!("query={q}")];
+    let mut a = ["api", "graphql", "--paginate", "--jq", ISSUES_JQ]
+        .map(String::from)
+        .to_vec();
+    a.extend(v.into_iter().chain(since).flat_map(|x| ["-f".into(), x]));
+    let out = ok(r, "gh", &a)?;
+    for i in out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        c["since"] = json!(c["since"].as_str().max(i["updated"].as_str()));
+        let (n, m) = (i["number"].to_string(), c["issues"].as_object_mut());
+        let m = m.ok_or_else(|| anyhow::anyhow!("bad backlog cache"))?;
+        m.remove(&n);
+        m.extend((i["state"] == "OPEN").then_some((n, i)));
+    }
+    c["ts"] = json!(ctx.now);
+    store(&p, &c)
 }
 
 /// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open

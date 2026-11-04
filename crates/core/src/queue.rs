@@ -13,6 +13,8 @@ pub struct Item {
     pub serial: Vec<String>,
     /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
     pub needs: Vec<String>,
+    /// #365: queued from the board's backlog, its spec not checked yet (`needs-check`).
+    pub check: bool,
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | set (`needs`).
@@ -61,11 +63,13 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     blocked_by: None,
                     serial: serial.clone(),
                     needs: strs(&d["needs"]),
+                    check: d["check"] == true,
                 })
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blocked_by = old.blocked_by;
+                    m.check |= old.check;
                     m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
                     m.needs.dedup();
@@ -283,6 +287,11 @@ pub fn board(events: &[Event], fleet: &str, now: u64, cfg: Option<&crate::config
             let names: Vec<_> = files.iter().map(|p| p.rsplit('/').next().unwrap_or_default()).collect();
             format!("\n         ⚠ conflicts with {o} ({})", names.join(", "))
         });
+        // #373: its own line too, until a PASS: `✗ migration-order failed: rename needed`.
+        let pass = |e: &&Event| e.is("verdict", fleet, n) && e.str("verdict") == Some("PASS");
+        let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
+        let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
+        let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
         let last = last.unwrap_or_else(|| if ev.is_empty() { "-".into() } else { ev.into() });
         format!(
             "{pos:>2} #{n:<5} {:<11} {lane:<20} {eff:<5} {a:<4} {last}{warn}",

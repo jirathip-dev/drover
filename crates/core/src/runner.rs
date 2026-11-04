@@ -20,6 +20,13 @@ pub trait Runner: Sync {
     fn sleep(&self, secs: u64) {
         std::thread::sleep(std::time::Duration::from_secs(secs));
     }
+    /// #340: start `exe args` detached, stdin null, both streams appended to `log`; its pid. `Real` gives it its own
+    /// session, out of reach of launchd's group kill when the tick/fast job exits; fakes see this `sh -c nohup` line.
+    fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
+        let (args, log) = (args.join(" "), log.display());
+        let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
+        Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
+    }
 }
 
 pub struct Real;
@@ -46,6 +53,29 @@ impl Runner for Real {
             stdout: text(&o.stdout),
             stderr: text(&o.stderr),
         })
+    }
+    fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
+        use std::os::unix::process::CommandExt;
+        extern "C" {
+            fn setsid() -> i32;
+        }
+        let log = std::fs::File::options().create(true).append(true).open(log)?;
+        let mut c = Command::new(exe);
+        c.args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        // SAFETY: setsid is async-signal-safe; between fork and exec it touches nothing else.
+        unsafe {
+            c.pre_exec(|| match setsid() {
+                -1 => Err(std::io::Error::last_os_error()),
+                _ => Ok(()),
+            });
+        }
+        let mut child = c.spawn().with_context(|| format!("cannot run {exe}"))?;
+        let pid = child.id();
+        std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
+        Ok(pid)
     }
 }
 

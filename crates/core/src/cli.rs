@@ -280,6 +280,11 @@ enum Cmd {
         #[arg(long)]
         orphans: bool,
     },
+    /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
+    Reclaim {
+        #[arg(long, help = "Remove without asking")]
+        apply: bool,
+    },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
@@ -298,6 +303,11 @@ enum Cmd {
     },
     /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
     Migrate,
+    /// Landing numbers: `stats land <fleet>`
+    Stats {
+        #[command(subcommand)]
+        cmd: StatsCmd,
+    },
     /// Help; --agent prints the usage doc agents get
     Help {
         /// Print the agent usage doc
@@ -407,6 +417,12 @@ enum PushCmd {
 }
 
 #[derive(Subcommand)]
+enum StatsCmd {
+    /// #350: per landing mode, median PASS → landed, landings per day, reverts, check time; red minutes on integration
+    Land { fleet: String },
+}
+
+#[derive(Subcommand)]
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
@@ -451,7 +467,7 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "resume", "serve", "setup", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "resume", "serve", "setup", "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -822,7 +838,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     role,
                     pane,
                 } => {
-                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane)?;
+                    spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
                 }
                 Cmd::Ask {
                     fleet,
@@ -898,6 +914,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
+                Cmd::Stats {
+                    cmd: StatsCmd::Land { fleet },
+                } => crate::land::stats(ctx, &cfg, out, &fleet)?,
                 Cmd::Clean {
                     fleet,
                     lane,
@@ -909,6 +928,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                     }
                 }
+                Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
                 Cmd::Kill { agent, yes } => check::kill(ctx, &cfg, r, out, &agent, yes)?,

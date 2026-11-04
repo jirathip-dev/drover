@@ -198,16 +198,7 @@ impl Runner for Memo<'_> {
             )
         });
         cache().insert(key, (t, out.clone()));
-        Ok(out.map_or(
-            Out {
-                code: 1,
-                ..Out::default()
-            },
-            |stdout| Out {
-                stdout,
-                ..Out::default()
-            },
-        ))
+        Ok(crate::snapshot::out(out))
     }
 }
 
@@ -505,7 +496,7 @@ fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host",
+    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -741,6 +732,7 @@ impl<'a> Server<'a> {
                     .to_string();
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
+            let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
             let (mut top, mut sent) = (0, BTreeMap::new());
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
@@ -753,9 +745,10 @@ impl<'a> Server<'a> {
                 };
             }
             // Each second: a frag (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
-            // the slot), else a ping every 15 s.
+            // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
                 while s.write_all(msg.as_bytes()).is_ok() {
+                    let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
                         match rx.recv_timeout(Duration::from_secs(1)) {
@@ -1351,6 +1344,12 @@ impl<'a> Server<'a> {
                 crate::hosts::toggle(ctx, &mut out, g("host"), on, "web")?;
                 format!("{} {}", g("host"), if on { "on" } else { "off" })
             }
+            "bqueue" => {
+                let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                let mut d = queue::op("add", &ns, false, None, None, None);
+                d["check"] = json!(true);
+                crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))? + " (needs-check)"
+            }
             "unpair" => {
                 let _g = devices::lock();
                 let mut all = devices::load(ctx);
@@ -1768,6 +1767,11 @@ impl<'a> Server<'a> {
                 if let Some(b) = blocked_by {
                     card.push(format!("<span class=r>blocked by #{b}</span>"));
                 }
+                let ck = k.is_some_and(|k| q[k].check);
+                card.extend(ck.then(|| "<span class=m>needs-check: from the backlog, spec not checked</span>".into()));
+                if let Some(w) = crate::land::note(events, f, n) {
+                    card.push(format!("<span class=r>{}</span>", esc(&w)));
+                }
                 // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (esc(u.str("id").unwrap_or("?")), esc(u.str("reason").unwrap_or("?")));
@@ -1802,13 +1806,18 @@ impl<'a> Server<'a> {
                 let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
                 let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
                 let data = format!(
-                    "class=\"q\"{}{b}{} data-act={}{}",
+                    "class=\"q\"{}{}{b}{} data-act={}{}",
                     if k.is_some() { " data-q" } else { "" },
+                    if ck { " data-ck" } else { "" },
                     s.unwrap_or_default(),
                     act(["", "update"][usize::from(up)], state),
                     coat
                 );
                 let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
+                // #367: the time it counts from too (fixed, so /live sends no patch a second); serve.js writes `in impl 1h 47m`.
+                let t = st.get(&(f.clone(), n)).map_or(now, |s| s.last_ts);
+                let age = format!("<span class=m>{a}</span></summary>");
+                let row = row.replacen(&age, &format!("<span class=m data-t={t}>{a}</span></summary>"), 1);
                 let row = match (qls, row.strip_suffix("</details>")) {
                     (Some(q), Some(r)) => format!("{r}{q}</details>"),
                     _ => row,
@@ -1864,7 +1873,7 @@ impl<'a> Server<'a> {
                         format!(
                             "<p>#{} <span class=g>{}</span> {}{link}</p>",
                             s.issue,
-                            s.state,
+                            esc(&crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone())),
                             age(now.saturating_sub(s.last_ts))
                         )
                     })
@@ -1872,6 +1881,20 @@ impl<'a> Server<'a> {
                 body += &format!(
                     "<details class=done><summary><i class=cv></i><span>done today: {}</span></summary>{rows}</details>",
                     done.len()
+                );
+            }
+            // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
+            let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
+            let mut open = bl["issues"].as_object().cloned().unwrap_or_default();
+            open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
+            if bl["issues"].is_object() {
+                body += &format!(
+                    "<details class=bl data-bl=\"{}\"><summary><i class=cv></i><span>backlog</span><span class=m></span></summary>\
+                     <div class=bls></div><p class=m>read {} ago · [Drive now] reads it again</p><form method=post class=bbar \
+                     hidden>{}<input type=hidden name=issues><button>queue</button></form></details>",
+                    esc(&json!(open).to_string()),
+                    age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+                    hidden("bqueue", f, &mt)
                 );
             }
             let button = |op: &str, label: &str| {
@@ -1942,6 +1965,12 @@ impl<'a> Server<'a> {
                     if n == 1 { "" } else { "s" }
                 ),
             };
+            // #350: fast-first landings wait while integration is red.
+            let bad = bad
+                + &crate::land::paused(events, f).map_or(String::new(), |p| {
+                    let at = esc(p.str("at").unwrap_or("?"));
+                    format!("<p class=r>landing paused: {} red since {at}</p>", esc(&fc.integration))
+                });
             cards.push((!need.is_empty(), format!(
                 "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
                  <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{bad}{body}</div>",
@@ -3330,14 +3359,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if [
-            "stall",
-            "orphan-lane",
-            "conflict-predicted",
-            "heads-up",
-            "ready-unmerged",
-        ]
-        .contains(&k)
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged"
+            .split(' ')
+            .any(|x| x == k)
             || k.starts_with("orch-") =>
         {
             ("!", "a", format!("{k}{r}"), false)

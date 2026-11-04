@@ -12,7 +12,7 @@ use crate::{gh, herdr};
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Head sha of an open PR that passes every merge gate, if any.
@@ -211,15 +211,22 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     // #107: a herdr agent named like a lane (`<fleet>-<role>-<n>…`) that no `spawn` event logged; once per agent.
+    // #376: only one of no tracked issue: drive adopts (or closes) the rest.
+    let tracked = fold(&events);
     for name in agents.iter().flatten().filter_map(|a| a["name"].as_str()) {
-        let lane = cfg.fleet.iter().find_map(|(fl, f)| {
-            let mut w = name.strip_prefix(&format!("{fl}-"))?.split('-');
-            f.role.contains_key(w.next()?).then_some(())?;
-            Some((fl.as_str(), Some(w.next()?.parse().ok()?)))
-        });
-        if let Some(at) = lane.filter(|_| last_spawn(&events, name).is_none()) {
-            let d = json!({"key": name, "reason": format!("herdr agent {name} has no spawn event; spawn adopts it")});
-            fire(ctx, cfg, out, &events, at, "orphan-lane", d)?;
+        let lane = crate::spawn::shaped(cfg, &json!({"name": name}));
+        let lane = lane.filter(|l| l.2.is_some() && !tracked.contains_key(&(l.0.to_string(), l.1)));
+        if let Some(l) = lane.filter(|_| last_spawn(&events, name).is_none()) {
+            let why = format!("herdr agent {name} has no spawn event and matches no tracked issue");
+            fire(
+                ctx,
+                cfg,
+                out,
+                &events,
+                (l.0, Some(l.1)),
+                "orphan-lane",
+                json!({"key": name, "reason": why}),
+            )?;
         }
     }
     let open = open_asks(&events);
@@ -445,7 +452,7 @@ pub fn clean(
             if yes {
                 reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
                 if on.machine.is_none() {
-                    freed += purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+                    freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
             }
             dirty(&on, Path::new(wt))
@@ -566,10 +573,10 @@ pub fn leftovers(
     Ok(found)
 }
 
-const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist"];
+const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", ".cache"];
 /// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes
-/// freed. One git does not ignore stays.
-pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path) -> Result<u64> {
+/// freed (#361: with `dry`, listed and counted, none removed). One git does not ignore stays.
+pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path, dry: bool) -> Result<u64> {
     let mut freed = 0;
     let more = cfg.fleet.get(fleet).map_or(&[][..], |f| &f.build_dirs);
     for d in BUILD_DIRS.iter().copied().chain(more.iter().map(String::as_str)) {
@@ -582,7 +589,8 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
             continue;
         }
         let size = du(&dir);
-        if std::fs::remove_dir_all(&dir).is_ok() {
+        let _ = dry.then(|| writeln!(out, "  would remove {} ({:.2} GB)", dir.display(), gb(size)));
+        if dry || std::fs::remove_dir_all(&dir).is_ok() {
             freed += size;
         }
     }
@@ -656,7 +664,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             if !over(total) {
                 break;
             }
-            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
             if bytes > 0 {
                 total = total.saturating_sub(bytes);
                 writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
@@ -673,6 +681,55 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+const NOTE: &str = "(logical sizes; APFS clones may free less)";
+/// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
+pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
+    let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
+    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+        let wt = Path::new(e.str("worktree").unwrap_or_default());
+        if e.str("machine").is_some() || !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
+            continue;
+        }
+        let why = match touched(r, wt).map(|t| ctx.now.saturating_sub(t)) {
+            _ if !host::live_in(&agents, e.str("agent").unwrap_or("\0"), wt).is_empty() => "a live lane".into(),
+            _ if !host::inside(&ps, wt).is_empty() => "a process runs there".into(),
+            Some(a) if a >= 7 * 86_400 => String::new(),
+            Some(a) => format!("touched {} ago", age(a)),
+            None => "HEAD or status unreadable".into(),
+        };
+        if why.is_empty() {
+            writeln!(o, "{}:", wt.display())?;
+            total += purge(r, cfg, &e.fleet, o, wt, !yes)?;
+        } else {
+            writeln!(o, "skip {}: {why}", wt.display())?;
+        }
+    }
+    let done = if yes { "freed" } else { "reclaimable" };
+    writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
+    if yes {
+        return Ok(());
+    }
+    let mut b = [0];
+    if total > 0 && write!(o, "apply? [y/N] ").is_ok() && i.read(&mut b).is_ok() && b == *b"y" {
+        return reclaim(ctx, cfg, r, o, i, true);
+    }
+    Ok(writeln!(o, "preview: nothing changed; pass --apply to remove")?)
+}
+
+/// #361: the latest of HEAD's last move and the mtimes of changed, deleted (nearest folder) or untracked files.
+fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &*wt.to_string_lossy()][..], a].concat()).ok();
+    let head = git(&["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"])?;
+    let mut t: u64 = head.trim().strip_prefix("HEAD@{")?.strip_suffix('}')?.parse().ok()?;
+    for f in git(&["status", "--porcelain", "-z", "--untracked-files=all"])?.split_terminator('\0') {
+        let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
+        let m = wt.join(f).ancestors().find_map(|a| a.metadata().ok());
+        t = t.max(m.map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs()));
+    }
+    Some(t)
 }
 
 #[allow(clippy::cast_precision_loss)] // GB to one decimal
@@ -839,15 +896,8 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     };
     let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
-        gh::pr(
-            ctx,
-            r,
-            f,
-            (&e.fleet, n),
-            &crate::gate::branch_of(st.as_ref(), n),
-            ctx.now,
-        )
-        .ok()
+        let b = crate::gate::branch_of(st.as_ref(), n);
+        gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
     });
     let pr = pr
         .filter(|p| p["state"] == "OPEN")

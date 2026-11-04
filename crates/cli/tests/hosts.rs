@@ -856,8 +856,8 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 12 --why answer --now"));
 }
 
-/// #275: `agent_name_not_found` on another host: one more start when no harness came up, none when one did (it is
-/// named instead); every call on that host, and no workspace closed.
+/// #275: `agent_name_not_found` on another host: one more start (#359: on a fresh pane, the unconfirmed one closed)
+/// when no harness came up, none when one did (it is named instead); every call on that host, and no workspace closed.
 #[test]
 fn a_lost_agent_name_retries_once_without_a_double_start() {
     let lost =
@@ -866,9 +866,15 @@ fn a_lost_agent_name_retries_once_without_a_double_start() {
     for up in [false, true] {
         let c = setup("hosts-lost", "", true, 0);
         with_account(&c);
-        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": if up { "claude" } else { "" }}}});
+        let pane =
+            json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "terminal_title": "✳ Claude Code"}}});
         let mut r = remote_fake()
             .once_err(start, 1, lost)
+            .reply(
+                "herdr --machine bazzite pane split w9:p1",
+                r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+            )
+            .reply("herdr --machine bazzite pane run w9:p2 export", "{}")
             .reply("herdr --machine bazzite agent rename w9:p1 sendmeter-impl-12", "{}");
         if up {
             r = r.reply("herdr --machine bazzite pane get w9:p1", &pane.to_string());
@@ -877,6 +883,7 @@ fn a_lost_agent_name_retries_once_without_a_double_start() {
         assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
         assert_eq!(r.count(start), if up { 1 } else { 2 });
         assert_eq!(r.called("herdr --machine bazzite agent rename"), up);
+        assert_eq!(r.called("herdr --machine bazzite pane close w9:p1"), !up);
         assert!(!r.called("herdr --machine bazzite workspace close"));
         let calls = r.calls.borrow();
         assert!(calls
@@ -933,8 +940,8 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
     assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
 }
 
-/// #275 (conductor): `agent_name_not_found` also hits the main host under load: the same retry or naming, and no
-/// pane closed.
+/// #275 (conductor): `agent_name_not_found` also hits the main host under load: the same retry or naming; #359: only
+/// a pane that never confirmed is closed.
 #[test]
 fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
     let lost = r#"{"error":{"code":"agent_name_not_found"}}"#;
@@ -942,7 +949,7 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
     for up in [false, true] {
         let c = setup("hosts-lost-main", "", true, 0);
         with_account(&c);
-        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude"}}});
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "agent_status": "idle"}}});
         let mut r = fake(0.1, 0.1)
             .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
             .reply("git -C", "")
@@ -952,6 +959,9 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
                 r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
             )
             .reply("herdr pane run w9:p1 export", "{}")
+            .reply("herdr pane run w9:p2 export", "{}")
+            .reply("herdr pane split w9:p1", r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#)
+            .reply("herdr pane close w9:p1", "{}")
             .once_err("herdr agent start", 1, lost)
             .reply("herdr agent start sendmeter-impl-12", "{}")
             .reply("herdr agent wait sendmeter-impl-12", "{}")
@@ -963,7 +973,8 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
         assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
         assert_eq!(r.count("herdr agent start"), if up { 1 } else { 2 });
         assert_eq!(r.called("herdr agent rename"), up);
-        assert!(!r.called("herdr pane close") && !r.called("herdr --machine"));
+        assert_eq!(r.called("herdr pane close w9:p1"), !up);
+        assert!(!r.called("herdr --machine"));
         let spawned = read(&c.state)
             .unwrap()
             .into_iter()
@@ -971,7 +982,7 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
             .unwrap();
         assert_eq!(
             (spawned.str("host"), spawned.str("pane")),
-            (Some("mini"), Some("w9:p1"))
+            (Some("mini"), Some(if up { "w9:p1" } else { "w9:p2" }))
         );
     }
 }
