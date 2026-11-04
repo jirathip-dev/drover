@@ -519,6 +519,8 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
     // images, loaded, at `/`; open, same URL, first, `1 / 2`; second, `2 / 2`; zoomed; [×] closed; swipe closed,
     // still loaded, same URL, page errors.
     assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
+}
+
 /// #403: a runner whose typing into an agent (`herdr agent prompt`) waits for the test's go, then reports the line.
 struct Held(
     Fake,
