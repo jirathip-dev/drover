@@ -158,7 +158,11 @@ fn a_harness_that_wont_start_twice_rests() {
         let r = fake(&c, 12).once_err("herdr agent start", 1, "claude: command not found");
         assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "impl"]).0, 1);
     }
-    let ev = read(&c.state).unwrap();
+    let ev: Vec<_> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind != "spawn-started")
+        .collect();
     let kinds: Vec<_> = ev.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["spawn-failed", "agent-unavailable"]);
     assert_eq!(
