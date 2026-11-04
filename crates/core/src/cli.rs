@@ -280,6 +280,12 @@ enum Cmd {
         #[arg(long)]
         orphans: bool,
     },
+    /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
+    Reclaim {
+        /// Remove without asking
+        #[arg(long)]
+        apply: bool,
+    },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
@@ -923,6 +929,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                     }
                 }
+                Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
                 Cmd::Kill { agent, yes } => check::kill(ctx, &cfg, r, out, &agent, yes)?,

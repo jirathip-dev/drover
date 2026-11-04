@@ -177,6 +177,20 @@ fn fleet_env_is_exported_into_the_lane() {
     );
 }
 
+/// #361: `shared_cache` is exported like `env`, `<fleet>` replaced by the fleet's name.
+#[test]
+fn shared_cache_is_exported_into_the_lane() {
+    let cfg = CONFIG.replace(
+        "[fleet.sendmeter.role.impl]",
+        "shared_cache = { CARGO_TARGET_DIR = \"/c/cache/<fleet>/target\" }\n\n[fleet.sendmeter.role.impl]",
+    );
+    let c = ctx(&tmpdir("spawn-shared-cache"), &cfg);
+    assert_eq!(
+        words(&plan(&c, &Fake::default(), "impl")["commands"][2])[7..],
+        ["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()]
+    );
+}
+
 /// #187: the same fleet and branch always hash to the same port, inside the range; the dry run shows it.
 #[test]
 fn lane_port_is_stable_per_fleet_and_branch() {

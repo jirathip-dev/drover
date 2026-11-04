@@ -29,13 +29,21 @@ herdsman clean --orphans --yes        # also remove folders under the worktree r
   hard-linked file counts once per link).
 - `DISK_BUDGET`: worktrees over `[limits] worktree_budget_gb` (default 25 GB) by drive's last walk, after it freed the idlest
   lanes' build folders. A lane's build folders also go at its verdict (reviewer) or PASS (builder).
+- `herdsman reclaim` (#361) lists, per worktree idle 7 days, the build folders that would go (`target/`, `node_modules/`,
+  `.next/`, `dist/`, `.cache/` and the fleet's `build_dirs`, only git-ignored ones) and their sizes, then asks; `--apply`
+  skips the question. Idle means no live lane, no process with its cwd there, HEAD not moved and no changed or
+  untracked file modified in 7 days. Sources, branches and worktree registrations stay. Sizes are logical: an
+  APFS-cloned folder shares blocks, so freeing it may save less.
 - `LANE_LIVE`: a herdr agent is live in the worktree, or the log has an unfinished lane.
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `herdsman help --agent`.
 
 A fleet's `env` table is exported into every lane's shell. Share one build cache per fleet instead of
 one per lane, e.g. `[fleet.herdsman.env] CARGO_TARGET_DIR = "~/.cache/herdsman/target/herdsman"` (cargo's
-lock makes it safe; lanes queue on it). Node fleets: pnpm's store is already shared; for npm set
+lock makes it safe; lanes queue on it). `shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/<fleet>/target" }`
+says the same, opt-in per fleet, `<fleet>` replaced by its name: new lanes skip full rebuilds, but lanes building at once
+wait on cargo's lock (`Blocking waiting for file lock on build directory`), and `reclaim` never touches it (it lives
+outside the worktrees). Node fleets: pnpm's store is already shared; for npm set
 `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
 for `target`, `package-lock.json` and `pnpm-lock.yaml` for `node_modules`; other names are logged and skipped.

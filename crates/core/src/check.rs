@@ -12,7 +12,7 @@ use crate::{gh, herdr};
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 
 /// Head sha of an open PR that passes every merge gate, if any.
@@ -445,7 +445,7 @@ pub fn clean(
             if yes {
                 reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
                 if on.machine.is_none() {
-                    freed += purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+                    freed += purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
                 }
             }
             dirty(&on, Path::new(wt))
@@ -566,10 +566,10 @@ pub fn leftovers(
     Ok(found)
 }
 
-const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist"];
+const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", ".cache"];
 /// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes
-/// freed. One git does not ignore stays.
-pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path) -> Result<u64> {
+/// freed (#361: with `dry`, listed and counted, none removed). One git does not ignore stays.
+pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path, dry: bool) -> Result<u64> {
     let mut freed = 0;
     let more = cfg.fleet.get(fleet).map_or(&[][..], |f| &f.build_dirs);
     for d in BUILD_DIRS.iter().copied().chain(more.iter().map(String::as_str)) {
@@ -582,7 +582,10 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
             continue;
         }
         let size = du(&dir);
-        if std::fs::remove_dir_all(&dir).is_ok() {
+        if dry {
+            writeln!(out, "  would remove {} ({})", dir.display(), mb(size))?;
+            freed += size;
+        } else if std::fs::remove_dir_all(&dir).is_ok() {
             freed += size;
         }
     }
@@ -656,7 +659,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             if !over(total) {
                 break;
             }
-            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt))?;
+            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
             if bytes > 0 {
                 total = total.saturating_sub(bytes);
                 writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
@@ -673,6 +676,107 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+/// #361: `herdsman reclaim`: the build folders of worktrees idle 7 days (no live lane, no process there, HEAD and
+/// changed files untouched), previewed; removed with `apply` or a `y` on stdin.
+pub fn reclaim(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    stdin: &mut dyn Read,
+    apply: bool,
+) -> Result<()> {
+    let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let (mut seen, mut idle, mut total) = (std::collections::BTreeSet::new(), vec![], 0);
+    for e in events
+        .iter()
+        .rev()
+        .filter(|e| e.kind == "spawn" && e.str("machine").is_none())
+    {
+        let Some(wt) = e.str("worktree").map(Path::new) else {
+            continue;
+        };
+        if !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
+            continue;
+        }
+        let why = if !host::live_in(&agents, e.str("agent").unwrap_or("\0"), wt).is_empty() {
+            "a live lane".into()
+        } else if !host::inside(&ps, wt).is_empty() {
+            "a process runs there".into()
+        } else {
+            match touched(r, wt) {
+                Some(t) if ctx.now.saturating_sub(t) >= 7 * 86_400 => String::new(),
+                Some(t) => format!("touched {} ago", age(ctx.now.saturating_sub(t))),
+                None => "HEAD or status unreadable".into(),
+            }
+        };
+        if !why.is_empty() {
+            writeln!(out, "skip {}: {why}", wt.display())?;
+            continue;
+        }
+        writeln!(out, "{}:", wt.display())?;
+        let bytes = purge(r, cfg, &e.fleet, out, wt, true)?;
+        total += bytes;
+        idle.extend((bytes > 0).then_some((e, wt)));
+    }
+    writeln!(
+        out,
+        "{} reclaimable (logical sizes; APFS clones may free less)",
+        mb(total)
+    )?;
+    if idle.is_empty() {
+        return Ok(());
+    }
+    if !apply {
+        write!(out, "apply? [y/N] ")?;
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(stdin).read_line(&mut line);
+        if line.trim() != "y" {
+            return Ok(writeln!(out, "preview: nothing changed; pass --apply to remove")?);
+        }
+    }
+    let mut freed = 0;
+    for (e, wt) in idle {
+        freed += purge(r, cfg, &e.fleet, out, wt, false)?;
+    }
+    Ok(writeln!(
+        out,
+        "freed {} (logical sizes; APFS clones may free less)",
+        mb(freed)
+    )?)
+}
+
+/// #361: the latest of HEAD's last move and the mtimes of the worktree's changed or untracked files.
+fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
+    let w = wt.to_string_lossy();
+    let head = ok(
+        r,
+        "git",
+        &["-C", &w, "log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"],
+    )
+    .ok()?;
+    let mut t: u64 = head.trim().strip_prefix("HEAD@{")?.strip_suffix('}')?.parse().ok()?;
+    let st = ok(
+        r,
+        "git",
+        &["-C", &w, "status", "--porcelain", "-z", "--untracked-files=all"],
+    )
+    .ok()?;
+    for f in st.split('\0').filter(|f| !f.is_empty()) {
+        // `XY path`, or a rename's bare source path
+        let f = f.get(3..).filter(|_| f.as_bytes().get(2) == Some(&b' ')).unwrap_or(f);
+        if let Ok(m) = std::fs::metadata(wt.join(f)).and_then(|m| m.modified()) {
+            t = t.max(m.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()));
+        }
+    }
+    Some(t)
+}
+
+#[allow(clippy::cast_precision_loss)] // MB to one decimal
+fn mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
 #[allow(clippy::cast_precision_loss)] // GB to one decimal

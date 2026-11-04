@@ -196,6 +196,9 @@ pub struct Fleet {
     /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// #361: build caches shared by the fleet's lanes (`<fleet>` is its name), exported like `env`; opt-in.
+    #[serde(default)]
+    pub shared_cache: BTreeMap<String, String>,
     /// #185: build folders a new lane APFS-clones from `local` on a lockfile match; `clone_node_modules` is its alias for one release.
     #[serde(default)]
     pub clone_build: Vec<String>,
