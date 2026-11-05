@@ -1,5 +1,5 @@
 //! The per-fleet work queue (`queue` events): `herdsman queue`, `next` and `board`.
-use crate::config::{Fleet, Serial};
+use crate::config::{Config, Fleet, Serial};
 use crate::events::{age, fold, last_spawn, Event, IssueState, States};
 use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
@@ -290,13 +290,7 @@ pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
 pub const WIDTH: usize = 60;
 
 /// One fleet's board, lines ≤ 60 cols: the queue, other open issues, issues merged in the last 24 h.
-pub fn board(
-    ctx: &crate::Ctx,
-    events: &[Event],
-    fleet: &str,
-    cfg: Option<&crate::config::Config>,
-    c: &Conflicts,
-) -> String {
+pub fn board(ctx: &crate::Ctx, events: &[Event], fleet: &str, cfg: Option<&Config>, c: &Conflicts) -> String {
     let now = ctx.now;
     let st = fold(events);
     let q = view(events, &st, fleet);

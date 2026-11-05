@@ -81,38 +81,32 @@ impl Real {
             .spawn()
             .with_context(|| format!("cannot run {prog}"))?;
         let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
-        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        let Some(limit) = limit else {
-            let o = c.wait_with_output()?;
-            let code = o.status.code().unwrap_or(-1);
-            return Ok(Out {
-                code,
-                stdout: text(&o.stdout),
-                stderr: text(&o.stderr),
-            });
-        };
         let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
-        let end = Instant::now() + limit;
-        while Instant::now() < end {
-            if let Some(st) = c.try_wait()? {
-                let (stdout, stderr) = (
-                    text(&so.join().unwrap_or_default()),
-                    text(&se.join().unwrap_or_default()),
-                );
-                return Ok(Out {
-                    code: st.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
+        let end = limit.and_then(|l| Instant::now().checked_add(l));
+        let st = loop {
+            match (c.try_wait()?, end) {
+                (Some(st), _) => break st,
+                (None, None) => break c.wait()?,
+                (None, Some(end)) if Instant::now() >= end => {
+                    let _ = (c.kill(), c.wait()); // its readers may outlive it while a grandchild (ssh) holds the pipes
+                    let stderr = format!(
+                        "{prog} {}: no answer in {:?}",
+                        args.join(" "),
+                        limit.unwrap_or_default()
+                    );
+                    return Ok(Out {
+                        code: 124,
+                        stderr,
+                        ..Out::default()
+                    });
+                }
+                _ => std::thread::sleep(Duration::from_millis(50)),
             }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let _ = (c.kill(), c.wait()); // its readers may outlive it while a grandchild (ssh) holds the pipes
-        let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
+        };
         Ok(Out {
-            code: 124,
-            stderr,
-            ..Out::default()
+            code: st.code().unwrap_or(-1),
+            stdout: so.join().unwrap_or_default(),
+            stderr: se.join().unwrap_or_default(),
         })
     }
 }
@@ -123,11 +117,11 @@ pub fn limit(prog: &str, args: &[String]) -> Option<Duration> {
     (remote && args.get(3).is_some_and(|a| a == "list")).then(|| Duration::from_secs(20))
 }
 
-fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<String> {
     std::thread::spawn(move || {
         let mut v = vec![];
         let _ = p.map(|mut p| p.read_to_end(&mut v));
-        v
+        String::from_utf8_lossy(&v).into_owned()
     })
 }
 

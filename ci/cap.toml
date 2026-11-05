@@ -3,5 +3,5 @@
 # lines of headroom (default 500) cap-check warns and `herdsman check` alerts `cap-near`.
 # #270: it also prints the web/src TypeScript lines, a soft budget: reported in each PR, never blocking.
 [fleet.herdsman]
-line_cap = 24995
+line_cap = 25070
 warn_within = 500

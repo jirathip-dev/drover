@@ -1212,9 +1212,9 @@ impl<'a> Server<'a> {
         };
         match op {
             "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
-            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
+            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None, yes))?,
             "clean" => crate::check::clean(ctx, &cfg, self.r, &mut out, Some(&fleet), (None, Some(agent)), yes)?,
-            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
+            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, (agent, None))?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
         if yes || op == "stop" {

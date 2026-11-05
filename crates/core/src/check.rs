@@ -1021,14 +1021,8 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
 
 /// `herdsman close`: close a non-lane herdr agent's pane (by name or pane id); files stay. Logs `closed-other`.
 /// #478: `host` picks that machine's agent when names collide (a lane is only the one its newest spawn there).
-pub fn close(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    agent: &str,
-    host: Option<&str>,
-) -> Result<()> {
+pub fn close(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: (&str, Option<&str>)) -> Result<()> {
+    let (agent, host) = a;
     if let Some(h) = host.filter(|h| !cfg.hosts.contains_key(*h)) {
         return crate::gate::refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]"));
     }
@@ -1054,14 +1048,8 @@ pub fn close(
 /// `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes.
 /// The worktree is kept.
 /// #478: `host` kills the agent's newest lane there; one an other host's lane superseded logs `stale-pane-killed`.
-pub fn kill(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    (agent, host): (&str, Option<&str>),
-    yes: bool,
-) -> Result<()> {
+pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, a: (&str, Option<&str>, bool)) -> Result<()> {
+    let (agent, host, yes) = a;
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent, host)?;
     let stale = !last_spawn(&events, agent).is_some_and(|l| std::ptr::eq(l, e));
@@ -1152,7 +1140,7 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             .iter()
             .any(|a| a["name"] == agent && a["pane_id"].as_str() == pane)
         {
-            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true) {
+            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h), true)) {
                 writeln!(out, "stale pane {h}:{agent}: {e:#}")?;
             }
         } else {
