@@ -143,7 +143,7 @@ impl herdsman::runner::Runner for Slow {
             if self.up.load(SeqCst) {
                 out.stdout = self.list.clone();
             } else {
-                drop(self.listed.lock().unwrap().send(()));
+                let _ = self.listed.lock().unwrap().send(());
             }
         }
         if is("agent", "start") {
