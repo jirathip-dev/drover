@@ -165,8 +165,8 @@ pub trait Harness: Sync {
     fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
         None
     }
-    /// #463: a first-start prompt on a pane that would not start: its name and the keys that answer it.
-    fn startup_prompt(&self, _screen: &str) -> Option<(&'static str, String)> {
+    /// #463: a first-start prompt on a pane that would not start: its name and the keys that answer it, in order.
+    fn startup_prompt(&self, _screen: &str) -> Option<(&'static str, Vec<String>)> {
         None
     }
     /// The keys that pick menu option `n` (1-based).

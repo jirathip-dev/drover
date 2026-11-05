@@ -859,7 +859,9 @@ pub fn spawn(
         if start.code != 0 && !late {
             screen = tail(r, &pane);
             if let Some((prompt, keys)) = h.startup_prompt(&screen) {
-                herdr::keys(r, &pane, &keys)?;
+                for k in &keys {
+                    herdr::keys(r, &pane, k)?;
+                }
                 event(
                     "startup-prompt",
                     json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
