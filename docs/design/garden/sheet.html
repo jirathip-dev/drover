@@ -2,7 +2,7 @@
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Garden sprite sheet</title>
 <!-- #423 sprite sheet: every growth stage × the six species, the keeper's six actions × 3 looks and frame 2, the moments,
-     the 16 px row sprites at 1.5× (the board's 24 px) and 4×, on this scheme's own background. Drawn from art.mjs. -->
+     the 24 × 24 row sprites at 1× (the board's 24 px) and 4×, on this scheme's own background. Drawn from art.mjs. -->
 <link rel=stylesheet href=../../../assets/serve.css>
 <link rel=stylesheet href=garden.css>
 <style>
@@ -17,17 +17,17 @@ h1{font-size:var(--fs);margin:var(--s4) 0 var(--s2)}h1 .m{font-weight:400}
 .rows{display:grid;grid-template-columns:13ch repeat(9,minmax(56px,auto));gap:var(--s2) var(--s3);align-items:center;overflow-x:auto}
 .rows>b{font-weight:400;color:var(--mute);font-size:var(--fs-meta)}
 .rows figure{margin:0;display:flex;align-items:center;gap:var(--s2)}
-.rows .x4{width:64px;height:64px;image-rendering:pixelated;border:1px solid var(--line);border-radius:4px}
+.rows .x4{width:96px;height:96px;image-rendering:pixelated;border:1px solid var(--line);border-radius:4px}
 </style></head>
 <body>
 <svg width=0 height=0 style="position:absolute" aria-hidden=true><defs id=defs></defs></svg>
-<h1>garden · growth stages × species <span class=m>(132 × 100, 1 pixel = 4; the plant stands right of the keeper; the leaves sway on two frames)</span></h1>
+<h1>garden · growth stages × species <span class=m>(132 × 100, 1 pixel = 2: a 66 × 50 grid; the plant stands right of the keeper; the leaves sway on two frames)</span></h1>
 <div class="sheet loop" id=stages></div>
 <h1>the keeper by role <span class=m>(three looks: sun hat, scarf, bun · the neckerchief is the repo colour · the plant is the role's stage)</span></h1>
 <div class=sheet id=acts></div>
 <h1>moments <span class=m>(merged: wrapped, the bell rings, hop · review FAIL: a yellowed leaf drops, shake · needs you: the thirsty drop, pulse)</span></h1>
 <div class="sheet loop" id=moms></div>
-<h1>16 px row sprites <span class=m>(Queue rows: the issue's stage in its species · Events rows: the role's tool · at 24 px and 4×)</span></h1>
+<h1>24 × 24 row sprites <span class=m>(Queue rows: the issue's stage in its species · Events rows: the role's tool · at 24 px, 1 pixel = 1, and 4×)</span></h1>
 <div class="rows loop" id=rows></div>
 <script type=module>
 import './scheme.mjs';
@@ -48,7 +48,7 @@ document.getElementById('moms').innerHTML = '<b></b><span class=lb>sold · frame
   [['sold', 0], ['sold', 1], ['leaf-drop', 0], ['leaf-drop', 1], ['thirsty', 0]].map(([m, f]) => `<div class="cell${f ? ' f2v' : ''}">${use('m-' + m, style(0, 'c') + ';' + sv('monstera'))}</div>`).join('');
 const R = [...STAGES, 'needs', 'fail'];
 let r = '<b></b>' + R.map(s => `<span class=lb>${s}</span>`).join('');
-const px = (id, st, cls) => `<svg class="${cls}" viewBox="0 0 16 16" style="${st}"><use href="#${id}"/></svg>`;
+const px = (id, st, cls) => `<svg class="${cls}" viewBox="0 0 24 24" style="${st}"><use href="#${id}"/></svg>`;
 for (const { id } of SPECIES) r += `<b>${id}</b>` + R.map(s => `<figure>${px(`rs-${id}-${s}`, sv(id), 'px24')}${px(`rs-${id}-${s}`, sv(id), 'x4')}</figure>`).join('');
 r += '<b>actions</b>' + ['water', 'prune', 'inspect', 'repot', 'idle', 'done', 'wilted', 'thirsty', 'fall'].map(k => `<figure>${px('r-' + k, sv('monstera') + ';' + style(0, 'l'), 'px24')}${px('r-' + k, sv('monstera'), 'x4')}</figure>`).join('');
 r += '<b></b>' + ['water', 'prune', 'inspect', 'repot', 'idle', 'done', 'wilted', 'needs', 'fail'].map(s => `<span class=lb>${s}</span>`).join('');
