@@ -65,7 +65,8 @@ pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
 
 /// #327: the fix lane died (`lane-dead`) or its supersede never spawned, with no new head: the fix is still due.
 fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
-    let mut since = events.iter().rev().take_while(|e| !e.is("spawn", &s.fleet, s.issue));
+    let build = |e: &&Event| e.is("spawn", &s.fleet, s.issue) && !crate::events::design(e);
+    let mut since = events.iter().rev().take_while(|e| !build(e));
     let dead = |e: &Event| e.is("lane-dead", &s.fleet, s.issue) || e.is("supersede", &s.fleet, s.issue);
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
@@ -82,7 +83,7 @@ const RESPAWN_SECS: u64 = 1800;
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
 fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
-    let reset = ["pushed", "verdict", "needs-human", "round-extended"];
+    let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let at: Vec<u64> = mine
         .take_while(|e| !reset.contains(&e.kind.as_str()))
@@ -313,7 +314,12 @@ pub fn waiting_on(
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },
         // #217: an extra round whose lane never started (a failed or deferred spawn) is due the same way.
-        "fix" if s.last_event == "verdict" || unspawned(events, s) || lost(events, s, pushed) => {
+        // #500: so is one a `repaired` false park put back.
+        "fix"
+            if matches!(s.last_event.as_str(), "verdict" | "repaired")
+                || unspawned(events, s)
+                || lost(events, s, pushed) =>
+        {
             // The FAIL's stage: a check's FAIL, or a gate's CI red (logs before #173 name none: `rev`).
             let v = events.iter().rev().find(|e| e.is("verdict", f, n));
             let by = v.and_then(|e| e.str("stage")).unwrap_or("rev");
@@ -536,8 +542,11 @@ pub fn scan(
         }
         // #444: an impl/fix lane gone from herdr, or whose prompt never landed, with no push: drive respawns it
         // `--supersede` at most every 30 min; after two respawns in a row without a push it needs a human.
+        // #500: the build role's own lane, never the check lane that ran last.
+        let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
+        let sp = last_spawn(mine, &built);
         let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
-        let gone = !agents.iter().any(|a| a["name"] == lane.as_str());
+        let gone = !agents.iter().any(|a| a["name"] == built.as_str());
         // A lane started this pass, or a spawn still starting, is not gone yet.
         let settled = || {
             sp.is_some_and(|e| ctx.now >= e.ts + 120)
@@ -549,7 +558,7 @@ pub fn scan(
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
             let why = if gone { "lane gone" } else { "prompt never landed" };
-            w.who = "drive";
+            (w.who, w.lane) = ("drive", built);
             w.next_cmd = Some(format!("herdsman spawn {} {} {role} --supersede", s.fleet, s.issue));
             w.what = if n >= 2 {
                 w.next_cmd = None;
@@ -593,10 +602,15 @@ pub fn scan(
                 .map_or(String::new(), |p| format!(" (resume to review PR #{p})"));
             (w.who, w.what, w.next_cmd) = ("none", format!("parked: fleet paused{pr}"), None);
         }
+        // #500: the row's lane is the one it waits on (a respawn's: the build lane).
+        let s = IssueState {
+            lane: Some(w.lane.clone()),
+            ..s
+        };
         out.extend(
             s.lanes
                 .values()
-                .filter(|l| **l != lane && !busy(l))
+                .filter(|l| **l != w.lane && !busy(l))
                 .map(|l| (s.clone(), w.on(l))),
         );
         out.push((s, w));
