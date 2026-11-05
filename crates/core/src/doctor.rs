@@ -193,7 +193,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install");
+        let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
