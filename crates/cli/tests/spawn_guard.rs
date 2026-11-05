@@ -830,12 +830,35 @@ fn claude_ctx(name: &str) -> (PathBuf, herdsman::Ctx) {
 }
 
 const TRUST: &str = " Accessing workspace:\n\n /tmp/cooee/design-1\n\n Quick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel\n";
+/// #476: Claude Code's unnumbered trust menu, as cooee #10's pane showed it.
+const TRUST_CURSOR: &str = " Accessing workspace:
+
+ /Users/jkmacmini/.herdr/worktrees/cooee/issue-10
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source
+ project, or work from your team). If not, take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+";
+const TRUST_1X: &str = "╭──────────────────────────────────────────╮\n│ Do you trust the files in this folder?   │\n│                                          │\n│ /tmp/cooee/design-1                      │\n│                                          │\n│ ❯ 1. Yes, proceed                        │\n│   2. No, exit                            │\n╰──────────────────────────────────────────╯\n   Enter to confirm · Esc to exit\n";
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
 /// A new folder's trust dialog (and the bypass warning, "Yes" second) is answered, then the lane confirms and runs.
 #[test]
 fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
-    for (screen, prompt, key) in [(TRUST, "folder-trust", "1"), (BYPASS, "bypass-permissions", "2")] {
+    for (screen, prompt, keys) in [
+        (TRUST, "folder-trust", &["1"][..]),
+        (TRUST_1X, "folder-trust", &["1"]),
+        (BYPASS, "bypass-permissions", &["2"]),
+        (TRUST_CURSOR, "folder-trust", &["Down", "Enter"]),
+    ] {
         let (_d, c) = claude_ctx("first-start");
         let up =
             json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "terminal_title": "✳ Claude Code"}}});
@@ -846,10 +869,16 @@ fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
             .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
         let (exit, out) = spawn(&c, &r, &[]);
         assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
-        let keys = format!("herdr pane send-keys w9:p1 {key}");
-        assert_eq!(r.count(&keys), 1, "{:?}", r.calls.borrow());
+        let sent: Vec<String> = r
+            .calls
+            .borrow()
+            .iter()
+            .filter_map(|c| c.strip_prefix("herdr pane send-keys w9:p1 ").map(String::from))
+            .collect();
+        assert_eq!(sent, keys, "{:?}", r.calls.borrow());
+        let last = format!("herdr pane send-keys w9:p1 {}", keys[keys.len() - 1]);
         assert!(
-            r.index(&keys) < r.index("herdr pane get w9:p1"),
+            r.index(&last) < r.index("herdr pane get w9:p1"),
             "answered, then confirmed"
         );
         assert!(!r.called("herdr pane close"), "{:?}", r.calls.borrow());
