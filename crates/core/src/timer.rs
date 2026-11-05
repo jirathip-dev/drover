@@ -12,6 +12,8 @@ pub const TICK: &str = "dev.herdsman.tick";
 /// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.herdsman.fast";
 /// #237: the build's own jobs (label, args); `install` derives each one's interval from its args.
+/// #345: `herdsman service`, kept alive; it runs the fast step itself (and the board with `--board`).
+pub const SERVICE: &str = "dev.herdsman.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
@@ -63,7 +65,7 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
 
 /// The job's files as `install` writes them, with `path` for PATH.
 fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
-    let every = args[0] != "serve";
+    let every = !["serve", "service"].contains(&args[0]);
     let secs = [0, cfg.limits.slow_secs, cfg.limits.fast_secs][usize::from(every) + usize::from(args[0] == "drive")];
     let cmd: Vec<&str> = std::iter::once(ctx.exe.as_str()).chain(args.iter().copied()).collect();
     files(ctx, label, &cmd, path, secs, MAC)
@@ -109,7 +111,10 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
-    let (every, files) = (args[0] != "serve", expect(ctx, cfg, label, args, &path(ctx, cfg, r)));
+    let (every, files) = (
+        !["serve", "service"].contains(&args[0]),
+        expect(ctx, cfg, label, args, &path(ctx, cfg, r)),
+    );
     let [probe, up, down] = ctl(ctx, label, every);
     let live = load && exec(r, &probe).is_ok();
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);
@@ -242,7 +247,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
 /// that fails. Never the tick's own job: reloading it would end this run (its row stays red, alerted).
 fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
     for ((label, state), (_, args)) in drift(ctx, cfg, r).into_iter().zip(JOBS) {
-        if label == TICK || state == "loaded" {
+        // #345: a running service is the fast step; its job stays out.
+        if label == TICK || state == "loaded" || label == FAST && crate::service::up(ctx).is_some() {
             continue;
         }
         let line = install(ctx, cfg, r, label, args, true);
@@ -311,6 +317,22 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
     writeln!(out, "{}", [tick, fast, board, tailscale, sync].join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false)
+}
+
+/// #345 `herdsman service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands
+/// that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
+pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
+    let cfg = Config::load(&ctx.config)?;
+    let mut args = vec!["service", "--api", api];
+    args.extend(board.iter().flat_map(|b| ["--board", *b]));
+    writeln!(out, "{}", install(ctx, &cfg, r, SERVICE, &args, false))?;
+    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+    writeln!(out, "To swap it in, run:")?;
+    for (label, every) in std::iter::once((FAST, true)).chain(board.map(|_| (serve, false))) {
+        writeln!(out, "  {}", ctl(ctx, label, every)[2])?;
+    }
+    writeln!(out, "  {}", ctl(ctx, SERVICE, false)[1])?;
+    Ok(())
 }
 
 /// The phone alerts state (#87): on/off, devices and last sent, unless a webpush failure is newer.
@@ -387,8 +409,10 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let mut rows = vec![row("board", t, d, "herdsman setup")];
     // #237: each own job against this build, folded into its step's row: red unless loaded.
     let drift = drift(ctx, cfg, r);
+    let service = crate::service::up(ctx);
     let job = |i: usize, t, d: String| match drift[i].1 {
         "loaded" => (t, d),
+        _ if i == 1 && service.is_some() => (t, d + " · by the service"),
         state => ("r", format!("{d} · job {state}")),
     };
     let (t, d) = tick_row(ctx, &events);

@@ -177,8 +177,12 @@ thread_local! {
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    if IN_ACT.get() || crate::outbox::lane().is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
         return None;
+    }
+    // #345: a running service drives it in its own process at once; else the detached kick below (direct mode).
+    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why) {
+        return Some(pid);
     }
     a.push("--now".into());
     r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
