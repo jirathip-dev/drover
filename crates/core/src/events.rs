@@ -542,7 +542,7 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 /// #447: one pass, each closing event checked against the asks still open.
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     let (mut open, mut first): (Vec<(usize, &Event)>, std::collections::HashMap<_, usize>) =
-        (vec![], Default::default());
+        (vec![], std::collections::HashMap::default());
     for (i, e) in events.iter().enumerate() {
         let at = (e.str("agent"), e.str("pane"));
         match e.kind.as_str() {
