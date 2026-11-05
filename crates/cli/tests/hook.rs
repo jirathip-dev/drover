@@ -596,6 +596,11 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         (cond, format!("cd {st} && cp a.png ./events.jsonl")),
         ("synergy:7:impl", format!("cd {st} && cp a.png ./events.jsonl")),
         ("synergy:7:impl", format!("cp a.png {own}/a.png")),
+        (cond, format!("cp --target-directory={st}/ a.png")),
+        (cond, format!("dd if=a of={st}/events.jsonl")),
+        (cond, format!("cp a.png {own}/a.png && echo x>{st}/events.jsonl")),
+        ("synergy:7:impl", format!("cp --target-directory={st}/ a.png")),
+        ("synergy:7:impl", format!("dd if=a of={st}/events.jsonl")),
     ] {
         assert!(run(lane, &cmd).contains("is blocked"), "{lane}: {cmd}");
     }

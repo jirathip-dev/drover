@@ -132,12 +132,17 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
-        // #499: each word resolved against the cwd; a conductor's write lands only in its own folder.
-        let paths = t.iter().filter(|w| !w.starts_with('-')).map(|w| resolve(w, &cwd));
-        if let Some(pp) = paths
-            .into_iter()
-            .find_map(|f| protected_path(&f, p).filter(|_| !own_file(&f, p)))
-        {
+        // #499: each path in a word (`--opt=`, `of=`, `a>b` split off) resolved against the cwd; a conductor's
+        // write lands only in its own folder. The segment's own text is still checked unless it names that folder.
+        let paths: Vec<String> = (t.iter().flat_map(|w| w.split(['=', '>'])))
+            .filter(|w| !w.is_empty() && !w.starts_with('-'))
+            .map(|w| resolve(w, &cwd))
+            .collect();
+        let hit = paths
+            .iter()
+            .find_map(|f| protected_path(f, p).filter(|_| !own_file(f, p)));
+        let seg_hit = protected_path(seg, p).filter(|_| !paths.iter().any(|f| own_file(f, p)));
+        if let Some(pp) = hit.or(seg_hit) {
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))
                 || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
