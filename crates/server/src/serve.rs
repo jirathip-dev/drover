@@ -516,7 +516,14 @@ fn names(name: &str, v: &str) -> bool {
 fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
         "merged" | "ready" | "PASS" | "working" | "done" | "ok" | "normal" => "g",
-        "blocked" | "needs-human" | "⏸ waiting: decision" | "dead" | "FAIL" | "critical" | "capped" => "r",
+        "blocked"
+        | "needs-human"
+        | "design-review"
+        | "⏸ waiting: decision"
+        | "dead"
+        | "FAIL"
+        | "critical"
+        | "capped" => "r",
         "parked" | "asleep" => "m",
         _ => "a",
     }
@@ -725,6 +732,8 @@ impl<'a> Server<'a> {
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") {
                     140 << 20 // #405: up to 10 files a message
+                } else if h.starts_with("POST /report ") {
+                    3 << 20 // #363: a report carries its screenshot
                 } else {
                     32_768
                 };
@@ -979,7 +988,9 @@ impl<'a> Server<'a> {
         }
         // Host/Origin-checked: the live stream, transcripts, Herd's data and every write.
         let guarded = method == "GET"
-            && (["/live", "/lane", "/herd.json"].contains(&path) || path.starts_with("/thread/"))
+            && (["/live", "/lane", "/herd.json"].contains(&path)
+                || path.starts_with("/thread/")
+                || path.starts_with("/design/"))
             || method == "POST" && self.addr.is_some();
         let paired_op = form(body.trim())
             .get("op")
@@ -1028,6 +1039,19 @@ impl<'a> Server<'a> {
                 match at.and_then(|p| std::fs::read(p).ok()) {
                     Some(b) => ("200 OK", ctype(&name), b),
                     None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
+                }
+            }
+            // #412: a PNG of the design waiting for the owner's decision.
+            ("GET", p) if p.starts_with("/design/") => {
+                let mut it = p[8..].splitn(3, '/');
+                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
+                let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let ev = read(&ctx.state).unwrap_or_default();
+                let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                match at.and_then(|p| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", PNG, b),
+                    None => ("404 Not Found", "text/plain", text("no such design file\n")),
                 }
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
@@ -1079,7 +1103,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread" | "/report")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1125,7 +1149,7 @@ impl<'a> Server<'a> {
         devices::find(ctx, header(head, "cookie").unwrap_or_default())
     }
 
-    /// The reply box (or a blocked menu's option, or a sheet action): a paired device (cookie) prompts one agent, at most 10 sends a minute.
+    /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
     fn send(&self, ctx: &Ctx, head: &str, f: &BTreeMap<String, String>, path: &str) -> (&'static str, String) {
         let Some(dev) = self.device(ctx, head) else {
             return ("401 Unauthorized", "pair this device: tap Pair this phone".into());
@@ -1150,6 +1174,8 @@ impl<'a> Server<'a> {
             self.pick(ctx, &dev, &body(f))
         } else if act {
             self.act(ctx, &dev, &body(f))
+        } else if path == "/report" {
+            Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(
@@ -1609,8 +1635,9 @@ impl<'a> Server<'a> {
             .filter(|l| l.state == "blocked")
             .map(|l| self.blocked(ctx, l, paired))
             .collect();
-        // #386: a conductor's asks wait in its thread (amber), not in this stack.
-        crate::events::open_asks(events).into_iter().filter(|a| a.str("thread").is_none()).map(|a| {
+        // #386: a conductor's asks wait in its thread (amber), not in this stack; #412: a design's here too.
+        let design = |a: &&Event| crate::design::is_ask(a);
+        crate::events::open_asks(events).into_iter().filter(|a| a.str("thread").is_none() || design(a)).map(|a| {
             let s = |k| a.str(k).unwrap_or_default();
             let who = join(&[&a.fleet, &a.issue.map_or(String::new(), |n| format!("#{n}")), s("agent"), &age(ctx.now.saturating_sub(a.ts))]);
             let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
@@ -1621,7 +1648,13 @@ impl<'a> Server<'a> {
             let who = esc(&who);
             let question = esc(s("question"));
             let form = self.addr.as_ref().map_or(String::new(), |_| answer_form(ctx, a, "Send"));
-            format!("<div class=ask><p><b>needs you</b> <span class=m>{who}</span> <span class=m>· {kind}{}</span></p><p>{question}</p>{form}</div>", host.unwrap_or_default())
+            // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
+            let png = |(i, f): (usize, &serde_json::Value)| {
+                let name = esc(f["name"].as_str().unwrap_or_default());
+                format!("<figure class=im><img src=\"design/{}/{}/{i}\" alt=\"{name}\" loading=lazy><figcaption>{name}</figcaption></figure>", enc(&a.fleet), a.issue.unwrap_or_default())
+            };
+            let pngs: String = chat::files_of(a).enumerate().map(png).collect();
+            format!("<div class=ask><p><b>needs you</b> <span class=m>{who}</span> <span class=m>· {kind}{}</span></p><p>{question}</p>{pngs}{form}</div>", host.unwrap_or_default())
         }).collect::<String>() + &blocked + &self.needs_human(ctx, cfg, events, st, paired)
     }
 
