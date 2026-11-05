@@ -307,7 +307,7 @@ fn every_idle_lane_of_an_issue_gets_a_reason() {
 }
 
 #[test]
-fn waiting_lists_drive_and_owner_items_with_their_next_command() {
+fn waiting_lists_every_open_item_with_its_next_command() {
     let (c, r) = fixture("waiting-cmd");
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
@@ -316,7 +316,8 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
         out.contains("sendmeter #1 owner: waiting on your answer (q3) (10m)\n"),
         "{out}"
     );
-    assert!(!out.contains("#5 "), "ci and none items are not listed: {out}");
+    // #445: every open issue is listed with its reason, ci and nothing-due ones too.
+    assert!(out.contains("sendmeter #5 ci: PASS · CI running 0/1 (24m)\n"), "{out}");
     // #444: herdr lists no lane here, so the impl lanes that never pushed are gone: respawned by drive.
     assert!(
         out.contains("sendmeter #10 drive: lane gone, no push: respawning impl (25m) → herdsman spawn sendmeter 10 impl --supersede\n"),
@@ -326,8 +327,8 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
     let v: serde_json::Value = serde_json::from_str(&j).unwrap();
     assert_eq!(
         v.as_array().unwrap().len(),
-        12,
-        "#9 and #12's reviewers exited, #7, #10 and #11 gone: {out}"
+        14,
+        "#9 and #12's reviewers exited, #7, #10 and #11 gone, #5 and #13 listed too: {out}"
     );
     assert!(
         out.contains("sendmeter #12 drive: reviewer exited without a verdict: reviewing again"),
