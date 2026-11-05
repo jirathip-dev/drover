@@ -32,7 +32,7 @@ jobs:
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|herdsman-core|herdsman-server' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|herdsman-core|herdsman-server' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
       - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
         run: |

@@ -117,7 +117,8 @@ pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
 /// Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
 pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balance, bool), String>> {
     let p = cfg.providers.deepseek.as_ref()?;
-    let key = match p.env_file.as_deref().or(cfg.accounts.accounts_env.as_deref()) {
+    let stored = || r.secret(&crate::secret::service("all", &p.key_env)).ok().flatten();
+    let key = match p.env_file.as_deref() {
         Some(f) => match std::fs::read_to_string(expand(f))
             .ok()
             .and_then(|t| env_value(&t, &p.key_env))
@@ -126,7 +127,7 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
             Some(k) => k,
             None => return Some(Err(format!("key not found in {f}"))),
         },
-        None => std::env::var(&p.key_env).ok().filter(|k| !k.is_empty())?,
+        None => stored().or(std::env::var(&p.key_env).ok()).filter(|k| !k.is_empty())?,
     };
     let path = dir(ctx).join("deepseek.json");
     let cached: Option<Balance> = load(&path);

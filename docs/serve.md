@@ -317,7 +317,8 @@ Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/th
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
 shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
-for the state database (#344, docs/architecture.md). CI's deps gate fails on any other direct dependency.
+for the state database (#344, docs/architecture.md), and keyring for the main host's secret store
+(#441, owner-approved; docs/providers.md). CI's deps gate fails on any other direct dependency.
 
 ## JSON API v1 (#265)
 

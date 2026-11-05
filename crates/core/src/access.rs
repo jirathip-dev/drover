@@ -1,12 +1,12 @@
 //! What a lane may use: its account (first uncapped of an ordered list; tokens never read out) and MCP servers.
-use crate::config::{expand, Config, Fleet, Role};
+use crate::config::{Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::gate::refused;
 use crate::harness::Credential;
 use crate::runner::Runner;
 use crate::usage;
 use crate::Ctx;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -43,13 +43,13 @@ pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(R
     Ok((to, until.map(|t| (format!("on {entry} ({resting} resting until"), t))))
 }
 
-/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and the
-/// pane-shell assignment that exports its token straight from the env file; None unless the role's harness runs on an
+/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and its
+/// token's secret name (#441: `spawn::deliver` reads it from the store); None unless the role's harness runs on an
 /// `[accounts]` token (`Credential::Token`).
 pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<(String, String)>> {
     let now = ctx.now;
     let mut names = role.account_list();
-    let Credential::Token(token_var) = crate::harness::get(&role.harness).credential() else {
+    let Credential::Token(_) = crate::harness::get(&role.harness).credential() else {
         return Ok(None);
     };
     if names.is_empty() {
@@ -88,22 +88,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         let why = format!("every account {all:?} is capped; the first resets in {at}");
         return refused("ALL_CAPPED", why);
     };
-    let var = &cfg.accounts.names[name];
-    let file = expand(
-        cfg.accounts
-            .accounts_env
-            .as_deref()
-            .context("[accounts].accounts_env is not set")?,
-    );
-    let text = std::fs::read_to_string(&file).with_context(|| format!("cannot read {}", file.display()))?;
-    if !has_var(&text, var) {
-        bail!("account {name}: {var} is not set in {}", file.display());
-    }
-    let src = file.to_string_lossy().replace('\'', r"'\''");
-    Ok(Some((
-        name.clone(),
-        format!("{token_var}=\"$(. '{src}' && printf %s \"${var}\")\""),
-    )))
+    Ok(Some((name.clone(), cfg.accounts.names[name].clone())))
 }
 
 /// The banner's `resets 9am` / `resets Nov 4, 8am` (host local time); else `cap_reset_minutes` on (a day if weekly).
@@ -161,13 +146,6 @@ pub fn civil_year(days: u64) -> u64 {
 fn local_offset(r: &dyn Runner, now: u64) -> i64 {
     let z = usage::date(r, now, "+%z").parse::<i64>().unwrap_or(0);
     z / 100 * 3600 + z % 100 * 60
-}
-
-/// `var` has a non-empty value in an env file's `text` (`VAR=value` lines).
-pub fn has_var(text: &str, var: &str) -> bool {
-    text.lines()
-        .filter_map(|l| l.trim().trim_start_matches("export ").split_once('='))
-        .any(|(k, v)| k.trim() == var && !v.trim().trim_matches(['"', '\'']).is_empty())
 }
 
 /// The screen holds one of `pat`'s `|`-separated, case-insensitive substrings (a usage-limit banner).

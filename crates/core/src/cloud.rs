@@ -1,5 +1,5 @@
 //! #254 cloud hosts (docs/hosts.md): recipe commands start, stop and price a `[hosts.<n>] cloud` host; logs `cloud-*`.
-use crate::config::{expand, write_atomic, Config};
+use crate::config::{write_atomic, Config};
 use crate::events::{age, emit, read, Event};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -25,10 +25,9 @@ fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Resul
     let (rc, size) = recipe(ctx, cfg, name)?;
     let s = |k: &str| rc.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let (var, line) = (s("key_env"), s(verb).replace("{name}", name).replace("{size}", &size));
-    let file = || std::fs::read_to_string(expand(cfg.accounts.accounts_env.as_deref()?)).ok();
-    let env = || crate::usage::env_value(&file()?, &var);
-    let key = std::env::var(&var).ok().or_else(env).unwrap_or_default();
-    ensure!(!key.is_empty(), "{var} not set (env or accounts_env)");
+    let stored = || r.secret(&crate::secret::service("all", &var)).ok().flatten();
+    let key = std::env::var(&var).ok().or_else(stored).unwrap_or_default();
+    ensure!(!key.is_empty(), "{var} not set (env or the store's `all` secret {var})");
     let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {line}");
     let o = r.run_in("sh", &argv(&["-c", &script]), &format!("{key}\n"))?;
     let err = o.stderr.trim().replace(&key, "•••");

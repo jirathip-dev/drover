@@ -106,7 +106,7 @@ pub struct Plan {
     pub kick: String,
     /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
     pub lane: String,
-    /// `[accounts]` lanes: the account name and the shell assignment exporting its token.
+    /// `[accounts]` lanes: the account name and its token's secret name (`all`'s, in the store).
     pub account: Option<(String, String)>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
@@ -123,24 +123,44 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env` and an account's token in the pane's shell.
+    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
         let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
         let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
         let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
-        // #387: `secret:<NAME>` is read from the keychain by the pane's shell, never by herdsman.
-        let fleet = self.lane.split(':').next().unwrap_or_default();
-        c.extend(self.env.iter().map(|(k, x)| match x.strip_prefix("secret:") {
-            Some(n) => format!("{k}={}", crate::secret::shell(fleet, n)),
-            None => format!("{k}='{}'", v(x)),
-        }));
-        c.extend(
-            self.account
-                .iter()
-                .flat_map(|a| [format!("HERDSMAN_ACCOUNT='{}'", a.0), a.1.clone()]),
-        );
+        let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
+        c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
+        c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        if !self.secrets().is_empty() {
+            let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
+            c.push(format!("&& . '{f}'"));
+        }
         c
+    }
+
+    /// #441: (env var, fleet, secret name) of each `secret:<NAME>` env and of the account's token.
+    fn secrets(&self) -> Vec<(String, &str, String)> {
+        let fleet = self.lane.split(':').next().unwrap_or_default();
+        let env = self
+            .env
+            .iter()
+            .filter_map(|(k, x)| Some((k.clone(), fleet, x.strip_prefix("secret:")?.into())));
+        let token = match harness::get(&self.harness).credential() {
+            harness::Credential::Token(v) => Some(v),
+            _ => None,
+        };
+        let acct = self
+            .account
+            .iter()
+            .zip(token)
+            .map(|(a, v)| (v.to_string(), "all", a.1.clone()));
+        env.chain(acct).collect()
+    }
+
+    /// The file `deliver` writes beside the worktree, on the lane's host.
+    pub fn secrets_file(&self) -> PathBuf {
+        PathBuf::from(format!("{}.env", self.worktree.display()))
     }
 
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
@@ -157,6 +177,34 @@ impl Plan {
         self.brief = self.worktree.join(".brief.md");
         self.mcp_file = self.worktree.join(".mcp.lane.json");
         self.kick = format!("Read {} and execute it fully.", self.brief.display());
+    }
+}
+
+/// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
+/// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
+pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+    let mut text = String::new();
+    for (var, fleet, name) in p.secrets() {
+        let v = crate::secret::lookup(on, fleet, &name)?;
+        let why =
+            || format!("{var}: secret {name} is not in the store (`herdsman accounts import` or a secret request)");
+        text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
+    }
+    let file = (!text.is_empty()).then(|| p.secrets_file());
+    if let Some(f) = &file {
+        on.write_private(f, &text)?;
+    }
+    Ok(Delivered(on, file))
+}
+
+/// The secrets file `deliver` wrote; removed on drop (the lane's shell has read it by then).
+pub struct Delivered<'a>(&'a crate::hosts::On<'a>, Option<PathBuf>);
+
+impl Drop for Delivered<'_> {
+    fn drop(&mut self) {
+        if let Some(f) = &self.1 {
+            let _ = self.0.remove(f);
+        }
     }
 }
 
@@ -577,8 +625,6 @@ pub fn spawn(
         p.at(&pl.root, f.repo_name());
         p.env.insert("HERDSMAN_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
         if pl.machine.is_some() {
-            p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
-
             // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
             p.env.insert("HERDSMAN_OUTBOX".into(), "1".into());
         }
@@ -811,6 +857,7 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
+    let _secrets = deliver(&on, &p)?;
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
     let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
         Err(e) if format!("{e:#}").contains("workspace_not_found") => {
