@@ -566,7 +566,7 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) ->
     let new_cfg = Config::parse(&new)?;
     let fails = |c: &Ctx| -> Result<Vec<String>> {
         let mut out = vec![];
-        crate::doctor::doctor(c, r, &mut out, true)?;
+        crate::doctor::doctor(c, r, &mut out, true, false)?;
         Ok(serde_json::from_slice::<Vec<String>>(&out)?
             .into_iter()
             .filter(|l| l.starts_with('✗'))
@@ -668,7 +668,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     h.ready(ctx, r, &p)?;
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = crate::spawn::deliver(&on, &p)?;
+    let _secrets = crate::spawn::deliver(&on, cfg, &p)?;
     let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
     let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
     herdr::ok(r, &p.lane_cmd(&new))?;
