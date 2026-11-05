@@ -60,6 +60,22 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
+/// #444: a gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
+pub const NO_PUSH: &str = ", no push: ";
+const RESPAWN_SECS: u64 = 1800;
+
+/// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
+fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
+    let reset = ["pushed", "verdict", "needs-human", "round-extended"];
+    let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let at: Vec<u64> = mine
+        .take_while(|e| !reset.contains(&e.kind.as_str()))
+        .filter(|e| e.kind == "respawn")
+        .map(|e| e.ts)
+        .collect();
+    (at.len(), at.first().copied().unwrap_or(0))
+}
+
 /// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
 pub fn reviewed_head(t: &str) -> Option<&str> {
     let l = t.lines().find(|l| l.contains("Reviewed head"))?;
@@ -477,6 +493,35 @@ pub fn scan(
             w.who = "drive";
             w.what = "reviewer exited without a verdict: reviewing again".into();
             w.next_cmd = Some(format!("herdsman spawn {} {} {c} --supersede", s.fleet, s.issue));
+        }
+        // #444: an impl/fix lane gone from herdr, or whose prompt never landed, with no push: drive respawns it
+        // `--supersede` at most every 30 min; after two respawns in a row without a push it needs a human.
+        let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
+        let gone = !agents.iter().any(|a| a["name"] == lane.as_str());
+        // A lane started this pass, or a spawn still starting, is not gone yet.
+        let settled = || {
+            sp.is_some_and(|e| ctx.now >= e.ts + 120)
+                && !crate::drive::pending(ctx)
+                    .iter()
+                    .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
+        };
+        if w.what.starts_with("idle without pushing") && (gone || unconfirmed) && settled() {
+            let (n, last) = respawns(events, &s.fleet, s.issue);
+            let role = s.build.as_deref().unwrap_or(f.flow().start());
+            let why = if gone { "lane gone" } else { "prompt never landed" };
+            w.who = "drive";
+            w.next_cmd = Some(format!("herdsman spawn {} {} {role} --supersede", s.fleet, s.issue));
+            w.what = if n >= 2 {
+                w.next_cmd = None;
+                format!("lane keeps ending{NO_PUSH}needs you")
+            } else if n > 0 && ctx.now < last + RESPAWN_SECS {
+                format!(
+                    "{why}{NO_PUSH}respawned {} ago, again after 30 min",
+                    age(ctx.now - last)
+                )
+            } else {
+                format!("{why}{NO_PUSH}respawning {role}")
+            };
         }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), events, &pr);
         let m = w.what.starts_with("PASS · CI running").then(gone).flatten();

@@ -467,6 +467,7 @@ pub const PASSIVE: &[&str] = &[
     "fallback",
     "ask-waiting",
     "driven",
+    "respawn",
     "drive-pass",
     "kick",
     "amended",
