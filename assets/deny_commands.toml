@@ -1,4 +1,5 @@
 # #216: the default [limits] deny_commands (src/config.rs). Lanes never start containers (owner rule); CI may.
+# #502: `pkill` and `killall` are denied on top of this list, whatever a fleet sets (hook::broad_kill).
 # The same entry syntax as fleet.toml: a command word or command + subcommand prefix; `why` is the whole message.
 deny_commands = [
   { cmd = "docker", why = "REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the repo's non-container test path, or ask the conductor." },

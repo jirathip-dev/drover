@@ -74,19 +74,20 @@ nav a .n{color:var(--r);font-weight:700}
 nav a.on{box-shadow:inset 0 2px var(--l)}
 nav a.on>span{background:var(--l);color:var(--bg)}
 nav a.on .n{color:inherit}
-#stale{color:var(--r);font-size:var(--fs-meta)}
 .tl,.cst{grid-column:1/-1;margin-top:calc(-1 * var(--s1));color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #dot{width:8px;height:var(--s2);border-radius:50%;background:currentColor;font-style:normal;flex:none}
 #dot.p{animation:p .6s}
 @keyframes p{50%{transform:scale(1.9)}}
 /* #290: the four header controls are one width, so each bracket sits as far from its glyph */header>button:not(.pairb){width:calc(var(--ctl) + var(--s1));padding:0}header>button:not(.pairb)+button{margin-left:var(--s2)} /* 16 px apart: no tap ring over its neighbour */#herd-on svg{width:19px;height:14px}
 #rf i,#ptr{font-style:normal}#rf.spin i,#ptr.spin{display:inline-block;animation:s 1s linear infinite}
-/* #337: a wait over 300 ms: the theme's `loading` sprite, 96 px, centred near the top of the content over a light scrim
-   (below the header, never catching a tap); terminal (no sprite): a spinning glyph. 8 fps through steps(), the trot by
-   --gait, the kf1/kf2 frames (with the flame) by --o1/--o2; reduced motion: one still frame. */
-#ld{position:fixed;inset:calc(var(--hit) + var(--s1)) 0 0;z-index:2;pointer-events:none;display:flex;justify-content:center;align-items:flex-start;padding-top:calc(var(--s4) * 3);background:color-mix(in srgb,var(--bg) 45%,transparent)}
-#ld[hidden]{display:none}#ld .lds{width:calc(var(--s4) * 6);height:calc(var(--s4) * 6);image-rendering:pixelated;shape-rendering:crispEdges;animation:ldg .5s steps(2) infinite,ldk .25s infinite}
-#ld i{font-style:normal;font-size:var(--fs-code);line-height:var(--fs-code);margin-top:calc(var(--s4) * 2);scale:1.5;color:var(--mute);animation:s 1s linear infinite}#ld i::before{content:"↻"}#ld.ld i,#ld:not(.ld) .lds{display:none}
+/* #450: one thin strip under the header on every tab: a wait over 300 ms is the chat's inline mark (.tld: the theme's
+   sprite, ascii frames or a spinning glyph) + `loading`; data over 2 min old adds `as of 3m ago`, small and dim, on the
+   same row. Nothing to say: no height. The page under it stays visible and tappable. */
+#strip{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s2);background:var(--bg);color:var(--mute);font-size:var(--fs-meta)}
+#strip:has(#ld:not([hidden]),#stale:not([hidden])){padding-block:var(--s1)}#ld[hidden],#ld[hidden]+.ldw{display:none}
+#stale{margin-left:auto;white-space:nowrap}
+/* #450 first load: a tab with nothing yet is two empty outlines of its cards (no text) until its data paints. */
+main>section:empty::before,main>section:empty::after{content:"";display:block;height:calc(var(--s4) * 5);margin:var(--s3) var(--s2);border:1px solid var(--line);border-radius:6px}
 html.bg *{animation-play-state:paused!important} /* #337: no motion while the app is in the background */
 @keyframes ldg{0%{--gait:-16deg}50%{--gait:16deg}100%{--gait:-16deg}}
 @keyframes ldk{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
@@ -104,7 +105,7 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
 .ask .reason{margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ask .command{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}.ask .command.open{display:block}
 .ask .title,.ask .cd{margin:0;font-size:var(--fs-meta)}.ask .cd{color:var(--r)}.ask :is(.title,.reason,.command):empty{display:none}
-@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#ld .lds,#ld i,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
+@media (prefers-reduced-motion:reduce){#dot.p,#rf.spin i,#ptr.spin,.fl,button[aria-busy=true]::after{animation:none}}
 .av{display:flex;align-items:center;justify-content:center;width:48px;height:40px;overflow:hidden}
 .av>*{display:none}
 /* Scene mode shows the glyph until herd.js's symbols land (`.hz`): no fetch or JS, no blank avatar. */
@@ -118,10 +119,9 @@ html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) 
    the line box (and the row) its height. */
 .rsp{width:calc(var(--s4) + var(--s2));height:calc(var(--s4) + var(--s2));margin:calc(-1 * var(--s1)) calc(var(--s1) / 2);image-rendering:crisp-edges;image-rendering:pixelated;shape-rendering:crispEdges}
 /* #335 ascii style: a row's 3-character figure in the sprite's box (so the slot stays 28 px), a Host group's load as text,
-   the loading overlay's frames (two: .run swaps them, no node replaced; reduced motion: the first). */
+   the loading mark's frames (two: .run swaps them, no node replaced; reduced motion: the first). */
 .rsa{display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-meta);line-height:1;font-style:normal;white-space:pre}
 .lsa{width:auto;font-size:var(--fs-meta);line-height:var(--s4);font-style:normal;white-space:pre;color:var(--mute)}
-#ld .lda{display:none;font-size:var(--fs-code);line-height:1;white-space:pre;color:var(--fg)}#ld.la .lda{display:grid}#ld.la :is(.lds,i){display:none}
 :is(details.q,.qc):has(>summary .gt>.rsg){--gw:calc(2 * var(--d, 0) * 1ch + var(--s4) + var(--s3))}
 details.er:has(>summary>.rsg)>summary{grid-template-columns:calc(var(--s4) + var(--s3)) var(--s2) 6ch minmax(0,1fr) auto}
 details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * var(--s2))}
@@ -130,12 +130,11 @@ details.er:has(>summary>.rsg)>.ex{padding-left:calc(var(--s4) + var(--s3) + 3 * 
 @keyframes hop{50%{translate:0 calc(-1 * var(--s2))}}@keyframes shake{25%{translate:calc(-1 * var(--s1)) 0}75%{translate:var(--s1) 0}}@keyframes pulse{50%{scale:1.2}}
 @media (prefers-reduced-motion:reduce){#mo{animation:none}}
 /* #370: a label's theme word keeps the label's colour and size, its plain word is the muted part in --fs-meta; each tab's
-   own first line; an Events kind's word in the row's tone; an empty tab's theme line over the plain one; the loading word */
+   own first line; an Events kind's word in the row's tone; an empty tab's theme line over the plain one */
 .pw{color:var(--mute);font-size:var(--fs-meta);font-weight:400;white-space:nowrap}h2 .pw,.tsub .pw{text-transform:none;letter-spacing:0}
 .tsub{margin:var(--s2) 0 0;padding:0 var(--s1);font-weight:600}
 .thw.ev{font-weight:600}details.er:has(.t-g) .thw.ev{color:var(--g)}details.er:has(.t-r) .thw.ev{color:var(--r)}details.er:has(.t-l) .thw.ev{color:var(--l)}
 p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.empty .pw{white-space:normal}
-#ld .ldw{position:absolute;top:calc(var(--s4) * 9 + var(--s2));margin:0;padding:0 var(--s2);border-radius:var(--s1);background:var(--bg);font-size:var(--fs-meta)}#ld .ldw:empty,.tld .ldw{display:none}
 /* the Host card's load: its 48 × 16 mini at 1.5×, two frames, and the level word */
 .lsm{display:inline-flex;align-items:center;gap:var(--s1);margin-left:auto;padding-left:var(--s2);font-size:var(--fs-meta)}
 .lsm svg{width:calc(var(--s4) * 3);height:var(--s4);image-rendering:pixelated;shape-rendering:crispEdges;animation:kfr 1.2s infinite}
@@ -531,9 +530,8 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}
-/* The header never wraps its title (offline, `last update hh:mm` squeezed it to a letter a line); the note, now `as of
-   hh:mm`, fits beside [?] [↻] [🐎] [⚙] at 390 and ellipsises first; the title only as a last resort (+ [Pair]). */
-body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#stale{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The header never wraps its title: it ellipsises beside [?] [↻] [🐎] [⚙] at 390 (+ [Pair]) as a last resort. */
+body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* #290: the look sheet (docs/design/pickers), #440: System's Appearance: two listboxes, THEME and COLOURS (`.cg` groups
    as in [config]), then STYLE; ≥ 900 px side by side. */
 /* A row: 44 px, the art, the name, `(theme default)`; the current one is in the accent with a ✓. Pressed inverts like a
@@ -667,7 +665,7 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .att>span{font-size:var(--fs-meta);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* #403: the box grows with its text to 6 lines, then scrolls inside; with the keyboard up (the box focused) a phone
    hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
-   delivery's system line is red too. A working thread's mark is the loading overlay's art (#ld), 24 px, inline. */
+   delivery's system line is red too. A working thread's mark is the loading strip's art (#ld), 24 px, inline. */
 .tw textarea{max-height:calc(6lh + 2 * var(--s2) + 2px);overflow-y:auto}
 /* #443: on a phone the open thread is fixed between the header and the tab bar, or the keyboard's top (`--kb`,
    serve.js) while the box is focused: the composer sits flush on it, the page never scrolls, only the messages do. */
