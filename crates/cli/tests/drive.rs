@@ -1822,7 +1822,11 @@ fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
 
 /// #12 FAILed at `head` with `body` (`stage`), then its fix lane (spawned at 40) went idle without a new commit.
 fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
-    let c = setup(name);
+    no_change_in(CONFIG, name, stage, body, ci)
+}
+
+fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+    let c = ctx(&tmpdir(name), cfg);
     let head = sha("abc");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(&c, 20, "pushed", json!({"sha": head}));
@@ -1902,6 +1906,54 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     let s = &kinds(&c, "stall")[0];
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
     assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
+}
+
+/// #445: the required `quality` runs only once a PASS adds the merge label, so at a FAILed head it never reports. A
+/// `done --no-change` there is no stall asking for it again, `waiting` names the review, and drive spawns it.
+#[test]
+fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent() {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
+    );
+    let body = "FAIL (form-only)\n1. blocking [form]: the PR body lacks For humans";
+    let (c, r, head) = no_change_in(&cfg, "drive-noop-label", "rev", body, "pending");
+    let earlier = herdsman::Ctx {
+        now: c.now - 3 * 3600,
+        ..c.clone()
+    };
+    let (code, out) = run(
+        &earlier,
+        &r,
+        &["done", "sendmeter", "12", "--no-change", "PR body rewritten"],
+    );
+    assert_eq!(code, 0, "{out}");
+    // `waiting` reads the PR, as the tick does before `check`.
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    let want = format!(
+        "sendmeter #12 drive: no change at {:.7}, waiting for drive (next pass ≤ 5 min) to spawn review",
+        head
+    );
+    assert!(out.contains(&want), "{out}");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let stalls: Vec<_> = kinds(&c, "stall")
+        .iter()
+        .map(|e| e.str("reason").unwrap().to_string())
+        .collect();
+    assert!(stalls.iter().all(|s| !s.contains("--no-change")), "{stalls:?}");
+    assert!(
+        stalls
+            .iter()
+            .any(|s| s.ends_with("fix-done recorded, waiting for drive to spawn review")),
+        "{stalls:?}"
+    );
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
+    let e = &kinds(&c, "fix-no-change")[0];
+    assert_eq!((e.str("sha"), e.str("ci")), (Some(head.as_str()), Some("pending")));
+    assert!(state(&c).starts_with("review"), "{}", state(&c));
 }
 
 /// #388: a PASSed head with no checks reads `CI running` inside `ci_start_minutes`, `CI missing` after it; a pending

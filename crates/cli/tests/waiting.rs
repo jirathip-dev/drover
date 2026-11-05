@@ -299,7 +299,7 @@ fn every_idle_lane_of_an_issue_gets_a_reason() {
 }
 
 #[test]
-fn waiting_lists_drive_and_owner_items_with_their_next_command() {
+fn waiting_lists_every_open_item_with_its_next_command() {
     let (c, r) = fixture("waiting-cmd");
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
@@ -308,13 +308,15 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
         out.contains("sendmeter #1 owner: waiting on your answer (q3) (10m)\n"),
         "{out}"
     );
+    // #445: every open issue is listed with its reason, ci and nothing-due ones too.
     assert!(
-        !out.contains("#5 ") && !out.contains("#7 "),
-        "ci and none items are not listed: {out}"
+        out.contains("sendmeter #5 ci: PASS · CI running 0/1 (24m)\n")
+            && out.contains("sendmeter #7 none: idle without pushing (check the pane) (25m)\n"),
+        "ci and none items are listed: {out}"
     );
     let (_, j) = run(&c, &r, &["waiting", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&j).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 9, "#9 and #12's reviewers exited: {out}");
+    assert_eq!(v.as_array().unwrap().len(), 14, "#9 and #12's reviewers exited: {out}");
     assert!(
         out.contains("sendmeter #12 drive: reviewer exited without a verdict: reviewing again"),
         "{out}"

@@ -60,6 +60,12 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
+/// #445: the `fix-done` (`done --no-change`) logged since the issue's last verdict: its head is reviewed again.
+pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
+    let mut since = events.iter().rev().take_while(|e| !e.is("verdict", f, n));
+    since.find(|e| e.is("fix-done", f, n))
+}
+
 /// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
 pub fn reviewed_head(t: &str) -> Option<&str> {
     let l = t.lines().find(|l| l.contains("Reviewed head"))?;
@@ -287,12 +293,16 @@ pub fn waiting_on(
         // #319: so is the FAILed head again after a fix round that changed nothing (`fix-no-change`).
         "impl" | "fix"
             if !pushed.is_empty()
-                && (!s.reviewed(pushed) || s.last_event == "fix-no-change")
+                && (!s.reviewed(pushed) || s.last_event == "fix-no-change" || fix_done(events, f, n).is_some())
                 && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
         {
+            let how = match s.rounds {
+                _ if s.reviewed(pushed) => "no change at ",
+                0 => "pushed ",
+                _ => "pushed fix ",
+            };
             let mut what = format!(
-                "pushed {}{}, waiting for drive to spawn review",
-                if s.rounds > 0 { "fix " } else { "" },
+                "{how}{}, waiting for drive to spawn review",
                 &pushed[..7.min(pushed.len())]
             );
             // #212: drive's last try at this review was refused: say why in plain words.

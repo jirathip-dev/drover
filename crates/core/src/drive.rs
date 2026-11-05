@@ -855,8 +855,11 @@ fn handoff(
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
-        let idle = w.who == "none" && ctx.now >= w.since + 120;
-        if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
+        // #445: a recorded `done --no-change` is due at once; a check that runs only once labelled never blocks it.
+        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some();
+        let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
+        let idle = done || w.who == "none" && ctx.now >= w.since + 120;
+        if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
         if s.reviewed(head) {

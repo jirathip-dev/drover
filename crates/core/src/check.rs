@@ -205,7 +205,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let ci = cfg
                     .fleet(&s.fleet)
                     .map(|f| gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)));
+                let done = crate::waiting::fix_done(&events, &s.fleet, s.issue).is_some();
                 let why = match ci {
+                    Ok(_) if same && done => "fix-done recorded, waiting for drive to spawn review".into(),
                     Ok(ci) if same => format!(
                         "fix lane idle, head unchanged, CI {ci}: run herdsman done {} {} --no-change \"<why>\" or push",
                         s.fleet, s.issue

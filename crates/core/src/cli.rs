@@ -164,7 +164,7 @@ enum Cmd {
     },
     /// Per-issue state, lane and last-event age
     Status(Scope),
-    /// Every lane waiting on drive or the owner, with its next command (the owner's watchdog)
+    /// Every open issue's latest lane: what it waits on, with its next command (the owner's watchdog)
     Waiting(Scope),
     /// Print the issue spec cached at spawn; read this instead of `gh issue view`
     Brief { fleet: String, issue: u64 },
@@ -1054,9 +1054,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     );
                     let rows: Vec<_> = all
                         .into_iter()
-                        .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane))
+                        // #445: every open issue, with the reason, nothing-due ones too.
+                        .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")
                         .map(|x| x.1)
-                        .filter(|w| matches!(w.who, "drive" | "owner") && fleet.as_ref().is_none_or(|f| *f == w.fleet))
+                        .filter(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet))
                         .collect();
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
