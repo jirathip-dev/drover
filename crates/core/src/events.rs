@@ -269,7 +269,15 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
+    // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
+    let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
+    let watched = ev
+        .str("thread")
+        .and_then(at)
+        .and_then(|a| a.trim().parse::<u64>().ok())
+        .is_some_and(|a| a + 5 >= ev.ts);
     let push = match ev.kind.as_str() {
+        _ if watched => "",
         "needs-decision" if ev.str("kind") == Some("routine") => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.

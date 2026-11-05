@@ -668,3 +668,17 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
 html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
 @media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}
+/* #407: a finished turn's commands fold into one `▸ N commands` row; open, its rows under it. */
+.blk.fold{--k:var(--a)}.fold>summary::before{content:"▸";color:var(--k)}.fold[open]>summary::before{content:"▾"}
+.blk.fold[open]>summary .pv{visibility:visible}.fold>.blk{margin-top:var(--s4)}
+/* #407: the floating pill above the box (working, stopping…, reconnecting…, offline); the line it replaces hides. */
+.tlv.wk{display:none}
+.pill{position:absolute;bottom:calc(100% + var(--s2));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:var(--s2);max-width:calc(100% - 2 * var(--s4));min-height:var(--ctl);padding:0 var(--s3);border:1px solid var(--edge);border-radius:999px;background:var(--card);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap}
+/* #407: queued messages above the box, one line each with [send now] edit [remove]; the edit line; the hint under it. */
+.tq{flex-basis:100%;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);padding:0 var(--s2);border-left:2px solid var(--a);border-radius:6px;background:var(--card)}
+.tq>p{flex-basis:100%;margin:0;padding-top:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tw>:is(.qe,.qh){flex-basis:100%;margin:0;font-size:var(--fs-meta);color:var(--mute)}.tw>.qh{margin-top:calc(-1 * var(--s2))}
+/* #407: a long press's menu: the send's [queue]/[steer] choices, or a message's [copy] [copy as markdown] [quote]. */
+#mm{position:fixed;z-index:3;left:var(--s3);right:var(--s3);display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);padding:var(--s2) var(--s3);border:1px solid var(--edge);border-radius:6px;background:var(--card);font-size:var(--fs-meta)}
+#mm[hidden]{display:none}
+@media (pointer:coarse){.cvp :is(.snd,.tc .blk:is(.me,.ai)){-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
