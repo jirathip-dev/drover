@@ -67,7 +67,7 @@ fn pass(c: &herdsman::Ctx, r: &Fake) -> serde_json::Value {
 
 #[test]
 fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
-    let c = fleet("kicks-ten", 10, 10);
+    let c = fleet("kicks-ten", 11, 10);
     // The harness start never returns quickly; the pass must not reach it.
     let r = fake("1.0")
         .reply("herdr agent start", "{}")
@@ -90,25 +90,26 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
     let c = fleet("kicks-max", 3, 5);
     let r = fake("1.0");
     let d = pass(&c, &r);
-    assert_eq!(d["spawns_launched"], 3, "{d}");
-    assert!((1..=3).all(|n| launched(&r, n) == 1) && (4..=5).all(|n| launched(&r, n) == 0));
+    // #513: starts leave the last slot to in-flight work.
+    assert_eq!(d["spawns_launched"], 2, "{d}");
+    assert!((1..=2).all(|n| launched(&r, n) == 1) && (3..=5).all(|n| launched(&r, n) == 0));
     let held = d["actions"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|a| a["code"] == "SPAWN_PENDING")
         .count();
-    assert_eq!(held, 2, "{d}");
+    assert_eq!(held, 3, "{d}");
     // Kick #1 re-checks admission: a busy host gives up quietly, no harness start, its marker cleared.
     let busy = fake("40.0");
     let (code, out) = run(&c, &busy, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
     assert!(!busy.called("herdr agent start") && marker(&c, 1).is_none());
-    // Its slot is free again: the next pass launches #1 once more and #4, not #2/#3 still starting.
+    // Its slot is free again: the next pass launches #1 once more, not #2 still starting nor #3 (the reserved slot).
     let r = fake("1.0");
     pass(&c, &r);
-    assert_eq!((launched(&r, 1), launched(&r, 2), launched(&r, 4)), (1, 0, 0));
+    assert_eq!((launched(&r, 1), launched(&r, 2), launched(&r, 3)), (1, 0, 0));
 }
 
 #[test]
@@ -357,4 +358,53 @@ fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
     let d = pass(&c, &r);
     assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
     assert_eq!((launched(&r, 1), launched(&r, 2)), (0, 1), "{d}");
+}
+
+/// #513: issue `n` (not queued) built, pushed and FAILed: its fix round is due.
+fn fix_due(c: &herdsman::Ctx, n: u64) {
+    let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
+    std::fs::create_dir_all(&wt).unwrap();
+    let d = serde_json::json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": "w9:p1",
+        "worktree": wt, "branch": format!("issue-{n}")});
+    let at = |kind, d| herdsman::events::Event::new(10, "sendmeter", Some(n), kind, d);
+    herdsman::events::append(&c.state, &at("spawn", d)).unwrap();
+    let v = serde_json::json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": "FAIL\nsrc/x.rs:3 off by one"});
+    herdsman::events::append(&c.state, &at("verdict", v)).unwrap();
+}
+
+/// #513: in-flight fix rounds launch before any start, and starts leave the last slot free.
+#[test]
+fn fix_rounds_launch_before_starts_and_starts_keep_one_slot_free() {
+    let c = fleet("kicks-order", 6, 10);
+    (21..=22).for_each(|n| fix_due(&c, n));
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} "));
+    let (fixes, starts) = ([at(21), at(22)], (1..=10).filter_map(at).collect::<Vec<_>>());
+    assert!(fixes.iter().all(Option::is_some), "{d}");
+    assert!(starts.iter().all(|s| fixes.iter().all(|f| f < &Some(*s))), "{d}");
+    assert_eq!((starts.len(), d["spawns_launched"].as_u64()), (3, Some(5)), "{d}");
+}
+
+/// #513: five starts still starting: a due fix round takes the reserved sixth slot; a start does not.
+#[test]
+fn a_due_fix_round_takes_the_reserved_slot() {
+    let c = fleet("kicks-reserved", 6, 1);
+    (11..=15).for_each(|n| mark(&c, n, 4242, 10));
+    fix_due(&c, 21);
+    let r = fake("1.0")
+        .reply("kill -0 4242", "")
+        .reply("ps -o etime= -p 4242", "  00:30\n");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 21), launched(&r, 1)), (1, 0), "{d}");
+    assert!(codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+}
+
+/// #513: one slot, nothing in flight: a start still launches.
+#[test]
+fn one_slot_and_nothing_in_flight_still_starts() {
+    let c = fleet("kicks-one", 1, 2);
+    let r = fake("1.0");
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
 }
