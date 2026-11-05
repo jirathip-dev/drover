@@ -61,6 +61,28 @@
     f.querySelectorAll('[disabled]').forEach(e => { e.disabled = false; });
     return f;
   };
+  // #407: t3 mid-turn (its live line as serve.rs renders it, the turn 83 s old), with `qd` queued messages above the box
+  // (their markup as serve.rs renders it), its composer enabled.
+  const midTurn = (qd = '') => {
+    tab('chat'); chatOpen('t3'); $('.lall')?.click();
+    const c = $('#chat').cloneNode(true), l = c.querySelector('.cvp[data-t=t3] .tlv');
+    Object.assign(l, { className: 'tlv wk', innerHTML: '<i class=tld aria-hidden=true></i> working' }).dataset.since = Math.round(Date.now() / 1e3) - 83;
+    c.querySelector('.tw[data-t=t3] input[type=file]').insertAdjacentHTML('beforebegin', qd);
+    frag('chat', c.innerHTML);
+    return composer();
+  };
+  const QD = (q, t) => `<div class=tq data-q=${q}><p title="${t}">${t}</p><span class=btns><button type=button name=qn>send now</button><button type=button name=qe>edit</button><button type=button name=qx>remove</button></span></div>`;
+  const pillIs = (want, what) => { const p = $('#chat .cvp[data-t=t3] .pill'), t = p && [...p.childNodes].filter(n => !n.matches?.('.tld')).map(n => n.textContent).join(''); if (!p || !seen(p) || !want.test(t)) early.push(`${what}: pill "${t}"`); return p; };
+  // A long press on `e` (a held ½ s timer fired by hand: virtual time).
+  const press = e => {
+    const r = e.getBoundingClientRect(), st = window.setTimeout, fs = [];
+    window.setTimeout = (f, ms) => ms === 500 ? fs.push(f) : st(f, ms);
+    e.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 }));
+    window.setTimeout = st;
+    fs.forEach(f => f());
+    e.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 }));
+    e.click(); // the click a release ends with: it does nothing else
+  };
   const VIEWS = {
     queue: () => tab('queue'),
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
@@ -256,11 +278,8 @@
     // the theme's sprite (pixel), its ascii_loading frames (ascii, `ascii-chat-wait`), the glyph (terminal); a still
     // frame with reduced motion (`chat-wait-still`); never the #ld overlay.
     'chat-wait': () => {
-      tab('chat'); chatOpen('t3'); $('.lall')?.click();
-      const c = $('#chat').cloneNode(true);
-      c.querySelector('.cvp[data-t=t3] .tlv').innerHTML = '<i class=tld aria-hidden=true></i> working';
-      frag('chat', c.innerHTML);
-      const i = $('#chat .cvp[data-t=t3] .tld'), t = document.documentElement.dataset.theme, asc = B.dataset.mode === 'ascii';
+      midTurn(); // #407: the mark is in the floating pill
+      const i = $('#chat .cvp[data-t=t3] .pill .tld'), t = document.documentElement.dataset.theme, asc = B.dataset.mode === 'ascii';
       const want = asc ? '.lda' : t === 'terminal' ? 'i' : '.lds', shown = [...i.children].filter(seen), r = i.getBoundingClientRect();
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches, a = shown[0] && getComputedStyle(asc ? shown[0].lastChild : shown[0]).animationName;
       if (shown.length !== 1 || !shown[0].matches(want)) early.push(`${t}${asc ? ' ascii' : ''}: the mark shows ${shown.map(e => e.outerHTML.slice(0, 30))}, not ${want}`);
@@ -270,6 +289,138 @@
       if (!DBG.get('check')) $$('#chat .cvp[data-t=t3] .tc>*').forEach(e => { e.hidden = true; });
     },
     'chat-wait-still': () => VIEWS['chat-wait'](),
+    // #407 gate 2: after a send the message sits 16 px under the thread bar, scrolled to the end, the room under it
+    // empty until the reply fills it; a reply that comes keeps it there.
+    'chat-pin': async () => {
+      const f = composer(), box = f.elements.text;
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(() => {}) : F(u, o);
+      box.value = 'and the premerge checks: which ones block?';
+      f.requestSubmit();
+      await wait();
+      const at = () => $('#chat .cvp[data-t=t3] .snt').getBoundingClientRect().top - Math.max(0, ...[$('header'), $('#chat .cvp[data-t=t3] .th')].map(e => e.getBoundingClientRect().bottom));
+      const c = innerWidth < 1000 ? $('#chat .cvp[data-t=t3] .tc') : document.scrollingElement, end = () => Math.abs(c.scrollTop + c.clientHeight - c.scrollHeight) <= 1; // (#443: a phone's messages scroll)
+      if (Math.abs(at() - 16) > 1 || !end()) early.push(`pinned: ${at()} px under the bar (or the screen's top), not 16; at the end ${end()}`);
+    },
+    // #407 gate 2: a finished turn's commands fold into one `2 commands` row (t4), then open: its rows under it.
+    'chat-fold': () => {
+      VIEWS['chat-thread']();
+      const d = [...$$('#chat .cvp[data-t=t4] .fold')].find(d => d.querySelector('summary').textContent === '2 commands');
+      if (!d || d.open || d.querySelector('summary').textContent !== '2 commands' || d.querySelectorAll('.blk.run').length !== 2) early.push(`no closed "2 commands" fold: ${d?.outerHTML.slice(0, 80)}`);
+      if (!d) return;
+      [...$$('#chat .cvp[data-t=t4] .tc>*')].slice(0, [...d.parentNode.children].indexOf(d) - 1).forEach(e => { e.hidden = true; });
+      FOL = false; // read from the top, as after a drag up (a scrolled view shoots blank)
+      scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; });
+      if (DBG.get('check')) { d.open = true; if (!seen(d.querySelector('.blk.run'))) early.push('the open fold shows no rows'); }
+    },
+    // #407 gate 2: the pill: `working 1m 23s` with the art and [stop]; after [stop] `stopping…`; with the stream down
+    // `reconnecting…`, then (30 s or offline) `offline · tap to retry`; idle and connected, none.
+    'chat-pill': () => {
+      if (DBG.get('check')) { composer(); if ($('#chat .pill')) early.push('an idle thread shows a pill'); }
+      midTurn();
+      const p = pillIs(/^working 1m 2\ds?stop$/, 'working');
+      if (!p?.querySelector('.tld').children.length || !p.querySelector('.stp')) early.push('the working pill has no art or [stop]');
+      if (p && p.getBoundingClientRect().bottom > $('#chat .tw[data-t=t3] textarea').getBoundingClientRect().top) early.push('the pill is not above the box');
+    },
+    'chat-pill-stopping': () => {
+      VIEWS['chat-pill']();
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(() => {}) : F(u, o);
+      $('#chat .pill .stp').click();
+      pillIs(/^stopping…$/, 'after [stop]');
+    },
+    'chat-pill-reconnecting': () => {
+      VIEWS['chat-pill']();
+      delete B.dataset.demo;
+      down = Date.now() - 5000;
+      pill();
+      pillIs(/^reconnecting…$/, 'the stream down 5 s');
+    },
+    'chat-pill-offline': () => {
+      VIEWS['chat-pill']();
+      delete B.dataset.demo;
+      down = Date.now() - 40000;
+      pill();
+      pillIs(/^offline · tap to retry$/, 'the stream down 40 s');
+    },
+    // #407 gate 2: mid-turn [send] reads [queue] with its hint; queued messages wait above the box, each with
+    // [send now], edit, [remove]. A send queues (op=queue, no `sending…` mark).
+    'chat-queue': async () => {
+      const f = midTurn(QD(101, 'and run the premerge checks on staging first') + QD(102, 'then tell me which ones would have blocked #48, with the logs of each failing one'));
+      const posts = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? (posts.push(Object.fromEntries(new URLSearchParams(o.body))), Promise.resolve(new Response('queued\n'))) : F(u, o);
+      const rows = [...f.querySelectorAll('.tq')], top = f.elements.text.getBoundingClientRect().top;
+      if (f.querySelector('.snd').textContent !== 'queue' || !f.querySelector('.qh')) early.push(`[send] reads "${f.querySelector('.snd').textContent}", hint ${!!f.querySelector('.qh')}`);
+      if (rows.length !== 2 || rows.some(r => r.getBoundingClientRect().bottom > top || r.querySelectorAll('button').length !== 3)) early.push('the queued rows are not above the box with 3 buttons each');
+      if (DBG.get('check')) {
+        f.elements.text.value = 'one more';
+        f.requestSubmit();
+        await wait();
+        if (posts[0]?.op !== 'queue' || posts[0]?.text !== 'one more' || $('#chat .snt')) early.push(`a mid-turn send: ${JSON.stringify(posts[0])}, a sending mark ${!!$('#chat .snt')}`);
+      }
+    },
+    // #407 gate 2: edit on a queued message: its text in the box, `editing queued message · [cancel]`, [send]; its send
+    // replaces it (op=queue, q) and the draft comes back; [cancel] puts the draft back too.
+    'chat-queue-edit': async () => {
+      const f = midTurn(QD(101, 'and run the premerge checks on staging first')), box = f.elements.text, posts = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? (posts.push(Object.fromEntries(new URLSearchParams(o.body))), Promise.resolve(new Response('queued\n'))) : F(u, o);
+      box.value = 'my draft';
+      f.querySelector('.tq button[name=qe]').click();
+      if (box.value !== 'and run the premerge checks on staging first' || f.querySelector('.qe')?.textContent !== 'editing queued message · cancel' || f.querySelector('.snd').textContent !== 'send') early.push(`editing: box "${box.value}", line "${f.querySelector('.qe')?.textContent}"`);
+      if (DBG.get('check')) {
+        f.querySelector('.ecl').click();
+        if (box.value !== 'my draft' || f.querySelector('.qe')) early.push(`[cancel]: box "${box.value}"`);
+        f.querySelector('.tq button[name=qe]').click();
+        box.value = 'run the premerge checks on main too';
+        f.requestSubmit();
+        await wait();
+        if (posts[0]?.op !== 'queue' || posts[0]?.q !== '101' || box.value !== 'my draft') early.push(`edit sent: ${JSON.stringify(posts[0])}, box "${box.value}"`);
+      }
+    },
+    // #407 gate 2: a long press on [queue] offers [queue] and [steer], each with its line; [steer] posts op=steer.
+    'chat-steer': async () => {
+      const f = midTurn(), posts = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? (posts.push(Object.fromEntries(new URLSearchParams(o.body))), Promise.resolve(new Response('sent\n'))) : F(u, o);
+      f.elements.text.value = 'stop: the checks run on main, not staging';
+      press(f.querySelector('.snd'));
+      const m = [...$$('#mm button')].map(b => b.textContent).join(' | ');
+      if (!seen($('#mm')) || m !== 'queue · delivered when this turn ends | steer · stops the turn and sends it now') early.push(`the send menu: ${m}`);
+      if (posts.length) early.push('the long press sent');
+      if (DBG.get('check')) { $('#mm button[value=steer]').click(); await wait(); if (posts[0]?.op !== 'steer' || !$('#chat .snt')) early.push(`[steer]: ${JSON.stringify(posts[0])}`); }
+    },
+    // #407 gate 2: a long press on a message: [copy] [copy as markdown] [quote]; copy puts its text, markdown its
+    // source, then `copied`; quote puts `> ` lines in the box.
+    'chat-menu': async () => {
+      VIEWS['chat-code']();
+      let cp = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: t => { cp = t; return Promise.resolve(); } } });
+      const b = $('#chat .cvp[data-t=t2] .blk.ai .md code')?.closest('.blk') || $('#chat .cvp[data-t=t2] .blk.ai');
+      press(b);
+      const m = [...$$('#mm button')].map(x => x.textContent).join(' | ');
+      if (m !== 'copy | copy as markdown | quote') early.push(`the message menu: ${m}`);
+      if (DBG.get('check')) {
+        const src = b.querySelector('.md').dataset.md, box = $('#chat .tw[data-t=t2] textarea'), st = window.setTimeout;
+        window.setTimeout = (f, ms) => ms === 1000 ? 0 : st(f, ms);
+        $('#mm button[value=md]').click(); await wait();
+        if (cp !== src || $('#mm').textContent !== 'copied') early.push(`copy as markdown: "${cp?.slice(0, 30)}", menu "${$('#mm').textContent}"`);
+        press(b); $('#mm button[value=copy]').click(); await wait();
+        if (cp.includes('```') || cp.includes('`') || !cp.includes('curl -s localhost:8080/v1/openapi.json')) early.push(`copy: "${cp.slice(0, 40)}"`);
+        press(b); $('#mm button[value=quote]').click();
+        if (!box.value.startsWith('> ') || seen($('#mm'))) early.push(`quote: box "${box.value.slice(0, 30)}"`);
+        window.setTimeout = st; // (the menu closed: it would cover the rows the tap check measures)
+      }
+    },
+    // #407 gate 2: [archive] after a swipe: `archived · [undo]` for 5 s (held for the shot); [undo] posts restore.
+    'chat-undo': async () => {
+      VIEWS['chat-archive']();
+      const posts = [], st = window.setTimeout;
+      window.fetch = (u, o) => o && o.method === 'POST' ? (posts.push(Object.fromEntries(new URLSearchParams(o.body))), Promise.resolve(new Response(posts.length > 1 ? 't4 restored\n' : 't4 archived\n'))) : F(u, o);
+      window.setTimeout = (f, ms) => ms === 5000 ? 0 : st(f, ms);
+      $('#chat .sw.op .sb[name=archive]').click();
+      await wait();
+      window.setTimeout = st;
+      const m = $('.msg.g');
+      if (m?.textContent !== 'archived · undo' || !m.querySelector('button.und')) early.push(`after [archive]: toast "${m?.textContent}"`);
+      if (DBG.get('check')) { m.querySelector('.und').click(); await wait(); if (posts[1]?.op !== 'restore' || posts[1]?.t !== 't4') early.push(`[undo]: ${JSON.stringify(posts[1])}`); }
+    },
     'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
     // #408: a long thread: the demo's t4 under an older-messages marker, the page before it 30 canned messages. `chat-older`:
     // scrolled to the top, that page loaded above (the message on screen stays put); `chat-mid`: then half way down, the
