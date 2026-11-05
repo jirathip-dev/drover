@@ -563,6 +563,30 @@ fn lanes_group_by_fleet_with_others() {
     assert_eq!(r.count("herdr pane read w1:p2"), 1 + 1);
 }
 
+/// #516: a superseded lane spawned twice, herdr listing its agent twice (once idle): one lane, the live working one.
+#[test]
+fn one_lane_per_agent_name() {
+    let c = ctx(&tmpdir("lanes-dup"), CONFIG);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    for ts in [900_000, 950_000] {
+        let d = json!({"role": "impl", "agent": "sendmeter-impl-3061", "harness": "claude", "pane": "w1:p1"});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(3061), "spawn", d)).unwrap();
+    }
+    let events = read(&c.state).unwrap();
+    let agents = json!([
+        {"name": "sendmeter-impl-3061", "agent_status": "working", "pane_id": "w1:p1", "cwd": "/x"},
+        {"name": "sendmeter-impl-3061", "agent_status": "idle", "pane_id": "w9:p1", "cwd": "/x", "host": "mini"},
+    ]);
+    let st = herdsman::events::fold(&events);
+    let (fake, ws) = (Fake::default(), Default::default());
+    let lanes = herdsman::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap(), &ws);
+    let got: Vec<_> = lanes
+        .iter()
+        .map(|l| (l.name.as_str(), l.state.as_str(), l.pane.as_deref()))
+        .collect();
+    assert_eq!(got, [("sendmeter-impl-3061", "working", Some("w1:p1"))]);
+}
+
 #[test]
 fn activity_lines_per_harness_are_masked_and_cut() {
     use herdsman::lanes::{activity, mask, tail};
