@@ -1,0 +1,15 @@
+/* #462 mockup only: the bush's frame loop, day/night and sign levels, and the moment animations for index.html and
+   sheet.html. Phase 2 maps these onto herd.css / serve.css's existing kf1/kf2, .night/.sky-night and mo-* rules. */
+@property --o1{syntax:"<number>";inherits:true;initial-value:1}@property --o2{syntax:"<number>";inherits:true;initial-value:0}
+.f1{opacity:var(--o1,1)}.f2{opacity:var(--o2,0)}
+.loop{animation:bfr 1.2s infinite}
+@keyframes bfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+.f2v{--o1:0;--o2:1}
+.sky-night{display:none}.night .sky-night{display:inline}.night .sky-day{display:none}
+.s-moderate,.s-high,.s-catastrophic,.s-up{display:none}
+.sign-moderate .s-moderate,.sign-high .s-high,.sign-catastrophic .s-catastrophic,.sign-high .s-up,.sign-catastrophic .s-up{display:inline}
+.mo-hop{animation:bhop .8s ease-in-out infinite}.mo-shake{animation:bshake .4s ease-in-out infinite}.mo-pulse{animation:bpulse .8s ease-in-out infinite}
+@keyframes bhop{50%{translate:0 calc(-1 * var(--s1))}}@keyframes bshake{25%{translate:calc(-1 * var(--s1) / 2) 0}75%{translate:calc(var(--s1) / 2) 0}}@keyframes bpulse{50%{scale:1.2}}
+.still .loop,.still .mo-hop,.still .mo-shake,.still .mo-pulse{animation:none}
+@media (prefers-reduced-motion:reduce){.loop,.mo-hop,.mo-shake,.mo-pulse{animation:none}}
+svg.px24{width:24px;height:24px;image-rendering:pixelated;shape-rendering:crispEdges;vertical-align:middle}

@@ -1,0 +1,25 @@
+{
+  "label": "Bush light (sun-bleached ochre, gum-leaf sage, red earth; #462)",
+  "color-scheme": "light",
+  "tokens": {
+    "--bg": "#f5ecd8",
+    "--card": "#ebdfc4",
+    "--edge": "#cdbb94",
+    "--line": "#e0d2b4",
+    "--scrim": "#2b1d1266",
+    "--fg": "#2b2118",
+    "--mute": "#5d4e3b",
+    "--l": "#983815",
+    "--link": "#3a5a8c",
+    "--g": "#386826",
+    "--a": "#765700",
+    "--r": "#a3134d",
+    "--p": "#74488f",
+    "--c": "#256a63",
+    "--fk-l": "#2f5c9a",
+    "--fk-p": "#74488f",
+    "--fk-c": "#256a63",
+    "--fk-g": "#386826",
+    "--fk-a": "#765700"
+  }
+}

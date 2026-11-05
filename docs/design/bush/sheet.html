@@ -1,0 +1,58 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Bush sprite sheet</title>
+<!-- #462 sprite sheet: the seven actions × looks and frame 2, the moments, the hollow-log rail items, the sign at its three
+     levels, every 16 px row sprite at 24 px and 4×, on this scheme's own background. Drawn from art.mjs. -->
+<link rel=stylesheet href=../../../assets/serve.css>
+<link rel=stylesheet href=bush.css>
+<style>
+body{padding:var(--s3)}
+h1{font-size:var(--fs);margin:var(--s4) 0 var(--s2)}h1 .m{font-weight:400}
+.sheet{display:grid;grid-template-columns:13ch repeat(7,132px);gap:var(--s2);align-items:center;overflow-x:auto}
+.sheet>b{font-weight:400;color:var(--mute);font-size:var(--fs-meta)}
+.lb{font-size:var(--fs-meta);color:var(--mute);text-align:center}
+.cell{width:132px;height:108px;display:flex;align-items:end;justify-content:center;border-radius:6px;background:linear-gradient(#0000 0 74%,#b5562e 74%),#e9d9b6}
+.night .cell{background:linear-gradient(#0000 0 74%,#5e3226 74%),#2a2850}
+.cell svg{width:132px;height:100px;display:block}
+.rows{display:grid;grid-template-columns:13ch repeat(11,minmax(56px,auto));gap:var(--s2) var(--s3);align-items:center;overflow-x:auto}
+.rows>b{font-weight:400;color:var(--mute);font-size:var(--fs-meta)}
+.rows figure{margin:0;display:flex;align-items:center;gap:var(--s2)}
+.rows .x4{width:64px;height:64px;image-rendering:pixelated;border:1px solid var(--line);border-radius:4px}
+.signs{display:flex;flex-wrap:wrap;gap:var(--s3)}.signs figure{margin:0;font-size:var(--fs-meta);color:var(--mute)}
+.signs .hm{width:144px;height:48px;image-rendering:pixelated;display:block}
+</style></head>
+<body>
+<svg width=0 height=0 style="position:absolute" aria-hidden=true><defs id=defs></defs></svg>
+<h1>bush · the animals by role <span class=m>(132 × 100, 1 pixel = 4 · the neckerchief is the repo colour · eight looks keep one lane's coats across roles)</span></h1>
+<div class=sheet id=acts></div>
+<h1>moments and the hollow-log rail <span class=m>(merged: over the fence, a kookaburra laughs, hop · FAIL: a magpie swoops, shake · needs you: a cockatoo screeches on the log, pulse)</span></h1>
+<div class=sheet id=moms></div>
+<h1>the Fire Danger Rating sign <span class=m>(Host card mini, 48 × 16 at 3× · needle frame 1 and its 5° wobble on frame 2)</span></h1>
+<div class=signs id=signs></div>
+<h1>16 px row sprites <span class=m>(Queue and Events rows · at 24 px and 4×)</span></h1>
+<div class="rows loop" id=rows></div>
+<script type=module>
+import './scheme.mjs';
+import { symbols, style, ACTIONS, ACT_WORD, ROWS, mini, LEVELS } from './art.mjs';
+document.getElementById('defs').innerHTML = symbols();
+const use = (id, st = '', vb = '0 0 132 100') => `<svg viewBox="${vb}" style="${st}"><use href="#${id}"/></svg>`;
+const R = { bound: 'impl', dig: 'fix', peer: 'rev', run: 'update', sleep: 'idle', laugh: 'done', stuck: 'blocked' };
+const LK = [[0, 'l'], [1, 'p'], [2, 'g'], [0, 'l', 1], [3, 'c'], [4, 'a'], [7, 'l']];
+let a = '<b></b>' + ['look 1', 'look 2', 'look 3', 'look 1 · frame 2', 'look 4', 'look 5', 'look 8'].map(t => `<span class=lb>${t}</span>`).join('');
+for (const k of Object.keys(ACTIONS)) a += `<b>${R[k]} · ${ACT_WORD[k]}</b>` + LK.map(([l, fk, f2]) => `<div class="cell${f2 ? ' f2v' : ''}">${use('a-' + k, style(l, fk))}</div>`).join('');
+document.getElementById('acts').innerHTML = a;
+const M = [['m-clear', 0, 'merged · 1'], ['m-clear', 1, 'frame 2'], ['m-swoop', 0, 'FAIL · 1'], ['m-swoop', 1, 'frame 2'], ['m-screech', 0, 'needs you · 1'], ['m-screech', 1, 'frame 2']];
+const Q = [['q-joey', 0, 'rail · joey'], ['q-joey', 1, 'frame 2'], ['q-egg', 0, 'rail · egg (alt)'], ['q-cocky', 0, 'rail · needs you'], ['q-cocky', 1, 'frame 2']];
+document.getElementById('moms').innerHTML = '<b></b>' + M.map(m => `<span class=lb>${m[2]}</span>`).join('') + '<span></span><b>moments</b>' +
+  M.map(([id, f]) => `<div class="cell${f ? ' f2v' : ''}">${use(id, style(0, 'c'))}</div>`).join('') + '<span></span>' +
+  '<b></b>' + Q.map(m => `<span class=lb>${m[2]}</span>`).join('') + '<span></span><span></span><b>rail</b>' +
+  Q.map(([id, f]) => `<div class="cell${f ? ' f2v' : ''}">${use(id, style(1, 'c'))}</div>`).join('');
+document.getElementById('signs').innerHTML = LEVELS.flatMap(l => [0, 1].map(f => `<figure>${mini(l, f)}${l}${f ? ' · frame 2' : ''}</figure>`)).join('');
+const K = Object.keys(ROWS);
+let r = '<b></b>' + K.map(s => `<span class=lb>${s}</span>`).join('');
+const px = (id, st, cls) => `<svg class="${cls}" viewBox="0 0 16 16" style="${st}"><use href="#${id}"/></svg>`;
+for (const [l, fk] of [[0, 'l'], [1, 'p'], [2, 'g']]) r += `<b>look ${l + 1}</b>` + K.map(k => `<figure>${px('r-' + k, style(l, fk), 'px24')}${px('r-' + k, style(l, fk), 'x4')}</figure>`).join('');
+document.getElementById('rows').innerHTML = r;
+document.body.dataset.ready = 1;
+</script>
+</body></html>

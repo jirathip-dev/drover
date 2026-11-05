@@ -1,0 +1,275 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Bush theme mockup</title>
+<link rel=icon href=icon/favicon-32.png>
+<!-- #462 design mockup: the bush theme (the outback: an animal by role) to #241's contract, #423's light/dark `scheme`
+     pair, and one proposed key (`load_scene.kind: "sign"`). serve.css and herd.css are the board's, unchanged; bush.css is
+     the frame loop, day/night and sign layers; the <style> below is mockup-only framing. Every sprite comes from art.mjs.
+     The page follows prefers-color-scheme (bush-light / bush-dark; the clearing is day or night with it); ?s=light|dark
+     pins one; ?still=1 or Reduce Motion stops every loop. Fixture: the demo's acme-* fleets (fake). -->
+<link rel=stylesheet href=../../../assets/serve.css>
+<link rel=stylesheet href=../../../assets/herd.css>
+<link rel=stylesheet href=bush.css>
+<style>
+/* ---- mockup framing only ---- */
+body{padding:0 var(--s3) var(--s4)}
+.doc{max-width:1440px;margin:0 auto}
+.doc>h2{margin:calc(2 * var(--s4)) 0 var(--s1);font-size:var(--fs)}
+.doc>p,.cap2{margin:0 0 var(--s2);color:var(--mute);font-size:var(--fs-meta)}
+.top{display:flex;align-items:center;gap:var(--s3);min-height:calc(var(--hit) + var(--s1));border-bottom:1px solid var(--line)}
+.top img{width:var(--ctl);height:var(--ctl);border-radius:6px}
+.row3{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-start}
+.ph{flex:0 0 390px;width:390px;min-width:0;max-width:100%;border:1px solid var(--edge);border-radius:12px;overflow:hidden;position:relative}
+.ph>.lbl{margin:0;padding:var(--s1) var(--s3);background:var(--card);color:var(--fg);font-size:var(--fs-meta);border-bottom:1px solid var(--edge)}
+@media (max-width:420px){.ph{flex:1 1 100%;width:auto;max-width:none;margin:0 calc(-1 * var(--s3));border-radius:0;border-width:1px 0}}
+/* the Herd in the outback: red earth under the clearing, a dark ironbark strip */
+.hp.b{--done:1;height:auto;overflow:visible;padding-bottom:0;color:#f4ecd8;background:radial-gradient(#0000 0 1px,#0000 1px) ,repeating-linear-gradient(90deg,#a84f2a 0 37px,#9f4a27 37px 38px),#a84f2a}
+.night .hp.b{background:repeating-linear-gradient(90deg,#4e2a2a 0 37px,#472626 37px 38px),#4e2a2a}
+.hp.b .hs{position:relative;background:#3e2416}.night .hp.b .hs{background:#151634}.hp.b .hs .sum{color:#f4ecd8bb}
+.hp.b .hr{height:186px;background:#b5562e}.hp.b .hr>svg{display:block;width:100%;height:100%}
+.hp.b .hcap2{margin:0;padding:0 var(--s2);background:#3e2416;font-size:var(--fs-meta);line-height:var(--ctl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#f4ecd8}
+.night .hp.b .hcap2{background:#151634}
+.hp.b .hh{cursor:default;position:relative}
+.logr{display:flex;flex-wrap:wrap;justify-content:center;margin:0 var(--s2)}
+.hqh{--qw:72px}.hqh svg{width:72px}
+.hqh.n svg{animation:bpulse .8s ease-in-out infinite}
+.still .hqh.n svg{animation:none}
+.bub{position:absolute;z-index:1;right:var(--s1);top:var(--s1);padding:0 var(--s2);border-radius:8px;background:#f7f1e3;color:#2b2420;font-size:var(--fs-meta);line-height:1.6;box-shadow:0 1px 3px #0004;white-space:nowrap}
+.bub.r{background:#f6d9d3;color:#b3261e}
+/* 1440: the clearings along the track, one per repo, the current page's lit */
+.wide{width:1440px;border:1px solid var(--edge);border-radius:12px;overflow:hidden;transform-origin:0 0}
+.wwrap{overflow:hidden}
+.line{position:relative;height:186px;display:flex;overflow:hidden}.line>.st:first-child{margin-left:-255px}
+.line>.st{flex:0 0 390px;height:186px;position:relative}.line>.st svg{display:block;width:390px;height:186px}
+.line>.st.off{filter:brightness(.62) saturate(.8)}.line>.st.off .fdr{display:none}
+.line>.st>b{position:absolute;left:var(--s2);top:var(--s3);padding:0 var(--s1);border-radius:4px;background:#3e2416d8;font-weight:400;font-size:var(--fs-meta);color:#f4ecd8;border-left:4px solid var(--fk)}
+.signs{display:flex;flex-wrap:wrap;gap:var(--s4)}
+.signs figure{margin:0;flex:0 0 390px;max-width:100%}
+.signs .hr{height:186px;border-radius:8px;background:#b5562e}.signs .hr svg{display:block;width:100%;height:100%}
+.signs figcaption{font-size:var(--fs-meta);color:var(--mute);padding-top:var(--s1)}
+/* the tabs, in the scheme */
+.tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:var(--s4)}
+.tab{border:1px solid var(--edge);border-radius:12px;padding:0 var(--s3) var(--s2);min-width:0;background:var(--bg)}
+.tab>h3{margin:var(--s2) 0 0;color:var(--fg);font-size:var(--fs)}
+.tsub2{margin:var(--s3) 0 var(--s1);font-weight:600}.tsub2 .pw{margin-left:var(--s1)}
+.qcard{border:1px solid var(--edge);border-top:3px solid var(--fk-g);border-radius:8px;padding:0 var(--s3) var(--s1);background:var(--card)}
+.qcard>p{margin:var(--s2) 0 var(--s1)}
+.qr{display:grid;grid-template-columns:28px 5ch minmax(0,1fr) auto;column-gap:var(--s2);align-items:center;min-height:var(--hit);padding:var(--s1) 0;border-top:1px solid var(--line);position:relative}
+.qr .rsp{margin:0}.qr>.st b{font-weight:600}.qr .tl{grid-column:2/-1;color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qr .ag{color:var(--mute)}
+.qr[data-mo=merged] .rsp{animation:bfr 1.2s infinite,bhop .8s ease-in-out infinite}
+.qr[data-mo=fail]{animation:bshake .4s ease-in-out infinite}
+.qr[data-mo=needs-you]{background:color-mix(in srgb,var(--r) 14%,transparent)}.qr[data-mo=needs-you] .rsp{animation:bfr 1.2s infinite,bpulse .8s ease-in-out infinite}
+.still .qr[data-mo] .rsp,.still .qr[data-mo]{animation:none}
+.mot{position:absolute;right:0;top:calc(var(--s1) + 2px);font-style:normal;font-weight:700;font-size:var(--fs-meta);padding:0 var(--s1);border-radius:var(--s1);color:var(--bg);background:var(--g);white-space:nowrap}
+.qr[data-mo=fail] .mot,.qr[data-mo=needs-you] .mot{background:var(--r)}.qr[data-mo] .ag{visibility:hidden}
+.lane .lr{grid-template-columns:48px minmax(0,1fr) max-content}
+.lane .px{width:48px;height:36px}.lane .av>.px{display:block}
+.lane .now{grid-column:1/-1;margin:0;color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nw{white-space:nowrap}.el{overflow:hidden;text-overflow:ellipsis}
+.grp{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-top:1px solid var(--line)}
+.grp .gn{font-weight:700;letter-spacing:.08em;color:var(--mute);font-size:var(--fs-meta)}
+.grp .lsm{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}.grp .lsm svg{width:72px;height:24px;image-rendering:pixelated;animation:bfr 1.2s infinite}
+.still .grp .lsm svg{animation:none}
+.cmp{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:var(--s2);margin:var(--s2) 0}
+.cmp figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute);text-align:center}
+.cmp .av{width:64px;border:1px solid var(--line);border-radius:4px;background:var(--card)}.cmp .asc{display:grid;color:var(--fg)}
+.ar{font:var(--fs)/1 ui-monospace,Menlo,monospace;white-space:pre;color:var(--fg)}
+.moms{display:flex;flex-wrap:wrap;gap:var(--s4)}
+.moms figure{margin:0;display:flex;flex-direction:column;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute);width:180px}
+.moms .mo{position:relative;width:180px;height:140px;border-radius:8px;background:linear-gradient(#0000 0 76%,#b5562e 76%),#e9d9b6;display:flex;align-items:end;justify-content:center;overflow:hidden}
+.night .moms .mo{background:linear-gradient(#0000 0 76%,#5e3226 76%),#2a2850}
+.moms .mo svg{width:165px;height:125px}
+.icons{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-end}
+.icons figure{margin:0;display:flex;flex-direction:column;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.icons .i512{width:256px;height:256px;border-radius:56px}.icons .i180{width:90px;height:90px;border-radius:20px}.icons .i192{width:96px;height:96px;border-radius:20px}
+.icons .px16{width:16px;height:16px;image-rendering:pixelated}.icons .px32{width:64px;height:64px;image-rendering:pixelated}
+.home{display:grid;grid-template-columns:repeat(4,60px);gap:var(--s3) var(--s4);padding:var(--s4);border-radius:16px;background:linear-gradient(#5d7a5a,#34483a);width:max-content;max-width:100%}
+.home figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:var(--s1);font:var(--fs-meta)/1.2 -apple-system,system-ui,sans-serif;color:#fff}
+.home img{width:60px;height:60px;border-radius:14px;display:block}
+.sheetm{flex:1 1 320px;min-width:0;border:1px solid var(--edge);border-radius:12px 12px 0 0;background:var(--card);padding:var(--s2) var(--s3);max-width:390px}
+.sheetm .nm{white-space:nowrap}.sheetm .pw{white-space:normal}
+.sheetm h4{margin:var(--s2) 0 0;font-size:var(--fs-meta);letter-spacing:.08em;color:var(--mute)}
+.sheetm p{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin:0;border-bottom:1px solid var(--line)}
+.sheetm p:last-child{border:0}.sheetm .ck{margin-left:auto;color:var(--l)}
+.chip{display:inline-block;width:var(--s3);height:var(--s3);border-radius:2px}
+.aa{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl);height:var(--ctl);border-radius:4px;border:1px solid var(--edge);font-weight:700}
+.ctab{border-collapse:collapse;font-size:var(--fs-meta);margin:var(--s3) 0;max-width:100%;display:block;overflow-x:auto}
+.ctab td,.ctab th{padding:var(--s1) var(--s2);border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.sw{display:inline-block;width:var(--s3);height:var(--s3);border-radius:2px;vertical-align:-1px;margin-right:var(--s1);border:1px solid #0003}
+.duos{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:var(--s4)}
+.duo2{border:1px solid var(--edge);border-radius:12px;padding:var(--s2) var(--s3);min-width:0}
+.duo2 h3{margin:0 0 var(--s2);font-size:var(--fs)}
+</style></head>
+<body data-mode=scene class=hz>
+<svg width=0 height=0 style="position:absolute" aria-hidden=true><defs id=defs></defs></svg>
+<div class=doc>
+<header class=top><img src=icon/icon-180.png alt=""><b>bush theme · design mockup (#462)</b><span class=m id=sch-name></span></header>
+
+<h2>1 · the mob, 390 px: moderate · high · catastrophic</h2>
+<p>One page per fleet, as today: that repo's clearing of ghost gums on red earth, the station gate over the track in its #162 colour, a billabong at the front.
+Under it, the hollow log: one joey waiting in it per queued issue, a cockatoo screeching on it when one needs you. Then the bands: on the move (working, the
+animal by role), having a kip (idle), home and hosed (done) and stuck (blocked). The roadside Fire Danger Rating sign is the load.</p>
+<div class=row3 id=phones></div>
+
+<h2>2 · 1440 px: the clearings along the track, one per repo</h2>
+<p>The scene band shows every repo's clearing side by side (the existing <code>scene.line</code>), the current page's lit and centred. A swipe walks down the track. The sign is the host's load, so only the lit clearing carries it (<code>.fdr</code>).</p>
+<div class=wwrap id=wwrap><div class=wide id=wide></div></div>
+
+<h2>3 · the Fire Danger Rating sign, the Host miniature and Reduce Motion</h2>
+<p>Drawn only from what the farm's weather already reads: <code>load/limit</code> and the spawn gate. Moderate (under 0.5): the needle in the green, a still
+afternoon. High (from 0.5): the needle in the yellow, heat shimmer over the track, a few cicadas. Catastrophic (spawns held): the needle hard in the red, a heat
+haze over the sky, the shimmer and a cloud of cicadas. No flames anywhere. The needle wobbles 5° on two frames (0.6 s); Reduce Motion: a static sign.</p>
+<div class=signs id=signs></div>
+
+<h2>4 · moments</h2>
+<p>Silent, 2.4 s, once (#370): on the issue's row on the visible tab, else the top-right overlay. Merged: the kangaroo clears the station fence in one bound and a
+kookaburra laughs (hop). Review FAIL: a magpie swoops it (the row shakes). Needs you: a cockatoo screeches on the log (pulse). Reduce Motion: the still frame and the tag.</p>
+<div class=tabs><div class=tab id=mrows><h3>on the row · Queue</h3></div><div class=tab><h3>the overlay (no row in view)</h3><div class=moms id=moms></div></div></div>
+
+<h2>5 · Queue and Lanes at 390 px</h2>
+<p>Queue and Lanes rows draw the role's animal: the kangaroo bounds (impl), the wombat digs (fix), the koala peers down (rev), the emu runs (update). A queued
+issue is a joey in the log. Labels are <code>theme word · plain word</code> (#370). Row heights, text sizes and the 28 px sprite slot don't change.</p>
+<div class=tabs><div class=tab id=tq><h3>queue</h3></div><div class=tab id=tl><h3>lanes</h3></div></div>
+
+<h2>6 · Events, Host, and the ASCII style</h2>
+<div class=tabs><div class=tab id=te><h3>events</h3></div><div class=tab id=ta><h3>ascii style (STYLE · ascii): Lanes cells and row figures</h3></div></div>
+
+<h2>7 · the icon and the look sheet</h2>
+<p>The yellow roo-crossing sign on its post, sky over red earth: 512, 192, 180 (apple-touch) and the favicon at 32 and 16 (the diamond alone). The look sheet
+lists bush under THEME. Under COLOURS, bush-light and bush-dark are one row, <i>bush (follows the phone)</i>, the theme default. A phone that picks one keeps it.</p>
+<div class=row3><div class=icons id=icons></div><div class=sheetm id=look></div></div>
+
+<h2>8 · the two schemes and the gate</h2>
+<p>bush-light: sun-bleached ochre and cream, gum-leaf sage, red-earth controls. bush-dark: the outback night, deep indigo, ochre controls, starlight links. Both pass
+serve.js's gate (<code>node check.mjs</code>). The rows below are serve.js's checks, each scheme's tightest first.</p>
+<div class=duos id=duos></div>
+</div>
+
+<script type=module>
+import { mode, scheme } from './scheme.mjs';
+import { symbols, style, clearing, mini, ASCII, ASCII_ROWS, ASCII_LOAD, ACT_OF } from './art.mjs';
+import { gate } from './gate.mjs';
+const $ = s => document.querySelector(s);
+if (new URLSearchParams(location.search).has('still')) document.body.classList.add('still');
+$('#defs').innerHTML = symbols();
+$('#sch-name').textContent = `colours: bush-${mode()} (follows the phone) · the clearing by ${mode() === 'dark' ? 'night' : 'day'}`;
+const SCENE = clearing();
+
+// A lane in the Herd: the role's animal in the 132 × 100 box, in its look.
+const lane = (name, act, look, fk, state, tone, word, age) =>
+  `<button type=button class="hh ${state}"><svg viewBox="0 0 132 100" style="${style(look, fk)}"><use href="#a-${act}"/></svg><span class=hl><b>${name}</b><span><i class=${tone}>${word}</i>${age ? ' · ' + age : ''}</span></span></button>`;
+const hole = (n, needs, look) => `<button type=button class="hqh${needs ? ' n' : ''}"><svg viewBox="0 0 132 100" style="${style(look, 'g')}"><use href="#q-${needs ? 'cocky' : 'joey'}"/></svg><span>#${n}${needs ? '<br><i class=r>! screech</i>' : ''}</span></button>`;
+const band = (cls, name, plain, n, items) => `<div class="band b-${cls}"><h4>${name} <span>· ${plain} ${n}</span></h4><div class=field>${items}</div></div>`;
+
+function page(level, { load, gate, fk = 'g', fleet = 'acme-web' } = {}) {
+  const working = [
+    lane('acme-web-impl-48', 'bound', 0, fk, 'working', 'g', 'bound · impl', '70s'),
+    lane('acme-web-impl-41', 'dig', 1, fk, 'working', 'g', 'dig · fix 2', '12m'),
+    lane('acme-web-rev-38', 'peer', 2, fk, 'working', 'g', 'peer · r1', '4m'),
+    lane('acme-web-impl-36', 'run', 4, fk, 'working', 'g', 'run · update', '2m'),
+  ].join('');
+  return `<section class="hp b sign-${level}"><div class=hs><p><b>${fleet}</b> <span class=n>· 7 in the mob</span></p>` +
+    `<p class=sum>4 in the log · 1 stuck · 4 on the move · 1 kip · 1 home</p></div>` +
+    `<div class="hr loop" style="--fk:var(--fk-${fk})">${SCENE}</div>` +
+    `<div class=hb><div class="band b-queue"><h4>in the log <span>· queued 4</span></h4><div class=logr>${hole(52, 0, 0)}${hole(53, 0, 1)}${hole(46, 1, 2)}${hole(55, 0, 3)}</div></div>` +
+    band('working', 'on the move', 'working', 4, working) +
+    band('idle', 'having a kip', 'idle', 1, lane('acme-web-impl-50', 'sleep', 5, fk, 'idle', 'a', 'asleep · CI pending', '9m')) +
+    band('done', 'home and hosed', 'done', 1, lane('acme-web-impl-33', 'laugh', 3, fk, 'done', 'g', 'laugh · PR #61', '1m')) +
+    band('blocked', 'stuck', 'blocked', 1, lane('acme-web-impl-44', 'stuck', 7, fk, 'blocked', 'r', 'stuck · needs you', '33m')) +
+    `</div><p class=hcap2>load ${load} · fire danger ${level}${gate ? ' · spawns held' : ''} · mem normal · swap 0</p></section>`;
+}
+const phone = (lbl, h) => `<div class=ph><p class=lbl>${lbl}</p>${h}</div>`;
+$('#phones').innerHTML =
+  phone('moderate · load/limit 0.16 (under 0.5): the needle in the green', page('moderate', { load: '0.40 / 2.5' })) +
+  phone('high · load/limit 0.72 (0.5 and up): shimmer, a few cicadas', page('high', { load: '1.80 / 2.5' })) +
+  phone('catastrophic · the spawn gate refuses (3.25 > 2.5): haze, cicadas', page('catastrophic', { load: '3.25 / 2.5', gate: 1 }));
+
+const bays = [['docs', 'l'], ['acme-api', 'p'], ['acme-web', 'g'], ['acme-ios', 'a'], ['acme-ops', 'c']];
+$('#wide').innerHTML = page('moderate', { load: '0.40 / 2.5' }).replace(/<div class="hr loop"[^>]*>[\s\S]*?<\/svg><\/div>/,
+  `<div class="hr loop line">${bays.map(([n, k]) => `<div class="st${n === 'acme-web' ? '' : ' off'}" style="--fk:var(--fk-${k})">${SCENE}<b>${n}</b></div>`).join('')}</div>`);
+const fit = () => { const w = $('#wwrap').clientWidth, k = Math.min(1, w / 1440); $('#wide').style.transform = `scale(${k})`; $('#wwrap').style.height = $('#wide').offsetHeight * k + 'px'; };
+addEventListener('resize', fit); requestAnimationFrame(fit);
+
+const sg = (l, cap, still) => `<figure class="sign-${l}${still ? ' still' : ''}"><div class="hr loop" style="--fk:var(--fk-g)">${SCENE}</div><figcaption>${cap}</figcaption></figure>`;
+$('#signs').innerHTML = sg('moderate', 'moderate (calm): the needle in the green, a still afternoon') + sg('high', 'high (busy): the needle in the yellow, shimmer over the track, a few cicadas') +
+  sg('catastrophic', 'catastrophic (held): the needle in the red, haze over the sky, a cloud of cicadas') + sg('catastrophic', 'catastrophic, Reduce Motion: a static sign, no wobble, shimmer and cicadas still', 1) +
+  `<figure><div class=tab style="padding-bottom:0">${['moderate', 'high', 'catastrophic'].map((l, i) => `<p class=grp><i class=dt></i><span class=gn>MACHINE</span><span class=lsm>${mini(l)}<span>${l} · ${['calm', 'busy', 'held'][i]}</span></span></p>`).join('')}</div>` +
+  '<figcaption>Host card header (#370 minis): the sign at 48 × 16, 1.5×, the needle wobbling on two frames</figcaption></figure>';
+
+// Rows: the 28 px slot, the 16 px art at 24 px. Queue rows by role (the lane's look); Events rows by kind.
+const rs = (id, look, word) => `<svg class="rsp" viewBox="0 0 16 16" style="${style(look, 'g')}" role=img aria-label="${word}"><title>${word}</title><use href="#r-${id}"/></svg>`;
+const qr = (n, spr, tone, w, plain, age, title, mo = '') => `<div class=qr${mo ? ` data-mo=${mo}` : ''}>${spr}<a href=#>#${n}</a><span class="st ${tone}"><b>${w}</b> <span class=pw>· ${plain}</span></span><span class=ag>${age}</span><span class=tl>${title}</span>${mo ? `<i class=mot>${{ merged: 'over the fence', fail: 'swooped', 'needs-you': 'screech' }[mo]}</i>` : ''}</div>`;
+const queue = () => '<p class=tsub2>the log <span class=pw>· queue</span></p><div class=qcard><p><b class=g style="color:var(--fk-g)">acme-web</b> <span class="tag r">! 1 screeching</span></p>' +
+  qr(46, rs('needs', 2, 'needs-human'), 'r', 'screech', 'needs you', '59m', 'The settings split: how should it ship?') +
+  qr(48, rs('bound', 0, 'impl'), 'a', 'bound', 'impl', '70s', 'Settings: every pane passes a WCAG AA contrast audit') +
+  qr(41, rs('dig', 1, 'fix'), 'a', 'dig', 'fix(2)', '12m', 'Saved filters survive a reload') +
+  qr(38, rs('peer', 2, 'review'), 'a', 'peer', 'review(1)', '4m', 'Dark mode for the billing pages') +
+  qr(36, rs('run', 4, 'update'), 'a', 'run', 'fix(1) · update', '2m', 'Bump the router to v7') +
+  qr(33, rs('laugh', 3, 'ready'), 'g', 'home and hosed', 'ready', '1m', 'CSV export of the orders list') +
+  qr(44, rs('stuck', 7, 'blocked'), 'r', 'stuck', 'blocked', '33m', 'Mobile e2e suite on every PR') +
+  qr(52, rs('joey', 0, 'queued'), 'm', 'in the log', 'queued', '', 'Invoice PDFs in the customer locale') +
+  qr(53, rs('joey', 1, 'queued'), 'm', 'in the log', 'queued', '', 'Webhook retries with backoff') +
+  '<p class=m style="font-size:var(--fs-meta)">over the fence today · merged 3</p></div>';
+$('#tq').insertAdjacentHTML('beforeend', queue());
+$('#mrows').insertAdjacentHTML('beforeend', '<div class=qcard style="margin-top:var(--s2)">' +
+  qr(31, rs('merged', 0, 'merged'), 'g', 'over the fence', 'merged', 'now', 'Order history paginates', 'merged') +
+  qr(38, rs('fail', 2, 'review FAIL'), 'r', 'swooped', 'review FAIL', 'now', 'Dark mode for the billing pages', 'fail') +
+  qr(46, rs('needs', 2, 'needs-human'), 'r', 'screech', 'needs you', 'now', 'The settings split: how should it ship?', 'needs-you') +
+  '</div><p class=cap2>Reduce Motion: no hop, shake or pulse; the sprite holds frame 1 and the tag shows for 2.4 s.</p>');
+$('#moms').innerHTML = [['clear', 'over the fence!', 'merged · hop', '', 'hop'], ['swoop', 'swooped!', 'review FAIL · shake', ' r', 'shake'], ['screech', 'screech!', 'needs you · pulse', ' r', 'pulse']]
+  .map(([m, b, c, r, a]) => `<figure><span class="mo loop"><svg viewBox="0 0 132 100" class="mo-${a}" style="${style(0, 'g')}"><use href="#m-${m}"/></svg><span class="bub${r}">${b}</span></span>${c}</figure>`).join('');
+
+// Lanes: .lr rows, the avatar is the role's animal (48 × 36).
+const lr = (act, look, name, tone, st, now) => `<div class=lane><button type=button class=lr><span class=av><svg class=px viewBox="0 0 132 100" style="${style(look, 'g')}"><use href="#a-${act}"/></svg></span><span class="nw el">${name}</span><span class="nw ${tone}">${st}</span><p class=now>${now}</p></button></div>`;
+$('#tl').insertAdjacentHTML('beforeend', '<p class=tsub2>on the move <span class=pw>· working (4)</span></p><p class=ch>ACME-WEB (4)</p>' +
+  lr('bound', 0, 'acme-web-impl-48-contrast', 'g', 'bound · 70s', 'now: running pnpm test settings') +
+  lr('dig', 1, 'acme-web-impl-41', 'g', 'dig · 12m', 'now: editing src/filters.ts') +
+  lr('peer', 2, 'acme-web-rev-38', 'g', 'peer · 4m', 'now: running pnpm test billing') +
+  lr('run', 4, 'acme-web-impl-36', 'g', 'run · 2m', 'now: merging origin/staging') +
+  '<p class=tsub2>having a kip <span class=pw>· idle (1)</span></p>' + lr('sleep', 5, 'acme-web-impl-50', 'a', 'asleep · 9m', 'pushed 0808080, waiting for drive to spawn review') +
+  '<p class=tsub2>home and hosed <span class=pw>· done (1)</span></p>' + lr('laugh', 3, 'acme-web-impl-33', 'g', 'laugh · 1m', 'PR #61 · CI ✓ · PASS') +
+  '<p class=tsub2>stuck <span class=pw>· blocked (1)</span></p>' + lr('stuck', 7, 'acme-web-impl-44', 'r', 'stuck · 33m', 'review rounds ran out (4/3)'));
+
+// Events: merged the roo over the fence, FAIL the magpie, asks the cockatoo, spawns the role's animal.
+const er = (spr, n, sm, ag) => `<div class=qr style="grid-template-columns:28px 5ch minmax(0,1fr) auto">${spr}<a href=#>#${n}</a><span style="font-size:var(--fs-meta)">${sm}</span><span class=ag>${ag}</span></div>`;
+$('#te').insertAdjacentHTML('beforeend', '<p class=tsub2>the track <span class=pw>· events</span></p>' +
+  er(rs('merged', 3, 'merged'), 33, '<b class=g>over the fence</b> <span class=pw>· merged</span> PR #61 into staging', '1m') +
+  er(rs('fail', 2, 'review FAIL'), 38, '<b class=r>swooped</b> <span class=pw>· FAIL</span> r1 · 2 findings', '4m') +
+  er(rs('bound', 0, 'spawn impl'), 48, '<b>bound</b> <span class=pw>· spawn impl</span> claude opus xhigh', '70s') +
+  er(rs('peer', 6, 'spawn rev'), 15, '<b>peer</b> <span class=pw>· spawn rev</span> claude opus', '9m') +
+  er(rs('dig', 1, 'spawn fix'), 41, '<b>dig</b> <span class=pw>· spawn fix</span> round 2', '12m') +
+  er(rs('run', 4, 'update'), 36, '<b>run</b> <span class=pw>· update</span> merges staging', '2m') +
+  er(rs('needs', 2, 'asks you'), 46, '<b class=r>screech</b> <span class=pw>· asks you</span> (q4) How should it ship?', '12m') +
+  '<p class=tsub2>the station <span class=pw>· host</span></p>' +
+  `<p class=grp><i class=dt></i><span class=gn>MACHINE</span><span class=lsm>${mini('high')}<span>high · busy</span></span></p>`);
+
+// ASCII: Lanes cells (≤ 3 lines of 8, the farm's 48 × 40 box) and the row figures (3 characters).
+const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const cell = t => `<span class=av><i class=asc><b>${esc(t)}</b></i></span>`;
+$('#ta').insertAdjacentHTML('beforeend', '<div class=cmp>' + Object.entries(ASCII).map(([k, t]) => `<figure>${cell(t)}${k} · ${ACT_OF[k]}</figure>`).join('') + '</div>' +
+  '<p class=tsub2>row figures <span class=pw>· by action</span></p><div class=cmp>' +
+  Object.entries(ASCII_ROWS).map(([k, t]) => `<figure><span class=ar>${esc(t)}</span>${k}</figure>`).join('') + '</div>' +
+  `<p class=tsub2>Host load <span class=pw>· the sign's needle: moderate, high, catastrophic</span></p><div class=cmp>${Object.entries(ASCII_LOAD).map(([k, t]) => `<figure><span class=ar>${esc(t)}</span>${k}</figure>`).join('')}<figure><span class=ar>~R^</span>loading 1</figure><figure><span class=ar>_R_</span>loading 2</figure></div>` +
+  '<p class=cap2>Farm\'s widths: cells ≤ 8 narrow characters × 3 lines, rows 3 characters, the load ≤ 5. ASCII only, no emoji.</p>');
+
+$('#icons').innerHTML = `<figure><img class=i512 src=icon/icon-512.png alt="">512 (shown at 256)</figure><figure><img class=i192 src=icon/icon-192.png alt="">192</figure>` +
+  `<figure><img class=i180 src=icon/icon-180.png alt="">180 · apple-touch</figure><figure><img class=px32 src=icon/favicon-32.png alt="">favicon 32 (×2)</figure><figure><img class=px16 src=icon/favicon-16.png alt="">16</figure>` +
+  `<figure><span class=home><figure><img src=../../../assets/icon-180.png alt="">farm</figure><figure><img src=../../../assets/themes/kitchen/icon-180.png alt="">kitchen</figure><figure><img src=icon/icon-180.png alt="">bush</figure><figure><img src=../../../assets/themes/terminal/icon-180.png alt="">terminal</figure></span>home screen, beside the others</figure>`;
+const L = scheme('light').tokens, D = scheme('dark').tokens;
+const chips = t => ['--g', '--a', '--r'].map(k => `<span class=chip style="background:${t[k]}"></span>`).join('');
+$('#look').innerHTML = '<h4>THEME</h4>' +
+  `<p><img src=../../../assets/icon-180.png alt="" width=24 height=24 style="border-radius:4px">farm</p><p><img src=../../../assets/themes/kitchen/icon-180.png alt="" width=24 height=24 style="border-radius:4px">kitchen</p><p><svg class=px24 viewBox="0 0 16 16" style="${style(0, 'g')}"><use href="#r-bound"/></svg>bush<span class=ck>✓</span></p>` +
+  '<h4>COLOURS</h4>' +
+  `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(mode() === 'dark' ? D : L)} <span><span class=nm>bush</span> <span class=pw>theme default · follows the phone</span></span><span class=ck>✓</span></p>` +
+  `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span>${chips(L)} <span class=nm>bush-light</span></p><p><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(D)} <span class=nm>bush-dark</span></p>`;
+
+$('#duos').innerHTML = ['light', 'dark'].map(k => {
+  const s = scheme(k), rows = gate(s).sort((a, b) => a[1] / a[2] - b[1] / b[2]).slice(0, 12);
+  return `<div class=duo2 style="background:${s.tokens['--bg']};color:${s.tokens['--fg']}"><h3>bush-${k} <span style="color:${s.tokens['--g']}">PASS</span></h3>` +
+    `<p>${Object.entries(s.tokens).filter(([t]) => !t.startsWith('--fk') && t !== '--scrim').map(([t, v]) => `<span style="white-space:nowrap;margin-right:var(--s2);font-size:var(--fs-meta)"><span class=sw style="background:${v}"></span>${t} ${v}</span>`).join(' ')}</p>` +
+    `<table class=ctab>${rows.map(([w, v, m]) => `<tr><td>${w}</td><td>${v.toFixed(2)}</td><td style="color:${s.tokens['--mute']}">min ${m}</td></tr>`).join('')}</table></div>`;
+}).join('');
+document.body.dataset.ready = 1;
+</script>
+</body></html>
