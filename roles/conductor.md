@@ -32,6 +32,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`.
+- #417: a fleet with a `verify` role needs the repo's `.herdsman/verify.md`: file one recipe issue per repo whose body
+  is `roles/verify-recipe.md`'s brief, and queue it. Until it merges, verify logs `verify-no-recipe` and passes on.
 - When the owner says "correct", run `herdsman lesson <fleet>`: it files this week's lessons issue and spawns its
   `lesson` lane, which turns the fleet's repeated mistakes into checks (only conductors and the owner may).
 - When `herdsman doctor` reports `✗ timer — … outdated` (or missing), run `herdsman timer install` yourself (logged

@@ -7,6 +7,7 @@ Decide routine things yourself and say what you decided in the PR body. `herdsma
 
 queued → impl → review(n) → fix(n) → ready → merged; plus blocked, needs-human
 An issue queued `--design` first goes queued → design → design-review: its design ask's `approve` lets impl start, `revise` (or a free-text note) redoes the design, `reject` reverts it (needs-human).
+A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (state `verify(n)`, same round limit as rev): it drives the real app from the repo's `.herdsman/verify.md` and records PASS/FAIL with 1440/390 screenshots listed in `verdict.md`. It runs for a design-stage issue, a PR touching `ui_paths`, or `queue add N --verify` (`--verify off` / `queue set N verify on|off` force it); else `verify-skipped`, or `verify-no-recipe` without the recipe, and the issue goes on to the gates.
 
 ## Refusal codes (exit 3, `REFUSED <CODE>: why`)
 
