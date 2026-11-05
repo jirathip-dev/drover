@@ -1,0 +1,178 @@
+<!doctype html><html lang=en data-theme=farm data-tab=queue class=sysopen><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Agent providers mockup</title>
+<!-- #496 design (shared with #497 and #498): the ⚙ System sheet's Agent providers section, its Anthropic and DeepSeek
+     cards, and the flows its buttons start. serve.css and herd.css are the board's, unchanged; the farm scheme's tokens
+     are the export's. The `proposed` block holds the only new rules (existing tokens only); they move to serve.css in
+     impl. The markup is web/src/system.ts providers()'s today plus the new parts, written by the functions below.
+     Views: `#` the section, `#signin` [+ add account] / [sign in again], `#use` [use] (#498), `#forms` [+ add key]
+     (#497), [remove] and a viewer device. -->
+<style id=sch>:root{--a:#f29b4b;--bg:#0f1a13;--c:#5fd0c4;--card:#1d1a12;--edge:#3b3a27;--fg:#ece4cc;--fk-a:#f29b4b;--fk-c:#5fd0c4;--fk-g:#7fd06a;--fk-l:#7cc4f0;--fk-p:#c7a4ff;--g:#7fd06a;--l:#ecdba6;--line:#26301f;--link:#7cc4f0;--mute:#a3a68a;--p:#c7a4ff;--r:#ff7d6e;--scrim:#050b08aa;color-scheme:dark}</style>
+<link rel=stylesheet href=../../../assets/serve.css>
+<link rel=stylesheet href=../../../assets/herd.css>
+<style>
+/* Mockup only: the System sheet and the lane sheet drawn in the page flow, so a screenshot shows all of it. */
+body{padding:0}
+#sys,#sys>.sh,.mk .sh{position:static;transform:none;transition:none}
+#sys>.sbd{display:none}
+.sh.sys .top{overflow:visible}
+.mk{display:none;padding:0 var(--s3) var(--s4)}
+body:is(.signin,.use,.forms) #sys{display:none}
+body.signin #signin,body.use #use,body.forms #forms{display:block}
+.mk>h1{margin:var(--s4) 0 var(--s2);font-size:var(--fs-meta);font-weight:400;color:var(--mute)}
+.mk>h1 b{color:var(--l);font-weight:700}
+.mk .sh{border:1px solid var(--edge);border-radius:14px;margin-bottom:var(--s4);padding-bottom:var(--s2)}
+.mk .sh .top{max-height:none;overflow:visible}
+.mk .pvc{background:var(--bg)}
+/* Mockup only: at 1440 the flows are one 560 px column to read (the app's sheet spans the width; the card is a grid cell). */
+@media (min-width:900px){.mk{max-width:560px;margin:0 auto}}
+
+/* ---- proposed for serve.css (#496, #497, #498) ---- */
+/* A card's head: the provider, what it holds, its [+ add …] on the right. */
+.pvch>.m{flex:1;min-width:0;font-size:var(--fs-meta);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A row's head: the name, its order badge (`active` filled green: the account new lanes take; `2nd`… muted; `capped`
+   amber), the state on the right in its tone. */
+.pvh .tag{flex:none;line-height:1.4}
+.pvh .tag.on{background:var(--g);border-color:var(--g);color:var(--bg)}
+/* Who uses it: the roles whose first live account (or named key) this is. */
+.pvw{margin:0;font-size:var(--fs-meta)}
+.pvw b{font-weight:400;color:var(--fg)}
+/* Its buttons: one line, 16 px apart; [remove] in red, last. */
+.pva{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
+.pva .rm{color:var(--r);margin-left:auto}
+.pvr[data-t=r] .pva .re{color:var(--r);font-weight:700}
+/* An inline step under a row or a card head ([use]'s scope, a new key, [remove]'s confirm): the confirm box's frame
+   in the neutral edge colour, red only for [remove]. */
+.pvx{margin:var(--s2) 0 0;padding:var(--s2);border:1px solid var(--edge);border-radius:8px}
+.pvx.cf{border-color:var(--r)}
+.pvx>p{margin:0 0 var(--s1)}
+.pvx .pick{margin:var(--s2) 0}
+.pvx .rp{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hit)}
+.pvx label.f{display:block;margin:var(--s2) 0 var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.pvx input:not([type=radio]){width:100%;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit)}
+.pvx input[aria-invalid=true]{border-color:var(--r)}
+.pvx .why{margin:var(--s1) 0 0;font-size:var(--fs-meta)}
+.pvx .how{font-size:var(--fs-meta);color:var(--mute)}
+/* The sign-in sheet's capture line: what herdsman did with the token, never the token. */
+.cap{margin:var(--s2) 0;padding:var(--s2);border-radius:6px;background:color-mix(in srgb,var(--g) 10%,transparent);font-size:var(--fs-meta)}
+.cap b{color:var(--g)}
+.cap.r{background:color-mix(in srgb,var(--r) 10%,transparent)}.cap.r b{color:var(--r)}
+/* #303's screen wraps (a login URL is longer than 390 px), as `.out pre` already does elsewhere. */
+pre.out{margin:0;padding:var(--s1) var(--s2);white-space:pre-wrap;overflow-wrap:anywhere}
+</style></head>
+<body>
+<div id=sys><div class=sbd></div><div class="sh lg sys full" role=dialog aria-modal=true aria-labelledby=syst>
+<div class=hd><p><b id=syst>system</b><button type=button class=sxc aria-label="close system">close</button></p></div>
+<div class=sxi role=navigation aria-label="system sections"><a href=#system/providers data-s=providers class=on aria-current=true><span>providers</span><i class=sd hidden></i></a><a href=#system/fleets data-s=fleets><span>fleets</span><i class=sd hidden></i></a><a href=#system/hosts data-s=hosts><span>hosts</span><i class=sd hidden></i></a><a href=#system/activity data-s=activity><span>activity</span><i class=sd hidden></i></a><a href=#system/notifications data-s=notifications><span>alerts</span><i class=sd hidden></i></a><a href=#system/conductor data-s=conductor><span>conductor</span><i class=sd hidden></i></a><a href=#system/appearance data-s=appearance><span>look</span><i class=sd hidden></i></a></div>
+<div class=top><section class=sy id=sy-providers data-s=providers></section>
+<section class=sy id=sy-fleets data-s=fleets><h2 class=syh><span class=syt>fleets</span><small class=sym>3 repos · config ~/.config/herdsman/fleet.toml</small></h2>
+<details class="sfl k-g"><summary><i class=fq>■</i><b>herdsman</b><span class=m>staging · impl · rev · verify</span><i class=cv></i></summary></details>
+<details class="sfl k-p"><summary><i class=fq>■</i><b>atlas</b><span class=m>staging · impl · rev</span><i class=cv></i></summary></details>
+<details class="sfl k-c"><summary><i class=fq>■</i><b>relay</b><span class=m>dev · impl · rev</span><i class=cv></i></summary></details></section></div></div></div>
+
+<div class=mk id=signin></div>
+<div class=mk id=use></div>
+<div class=mk id=forms></div>
+
+<script>
+// The markup the impl writes (web/src/system.ts), as plain functions over fixture rows.
+const gauge = (t, n) => `<span class="bar ${t}">▕${'█'.repeat(n)}<i>${'░'.repeat(12 - n)}</i>▏</span>`;
+const meter = (k, p) => { const b = p >= 100 ? 'r' : p >= 80 ? 'a' : 'g'; return `<span class=pm><span class=k>${k}</span>${gauge(b, Math.min(12, Math.round(p / 100 * 12)))} <b class=${b}>${p}%</b></span>`; };
+const btn = (l, c = '') => `<button type=button${c ? ` class=${c}` : ''}><span>${l}</span></button>`;
+// An account row: name · order badge · state; who uses it; 5h/7d from the lanes' status line (#258) and its age; buttons.
+function account(x, o = {}) {
+  const st = { ok: ['g', 'ok'], capped: ['a', `capped until ${x.until}`], invalid: ['r', 'token invalid: sign in again'] }[x.state];
+  const badge = x.active ? '<span class="tag on">active</span>' : `<span class="tag ${x.state === 'capped' ? 'a' : 'm'}">${x.order}</span>`;
+  const use = x.meters ? `<p class=pvu>${meter('5h', x.meters[0])}${meter('7d', x.meters[1])}</p>` : '';
+  const acts = o.ro ? '' : `<div class=pva>${x.first || x.state === 'invalid' ? '' : btn('use')}${btn('sign in again', 're')}${btn('remove', 'rm')}</div>`;
+  return `<div class=pvr data-t=${st[0]}><p class=pvh><b class=pvn>${x.name}</b>${badge}<span class="pvs ${st[0]}">${st[1]}</span></p>`
+    + `<p class="pvw m">${x.who}</p>${use}<p class=pvm>${x.note}</p>${acts}${o.after || ''}</div>`;
+}
+function key(x, o = {}) {
+  const [t, s] = x.ok ? ['g', `✓ ${x.balance}`] : ['r', 'invalid: replace it'];
+  const acts = o.ro ? '' : `<div class=pva>${btn('replace', 're')}${btn('remove', 'rm')}</div>`;
+  return `<div class=pvr data-t=${t}><p class=pvh><b class=pvn>${x.name}</b><span class="pvs ${t}">${s}</span></p><p class="pvw m">${x.who}</p><p class=pvm>${x.note}</p>${acts}${o.after || ''}</div>`;
+}
+const card = (p, name, what, add, rows, o = {}) => `<article class=pvc data-p=${p}><div class=pvch><b>${name}</b><span class=m>${what}</span>${o.ro ? '' : btn(add)}</div>${o.head || ''}${rows}</article>`;
+
+// Fixtures: the order is A, B, C for every role; A is capped, so lanes take B (active); C's token was refused.
+const A = { name: 'A', order: '1st', state: 'capped', until: '16:40', first: true, meters: [100, 64],
+  who: 'used by <b>nobody while capped</b> · its roles fall through to B', note: 'status line 4m ago · 5h resets 16:40 · 7d resets Fri 11:59 · 6.2 lane-h today' };
+const B = { name: 'B', order: '2nd', state: 'ok', active: true, meters: [34, 18],
+  who: 'used by <b>impl · rev · verify · conductor</b> · every fleet', note: 'status line 1m ago · 5h resets 14:20 · 7d resets Sat 09:00 · 3.1 lane-h today' };
+const C = { name: 'C', order: '3rd', state: 'invalid', meters: null,
+  who: 'used by nobody · skipped until it signs in again', note: 'refused 2h ago (401 on spawn) · no usage since Mon' };
+const K1 = { name: 'main', ok: true, balance: '¥ 42.10', who: 'used by <b>atlas impl</b> as DEEPSEEK_API_KEY', note: 'checked 12m ago · rechecked hourly' };
+const K2 = { name: 'spare', ok: false, who: 'used by nobody', note: 'hourly check 9m ago: 401 Authentication Fails' };
+
+const head = (meta, t = '') => `<h2 class=syh><span class=syt>agent providers</span><small class="sym ${t}">${meta}</small></h2>`;
+const foot = '<p class=pvf>tokens and keys stay in the main host\'s keychain, never shown · remote lanes get theirs over ssh stdin · a conductor proposes, you tap</p>';
+const anth = (rows, o) => card('anthropic', 'Anthropic', 'Claude · setup tokens', '+ add account', rows, o);
+const deep = (rows, o) => card('deepseek', 'DeepSeek', 'API keys', '+ add key', rows, o);
+document.getElementById('sy-providers').innerHTML = head('2 providers · 2 need you', 'a')
+  + `<div class=pvg>${anth([A, B, C].map(x => account(x)).join(''))}${deep([K1, K2].map(x => key(x)).join(''))}</div>${foot}`;
+
+// A lane sheet (#303's setup terminal: the masked screen, an [open] per login URL, the reply box), drawn open.
+const sheet = (title, body, st = '', reply = '') => `<div class=sh><div class=hd><p><b>${title}</b></p></div><div class=top><div class=card><p class="nw el">${title.replace('sign in · ', 'sign in: ')} on mac-mini; closes when it exits or in 10 min</p></div></div>`
+  + `<div class=chat><div class=now>${body}</div></div>${reply ? `<form class=reply><textarea rows=1 placeholder="${reply}" aria-label="${reply}"></textarea><button><span>Send</span></button></form>` : ''}<p class="st ${st[0] || ''}">${st[1] || ''}</p></div>`;
+const url = '<p><a href=#signin>[open]</a> <span class=m>https://claude.ai/oauth/authorize?code=true&amp;cl…</span></p>';
+const screen1 = `<pre class=out>Welcome to Claude Code v2.4.1
+
+Browser didn't open? Use the url below to sign in:
+
+https://claude.ai/oauth/authorize?code=true&amp;client_id=•••
+
+Paste code here if prompted &gt; </pre>${url}`;
+const newC = { name: 'C', order: '3rd', state: 'ok', meters: null, who: 'used by nobody yet · 3rd for every role', note: 'signed in just now · usage shows after its first lane' };
+const step = (n, t) => `<h1>${n} · <b>${t}</b></h1>`;
+document.getElementById('signin').innerHTML =
+  step('1', '[+ add account] names it; [sign in again] skips this')
+  + anth(account(A) + account(B), { head: `<div class=pvx><p>new Anthropic account</p><label class=f for=an>name (the next free letter)</label><input id=an value=C autocomplete=off><div class=rp>${btn('sign in')}${btn('cancel')}</div><p class="why m">runs <code>claude setup-token</code> in a setup terminal on mac-mini (the main host) · the row appears once its token is saved</p></div>` })
+  + step('2', 'the setup terminal, streamed: open the URL, paste the code back')
+  + sheet('sign in · Anthropic C', screen1, ['m', 'waiting for the code from the browser'], 'paste the code')
+  + step('3', 'token printed: caught, saved, pane cleared')
+  + sheet('sign in · Anthropic C', `<p class=cap><b>✓ saved</b> · Anthropic C's token is in the keychain · the pane is cleared · the token is in no event, log or capture</p>`, ['g', 'sign-in closed'])
+  + step('4', 'the row appears')
+  + anth(account(A) + account(B) + account(newC))
+  + step('✗', 'no token printed (closed, timed out, or refused)')
+  + sheet('sign in · Anthropic C', `<p class="cap r"><b>✗ no token saved</b> · setup-token exited: "OAuth error: invalid code" · nothing changed</p><p>${btn('try again')}</p>`, ['r', 'sign-in closed']);
+
+// #498: [use] asks its scope, moves the account to the front there, then one prompt for the running lanes.
+const scope = `<div class=pvx><p>use <b>C</b> first for</p><button type=button class=pick><span>every role · all fleets</span></button>`
+  + `<div class=rp><span class=m>or one fleet's role</span><label class=pk><span>atlas ▾</span><select aria-label=fleet><option>atlas</option></select></label><label class=pk><span>impl ▾</span><select aria-label=role><option>impl</option></select></label></div>`
+  + `<div class=rp>${btn('use there')}${btn('cancel')}</div><p class="why m">it moves to the front of that order (logged, by owner) · new lanes take it at once</p></div>`;
+const moved = `<div class=pvx><p><b class=g>✓ C is 1st for every role</b> <span class=m>· new lanes use it now</span></p><p>3 running lanes are on B: <span class=m>herdsman impl #497 · herdsman rev #496 · atlas impl #2912</span></p>`
+  + `<div class=rp><button type=button><span>move 3 running lanes</span></button>${btn('keep them')}</div><p class="why m">each finishes its turn, then resumes the same session on C · a lane whose harness can't resume gets a handover</p></div>`;
+const C2 = { ...newC, who: 'used by nobody yet · 3rd for every role', note: 'status line 20m ago · 5h resets 18:00 · 7d resets Sun 10:00', meters: [2, 1] };
+const C3 = { ...C2, order: '1st', active: true, first: true, who: 'used by <b>impl · rev · verify · conductor</b> · every fleet' };
+const B3 = { ...B, active: false, who: 'used by <b>3 running lanes</b> until their turn ends' };
+const proposal = `<details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>proposes use C for every role</span><i class=cv></i></summary><div class=md><p class=qid>use C · every role · all fleets</p><p>A is capped until 16:40 and B is at 81% of its 5h window; C was signed in this morning and is unused.</p></div><form class=chc>${btn('apply')}${btn('discard')}</form></details>`;
+document.getElementById('use').innerHTML =
+  step('1', '[use] asks where')
+  + anth(account(B) + account(C2, { after: scope }))
+  + step('2', 'it is first there; one prompt for the running lanes')
+  + anth(account(C3, { after: moved }) + account(B3))
+  + step('3', 'a conductor never switches: it proposes, you tap [apply]')
+  + `<div class=ct>${proposal}</div>`
+  + step('↳', '[apply] is [use] with that scope, then the same lanes prompt; on a viewer device it is inert');
+
+// #497: [+ add key]: a name, a masked paste, a how-to link above it; checked before it is saved.
+const addKey = (bad) => `<div class=pvx><p>new DeepSeek key</p><label class=f for=kn${bad ? 2 : 1}>name</label><input id=kn${bad ? 2 : 1} value=${bad ? 'spare' : 'main'} autocomplete=off>`
+  + `<p class=how>get one: platform.deepseek.com → API keys → Create new API key <a href=#forms>[open]</a></p><label class=f for=kv${bad ? 2 : 1}>key</label><input id=kv${bad ? 2 : 1} type=password value=sk-0000000000000000 autocomplete=off placeholder="paste the key"${bad ? ' aria-invalid=true' : ''}>`
+  + (bad ? '<p class="why r">✗ DeepSeek said 401 Authentication Fails · nothing saved</p>' : '<p class="why m">checked against DeepSeek\'s balance endpoint before it is saved</p>')
+  + `<div class=rp>${btn(bad ? 'check again' : 'check and save')}${btn('cancel')}</div></div>`;
+const confirm = `<div class="pvx cf"><p>remove <b>C</b>? its token leaves the keychain · roles that list it skip it · no running lane uses it</p><div class=rp><button type=button class=yes><span>remove</span></button><button type=button class=no><span>cancel</span></button></div></div>`;
+document.getElementById('forms').innerHTML =
+  step('1', '[+ add key]: name, how-to, masked paste')
+  + deep(key(K1), { head: addKey(false) })
+  + step('2', 'a key DeepSeek refuses is not saved; the field says why')
+  + deep(key(K1), { head: addKey(true) })
+  + step('3', '[remove] (owner device only) confirms first')
+  + anth(account(B) + account({ ...C, after: '' }, { after: confirm }))
+  + step('4', 'a viewer device (paired, not the owner\'s): no buttons')
+  + anth(account(A, { ro: true }) + account(B, { ro: true }), { ro: true })
+  + '<p class=mt>only a paired owner device can add, sign in, use or remove</p>';
+const on = () => { document.body.className = location.hash.slice(1); };
+addEventListener('hashchange', on); on();
+</script>
+</body></html>
