@@ -1,0 +1,25 @@
+{
+  "label": "Bush dark (outback night: indigo sky, ochre, red earth; #462)",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#14152b",
+    "--card": "#1f2040",
+    "--edge": "#3b3b66",
+    "--line": "#272848",
+    "--scrim": "#05061299",
+    "--fg": "#f0e6d2",
+    "--mute": "#aaa3bd",
+    "--l": "#e89a4c",
+    "--link": "#a9c4f0",
+    "--g": "#86c96e",
+    "--a": "#f3dc6a",
+    "--r": "#ff6f8e",
+    "--p": "#c6a3ec",
+    "--c": "#6fcac0",
+    "--fk-l": "#8bb5f2",
+    "--fk-p": "#c6a3ec",
+    "--fk-c": "#6fcac0",
+    "--fk-g": "#86c96e",
+    "--fk-a": "#f3dc6a"
+  }
+}
