@@ -5,8 +5,8 @@ sprite on each Queue and Events row, a load scene on each Host group, the Herd, 
 only: `theme.json`, `sprites.svg`, and optionally `scene.svg` and its icons. No theme ships CSS or JS.
 
 Built in: `farm` (horses, the ranch herd.js draws), `kitchen` (#239: pixel chefs by role at each fleet's station, the
-load as heat) and `terminal` (today's
-plain board). Your own go in `<config dir>/themes/<name>/` next to fleet.toml; one named like a built-in wins,
+load as heat), `garden` (#423: a houseplant shop, each issue a plant that grows leaf by leaf with its state, the keeper
+tending it by role, the load as the shop window's light) and `terminal` (today's plain board). Your own go in `<config dir>/themes/<name>/` next to fleet.toml; one named like a built-in wins,
 file by file.
 
 ## Picking one
@@ -30,7 +30,9 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `actions` | sprite id per action: `impl`, `fix`, `rev`, `update` (a lane at work, by role), `idle`, `done`, `blocked` | the theme's `poses` sprite for that action's pose (`working` for the four roles), then farm's action |
 | `poses` | sprite id per pose: `working`, `idle`, `done`, `blocked` (the Herd's horses) | farm's |
 | `looks` | a list of variant sets, `{"--c": "#…", "--d": …}`; a lane takes one by a stable hash of its name. Sprites may also use `var(--fk)`, the fleet's colour | the built-in coats |
-| `load_scene` | `{"kind": "weather" \| "heat" \| "none", "levels": {"calm", "busy", "held"}, "fan": id}`: the Host group headers' miniature (clouds and rain, or flame height) at the group's status (green, amber, red); `levels` are the words its label reads. #370 `minis`: `{"calm", "busy", "held"}` sprite ids drawn 48 × 16 on each Host card's header beside its level word (`simmer · calm`; load/limit under 0.5 calm, from 0.5 busy, at the limit held). `none`: text only. `heat` also heats the Herd: `heat-calm` (load/limit < 0.5), `heat-busy`, `heat-held` (the spawn gate refuses) on `#herd`, no night and no `[A]`; idle lanes draw `fan` while held | farm's (`weather`: clear, windy, storm) |
+| `stages` | #423: sprite id per growth stage of the lane's issue: `queued`, `impl`, `review`, `fix`, `ready`, `merged`, `blocked` (stuck: blocked, dead or needing you). A lane draws it under its `actions` sprite in the same 132 × 100 box; a queued issue at the Herd's rail is its `queued` plant (with `rail.needs` over it while it needs you); a Queue row draws `<id>-row`. With `species`, `<id>-<species id>` (and `<id>-<species id>-row`) first, then `<id>` | none: the action alone, as before |
+| `species` | #423: a list of variant sets like `looks`, each with an `id` (its sprites' suffix): an issue takes one by its number (`n % length`), so it never changes and neighbours differ | none |
+| `load_scene` | `{"kind": "weather" \| "heat" \| "light" \| "none", "levels": {"calm", "busy", "held"}, "fan": id}`: the Host group headers' miniature (clouds and rain, or flame height) at the group's status (green, amber, red); `levels` are the words its label reads. #370 `minis`: `{"calm", "busy", "held"}` sprite ids drawn 48 × 16 on each Host card's header beside its level word (`simmer · calm`; load/limit under 0.5 calm, from 0.5 busy, at the limit held). `none`: text only. `heat` also heats the Herd: `heat-calm` (load/limit < 0.5), `heat-busy`, `heat-held` (the spawn gate refuses) on `#herd`, no night and no `[A]`; idle lanes draw `fan` while held. #423 `light`: `light-calm`, `light-busy`, `light-held` on `#herd` show `scene.svg`'s `.l-sun`, `.l-overcast` or `.l-rain` layer (the shop window), no night and no `[A]` | farm's (`weather`: clear, windy, storm) |
 | `rail` | `{"item", "needs"}`: the sprite of a queued issue at the Herd's gate, and its needs-you variant | `item`: the `idle` action; `needs`: the item |
 | `moments` | `{"merged" \| "fail" \| "needs-you": {"sprite": id, "anim": "hop" \| "shake" \| "pulse"}}`, played for 2.4 s when the log gets that event (an `ev` with its `k`, fleet `f` and issue `n` on `/live`, once per seq). #370: on the issue's row on the visible tab (merged: the `row_sprites.merged` sprite hops; fail: the row shakes; needs-you: the sprite pulses, the row flashes), its theme word as a tag where the age is; a `/live` patch mid-moment resumes it. No row in view: the top-right overlay. Silent; reduced motion shows a still frame. `false`: none | farm's |
 | `row_sprites` | sprite id per action for the Queue and Events row sprite (16 × 12 art drawn at 24 px, 1.5× with crisp pixels, #281; its title and label is the plain state word), and (#370) per kind: `queued`, `needs` (a Queue row waiting or needing you; an Events ask), `merged`, `fail` (Events rows, and the row's moment). Each loops its `.kf1`/`.kf2` frames on the visible tab (frame 1 under reduced motion). `false`: rows keep their state glyph | the action's sprite; a kind: farm's |
@@ -41,7 +43,7 @@ Every key is optional. What a theme lacks is filled in by the server (`/themes/<
 | `ascii_rows` | per action, the ascii style's Queue and Events row figure in the sprite's slot: one line of at most 3 narrow characters (farm `~h=`, kitchen `c~@`); its title and label is the state word | farm's |
 | `ascii_load` | `{"calm", "busy", "held"}`: the ascii style's Host miniature, one line of at most 5 narrow characters (farm `\O/` `~~~` `///`, kitchen's flame) | farm's |
 | `ascii_loading` | the ascii style's loading overlay: two frames, one per line, swapped by CSS (farm `~h~` / `>h<`) | farm's |
-| `scheme` | the colour scheme a phone gets until it picks one (below) | `github-dark` |
+| `scheme` | the colour scheme a phone gets until it picks one (below); #423: or `{"light": name, "dark": name}`, picked by the phone's `prefers-color-scheme` and followed live | `github-dark` |
 | `glyphs`, `words`, `scene` | the Herd's label marks per lane state, label words (`{"horses": "chefs"}`; also a band's name, `queued` … `blocked/dead`, and a working lane's word by action, `impl` … `update`; #370: the board's labels on every tab, each shown as `<theme word> · <plain word>`, the plain one muted in `--fs-meta`: the groups `needs`, `working`, `idle`, `done`, `queued`, `parked`, `dead`, the roles `impl`, `fix`, `rev`, `update`, `merged`, `fail`, each tab's first line `tab-queue` … `tab-events`, the empty tabs `empty-queue`, `empty-lanes`, `empty-events`, and `loading` under the loading overlay; push titles use `merged` and `needs`), and `scene.weather: false` / `scene.line: true` (each fleet's page shows every fleet's `scene.svg` side by side, its own in the middle) / `scene.palette` (CSS custom properties on the Herd; herd.css reads `--done` for the done sprites' dimming, `--qw` for a queued slot's width, `--flutter` for a needs-you rail item's animation) | `glyphs`, `scene`: farm's, key by key; `words`: the plain word (#370: never farm's) |
 
 A key of the wrong shape is an error naming it (`` `ascii.impl` must be at most 3 lines of 8 narrow characters ``);
@@ -49,11 +51,13 @@ the whole theme is then farm.
 
 ## Files
 
-- `sprites.svg`: one `<g id=…>` per sprite id, drawn in a 132 × 100 box; coats are the CSS vars `--c`, `--d`, `--m`,
+- `sprites.svg`: one `<g id=…>` per sprite id, drawn in a 132 × 100 box (#423: or `data-box="0 0 24 24"`, its own, so a
+  row sprite or Host mini keeps whole pixels); coats are the CSS vars `--c`, `--d`, `--m`,
   `--b`; a `.leg` group swings with the trot, `var(--m)` fills skew in a storm. A sprite id the sheet lacks is farm's.
   `var(--fk)` is the fleet's colour, `.kf1` / `.kf2` groups are a two-frame loop (swapped every 0.6 s under `heat`, frame 1
   under reduced motion), `var(--f1)` / `var(--f2)` the flame colours by heat level, `.ksteam` shows from busy.
-- The kitchen's files are generated: `node docs/design/kitchen/build.mjs` (from `art.mjs`, the approved mockup's pixels).
+- The kitchen's files are generated: `node docs/design/kitchen/build.mjs` (from `art.mjs`, the approved mockup's pixels);
+  the garden's too: `node docs/design/garden/build.mjs`.
 - `scene.svg` (optional): the Herd strip's background, `viewBox="0 0 390 320"`.
 - `icon-180.png`, `icon-192.png`, `icon-512.png` (optional).
 
@@ -74,8 +78,9 @@ no scene miniature, no moments, the load as text; its icon is a green `>_` on th
 
 A scheme is the board's colours: one JSON file of every colour token the tabs use, so nothing else changes. Built in
 (`assets/schemes/`): `github-dark` (the board before schemes, colour for colour), `solarized-dark`, `gruvbox`, `nord`,
-`dracula`, `paper` (light, for daylight), `farm` (night green and soil, wheat-gold controls, sky-blue links) and
-`kitchen` (charcoal tile, copper controls, brass links, warm cream text). Your own go in
+`dracula`, `paper` (light, for daylight), `farm` (night green and soil, wheat-gold controls, sky-blue links),
+`kitchen` (charcoal tile, copper controls, brass links, warm cream text), and #423's `garden-light` (linen, terracotta
+controls, sage-teal links) and `garden-dark` (moss and walnut, lamp-amber controls). Your own go in
 `<config dir>/schemes/<name>.json` (letters, digits and `-`); one named like a built-in wins. The Herd scene
 (herd.css) is theme art and keeps its own colours. Contact sheet and values: `docs/design/schemes/`.
 
@@ -102,7 +107,8 @@ Host tab with its first reason; a phone that picked it gets its theme's default,
 
 **Picking one:** the look sheet's COLOURS list (`[◐]`) shows every scheme that passes, each as `Aa` in its fg on its
 bg, then its green, amber and red chips, per phone, kept in localStorage. A phone that never picked gets its theme's `scheme`, marked
-`(theme default)`: farm `farm`, kitchen `kitchen`, terminal `github-dark`; picking that row forgets the pick, so the
+`(theme default)`: farm `farm`, kitchen `kitchen`, garden `garden-light` or `garden-dark` by the phone's light/dark
+setting, terminal `github-dark`; picking that row forgets the pick, so the
 colours follow the theme again. The page paints the phone's last scheme before the first paint (no flash; else the board
-theme's built-in default), and the iOS status bar takes its `--bg`. The Host tab's `theme` row names this phone's
+theme's built-in default, a `{light, dark}` one by media query), and the iOS status bar takes its `--bg`. The Host tab's `theme` row names this phone's
 theme and colours. Debug: `?scheme=<name>` for one load.

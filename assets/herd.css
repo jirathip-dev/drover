@@ -66,8 +66,8 @@
 .hcap[data-fps]::after{content:" · " attr(data-fps)}
 .hb{padding-top:var(--s2)}
 /* #292: the ranch's grass fades into the pasture below it, no straight seam. */
-#herd:not(.heat) .hr::after{content:"";position:absolute;left:0;right:0;bottom:0;height:25%;pointer-events:none;background:linear-gradient(#0000,var(--bl,#a3ab68))}
-#herd:not(.heat) .hb{background:linear-gradient(var(--bl,#a3ab68),#0000 calc(3 * var(--s4)))}
+#herd:not(.heat,.light) .hr::after{content:"";position:absolute;left:0;right:0;bottom:0;height:25%;pointer-events:none;background:linear-gradient(#0000,var(--bl,#a3ab68))}
+#herd:not(.heat,.light) .hb{background:linear-gradient(var(--bl,#a3ab68),#0000 calc(3 * var(--s4)))}
 #herd.night{--bl:#4f665d}.fog2{--bl:#b2b9a2}
 .band h4{margin:0;padding:var(--s3) var(--s3) var(--s1);font-size:var(--fs);color:#f4ecd8;text-shadow:0 1px 2px #0008}
 .band h4 span{opacity:.8;font-weight:400}
@@ -118,6 +118,14 @@
 .hqh.n use{animation:var(--flutter,none);transform-box:view-box;transform-origin:50% 0}
 @keyframes kflut{from{rotate:-3deg}to{rotate:3deg}}
 @media (prefers-reduced-motion:reduce){#herd.heat,.heat-held .kglow,.hqh.n use{animation:none}}
+/* #423 window light (load_scene kind "light"): `light-calm|busy|held` on #herd shows the shop window's sun, cloud or
+   rain layer (the scene's .l-sun/.l-overcast/.l-rain); the sprites' kf1/kf2 frames loop as under heat, frame 1 under
+   reduced motion. */
+#herd.light{animation:kfr 1.2s infinite}
+.rs :is(.l-sun,.l-overcast,.l-rain){display:none}
+.light-calm .rs .l-sun,.light-busy .rs .l-overcast,.light-held .rs .l-rain{display:inline}
+@media (prefers-reduced-motion:reduce){#herd.light{animation:none}}
+#herd.light .hn .ask{background:var(--card)} /* the needs-you cards in the scheme's own colours, light or dark */
 /* #292 wide screens: the cards are a grid of equal columns from the rail's left edge, as wide as the page's widest line
    (`--cw`, herd.js patch(); ellipsised past 520 px, the whole line in `title`); the bands sit closer. */
 @media (min-width:900px){
