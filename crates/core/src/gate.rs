@@ -98,6 +98,8 @@ pub fn verdict(
         _ => p.gate(),
     };
     let lp = p.loop_of(stage);
+    // #417: a FAIL of a check that shares another's rounds (verify: rev's) is in that check's round at this head.
+    let cnt = p.counts(lp);
     // #228: `FAIL (form-only)` with every blocker tagged a form category doesn't count, `form_rounds` times per issue.
     let (used, of) = (st.as_ref().map_or(0, |s| s.form), f.form_rounds.unwrap_or_default());
     let tagged = !pass && body.lines().next().is_some_and(|l| l.trim() == "FAIL (form-only)");
@@ -118,17 +120,18 @@ pub fn verdict(
     }
     let form = tagged && demoted.is_none();
     let round = st.as_ref().map_or(1, |s| {
-        let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == lp);
-        s.stage_rounds.get(lp).copied().unwrap_or_default() + u32::from(new && !form)
+        let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == cnt);
+        s.stage_rounds.get(cnt).copied().unwrap_or_default() + u32::from(new && !form)
     });
+    let shots = crate::verify::shots(&body, Path::new(file));
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
-        "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha"))});
+        "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, Some(issue), "verdict", data),
     )?;
-    let (limit, of_limit) = limit(f, lp, st.as_ref());
+    let (limit, of_limit) = limit(f, cnt, st.as_ref());
     let (v, note) = if form {
         ("FAIL (form-only)", format!(" · not counted · form {}/{of}", used + 1))
     } else {
@@ -394,8 +397,9 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
             Some(v) => return Err(refuse("VERDICT_FAIL", format!("{} verdict for {head} is {v}", c.name))),
             None => return Err(refuse("STALE_VERDICT", format!("no {} PASS for head {head}", c.name))),
         }
-        let n = st.map_or(0, |s| s.stage_rounds.get(&c.name).copied().unwrap_or_default());
-        let (limit, of) = limit(f, &c.name, st);
+        let cnt = f.flow().counts(&c.name);
+        let n = st.map_or(0, |s| s.stage_rounds.get(cnt).copied().unwrap_or_default());
+        let (limit, of) = limit(f, cnt, st);
         if n > limit && !over {
             return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}{of})")));
         }

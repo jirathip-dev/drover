@@ -551,10 +551,13 @@ fn lanes_group_by_fleet_with_others() {
                 "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
             ))
     );
-    // One herdr agent list per 10 s, one pane read per 30 s.
+    // One herdr agent list per 10 s, one pane read per 30 s (#269: API v1's Lanes, the board's read).
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
-        s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", 1_000_000 + t);
+        assert!(
+            String::from_utf8_lossy(&s.respond("GET /api/v1/lanes HTTP/1.1\r\n\r\n", 1_000_000 + t))
+                .starts_with("HTTP/1.1 200")
+        );
     }
     assert_eq!(r.count("herdr agent list"), 1 + 2);
     assert_eq!(r.count("herdr pane read w1:p2"), 1 + 1);
@@ -913,7 +916,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         ))
         .into_owned()
     };
-    for path in ["/frags", "/?frag=all", "/herd.json"] {
+    for path in ["/herd.json", "/api/v1/needs", "/api/v1/lanes"] {
         let res = send(path, "");
         assert!(
             res.starts_with("HTTP/1.1 200 OK") && res.contains("Content-Type: application/json; charset=utf-8\r\n"),
@@ -922,8 +925,9 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
         assert!(j.is_object(), "{path}");
     }
-    assert!(send("/frags", "").contains("\"needs\""), "frags by element id");
-    for path in ["/frags", "/?frag=all", "/herd.json", "/lane?agent=sendmeter-impl-12"] {
+    // #269: `/frags` (HTML parts) is gone; the board reads API v1.
+    assert!(send("/frags", "").starts_with("HTTP/1.1 404"), "no HTML parts");
+    for path in ["/herd.json", "/lane?agent=sendmeter-impl-12"] {
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
             "Sec-Fetch-Dest: document\r\n",
@@ -945,13 +949,13 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         "the board itself"
     );
     // The SW answers a navigation off the page with the page (#406: but a thread's file, chat_tab.rs), and never
-    // caches `frags`; the page fetches `frags`.
+    // caches the API (#269: the board's every read); serve.js reads no `frags`.
     let sw = send("/sw.js", "");
     assert!(sw.contains("e.request.mode === 'navigate' && u.pathname !== P && !u.pathname.startsWith(P + 'thread/')) return e.respondWith(caches.match(P).then(m => m || fetch(P)))"), "{sw}");
-    assert!(sw.contains("P + 'frags'") && !sw.contains("frag=all"));
+    assert!(sw.contains("u.pathname.startsWith(P + 'api/')") && !sw.contains("frags"));
     let v = send("/", "");
     let v = &v[v.find("/a/").unwrap()..][..11];
-    assert!(send(&format!("{v}/serve.js"), "").contains("fetch(R + 'frags?tab='"));
+    assert!(!send(&format!("{v}/serve.js"), "").contains("frags"));
 }
 
 /// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404. #268:

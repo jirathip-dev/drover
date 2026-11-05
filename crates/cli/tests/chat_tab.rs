@@ -20,11 +20,10 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-/// The chat part as `/frags?tab=chat` sends it, and the needs-you part.
+/// The chat part and the needs-you part, as the board draws them (#269) from API v1's `chat` and `needs`.
 fn frags(s: &Server, cookie: &str, now: u64) -> (String, String) {
-    let res = req(s, "GET", "/frags?tab=chat", "", cookie, now);
-    let j: serde_json::Value = serde_json::from_str(body(&res)).unwrap();
-    (j["chat"].as_str().unwrap().into(), j["needs"].as_str().unwrap().into())
+    let [needs, _, chat] = parts(s, ADDR, cookie, now);
+    (chat, needs)
 }
 
 /// The demo's fleets and log, in a temp dir; its thread files' paths are relative to the repo root.
@@ -675,7 +674,8 @@ fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
     (c, cookie)
 }
 
-/// #408: a thread of 100 messages carries its last 30 under the older-messages marker; `thread/t1?before=` sends the
+/// #408: a thread of 100 messages carries its last 30 under the older-messages marker; `thread/t1?before=` (#269: API
+/// v1's) sends the
 /// 30 before them in order, and the last page stops at the thread's start.
 #[test]
 fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time() {
@@ -699,16 +699,10 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
     assert_eq!(msgs(view), want(71, 100));
     assert!(!view.contains("thread started"), "{view}");
     assert!(view.contains(" data-n="), "each block names its event");
+    // #269: API v1 `thread/t1?before=`, drawn by the board.
     let page = |b: &str| {
-        body(&req(
-            &s,
-            "GET",
-            &format!("/thread/t1?before={b}&n=30"),
-            "",
-            &cookie,
-            T + 200,
-        ))
-        .to_string()
+        let j = api(&s, ADDR, &cookie, T + 200, &format!("thread/t1?before={b}&n=30"));
+        board_js(&[(&j, &format!("chat.page({}, 't1', d, true)", T + 200))]).remove(0)
     };
     let p1 = page(&b(view).unwrap());
     assert_eq!(msgs(&p1), want(41, 70));
@@ -720,7 +714,7 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
         p3.starts_with("<p class=qs>thread started by owner") && b(&p3).is_none(),
         "{p3}"
     );
-    let no = req(&s, "GET", "/thread/t9?before=5", "", &cookie, T + 200);
+    let no = req(&s, "GET", "/api/v1/thread/t9?before=5", "", &cookie, T + 200);
     assert!(no.starts_with("HTTP/1.1 404"), "{no}");
 }
 

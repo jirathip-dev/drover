@@ -34,7 +34,7 @@ fn first_read() -> String {
 /// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let req = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    with_queue(&String::from_utf8_lossy(&s.respond(&req, NOW)), s, ADDR, NOW)
+    with_board(&String::from_utf8_lossy(&s.respond(&req, NOW)), s, ADDR, cookie, NOW)
 }
 
 fn post(s: &Server, cookie: &str, body: &str) -> String {

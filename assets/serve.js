@@ -15,18 +15,17 @@ function tab(t) {
   $$('main>section').forEach(s => s.hidden = s.id !== t);
   $$('nav a').forEach(a => a.classList.toggle('on', a.hash === '#' + t));
   put('tab', t);
-  document.cookie = `tab=${t};path=${R || '/'};max-age=31536000;samesite=strict`; // #337: the page carries this tab only
   $('.qhelp').hidden = t !== 'queue';
-  // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
+  // #337: a tab not read yet (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
   // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined); #268:
-  // after the first frame, so the page paints first (the Queue tab, the TypeScript board's, is never in the page).
+  // after the first frame, so the page paints first (#269: no tab is in the page, the TypeScript board draws each).
   if (!$('#' + t).childElementCount && sget('c:' + t)) requestAnimationFrame(() => setTimeout(() => $('#' + t).childElementCount || frag(t, sget('c:' + t))));
-  wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
+  // #269: the board reads the needs cards and the tab's part (on the page's first tab(), not loaded yet: its own first read).
+  if (window.boardTab) wait(window.boardTab(t).catch(() => have.delete(t)));
 }
-// #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
-const have = new Set([...$$('main>section')].filter(s => s.childElementCount).map(s => s.id));
+const have = new Set();
 // #337: a load, refresh or action over 300 ms shows the theme's loading animation, large, over a light scrim near the
 // top of the content (the page stays tappable; [↻] spins as well); it goes as soon as the data paints.
 let waits = 0, ovt = 0;
@@ -459,7 +458,7 @@ async function pushwords() {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, seq = 0, P = {}, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -524,7 +523,7 @@ function frag(id, html) {
   alerts();
   badge();
   if (id === 'needs') fold();
-  if (id === 'queue') sync(dot.classList[0]); // #268: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
+  if (id !== 'host' && id !== 'events' && !id.startsWith('sy-')) sync(dot.classList[0]); // #268, #269: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
   if (id === 'queue' && want) wanted();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
@@ -695,7 +694,7 @@ document.addEventListener('click', async e => {
     if (r.ok) refresh();
   } catch (err) { note(b, 'alerts failed: ' + err.message, false); }
 });
-// Network only (the SW passes `frags` through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
+// Network only (the SW passes the API through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
 async function refresh(quiet) {
   dbg('refresh');
   if (DEMO) return herdPull();
@@ -703,10 +702,10 @@ async function refresh(quiet) {
   busy = true;
   sync('a');
   try {
-    const t = document.documentElement.dataset.tab, j = await (quiet ? x => x : wait)(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
+    const t = document.documentElement.dataset.tab;
+    await (quiet ? x => x : wait)(window.boardTab ? window.boardTab(t) : Promise.resolve()); // #269: the needs cards and the tab's part
     have.clear();
     have.add(t);
-    for (const id in j) frag(id, j[id]);
     dispatchEvent(new Event('herd-refresh')); // #266: the TypeScript board's tabs read the API again
     herdPull();
     busy = false;
@@ -714,28 +713,19 @@ async function refresh(quiet) {
     pulse();
   } catch (e) { busy = false; sync('r'); }
 }
-// Backoff 1, 2, 5, 10 s; after 30 s down, poll `frags` every 10 s until SSE is back.
+// Backoff 1, 2, 5, 10 s; after 30 s down, refresh every 10 s until SSE is back.
 function connect() {
   if (DEMO) return;
   if (es) es.close();
-  P = {};
   const t = watching(); // #407: the open thread: no push for it while this stream lives
   try { es = new EventSource('live?tab=' + (sysOn() ? 'host' : document.documentElement.dataset.tab) + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
-  // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
+  // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until the data lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  // #351: after a part's first copy on this stream, only its changed pieces (`patch`, cut before each `<d` as serve.rs
-  // cuts them): the pieces at or past `p` not in `set` are the old ones, shifted by the length change.
-  const got = (id, ps) => { P[id] = ps; frag(id, ps.join('')); sync('g'); pulse(); claim(); };
-  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); got(j.id, j.html.split(/(?=<d)/)); });
-  es.addEventListener('patch', e => {
-    at(e);
-    const j = JSON.parse(e.data), o = P[j.id];
-    if (!o) return refresh();
-    got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
-  });
+  // #269: a changed part's data (the needs cards, Lanes, [chat]) as this device sees it; the TypeScript board draws it.
+  for (const id of ['needs', 'lanes', 'chat']) es.addEventListener(id, e => { at(e); dispatchEvent(new CustomEvent('herd-' + id, { detail: JSON.parse(e.data) })); sync('g'); pulse(); claim(); });
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
@@ -2002,7 +1992,7 @@ function chatPaint(root = $('#chat')) {
 }
 function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); }); }
 // #408: a thread opens with its last 30 messages; near the top a scroll (or a tap on the marker) loads the 30 before
-// them (`thread/<t>?before=`) above, the reading position kept. A live copy's marker becomes the live thread's blocks
+// them (API v1 `thread/<t>?before=`, the TypeScript board draws them) above, the reading position kept. A live copy's marker becomes the live thread's blocks
 // older than the copy's first (`data-n`), so a swap never drops the pages loaded.
 function chatKeep(root) {
   root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
@@ -2017,7 +2007,7 @@ async function chatOlder() {
   if (!m || OLDQ) return;
   OLDQ = true;
   FOL = false; // #407: up there reading older ones: the end is not followed
-  const h = await part(`thread/${encodeURIComponent(THR)}?before=${m.dataset.b}&n=30`), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
+  const h = await window.threadOlder?.(THR, m.dataset.b), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
   OLDQ = false;
   if (!h || !m.isConnected) return;
   const t = el('div', '');

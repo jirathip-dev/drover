@@ -26,14 +26,117 @@ export type Notice = { at: number, text: string, };
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
- * `/live`'s `frag`: a fragment's new HTML.
+ * #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's `age` (once over 2 min),
+ * the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board
+ * takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue;
+ * `pair`: the page offers Pair this phone.
  */
-export type Frag = { id: string, html: string, };
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, age?: string | null, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
 
 /**
- * #351: `/live`'s `patch`: a `frag` as length `n`, common prefix `p` and the changed pieces by index.
+ * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
+ * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
  */
-export type Patch = { id: string, n: number, p: number, set: { [key in string]: string }, };
+export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, };
+
+/**
+ * A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
+ * else a harness `menu`, or the pane's last lines (`tail`).
+ */
+export type Blocked = { name: string, who: string, push: boolean, activity?: string | null, menu?: Menu | null, tail?: string | null, };
+
+/**
+ * A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and
+ * options, `h` the hash of the menu the card shows (`POST /answer`).
+ */
+export type Menu = { title: string, reason: string, command: string, countdown?: number | null, question: string, options: Array<string>, h: string, };
+
+/**
+ * #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last
+ * verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is
+ * not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
+ */
+export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: string, title: string, why: string, pass?: string | null, stale: boolean, fail: string, pr: PrLine, repo?: string | null, mergeable: string, merge: boolean, shots: Array<string>, };
+
+/**
+ * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
+ * fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
+ */
+export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, };
+
+/**
+ * A state section (`tone`) and its repo groups.
+ */
+export type LaneSection = { name: string, tone: string, repos: Array<LaneRepo>, };
+
+export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
+
+/**
+ * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, `atone` and `coat`), name, `state` in `tone` for
+ * `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor
+ * `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
+ * fleet is not configured), `dead` and the blocked card.
+ */
+export type LaneRow = { name: string, role: string, state: string, act: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+
+/**
+ * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
+ */
+export type LaneNow = { title: string, w?: string | null, n?: string | null, t?: string | null, };
+
+/**
+ * #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's
+ * view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+ */
+export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
+
+/**
+ * A repo's card in colour `k`: its threads newest first, the archived ones apart.
+ */
+export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, };
+
+/**
+ * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line.
+ */
+export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, links: Array<Link>, line: string, };
+
+/**
+ * #413: a linked thread's chip: `from t5`, `continued in t6`.
+ */
+export type Link = { w: string, t: string, };
+
+/**
+ * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
+ * working, the turn's start `since`, and the `queued` messages above the box.
+ */
+export type ThreadView = { id: string, title: string, ds: string, state: string, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
+
+/**
+ * #407: a message queued for the turn's end, by its id `q`.
+ */
+export type QueuedMsg = { q: number, text: string, };
+
+/**
+ * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
+ * and conductor folder `dir`.
+ */
+export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
+
+/**
+ * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
+ * `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
+ * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
+ * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
+ * links to.
+ */
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
+
+export type FileRef = { name: string, size: number, };
+
+/**
+ * A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
+ */
+export type Answered = { n?: number | null, choice: string, by?: string | null, ts: number, };
 
 /**
  * #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.

@@ -12,7 +12,7 @@ probe on that runner proves the server, not a hand-built page, produced them.
 | first page `GET /` < 150 ms and < 40 KB | `serve_on`'s socket (warm) | same |
 | `/herd.json` < 100 ms, `status` < 300 ms | `serve_on`'s socket; the CLI | same |
 | first contentful paint in WebKit < 300 ms (warm) | `serve_on`'s socket, WebKit | `perf.rs` `the_first_paint_in_webkit_is_under_300ms` |
-| a steady-state `/live` change < 5 KB: one `patch` with only the changed pieces, no unchanged row | `serve_on`'s `/live` stream and watcher; serve.js rebuilds the same HTML | `perf.rs` `a_steady_state_live_change_is_a_patch_under_5kb` |
+| a steady-state `/live` change < 5 KB: the changed part's data only (#269: `needs`), no Lanes or [chat] | `serve_on`'s `/live` stream and watcher; the board draws the same cards as from API v1 | `perf.rs` `a_steady_state_live_change_is_one_part_under_5kb` |
 | a chat opens with ≤ 64 KB: its last 10 turns (3.2 KB a turn) and the lines that fit in 32 KB; 10 turns more a scroll | `GET /lane` | `history.rs` `a_chat_opens_with_its_last_10_turns_within_64kb` |
 | Events opens with 100 rows a view, then 100 a page | `GET /frag?id=events&skip=` | `history.rs` `events_open_with_100_rows_then_page` |
 

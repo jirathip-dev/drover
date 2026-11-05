@@ -22,8 +22,26 @@ macro_rules! each {
             Chat,
             Notice,
             Moment,
-            Frag,
-            Patch,
+            NeedsTab,
+            NeedAsk,
+            Blocked,
+            Menu,
+            NeedIssue,
+            LanesTab,
+            LaneSection,
+            LaneRepo,
+            LaneRow,
+            LaneNow,
+            ChatTab,
+            ChatRepo,
+            ThreadRow,
+            Link,
+            ThreadView,
+            QueuedMsg,
+            ThreadPage,
+            Msg,
+            FileRef,
+            Answered,
             BacklogIssue,
             Send,
             Answer,
@@ -132,6 +150,10 @@ fn serde_json_fits_the_types() {
     checks.push(("HostTab", same::<HostTab>(&file(&site.join("api/v1/host")))));
     // #268: the Queue tab's data, its rows, drive lines, backlogs and [config] sheets included.
     checks.push(("QueueTab", same::<QueueTab>(&file(&site.join("api/v1/queue")))));
+    // #269: the needs cards, the Lanes tab and the [chat] tab (its threads' messages, asks and files).
+    checks.push(("NeedsTab", same::<NeedsTab>(&file(&site.join("api/v1/needs")))));
+    checks.push(("LanesTab", same::<LanesTab>(&file(&site.join("api/v1/lanes")))));
+    checks.push(("ChatTab", same::<ChatTab>(&file(&site.join("api/v1/chat")))));
     for l in std::fs::read_dir(site.join("lane")).unwrap() {
         checks.push(("Chat", same::<Chat>(&file(&l.unwrap().path()))));
     }
@@ -156,12 +178,6 @@ fn serde_json_fits_the_types() {
         since: 1,
         next_cmd: None,
     };
-    let patch = Patch {
-        id: "q".into(),
-        n: 3,
-        p: 1,
-        set: [("2".into(), "<d>".into())].into(),
-    };
     let moment = Moment {
         seq: 4,
         ts: 5,
@@ -172,7 +188,6 @@ fn serde_json_fits_the_types() {
     checks.extend([
         ("HostRow", json!(row)),
         ("Waiting", json!(wait)),
-        ("Patch", json!(patch)),
         ("Moment", json!(moment)),
     ]);
     // #365: a backlog row as `gh::backlog`'s jq writes it to the cache.
@@ -191,8 +206,26 @@ fn serde_json_fits_the_types() {
         Chat,
         Notice,
         Moment,
-        Frag,
-        Patch,
+        NeedsTab,
+        NeedAsk,
+        Blocked,
+        Menu,
+        NeedIssue,
+        LanesTab,
+        LaneSection,
+        LaneRepo,
+        LaneRow,
+        LaneNow,
+        ChatTab,
+        ChatRepo,
+        ThreadRow,
+        Link,
+        ThreadView,
+        QueuedMsg,
+        ThreadPage,
+        Msg,
+        FileRef,
+        Answered,
         BacklogIssue,
         Send,
         Answer,

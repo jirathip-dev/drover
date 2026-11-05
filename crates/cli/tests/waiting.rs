@@ -378,8 +378,7 @@ fn idle_lanes_render_their_reason() {
         .reply("herdr workspace list", "{}")
         .reply("herdr pane read", "");
     let s = Server::new(&c, &r, None);
-    let page = String::from_utf8_lossy(&s.respond("GET /?tab=lanes HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW))
-        .into_owned();
+    let page = parts(&s, "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
     for (tone, label) in [
         ("r", "idle · waiting on your answer (q3) (10m)"),
         (
@@ -504,10 +503,7 @@ fn a_long_reason_never_squeezes_the_name() {
         .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
         .reply("herdr workspace list", "{}")
         .reply("herdr pane read", "");
-    let page = String::from_utf8_lossy(
-        &Server::new(&c, &r, None).respond("GET /?tab=lanes HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW),
-    )
-    .into_owned();
+    let page = parts(&Server::new(&c, &r, None), "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
     assert!(page.contains(&format!("<span class=\"nw el\">synergy-impl-2859</span><span class=\"nw r\">idle 10m</span><span class=\"why r\">{reason}</span>")), "{page}");

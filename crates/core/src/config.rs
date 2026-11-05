@@ -286,6 +286,9 @@ pub struct Fleet {
     pub land: Option<Land>,
     /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
+    /// #417: globs of UI files: a PR touching one goes through the verify stage.
+    #[serde(default)]
+    pub ui_paths: Vec<String>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -599,7 +602,7 @@ impl Config {
             let mut p = f
                 .pipeline
                 .take()
-                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits));
+                .unwrap_or_else(|| crate::pipeline::Pipeline::builtin(&c.limits, f.role.contains_key("verify")));
             // Each stage's line is its `[[fleet.<n>.pipeline.stage]]` header's, in order.
             let head = format!("[[fleet.{name}.pipeline.stage]]");
             let lines = text

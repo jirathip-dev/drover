@@ -46,6 +46,36 @@ next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }
 - **Red CI** after a PASS is the gate's FAIL at the same head. It counts against the rounds of the check that reviews
   the fix (`ci_red` → impl → `push` → rev), as before #173. In the last round it goes to park at once.
 
+## The verify stage (#417)
+
+A fleet that defines `[fleet.<n>.role.verify]` gets one more check in the built-in pipeline:
+
+```toml
+# rev: next = { PASS = "verify", FAIL = "impl" }
+[[fleet.x.pipeline.stage]]
+name = "verify"
+kind = "check"
+role = "verify"
+rounds = 3              # [limits] review_rounds, shared with rev
+next = { PASS = "gates", FAIL = "impl" }
+```
+
+- **What it does:** a read-only lane (`roles/verify.md`) launches the app at the head, following the repo's
+  `.herdsman/verify.md`, runs its Doctor, drives each acceptance criterion a user can see and records PASS or FAIL.
+  Any visual deviation from the approved `docs/design/<slug>/` PNGs is a FAIL. Its screenshots (1440 and 390 wide)
+  stay in its lane's folder, listed by path in `verdict.md`; the verdict event carries them, and the board's
+  needs-you card shows them inline.
+- **Rounds:** a verify FAIL counts in rev's rounds (the round of the head rev reviewed), so the third FAIL across both
+  parks the issue. Its fix pushes a new head, which goes rev → verify again. A verify PASS is for its own head only.
+- **When it runs:** for a head rev PASSed, if the issue had a design stage (#412), the PR touches the fleet's
+  `ui_paths` (globs), or it is queued `--verify`. `queue add N --verify [on|off]` and `queue set N verify on|off`
+  force it either way. Otherwise drive logs `verify-skipped` at that head and the issue goes on to the gates.
+- **No recipe:** when it should run but the head has no `.herdsman/verify.md`, drive logs `verify-no-recipe`, the
+  Queue card says so, and the issue goes on to the gates. It never blocks. `roles/verify-recipe.md` is the brief
+  for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map), proving each step.
+- Fleets without a `verify` role run the pipeline above, unchanged. A custom pipeline places a check with role
+  `verify` itself; it gets the same prompt and skip rules, and counts its own rounds.
+
 ## A custom pipeline: two checks
 
 ```toml

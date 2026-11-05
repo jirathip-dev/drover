@@ -165,6 +165,12 @@ impl Harness for Claude {
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
         pending(screen)
     }
+    /// #463: a new folder's trust dialog or the bypass-permissions warning (Claude Code 2.x): its "Yes" option.
+    fn startup_prompt(&self, screen: &str) -> Option<(&'static str, String)> {
+        let (name, _) = FIRST_RUN.iter().find(|(_, t)| screen.contains(t))?;
+        let n = pending(screen)?.1.iter().position(|o| o.starts_with("Yes"))?;
+        Some((name, self.answer_keys(n + 1)))
+    }
 
     /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
     fn transcript(&self, home: &Path, wt: &str) -> Option<PathBuf> {
@@ -184,6 +190,14 @@ impl Harness for Claude {
         &["claude"]
     }
 }
+
+/// #463: first-start screens by a line they show: `Do you trust the files in this folder?` (1.x), `Yes, I trust this
+/// folder` (2.x) and the `--dangerously-skip-permissions` warning, whose "No, exit" comes first.
+const FIRST_RUN: [(&str, &str); 3] = [
+    ("folder-trust", "trust the files in this folder"),
+    ("folder-trust", "trust this folder"),
+    ("bypass-permissions", "Bypass Permissions mode"),
+];
 
 /// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run
 /// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.
