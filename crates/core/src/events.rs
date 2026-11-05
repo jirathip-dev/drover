@@ -633,6 +633,11 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                     format!("fix({}{})", s.rounds, s.form_mark())
                 };
             }
+            // #417: a verify stage that doesn't run at a head passes it there, in no round.
+            "verify-skipped" | "verify-no-recipe" => {
+                let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
+                s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
+            }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
             "design-review" => s.state = "design-review".into(),

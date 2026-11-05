@@ -148,7 +148,7 @@ pub struct Menu {
 
 /// #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last
 /// verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is
-/// not configured), `mergeable` and `merge` (merge anyway is offered).
+/// not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
 pub struct NeedIssue {
     pub fleet: String,
     pub issue: u64,
@@ -163,6 +163,7 @@ pub struct NeedIssue {
     pub repo: Option<String>,
     pub mergeable: String,
     pub merge: bool,
+    pub shots: Vec<String>,
 }
 
 /// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
