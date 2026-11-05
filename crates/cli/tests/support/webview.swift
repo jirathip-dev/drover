@@ -5,7 +5,7 @@
 // #200, with `close`: the page under a sheet as it closes. A baseline before `js` opens the sheet, then `close` and
 // snapshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
-// the last frame is (0: the page as it was); the worst frame goes to out.png.
+// the last frame is (0: the page as it was); the worst frame goes to out.png, the baseline to out-base.png.
 // #206: `HERDSMAN_TAB` is the stored tab (a private localStorage) before the page loads; tab `-`: no tab()/mode() and no
 // <details> opened, the page as it loaded (with its scripts cut, as it first paints).
 // #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `HERDSMAN_COOKIE` (`name=value`) set;
@@ -91,6 +91,9 @@ func gate(_ w: WKWebView, _ close: String) {
                                     if let png {
                                         try! NSBitmapImageRep(data: got[worst].tiffRepresentation!)!.representation(using: .png, properties: [:])!
                                             .write(to: URL(fileURLWithPath: png))
+                                        // #450: the baseline beside it, so a red run shows what the frame was judged against.
+                                        try! NSBitmapImageRep(data: b!.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+                                            .write(to: URL(fileURLWithPath: png.replacingOccurrences(of: ".png", with: "-base.png")))
                                     }
                                     print(r.count, r[worst].off, 1 - r.last!.k)
                                     exit(0)
