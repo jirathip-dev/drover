@@ -169,13 +169,21 @@ fn closing_a_sheet_never_repaints_the_page() {
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let mut bad = vec![];
-    for (name, tab, open) in [
+    for (name, tab, open, shut) in [
         (
             "chat",
             "lanes",
             "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))",
+            "close()",
         ),
-        ("legend", "queue", "legend()"),
+        // #440: a fleet's [config] is System's Fleets row; System covers the page and its close uncovers it.
+        (
+            "config",
+            "queue",
+            "config(document.querySelector('.cfg[data-f=\"sendmeter\"]'))",
+            "sysshut()",
+        ),
+        ("legend", "queue", "legend()", "close()"),
     ] {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("close-{name}.png"))
@@ -189,7 +197,7 @@ fn closing_a_sheet_never_repaints_the_page() {
                 "horse",
                 png.to_str().unwrap(),
                 &format!("{stub}; {open}"),
-                "close()",
+                shut,
             ])
             .output()
             .unwrap();
