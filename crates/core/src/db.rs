@@ -21,7 +21,38 @@ CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TE
     json TEXT NOT NULL);";
 
 pub fn file(state: &Path) -> PathBuf {
-    state.with_file_name("state.db")
+    SCRATCH
+        .with_borrow(Clone::clone)
+        .unwrap_or_else(|| state.with_file_name("state.db"))
+}
+
+thread_local! {
+    /// #344: `serve --export --demo`'s database, a temporary one its files are copied into, never moved (`Scratch`).
+    static SCRATCH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// #344: until dropped, this thread's database is a new temporary one; the files beside the log are imported into it
+/// once and left where they are.
+pub struct Scratch(PathBuf);
+
+impl Scratch {
+    pub fn start() -> Scratch {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("herdsman-scratch-{}-{n}.db", std::process::id()));
+        SCRATCH.set(Some(p.clone()));
+        Scratch(p)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        SCRATCH.set(None);
+        OPEN.with_borrow_mut(|v| v.retain(|x| x.0 != self.0));
+        for x in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{x}", self.0.display()));
+        }
+    }
 }
 
 thread_local! {
@@ -38,11 +69,13 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
         return Ok(empty);
     }
     let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
-    let mut c = match cached {
-        Some((_, i, c)) if ino(&p) == Some(i) => c,
-        _ => open(state)?,
+    let (mut c, fresh) = match cached {
+        Some((_, i, c)) if ino(&p) == Some(i) => (c, false),
+        _ => (open(state)?, true),
     };
-    if !logs.is_empty() || lists.iter().any(|p| p.exists()) {
+    // A scratch database imports once: its files stay.
+    let scratch = SCRATCH.with_borrow(Option::is_some);
+    if (fresh || !scratch) && (!logs.is_empty() || lists.iter().any(|p| p.exists())) {
         import(&mut c, state)?;
     }
     let r = f(&mut c);
@@ -349,7 +382,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
         }
         done.push(p.clone());
     }
-    for p in &done {
+    for p in done.iter().filter(|_| SCRATCH.with_borrow(Option::is_none)) {
         retire(p)?;
     }
     tx.commit().context("import commit")

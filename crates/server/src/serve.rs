@@ -2866,21 +2866,7 @@ fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), Stri
 }
 
 /// `serve --export <dir> [--demo]` (#39, docs/serve.md): the page and its files as static files with relative URLs.
-fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
-    std::fs::create_dir_all(to)?;
-    for e in std::fs::read_dir(from)? {
-        let e = e?;
-        if e.file_type()?.is_dir() {
-            copy_dir(&e.path(), &to.join(e.file_name()))?;
-        } else {
-            std::fs::copy(e.path(), to.join(e.file_name()))?;
-        }
-    }
-    Ok(())
-}
-
 pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> Result<()> {
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let canned = if demo {
         Canned(serde_json::from_str(&std::fs::read_to_string(
             ctx.config.with_file_name("runner.json"),
@@ -2888,19 +2874,8 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         Canned::default()
     };
-    // #344: the demo's state is read from a copy, so its log is imported there and `demo/` stays as committed.
-    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = std::env::temp_dir().join(format!("herdsman-demo-{}-{n}", std::process::id()));
-    let ctx = &Ctx {
-        state: if demo {
-            let _ = std::fs::remove_dir_all(&tmp);
-            copy_dir(ctx.state.parent().unwrap_or(&ctx.state), &tmp)?;
-            tmp.join(ctx.state.file_name().unwrap_or_default())
-        } else {
-            ctx.state.clone()
-        },
-        ..ctx.clone()
-    };
+    // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
+    let _scratch = demo.then(crate::db::Scratch::start);
     let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, read(&ctx.state)?);
     let ctx = &Ctx {
         now: if demo {
@@ -3004,9 +2979,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         {
             std::fs::write(dir.join("lane").join(format!("{}.json", l.name)), j)?;
         }
-    }
-    if demo {
-        let _ = std::fs::remove_dir_all(&tmp);
     }
     Ok(())
 }
