@@ -106,9 +106,15 @@ export type ThreadRow = { id: string, title: string, age: string, unread: boolea
 export type Link = { w: string, t: string, };
 
 /**
- * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`.
+ * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
+ * working, the turn's start `since`, and the `queued` messages above the box.
  */
-export type ThreadView = { id: string, title: string, ds: string, state: string, page: ThreadPage, };
+export type ThreadView = { id: string, title: string, ds: string, state: string, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
+
+/**
+ * #407: a message queued for the turn's end, by its id `q`.
+ */
+export type QueuedMsg = { q: number, text: string, };
 
 /**
  * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
@@ -120,9 +126,10 @@ export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: num
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
  * `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
  * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
- * `resumed` (the session), `sleep`; `link` the thread it links to.
+ * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
+ * links to.
  */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
 
 export type FileRef = { name: string, size: number, };
 

@@ -76,6 +76,8 @@ function ask(now: number, m: Msg, dis: string): string {
   return block(now, 'ai', 'conductor', a.question, body, a.ts);
 }
 
+const cmd = (c: string) => `<details class="blk run"><summary><span class=k>$</span><span class=cmd>${esc(c)}</span><i class=cv></i></summary></details>`;
+
 /** One message's HTML, tagged `data-n` (its event's seq) after its tag name. */
 function msg(now: number, id: string, m: Msg, rw: boolean): string {
   const dis = or(rw, '', ' disabled'), lk = m.link ? chip(m.link) + ' ' : '';
@@ -90,10 +92,11 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
     case 'handoff': b = `<p class=qs>${lk}· ${esc(m.text)}</p>`; break;
     case 'msg': {
       const [k, who] = m.from === 'conductor' ? ['ai', 'conductor'] : lk ? ['ai', lk.trimEnd()] : ['me', 'you'];
-      b = block(now, k, who, m.text, `<div class=md>${prose(m.text)}</div>${files(id, m)}`, m.ts);
+      b = block(now, k, who, m.text, `<div class=md data-md="${esc(m.text)}">${prose(m.text)}</div>${files(id, m)}`, m.ts); // #407: [copy as markdown]
       break;
     }
-    case 'cmd': b = `<details class="blk run"><summary><span class=k>$</span><span class=cmd>${esc(m.text)}</span><i class=cv></i></summary></details>`; break;
+    case 'cmd': b = cmd(m.text); break;
+    case 'fold': b = `<details class="blk fold"><summary><span class=pv>${m.cmds.length} command${or(m.cmds.length === 1, '', 's')}</span></summary>${m.cmds.map(cmd).join('')}</details>`; break; // #407
     case 'ask': b = ask(now, m, dis); break;
     case 'config': {
       const q = esc(m.from), btn = (v: string) => `<button name=act value=${v}${dis}>${v}</button>`;
@@ -121,8 +124,14 @@ export function page(now: number, id: string, p: ThreadPage, rw: boolean): strin
   return top + p.msgs.map(m => msg(now, id, m, rw)).join('');
 }
 
-/** The composer: [+] attaches files (#405: several, up to 10), the box, [send]. */
-const composer = (id: string, repo: string, dis: string) => `<form class=tw data-t="${id}"${repo}><input type=file multiple hidden${dis}><button type=button class=add aria-label="attach images or files"${dis}>+</button><textarea name=text rows=1 aria-label=message placeholder="message the conductor"${dis}></textarea><button${dis}>send</button></form>`;
+/** The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above. */
+const composer = (id: string, repo: string, qd: string, dis: string) => `<form class=tw data-t="${id}"${repo}>${qd}<input type=file multiple hidden${dis}><button type=button class=add aria-label="attach images or files"${dis}>+</button><textarea name=text rows=1 aria-label=message placeholder="message the conductor"${dis}></textarea><button class=snd${dis}>send</button></form>`;
+
+/** #407: the queued messages above the box, each with [send now] (steer it in), edit and [remove]. */
+function queue(t: ThreadView, dis: string): string {
+  const b = (n: string, l: string) => `<button type=button name=${n}${dis}>${l}</button>`;
+  return t.queued.map(q => `<div class=tq data-q=${q.q}><p title="${esc(q.text)}">${esc(q.text)}</p><span class=btns>${b('qn', 'send now')}${b('qe', 'edit')}${b('qx', 'remove')}</span></div>`).join('');
+}
 
 const LIVE: Record<string, string> = {
   choose: '<b>●</b> waiting for your answer · sleeps after 30 min idle',
@@ -136,14 +145,14 @@ function thread(d: ChatTab, t: ThreadView): string {
   const dis = or(d.rw, '', ' disabled'), dot = or(['asleep', 'new'].includes(t.state), '', '<i class=dt></i>');
   const guest = or(d.rw, '', '<p class="ns m">pair this phone to answer or write</p>');
   return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>${esc(t.title)}</b><span class=ds>${dot}${esc(t.ds)}</span></div></div>`
-    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=tlv>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', dis)}</div>`;
+    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', queue(t, dis), dis)}</div>`; // #407: working, serve.js floats the line as a pill
 }
 
 /** #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it. */
 function draft(repo: string, dis: string): string {
   const r = esc(repo);
   return `<div class=cvp data-t="new-${r}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>new thread</b><span class=ds>${or(repo === 'all', 'all repos', r)}</span></div></div>`
-    + `<div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>${composer(`new-${r}`, ` data-repo="${r}"`, dis)}</div>`;
+    + `<div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>${composer(`new-${r}`, ` data-repo="${r}"`, '', dis)}</div>`;
 }
 
 const ST: Record<string, string> = { choose: '<b class=r>! choose</b>', working: '<b class=a>✻ working</b>', asleep: '<b class=m>☾ asleep</b>' };

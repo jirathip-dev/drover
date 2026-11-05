@@ -263,13 +263,22 @@ pub struct Link {
     pub t: String,
 }
 
-/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`.
+/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
+/// working, the turn's start `since`, and the `queued` messages above the box.
 pub struct ThreadView {
     pub id: String,
     pub title: String,
     pub ds: String,
     pub state: String,
+    pub since: Option<u64>,
+    pub queued: Vec<QueuedMsg>,
     pub page: ThreadPage,
+}
+
+/// #407: a message queued for the turn's end, by its id `q`.
+pub struct QueuedMsg {
+    pub q: u64,
+    pub text: String,
 }
 
 /// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
@@ -284,7 +293,8 @@ pub struct ThreadPage {
 /// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
 /// `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
 /// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
-/// `resumed` (the session), `sleep`; `link` the thread it links to.
+/// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
+/// links to.
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
@@ -300,6 +310,7 @@ pub struct Msg {
     pub routine: bool,
     pub answer: Option<Answered>,
     pub open: bool,
+    pub cmds: Vec<String>,
 }
 
 pub struct FileRef {

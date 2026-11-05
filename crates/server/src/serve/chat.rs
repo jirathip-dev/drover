@@ -1,7 +1,7 @@
 //! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
-use crate::api::{Answered, ChatRepo, ChatTab, FileRef, Link, Msg, ThreadPage, ThreadRow, ThreadView};
+use crate::api::{Answered, ChatRepo, ChatTab, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
 use crate::conductor;
 use crate::config::Config;
 use crate::events::{closed, Event};
@@ -35,6 +35,28 @@ fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &
 /// Its open asks (`ask --thread`): they wait in the thread, never in the needs-you stack.
 fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
     of(events, id).find(|e| e.kind == "needs-decision" && closed(events, e).is_none())
+}
+
+/// #407: a queued message's id, and its files.
+fn qid(e: &Event) -> u64 {
+    e.data.get("q").and_then(Value::as_u64).unwrap_or(e.seq)
+}
+fn qfiles(e: &Event) -> Vec<Value> {
+    files_of(e).cloned().collect()
+}
+
+/// #407: the thread's queued messages, oldest first, by id (their first `thread-queue`'s seq; an edit names it `q`).
+fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
+    let mut q = BTreeMap::new();
+    for e in of(events, id) {
+        let n = qid(e);
+        match e.kind.as_str() {
+            "thread-queue" => drop(q.insert(n, e)),
+            "thread-unqueue" => drop(q.remove(&n)),
+            _ => {}
+        }
+    }
+    q
 }
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
@@ -90,10 +112,28 @@ fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
 }
 
 /// #408: the thread's last `n` messages before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
-/// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`).
-fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64, usize)) -> ThreadPage {
+/// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`). #407: a
+/// finished turn's commands fold, each run of them one `fold` (tagged as its first command); a run after `open` (the
+/// live turn's start) stays rows.
+fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64, usize), open: u64) -> ThreadPage {
     let id = t.str("thread").unwrap_or_default();
-    let mut msgs = vec![];
+    let (mut msgs, mut run) = (vec![], vec![]);
+    let fold = |msgs: &mut Vec<Msg>, run: &mut Vec<Msg>| {
+        let Some((seq, ts)) = run.first().map(|f| (f.seq, f.ts)) else {
+            return;
+        };
+        if seq > open {
+            return msgs.append(run);
+        }
+        let cmds = run.drain(..).map(|c| c.text).collect();
+        msgs.push(Msg {
+            seq,
+            ts,
+            kind: "fold".into(),
+            cmds,
+            ..Msg::default()
+        });
+    };
     for e in of(events, id).filter(|e| e.seq < before) {
         let s = |k| e.str(k).unwrap_or_default().to_string();
         let m = |kind: &str, text: String| Msg {
@@ -105,7 +145,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
             ..Msg::default()
         };
         let main = cfg.hosts.iter().find(|h| h.1.machine.is_none());
-        msgs.push(match (e.kind.as_str(), e.str("from").unwrap_or_default()) {
+        let m = match (e.kind.as_str(), e.str("from").unwrap_or_default()) {
             // #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
             ("thread-msg", "system") => Msg {
                 retry: e.str("line").is_some(),
@@ -143,8 +183,15 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
             ("conductor-sleep", _) => m("sleep", String::new()),
             _ => continue,
-        });
+        };
+        if m.kind == "cmd" {
+            run.push(m);
+        } else {
+            fold(&mut msgs, &mut run);
+            msgs.push(m);
+        }
     }
+    fold(&mut msgs, &mut run);
     let k = msgs.len().saturating_sub(n);
     let dir = conductor::dir(ctx, cfg, id).display().to_string();
     let home = crate::config::home().display().to_string();
@@ -161,13 +208,21 @@ pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>
     let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
-    Some(page(ctx, &cfg, events, t, (before, n)))
+    Some(page(ctx, &cfg, events, t, (before, n), u64::MAX))
 }
 
-/// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state.
+/// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
+/// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
 fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
     let st = state(events, id, agents);
+    let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
+    let turn = of(events, id).rfind(me).map_or((0, t.ts), |e| (e.seq, e.ts));
+    let open = if st == "working" { turn.0 } else { u64::MAX };
+    let q = |(q, e): (&u64, &&Event)| QueuedMsg {
+        q: *q,
+        text: e.str("text").unwrap_or_default().into(),
+    };
     let role = conductor::role(cfg, &t.fleet).ok().map(|r| r.1);
     let (h, model) = (
         role.map_or("", |r| r.harness.as_str()),
@@ -179,7 +234,9 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]
         title: conductor::title(events, id).into(),
         ds: super::join(&[t.fleet.as_str(), h, model.unwrap_or_default(), shown]),
         state: st.into(),
-        page: page(ctx, cfg, events, t, (u64::MAX, 30)),
+        since: (st == "working").then_some(turn.1),
+        queued: queued(events, id).iter().map(q).collect(),
+        page: page(ctx, cfg, events, t, (u64::MAX, 30), open),
     }
 }
 
@@ -296,7 +353,9 @@ pub fn post(
     let (id, mut out) = (g("t"), vec![]);
     match g("op") {
         // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
-        "new" | "say" => {
+        // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
+        // ones come); `steer` interrupts the turn (Esc) and sends it now (`q`: queued message q's text and files).
+        "new" | "say" | "queue" | "steer" => {
             let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
             let data = g("data").split(',').filter(|d| !d.is_empty());
             let decode = |d| {
@@ -319,9 +378,48 @@ pub fn post(
                 conductor::find(&events, id)?;
                 id.to_string()
             };
-            let files = conductor::upload(ctx, &cfg, &id, &files)?;
-            later.push(conductor::post(ctx, &cfg, (&id, text, &files), ("owner", false))?);
+            let mut files = conductor::upload(ctx, &cfg, &id, &files)?;
+            let q = g("q").parse::<u64>().ok();
+            let old = q
+                .and_then(|q| queued(&events, &id).remove(&q))
+                .context("no such queued message");
+            let mut text = text.to_string();
+            if g("op") == "queue" {
+                conductor::text_ok(&text)?;
+                let mut d = json!({"thread": id, "text": text, "files": files});
+                if let Ok(o) = old {
+                    d["q"] = json!(q);
+                    (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+                }
+                let t = conductor::find(&events, &id)?;
+                crate::events::append(&ctx.state, &Event::new(ctx.now, &t.fleet, None, "thread-queue", d))?;
+                return Ok("queued".into());
+            }
+            if g("op") == "steer" {
+                if q.is_some() {
+                    let o = old?;
+                    text = o.str("text").unwrap_or_default().into();
+                    files = qfiles(o);
+                    unqueue(ctx, o, "sent")?;
+                }
+                stop(r, &events, &id);
+            }
+            later.push(conductor::post(ctx, &cfg, (&id, &text, &files), ("owner", false))?);
             Ok(if new { format!("{id} started") } else { "sent".into() })
+        }
+        "unqueue" => {
+            let q = g("q").parse::<u64>().unwrap_or_default();
+            unqueue(
+                ctx,
+                queued(&events, id).remove(&q).context("no such queued message")?,
+                "removed",
+            )?;
+            Ok("removed".into())
+        }
+        "stop" => {
+            conductor::find(&events, id)?;
+            stop(r, &events, id);
+            Ok("stopping".into())
         }
         "archive" | "restore" => {
             conductor::archive(ctx, &cfg, r, id, g("op") == "archive")?;
@@ -349,6 +447,49 @@ pub fn post(
         }
         op => bail!("unknown thread op `{op}`"),
     }
+}
+
+/// #407: queued message `e` leaves the queue: `sent` or `removed`.
+fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
+    let d = json!({"thread": e.str("thread"), "q": qid(e), "why": why});
+    crate::events::append(&ctx.state, &Event::new(ctx.now, &e.fleet, None, "thread-unqueue", d))
+}
+
+/// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
+fn stop(r: &dyn Runner, events: &[Event], id: &str) {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+        drop(crate::herdr::keys(r, p, "Escape"));
+    }
+}
+
+/// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
+/// the owner's and unqueued; the lines for `deliver`.
+pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
+    let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), crate::events::read(&ctx.state)) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for t in events.iter().filter(|e| e.kind == "thread-new") {
+        let id = t.str("thread").unwrap_or_default();
+        for e in queued(&events, id)
+            .values()
+            .take_while(|_| state(&events, id, agents) != "working")
+        {
+            let files = qfiles(e);
+            let sent = unqueue(ctx, e, "sent");
+            let p = sent.and_then(|()| {
+                conductor::post(
+                    ctx,
+                    &cfg,
+                    (id, e.str("text").unwrap_or_default(), &files),
+                    ("owner", false),
+                )
+            });
+            out.extend(p.ok());
+        }
+    }
+    out
 }
 
 /// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose

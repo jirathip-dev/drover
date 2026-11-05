@@ -691,6 +691,11 @@ impl<'a> Server<'a> {
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
+            // #407: a stream with a thread open stamps `watch-<thread>.at` each second: no push for it (`events::emit`).
+            let t = q
+                .get("thread")
+                .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()));
+            let watch = t.map(|t| st.with_file_name(format!("watch-{t}.at")));
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
             let mut top = 0;
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
@@ -709,6 +714,7 @@ impl<'a> Server<'a> {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
+                        let _ = watch.as_ref().map(|f| std::fs::write(f, crate::now().to_string()));
                         match rx.recv_timeout(Duration::from_secs(1)) {
                             Ok(m)
                                 if !m.is_empty()
@@ -798,6 +804,16 @@ impl<'a> Server<'a> {
                 lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
             }
             w.herd = (now, hash(&j));
+        }
+        // #407: a turn that ended (the log or herdr changed) gets its thread's queued messages.
+        let agents = (changed && self.addr.is_some())
+            .then(|| self.herdr_json(now, "agent"))
+            .flatten();
+        for job in agents
+            .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
+            .unwrap_or_default()
+        {
+            chat::deliver(at, self.r, &job);
         }
         if !changed {
             return;
