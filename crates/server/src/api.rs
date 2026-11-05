@@ -244,12 +244,21 @@ pub struct ChatTab {
     pub threads: Vec<ThreadView>,
 }
 
-/// A repo's card in colour `k`: its threads newest first, the archived ones apart.
+/// A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's
+/// `harness` chip.
 pub struct ChatRepo {
     pub repo: String,
     pub k: String,
     pub rows: Vec<ThreadRow>,
     pub archived: Vec<ThreadRow>,
+    pub harness: Chip,
+}
+
+/// #404: a composer chip: `name`'s current value `cur` (none: the default) and its choices `all`.
+pub struct Chip {
+    pub name: String,
+    pub cur: Option<String>,
+    pub all: Vec<String>,
 }
 
 /// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
@@ -272,7 +281,8 @@ pub struct Link {
 }
 
 /// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
-/// working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`.
+/// working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
+/// its model and effort `chips`.
 pub struct ThreadView {
     pub id: String,
     pub title: String,
@@ -281,6 +291,7 @@ pub struct ThreadView {
     pub waiting: Vec<String>,
     pub since: Option<u64>,
     pub queued: Vec<QueuedMsg>,
+    pub chips: Vec<Chip>,
     pub page: ThreadPage,
 }
 
