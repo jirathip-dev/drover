@@ -300,7 +300,9 @@ pub fn ask(
             e.str("role").unwrap_or_default()
         )
     };
-    let spawned = events.iter().rev().find(|e| e.kind == "spawn" && at(e) == lane);
+    // #446: a lane asking during its startup is already its `spawn-started`, not the lane before it.
+    let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
+    let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
     let mut d =
         json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
@@ -434,7 +436,14 @@ pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, 
         .filter(shown)
         .collect();
     if as_json {
-        writeln!(out, "{}", serde_json::to_string_pretty(&open)?)?;
+        // #446: and why each closed (`closed`, null while open).
+        let mut rows = Vec::new();
+        for e in &open {
+            let mut v = serde_json::to_value(e)?;
+            v["closed"] = json!(events::closed(&events, e));
+            rows.push(v);
+        }
+        writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     }
     for e in open.iter().filter(|_| !as_json) {
         let at = e.issue.map_or("-".into(), |n| format!("#{n}"));
