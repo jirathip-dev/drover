@@ -2352,3 +2352,85 @@ fn a_lesson_issue_parked_lane_ends_is_closed_on_install() {
     assert!(r.called(CLOSE), "{:?}", r.calls.borrow());
     assert_eq!(state(&c), "closed");
 }
+
+/// #534: cooee #1's shape: a reviewer spawned before the impl lane, done in herdr, holds the name the next review plans.
+fn old_reviewer(name: &str, status: &str) -> (herdsman::Ctx, Fake) {
+    let c = setup(name);
+    let rev = lane(&c, 5, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    let r = fake(&agents(&[
+        (
+            "sendmeter-impl-12",
+            "idle",
+            &wt.to_string_lossy(),
+            "w9:sendmeter-impl-12",
+        ),
+        (
+            "sendmeter-rev-12-r1",
+            status,
+            &rev.to_string_lossy(),
+            "w9:sendmeter-rev-12-r1",
+        ),
+    ]))
+    .reply("gh pr view issue-12", &pr(&head, "green"))
+    .reply(&format!("git -C {} log", wt.display()), &format!("{head} 20"))
+    .reply("git -C", "");
+    (c, r)
+}
+
+#[test]
+fn a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns() {
+    let (c, r) = old_reviewer("drive-old-rev", "done");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review", "review"], "{out}");
+    let all = read(&c.state).unwrap();
+    let sup = all.iter().find(|e| e.kind == "supersede").expect(&out);
+    assert_eq!(sup.str("agent"), Some("sendmeter-rev-12-r1"));
+    assert!(
+        r.called("herdr pane close w9:sendmeter-rev-12-r1"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(r.called("herdr agent start sendmeter-rev-12-r1"));
+    assert_eq!(state(&c), "review(1)");
+}
+
+#[test]
+fn a_working_reviewer_in_the_way_still_waits() {
+    let (c, r) = old_reviewer("drive-busy-rev", "working");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
+    assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+    assert!(!r.called("herdr agent start"));
+    assert_eq!(state(&c), "impl");
+}
+
+#[test]
+fn the_replayed_cooee_1_log_recovers_in_one_pass() {
+    let (c, r) = old_reviewer("drive-cooee-1", "done");
+    let old = "REFUSED LANE_LIVE: finished (done) lane(s) [\"sendmeter-rev-12-r1\"] in /wt/rev-12-r1; `--supersede` \
+        replaces it";
+    for ts in [20, 600, 1200] {
+        let d = json!({"step": "review", "cmd": "herdsman spawn sendmeter 12 rev", "result": old, "code": "LANE_LIVE"});
+        ev(&c, ts, "driven", d);
+        ev(
+            &c,
+            ts,
+            "kick",
+            json!({"why": "drive", "result": "sendmeter: 1 skipped (LANE_LIVE)"}),
+        );
+    }
+    assert_eq!(run(&c, &r, &["pr", "sendmeter", "12"]).0, 0); // the cached PR status reads
+    let (code, status) = run(&c, &r, &["status", "sendmeter"]);
+    assert_eq!(code, 0, "{status}");
+    assert!(
+        status.contains("an old reviewer (done) is in the way: replacing it"),
+        "{status} {:?}",
+        r.calls.borrow()
+    );
+    let (out, _) = drive(&c, &r);
+    assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
+    assert_eq!(state(&c), "review(1)");
+}

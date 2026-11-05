@@ -696,13 +696,30 @@ pub fn spawn(
                 names.join(", ")
             ),
         ));
-    } else if !live.is_empty() {
-        dup.push(("LANE_LIVE", format!("live agent(s) {names:?} in {wt}")));
     }
-    if let Some(s) = fold(&events)
+    let unfinished = fold(&events)
         .remove(&(fleet.to_string(), issue))
-        .filter(|s| s.unfinished(role, f.family(role) == "rev"))
-    {
+        .filter(|s| s.unfinished(role, f.family(role) == "rev"));
+    // #534: a lane of this issue done or idle, its verdict in or a later lane spawned: finished, drive supersedes it.
+    let over = |a: &&Value| {
+        let sp = (events.iter()).rposition(|e| e.is("spawn", fleet, issue) && e.str("agent") == a["name"].as_str());
+        let after = |i: usize| {
+            events[i + 1..]
+                .iter()
+                .any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
+        };
+        matches!(a["agent_status"].as_str(), Some("done" | "idle")) && sp.is_some_and(after)
+    };
+    if !stale && !live.is_empty() {
+        let st = live[0]["agent_status"].as_str().unwrap_or_default();
+        let finished = if unfinished.is_none() && live.iter().all(over) {
+            format!("finished ({st}) lane(s) ")
+        } else {
+            "live agent(s) ".into()
+        };
+        dup.push(("LANE_LIVE", format!("{finished}{names:?} in {wt}")));
+    }
+    if let Some(s) = unfinished {
         dup.push((
             "LANE_LIVE",
             format!(
