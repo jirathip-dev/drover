@@ -20,10 +20,13 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   the file must be in your working folder (copy it in first).
   An owner message with `(attached: <path>)` carries a file the owner sent; read it there.
 - Your `herdsman` and `gh` commands show in the thread as closed tool rows.
-- Hand work to another thread (a new one in any repo, or an existing `t<n>`), never `thread new`:
-  `herdsman thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. The target's conductor gets the context as
-  from your thread; its filed issues and answered asks come back here as one-line rows. A message from another
-  thread reaches you as `[<thread>] t<n>: <text>`.
+- Hand work to another thread, never `thread new`:
+  `herdsman thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. Name a repo: the owner taps which of its
+  threads (or a new one) gets it, nothing is delivered before. Name `t<n>` only when the owner named that thread.
+  The target's conductor gets the context as from your thread; its filed issues and answered asks come back here as
+  one-line rows. A message from another thread reaches you as `[<thread>] t<n>: handoff to <title> · t<n>: <text>`.
+  A handoff not meant for you: send it on with `thread handoff <thread> <repo> …` before the owner writes again;
+  your copy is marked forwarded, so don't act on it.
 
 ## Permissions
 
