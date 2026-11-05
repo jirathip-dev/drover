@@ -66,6 +66,7 @@ integration = "staging"
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
+# ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
 
 # #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
 [[fleet.web.serial]]
@@ -105,6 +106,12 @@ profile = "lane-rev"
 [fleet.web.role.design]
 harness = "hermes"
 profile = "lane-design"
+
+# #417: the optional verify stage (docs/pipeline.md): after rev's PASS, a read-only lane drives the real app at the
+# head from the repo's .herdsman/verify.md and screenshots it against the approved design; FAILs use rev's rounds.
+# [fleet.web.role.verify]
+# harness = "claude"
+# model = "claude-opus-5-5"
 
 [accounts]
 accounts_env = "~/.config/herdsman/accounts/tokens.env"   # VAR=token lines; never copied anywhere

@@ -19,6 +19,9 @@ pub struct Stage {
     /// The fleet.toml line of its `[[…stage]]` header; 0 for the built-in pipeline.
     #[serde(skip)]
     pub line: usize,
+    /// #417: the check whose round count this one's FAILs park on (the built-in verify: rev's).
+    #[serde(skip)]
+    pub share: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -68,20 +71,31 @@ fn stage(name: &str, kind: &str, role: Option<&str>, rounds: Option<u32>, next: 
         next: next.iter().map(|(o, t)| ((*o).into(), (*t).into())).collect(),
         rounds,
         line: 0,
+        share: None,
     }
 }
 
 impl Pipeline {
-    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate.
-    pub fn builtin(l: &Limits) -> Pipeline {
-        let stage = vec![
+    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; #417: with a `verify` role, rev's
+    /// PASS goes to a verify check whose FAILs count against rev's rounds.
+    pub fn builtin(l: &Limits, verify: bool) -> Pipeline {
+        let pass = if verify { "verify" } else { "gates" };
+        let mut v = stage(
+            "verify",
+            "check",
+            Some("verify"),
+            Some(l.review_rounds),
+            &[("PASS", "gates"), ("FAIL", "impl")],
+        );
+        v.share = Some("rev".into());
+        let mut stage = vec![
             stage("impl", "build", Some("impl"), None, &[("push", "rev")]),
             stage(
                 "rev",
                 "check",
                 Some("rev"),
                 Some(l.review_rounds),
-                &[("PASS", "gates"), ("FAIL", "impl")],
+                &[("PASS", pass), ("FAIL", "impl")],
             ),
             stage(
                 "gates",
@@ -91,7 +105,15 @@ impl Pipeline {
                 &[("ok", "merge"), ("ci_red", "impl"), ("conflict", "impl:update")],
             ),
         ];
+        if verify {
+            stage.insert(2, v);
+        }
         Pipeline { stage, builtin: true }
+    }
+
+    /// #417: the check whose rounds a FAIL of check `stage` counts toward: its `share`, else itself.
+    pub fn counts<'a>(&'a self, stage: &'a str) -> &'a str {
+        self.get(stage).and_then(|s| s.share.as_deref()).unwrap_or(stage)
     }
 
     pub fn get(&self, name: &str) -> Option<&Stage> {
