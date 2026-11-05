@@ -453,6 +453,11 @@ pub fn drive(
             Err(e) => writeln!(out, "orphans: {e:#}")?,
         }
     }
+    if !fast {
+        if let Err(e) = repair(ctx, cfg, out) {
+            writeln!(out, "repair: {e:#}")?;
+        }
+    }
     let grew = log();
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
@@ -511,6 +516,51 @@ pub fn drive(
 
 /// One fleet: each item's due step, reviews first. Each spawn samples the host afresh; false when a spawn met a
 /// busy host or full disk, so no fleet starts new work this pass. `fast`: verdicts and merges only (#212).
+/// #500: an issue parked `LANE_ENDS` whose every `lane gone` respawn followed a design lane's adoption (before #500 that
+/// adoption hid the issue's verdict) goes back to the state it had (`repaired`); once installed, none is left to find.
+fn repair(ctx: &Ctx, cfg: &Config, out: &mut dyn Write) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let reset = ["pushed", "verdict", "needs-human", "round-extended"];
+    for s in fold(&events)
+        .into_values()
+        .filter(|s| s.state == "needs-human" && cfg.fleet.contains_key(&s.fleet))
+    {
+        let mine: Vec<(usize, &Event)> = (events.iter().enumerate())
+            .filter(|(_, e)| e.fleet == s.fleet && e.issue == Some(s.issue))
+            .collect();
+        let Some(at) = mine.iter().rposition(|(_, e)| e.kind == "needs-human") else {
+            continue;
+        };
+        let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
+        let round = &mine[from.map_or(0, |i| i + 1)..at];
+        let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
+        let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
+            continue;
+        };
+        let gone = (round.iter()).all(|(_, e)| e.kind != "respawn" || e.str("why") == Some("lane gone"));
+        if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
+            continue;
+        }
+        let key = (s.fleet.clone(), s.issue);
+        let Some(was) = fold(&events[..mine[at].0]).remove(&key).map(|b| b.state) else {
+            continue;
+        };
+        writeln!(
+            out,
+            "{} #{} repaired: back to {was} (LANE_ENDS came from a design lane's adoption)",
+            s.fleet, s.issue
+        )?;
+        let why = "the lane gone came from a design lane's adoption, not the build round";
+        let d = json!({"code": "LANE_ENDS", "state": was, "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+        )?;
+    }
+    Ok(())
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -645,6 +695,22 @@ fn pass(
             if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
                 continue;
             }
+            // #491: a FAIL refused NO_PROOF is never retried unchanged; its reviewer is told once, or re-run once ended.
+            if step == "verdict" && args[3] == "FAIL" {
+                if let Some(code) = no_proof(
+                    ctx,
+                    cfg,
+                    r,
+                    out,
+                    (&events, &agents),
+                    (fleet, s.issue, &w.lane),
+                    &args,
+                    fast,
+                )? {
+                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
+                    continue;
+                }
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
@@ -709,6 +775,64 @@ fn pass(
         }
     }
     Ok(go)
+}
+
+/// #491: `None` for a FAIL with its Proof blocks (recorded as usual). A proofless one is refused once per head and
+/// file content (`proof-refused`); its reviewer, still in herdr, is prompted with the refusal once; an ended one
+/// gets a fresh review of the same head, which no verdict makes a new round.
+#[allow(clippy::too_many_arguments)]
+fn no_proof(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (ev, agents): (&[Event], &[Value]),
+    (fleet, n, lane): (&str, u64, &str),
+    args: &[&str],
+    fast: bool,
+) -> Result<Option<Code>> {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let on = crate::hosts::On::of(r, sp);
+    let body = on.read(Path::new(args[7])).unwrap_or_default();
+    let Some(why) = crate::gate::no_proof(&body) else {
+        return Ok(None);
+    };
+    let hash = &crate::devices::sha256(body.as_bytes())[..16];
+    let mine: Vec<&Event> = (ev.iter())
+        .filter(|e| e.is("proof-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts))
+        .collect();
+    let seen = mine
+        .iter()
+        .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
+    // `waiting` offers a verdict only once its reviewer stopped working: one still in herdr is told once; gone, or idle
+    // again after that, it has ended.
+    let pane = sp.and_then(|e| e.str("pane"));
+    let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
+    let told = mine.iter().any(|e| e.data["prompted"] == true);
+    if !seen {
+        act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
+        let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let tell =
+            |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+        let prompted = open.filter(|_| !told).is_some_and(tell);
+        let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
+        if prompted {
+            return Ok(Some(Some("NO_PROOF")));
+        }
+    }
+    if fast {
+        return Ok(Some(Some("NO_PROOF")));
+    }
+    let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
+    let (num, why) = (n.to_string(), "verdict refused NO_PROOF: re-review");
+    let c = ["spawn", fleet, &num, role, "--supersede"];
+    let code = act(ctx, cfg, r, out, ev, (fleet, Some(n), "review"), &c)?;
+    if code.is_none() {
+        let d = json!({"role": role, "agent": lane, "why": why});
+        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-lost", d))?;
+    }
+    Ok(Some(code))
 }
 
 /// #214: the merge just tried was refused or failed on a conflict (its words say so).

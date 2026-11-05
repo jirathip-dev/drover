@@ -45,7 +45,7 @@ fn fake(head: &str, files: &str) -> Fake {
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("gh pr view issue-12", &pr(head))
-        .reply("gh pr diff 100", files)
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/100/files", files)
         .reply("gh pr merge 100", "")
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "")

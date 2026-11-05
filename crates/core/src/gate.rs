@@ -45,6 +45,14 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
+/// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call.
+/// The `NO_PROOF` text naming each one that doesn't.
+pub fn no_proof(body: &str) -> Option<String> {
+    let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
+    let bad: Vec<String> = findings(body).into_iter().filter_map(proofless).collect();
+    (!bad.is_empty()).then(|| bad.join("; "))
+}
+
 #[allow(clippy::too_many_arguments)] // the CLI's verdict arguments, one each
 pub fn verdict(
     ctx: &Ctx,
@@ -70,11 +78,8 @@ pub fn verdict(
     let body = (crate::hosts::On::of(r, at).read(Path::new(file)))
         .with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
-    // #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call.
-    let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
-    let bad: Vec<String> = findings(&body).into_iter().filter_map(proofless).collect();
-    if !pass && !bad.is_empty() {
-        return refused("NO_PROOF", bad.join("; "));
+    if let Some(bad) = no_proof(&body).filter(|_| !pass) {
+        return refused("NO_PROOF", bad);
     }
     let st = issue_state(ctx, fleet, issue)?;
     let branch = branch_of(st.as_ref(), issue);
