@@ -17,6 +17,7 @@ body{padding:0 var(--s3) var(--s4)}
 .doc>h2{margin:calc(2 * var(--s4)) 0 var(--s1);font-size:var(--fs)}
 .doc>p,.cap2{margin:0 0 var(--s2);color:var(--mute);font-size:var(--fs-meta)}
 .top{display:flex;align-items:center;gap:var(--s3);min-height:calc(var(--hit) + var(--s1));border-bottom:1px solid var(--line)}
+.top{flex-wrap:wrap}.top>b{flex:1 0 auto}
 .top img{width:var(--ctl);height:var(--ctl);border-radius:6px}
 .row3{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-start}
 .ph{flex:0 0 390px;width:390px;min-width:0;max-width:100%;border:1px solid var(--edge);border-radius:12px;overflow:hidden;position:relative}
@@ -195,10 +196,10 @@ const win = (l, cap, still) => `<figure class="light-${l}${still ? ' still' : ''
 $('#lights').innerHTML = win('sun', 'sun (calm): blue sky, the sun, a sunbeam over the counter') + win('overcast', 'overcast (busy): grey cloud, no beam, the room 10 % dimmer') +
   win('rain', 'rain (held): dark cloud, rain on the glass, the room 22 % dimmer') + win('rain', 'rain, Reduce Motion: one static frame (drops still on the glass)', 1) +
   `<figure><div class=tab style="padding-bottom:0">${['sun', 'overcast', 'rain'].map((l, i) => `<p class=grp><i class=dt></i><span class=gn>MACHINE</span><span class=lsm>${mini(l)}<span>${l} · ${['calm', 'busy', 'held'][i]}</span></span></p>`).join('')}</div>` +
-  '<figcaption>Host card header (#370 minis): the window at 48 × 16, 1.5×; rain loops two frames</figcaption></figure>';
+  '<figcaption>Host card header (#370 minis): the window at 72 × 24, 1 pixel = 1; rain loops two frames</figcaption></figure>';
 
-// Rows: the 28 px slot, the 16 px art at 24 px. Queue rows by stage and species; Events rows by the role's tool.
-const rs = (id, st, word) => `<svg class="rsp" viewBox="0 0 16 16" style="${st}" role=img aria-label="${word}"><title>${word}</title><use href="#${id}"/></svg>`;
+// Rows: the 28 px slot, the 24 × 24 art at 24 px. Queue rows by stage and species; Events rows by the role's tool.
+const rs = (id, st, word) => `<svg class="rsp" viewBox="0 0 24 24" style="${st}" role=img aria-label="${word}"><title>${word}</title><use href="#${id}"/></svg>`;
 const stg = (n, stage, word) => rs(`rs-${sp(n)}-${stage}`, sv(sp(n)), word);
 const qr = (n, spr, tone, w, plain, age, title, mo = '') => `<div class=qr${mo ? ` data-mo=${mo}` : ''}>${spr}<a href=#>#${n}</a><span class="st ${tone}"><b>${w}</b> <span class=pw>· ${plain}</span></span><span class=ag>${age}</span><span class=tl>${title}</span>${mo ? `<i class=mot>${{ merged: 'sold', fail: 'leaf drop', 'needs-you': 'thirsty' }[mo]}</i>` : ''}</div>`;
 const queue = () => '<p class=tsub2>the counter <span class=pw>· queue</span></p><div class=qcard><p><b class=g style="color:var(--fk-g)">acme-web</b> <span class="tag r">! 1 thirsty</span></p>' +
@@ -260,7 +261,7 @@ $('#icons').innerHTML = `<figure><img class=i512 src=icon/icon-512.png alt="">51
 const L = scheme('light').tokens, D = scheme('dark').tokens;
 const chips = t => ['--g', '--a', '--r'].map(k => `<span class=chip style="background:${t[k]}"></span>`).join('');
 $('#look').innerHTML = '<h4>THEME</h4>' +
-  `<p><img src=../../../assets/icon-180.png alt="" width=24 height=24 style="border-radius:4px">farm</p><p><svg class=px24 viewBox="0 0 16 16" style="${sv('monstera')}"><use href="#rs-monstera-ready"/></svg>garden<span class=ck>✓</span></p>` +
+  `<p><img src=../../../assets/icon-180.png alt="" width=24 height=24 style="border-radius:4px">farm</p><p><svg class=px24 viewBox="0 0 24 24" style="${sv('monstera')}"><use href="#rs-monstera-ready"/></svg>garden<span class=ck>✓</span></p>` +
   '<h4>COLOURS</h4>' +
   `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(mode() === 'dark' ? D : L)} <span><span class=nm>garden</span> <span class=pw>theme default · follows the phone</span></span><span class=ck>✓</span></p>` +
   `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span>${chips(L)} <span class=nm>garden-light</span></p><p><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(D)} <span class=nm>garden-dark</span></p>`;

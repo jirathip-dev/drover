@@ -10,10 +10,11 @@ const root = new URL('../../../', import.meta.url).pathname, here = 'docs/design
 mkdirSync(new URL('icon/', import.meta.url), { recursive: true });
 for (const n of [180, 192, 512]) writeFileSync(new URL(`icon/icon-${n}.svg`, import.meta.url), icon(n));
 writeFileSync(new URL('icon/favicon.svg', import.meta.url), favicon(32));
+writeFileSync(new URL('icon/favicon-16.svg', import.meta.url), favicon(16));
 const srv = await serve(root), c = chrome(bin);
 const shots = [
   ...[180, 192, 512].map(n => [`icon/icon-${n}.svg`, `icon/icon-${n}.png`, n, n, 1]),
-  ['icon/favicon.svg', 'icon/favicon-32.png', 32, 32, 1], ['icon/favicon.svg', 'icon/favicon-16.png', 16, 16, 1, 'zoom'],
+  ['icon/favicon.svg', 'icon/favicon-32.png', 32, 32, 1], ['icon/favicon-16.svg', 'icon/favicon-16.png', 16, 16, 1],
   ...['light', 'dark'].flatMap(s => [
     [`sheet.html?s=${s}&still=1`, `sprite-sheet-${s}.png`, 1240, 900, 1, 'full'],
     [`index.html?s=${s}&still=1`, `garden-${s}-390.png`, 390, 844, 2, 'full'],
