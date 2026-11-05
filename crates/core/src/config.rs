@@ -569,6 +569,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "cap-near",
     "orphan-issue",
     "config-warning",
+    "keychain-locked",
 ];
 
 impl Notify {

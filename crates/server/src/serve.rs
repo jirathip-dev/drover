@@ -296,7 +296,7 @@ pub fn moment(e: &Event) -> Option<&'static str> {
     match e.kind.as_str() {
         "merged" => Some("merged"),
         "verdict" if e.str("verdict") == Some("FAIL") => Some("fail"),
-        "needs-human" | "needs-decision" => Some("needs-you"),
+        "needs-human" | "needs-decision" | "keychain-locked" => Some("needs-you"),
         _ => None,
     }
 }

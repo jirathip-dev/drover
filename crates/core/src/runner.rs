@@ -80,16 +80,64 @@ impl Runner for Real {
         Ok(pid)
     }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
-        match entry(svc)?.get_password() {
-            Err(keyring::Error::NoEntry) => Ok(None),
-            x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
-        }
+        store_get(self, svc)
     }
     fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        let e = entry(svc)?;
-        let done = value.map_or_else(|| e.delete_credential(), |v| e.set_password(v));
-        done.with_context(|| format!("secret store: {svc}"))
+        store_set(self, svc, value)
     }
+}
+
+/// #441: `svc`'s secret in the OS store (None: not set); #548: on `r`'s clock, `KEYCHAIN_LOCKED` past `KEYCHAIN_SECS`.
+pub fn store_get(r: &dyn Runner, svc: &str) -> Result<Option<String>> {
+    let e = entry(svc)?;
+    match keychain(r, svc, move || e.get_password())? {
+        Err(keyring::Error::NoEntry) => Ok(None),
+        x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
+    }
+}
+
+/// #441: save `svc`'s secret (None: delete it) in the OS store; #548: as `store_get`, never blocking.
+pub fn store_set(r: &dyn Runner, svc: &str, value: Option<&str>) -> Result<()> {
+    let (e, v) = (entry(svc)?, value.map(String::from));
+    let done = keychain(r, svc, move || {
+        v.map_or_else(|| e.delete_credential(), |v| e.set_password(&v))
+    })?;
+    done.with_context(|| format!("secret store: {svc}"))
+}
+
+/// #548: how long a keychain call may wait (a macOS access dialog nobody clicks blocks it for good).
+pub const KEYCHAIN_SECS: u64 = 5;
+
+/// #548: `f` (a keychain call on `svc`) on a worker thread, given `KEYCHAIN_SECS` (`r`'s clock) to answer; past that
+/// `KEYCHAIN_LOCKED` with the fix, and the worker is left waiting on the dialog.
+fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(f()));
+    let mut got = rx.recv_timeout(Duration::from_millis(200)).ok();
+    for _ in 0..KEYCHAIN_SECS {
+        if got.is_some() {
+            break;
+        }
+        r.sleep(1);
+        got = rx.try_recv().ok();
+    }
+    got.map_or_else(|| locked(r, svc), Ok)
+}
+
+/// #548: the one-time fix that lets the installed herdsman read `svc` without a prompt after a rebuild.
+pub fn keychain_fix(svc: &str) -> String {
+    format!("security set-generic-password-partition-list -S apple-tool:,apple:,unsigned: -s {svc} -a herdsman")
+}
+
+fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
+    let host = ok(r, "hostname", &["-s"]).map_or_else(|_| "this host".into(), |h| h.trim().to_string());
+    crate::gate::refused(
+        "KEYCHAIN_LOCKED",
+        format!(
+            "approve herdsman in the Keychain dialog on {host}, or run {}",
+            keychain_fix(svc)
+        ),
+    )
 }
 
 impl Real {

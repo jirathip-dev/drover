@@ -395,7 +395,17 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -
     let dir = dir(ctx, cfg, id);
     std::fs::create_dir_all(&dir)?;
     let lock = std::fs::File::create(dir.join(".deliver.lock"))?;
-    lock.lock()?;
+    // #548: a delivery stuck past 30 s (a Keychain dialog) fails the next one instead of hanging it.
+    for i in 0..=30 {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if i < 30 => r.sleep(1),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                bail!("{id}'s previous message is still being delivered after 30 s")
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
+    }
     let events = read(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;

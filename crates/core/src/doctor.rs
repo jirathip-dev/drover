@@ -140,7 +140,22 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let svc = crate::secret::service("all", var);
         let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
         let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
-        row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), bad, &line);
+        let got = r.secret(&svc);
+        // #548: an item the Keychain guards with a dialog (an ad-hoc signed rebuild) gets its one-time fix.
+        if got.as_ref().is_err_and(|e| {
+            e.downcast_ref::<crate::gate::Refusal>()
+                .is_some_and(|f| f.code == "KEYCHAIN_LOCKED")
+        }) {
+            let fix = crate::runner::keychain_fix(&svc);
+            row(
+                rows,
+                false,
+                '✗',
+                &format!("account {name} — {svc} prompts for Keychain access → {fix}"),
+            );
+            continue;
+        }
+        row(rows, got.is_ok_and(|v| v.is_some()), bad, &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();
