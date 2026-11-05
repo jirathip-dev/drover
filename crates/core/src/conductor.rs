@@ -203,7 +203,7 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
 
 /// #492: the owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there
 /// (`new`: a new thread in the card's repo); the target.
-pub fn pick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<String> {
+pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<String> {
     let (h, from) = (&ask.data["handoff"], ask.str("thread").unwrap_or_default());
     let opts = ask.data["options"].as_array().cloned().unwrap_or_default();
     let n = choice

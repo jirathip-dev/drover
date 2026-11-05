@@ -355,7 +355,7 @@ pub fn answer(
     }
     // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
     if ask.data.get("handoff").is_some() {
-        let to = conductor::pick(ctx, cfg, r, ask, choice)?;
+        let to = conductor::land(ctx, cfg, r, ask, choice)?;
         let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
