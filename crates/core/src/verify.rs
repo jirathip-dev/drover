@@ -7,7 +7,7 @@ use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// The repo's recipe the verifier follows.
 pub const RECIPE: &str = ".herdsman/verify.md";
@@ -63,15 +63,47 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     Ok(false)
 }
 
-/// The PNGs verdict.md (at `file`) lists, as `{name, path}`: a path relative to it is in its lane's folder.
-pub fn shots(body: &str, file: &Path) -> Vec<Value> {
+/// The PNGs verify's verdict.md (at `file`) lists, as `{name, path}`: #547: only a relative word with no `..` that is
+/// a regular file inside the verify lane's folder `lane` (none: no shots).
+pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     let dir = file.parent().unwrap_or(Path::new(""));
     let words = body.split(|c: char| c.is_whitespace() || "`()[]<>\"'".contains(c));
+    let plain = |w: &str| {
+        Path::new(w)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+    };
     let mut out: Vec<Value> = vec![];
     for w in words.map(|w| w.trim_end_matches([',', '.', ':', ';'])) {
-        if w.to_ascii_lowercase().ends_with(".png") && !out.iter().any(|v| v["name"] == w) {
-            out.push(json!({"name": w, "path": dir.join(w)}));
+        let png = w.to_ascii_lowercase().ends_with(".png") && plain(w);
+        let path = lane.filter(|_| png).and_then(|l| inside(&dir.join(w), Path::new(l)));
+        if let Some(p) = path.filter(|_| !out.iter().any(|v| v["name"] == w)) {
+            out.push(json!({"name": w, "path": p}));
         }
     }
     out
+}
+
+/// `path`, canonical, if it is a regular file inside `dir`.
+fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
+    let (p, d) = (path.canonicalize().ok()?, dir.canonicalize().ok()?);
+    (p.starts_with(d) && p.is_file()).then_some(p)
+}
+
+/// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file
+/// inside one of the issue's lane folders (older events kept any `.png` word).
+pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf)> {
+    let lanes: Vec<&str> = (events.iter().filter(|e| e.is("spawn", fleet, n)))
+        .filter_map(|e| e.str("worktree"))
+        .collect();
+    let last = events.iter().rfind(|e| e.is("verdict", fleet, n));
+    let files = last
+        .filter(|e| e.str("stage") == Some("verify"))
+        .and_then(|e| e.data["files"].as_array());
+    let shot = |v: &Value| {
+        let (name, path) = (v["name"].as_str()?, Path::new(v["path"].as_str()?));
+        let p = lanes.iter().find_map(|l| inside(path, Path::new(l)))?;
+        Some((name.to_string(), p))
+    };
+    files.into_iter().flatten().filter_map(shot).collect()
 }
