@@ -182,6 +182,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         });
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
         let o = swift()
+            .env("HERDSMAN_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
             .args([
                 script,
                 file.to_str().unwrap(),
