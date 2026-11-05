@@ -57,6 +57,12 @@ pub fn after(input: &Value) -> bool {
     dialects().any(|d| d.post == ev || d.stop == ev)
 }
 
+/// #508: a call before a tool runs (a pre-tool event, or Hermes' bare `args` without one), not a prompt or notification.
+pub fn pre_call(input: &Value) -> bool {
+    let ev = input["hook_event_name"].as_str().unwrap_or_default();
+    ev.is_empty() || dialects().any(|d| d.pre == ev)
+}
+
 /// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD.
 pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
