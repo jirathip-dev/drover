@@ -1897,12 +1897,15 @@ B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
 // first); a phone's open thread ends there (serve.css). iOS scrolls the page to show a focused box: put back. A change
 // in the messages' height (the keyboard, the box growing, a turn) moves their scroll by as much, so the message just
 // above the box stays just above it.
+// #488: the layout viewport is the root's clientHeight: iOS shrinks `innerHeight` with the visual one. A Home Screen
+// app may fire no `resize` as the keyboard opens or closes, so a focus change measures again as the keyboard moves.
 const kbFit = () => {
-  if (vv) document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) + 'px');
+  if (vv) document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop)) + 'px');
   if (THR && document.documentElement.dataset.tab === 'chat' && innerWidth < 1000 && scrollY) scrollTo(0, 0);
 };
 if (vv) { vv.addEventListener('resize', kbFit); vv.addEventListener('scroll', kbFit); }
 addEventListener('resize', kbFit);
+['focusin', 'focusout'].forEach(k => addEventListener(k, () => [0, 150, 300, 600, 1000].forEach(ms => setTimeout(kbFit, ms))));
 // (Their bottom edge is kept, `end`: a scroll only moves it at the height last seen, so the browser clamping a grown
 // list's scroll is never counted.)
 const tcKeep = new ResizeObserver(es => es.forEach(({ target: c }) => {
