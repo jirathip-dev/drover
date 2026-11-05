@@ -95,6 +95,12 @@ fn serve(c: herdsman::Ctx, r: Slow) -> (&'static herdsman::Ctx, &'static Slow, s
 
 /// One GET over the socket: (ms, response bytes).
 fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
+    let (t, text) = fetch(addr, path);
+    (t, text.len())
+}
+
+/// One GET over the socket: (ms, response text).
+fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
@@ -107,7 +113,7 @@ fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
         "{path}: {}",
         &text[..text.len().min(300)]
     );
-    (ms(t), res.len())
+    (ms(t), text.into_owned())
 }
 
 /// What a `/live` stream sends within `ms`.
@@ -383,8 +389,8 @@ fn big() -> (herdsman::Ctx, Fake) {
     (c, f)
 }
 
-/// #447: the waits are linear in the log: `snapshot::waits` under 200 ms and `GET /?tab=lanes` (served from the
-/// step's snapshot) under 300 ms on 30,000 events and 200 lanes, in a release build (CI's perf step; a debug build
+/// #447: the waits are linear in the log: `snapshot::waits` under 200 ms, and the Lanes tab's data
+/// (`/api/v1/lanes`, `/herd.json`, served from the step's snapshot) under 300 ms on 30,000 events and 200 lanes, in a release build (CI's perf step; a debug build
 /// reports only).
 #[test]
 fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
@@ -405,17 +411,31 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
         .collect();
     assert_eq!(owner.len(), 10, "{owner:?}");
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let snap = herdsman::snapshot::load(&c).unwrap();
+    let mut snap = herdsman::snapshot::load(&c).unwrap();
     assert_eq!(snap.waits.len(), w.len(), "the step saves the waits the board reads");
+    // Tag the saved waits: a request that shows the tag read the snapshot instead of scanning the log.
+    for w in &mut snap.waits {
+        w.what = format!("snaphit {}", w.what);
+    }
+    let file = herdsman::snapshot::file(&c);
+    std::fs::write(&file, serde_json::to_string(&snap).unwrap()).unwrap();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
-    get(addr, "/?tab=lanes");
-    let (lanes, _) = get(addr, "/?tab=lanes");
+    let mut lanes = 0;
+    for path in ["/api/v1/lanes", "/herd.json"] {
+        fetch(addr, path);
+        let (t, body) = fetch(addr, path);
+        assert!(
+            body.contains("snaphit"),
+            "{path} worked the waits out again instead of reading the snapshot"
+        );
+        lanes = lanes.max(t);
+    }
     report(&format!(
-        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /?tab=lanes {lanes} ms"
+        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /herd.json {lanes} ms"
     ));
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
     assert!(waits < 200, "snapshot::waits took {waits} ms (target < 200)");
-    assert!(lanes < 300, "GET /?tab=lanes took {lanes} ms (target < 300)");
+    assert!(lanes < 300, "the lanes reads took {lanes} ms (target < 300)");
 }
