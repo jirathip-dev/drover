@@ -133,12 +133,10 @@ pub fn waiting_on(
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
     if let Some(a) = log.asks.iter().copied().find(mine) {
-        return w(
-            "owner",
-            &format!("waiting on your answer ({})", a.str("id").unwrap_or("?")),
-            a.ts,
-            None,
-        );
+        let id = a.str("id").unwrap_or("?");
+        // #412: a design's ask names its answers.
+        let next = crate::design::is_ask(a).then(|| format!("herdsman answer {f} {id} approve|revise|reject"));
+        return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
     }
     // #350: a reverted landing's issue is in a fix round while its old PR stays merged.
     if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
@@ -344,6 +342,12 @@ pub fn waiting_on(
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
+        "design" => w(
+            "none",
+            "design lane idle without a pushed design (check the pane)",
+            s.last_ts,
+            cmd("spawn", " design --supersede"),
+        ),
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
 }
