@@ -7,7 +7,10 @@ export type Herd = { fleets: Array<HerdFleet>, others: Array<HerdLane>, host: He
 
 export type HerdFleet = { name: string, color: string, lanes: Array<HerdLane>, queue: Array<HerdQueued>, needs: Array<number>, };
 
-export type HerdLane = { name: string, act: string, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, effort?: string | null, account?: string | null, host?: string | null, state: string, shown: string, tone: string, age: string, coat: string, gone: boolean, };
+/**
+ * A lane in the Herd; #423: `grow`, its issue's growth stage (a theme's `stages`).
+ */
+export type HerdLane = { name: string, act: string, grow: string, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, effort?: string | null, account?: string | null, host?: string | null, state: string, shown: string, tone: string, age: string, coat: string, gone: boolean, };
 
 export type HerdQueued = { issue: number, title?: string | null, blocked_by?: number | null, coat: string, };
 
@@ -72,12 +75,12 @@ export type LaneSection = { name: string, tone: string, repos: Array<LaneRepo>, 
 export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
 
 /**
- * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, `atone` and `coat`), name, `state` in `tone` for
- * `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor
- * `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
+ * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in
+ * `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the
+ * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
 
 /**
  * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
@@ -91,9 +94,15 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 
 /**
- * A repo's card in colour `k`: its threads newest first, the archived ones apart.
+ * A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's
+ * `harness` chip.
  */
-export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, };
+export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, harness: Chip, };
+
+/**
+ * #404: a composer chip: `name`'s current value `cur` (none: the default) and its choices `all`.
+ */
+export type Chip = { name: string, cur?: string | null, all: Array<string>, };
 
 /**
  * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
@@ -108,9 +117,10 @@ export type Link = { w: string, t: string, };
 
 /**
  * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
- * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`.
+ * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
+ * its model and effort `chips`.
  */
-export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
+export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
 
 /**
  * #407: a message queued for the turn's end, by its id `q`.
@@ -286,13 +296,13 @@ export type Drive = { tone: string, line: string, meta: Array<string>, pass: boo
 export type DriveAct = { who: string, words: string, code: string, };
 
 /**
- * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act` and
- * `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
+ * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow`
+ * (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
  * pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
  * answer not delivered), the decision taken by default
  * (and its ask to change it), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
  */
-export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
+export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
 
 /**
  * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the

@@ -108,6 +108,10 @@ impl Harness for Claude {
         true
     }
 
+    fn takes_model(&self) -> bool {
+        true
+    }
+
     /// Claude gets the kick as argv, so it only waits.
     fn kick_cmds(&self, p: &Plan, _pane: &str) -> Vec<Vec<String>> {
         vec![herdr::wait_working_argv(&p.agent, "20000")]

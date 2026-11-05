@@ -1014,7 +1014,7 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
     );
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &pr(&head, "green"))
-        .reply("gh pr diff 100", files)
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/100/files", files)
         .reply("gh pr merge 100", "")
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "");

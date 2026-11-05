@@ -362,8 +362,13 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Option<u64> {
     let e = events
         .iter()
         .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind))?;
+        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e))?;
     e.data.get("on").filter(|_| e.kind == "held")?.as_u64()
+}
+
+/// #500: a design lane's spawn: never the issue's build or check lane.
+pub fn design(e: &Event) -> bool {
+    e.kind == "spawn" && e.str("role") == Some("design")
 }
 
 /// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged
@@ -389,6 +394,8 @@ pub const PASSIVE: &[&str] = &[
     "wip-blocked",
     "stall",
     "orphan-lane",
+    "orphan-issue",
+    "outbox-stale",
     "lane-dead",
     "ready-unmerged",
     "ci-missing",
@@ -398,6 +405,8 @@ pub const PASSIVE: &[&str] = &[
     "agent-unavailable",
     "spawn-failed",
     "spawn-started",
+    // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.
+    "spawn-adopted",
     "fallback",
     "ask-waiting",
     "driven",
@@ -413,6 +422,7 @@ pub const PASSIVE: &[&str] = &[
     "lane-kept-dirty",
     "lane-reaped",
     "lane-trimmed",
+    "stale-pane-killed",
     "decision-redelivered",
     "labelled",
     "build-cloned",
@@ -421,6 +431,7 @@ pub const PASSIVE: &[&str] = &[
     "form-rounds-exhausted",
     "stale-marker",
     "spawn-held",
+    "outbox",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
@@ -512,7 +523,7 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         }
         // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
         // branch (a `--design` issue's, before impl) is the issue's design stage.
-        if e.kind == "spawn" && e.str("role") == Some("design") {
+        if design(e) {
             if let Some(a) = e.str("agent") {
                 s.lanes.insert("design".into(), a.into());
             }
@@ -591,6 +602,8 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
+            // #500: a false `LANE_ENDS` park undone: the state before it.
+            "repaired" => s.state = e.str("state").map_or(s.state.clone(), String::from),
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {

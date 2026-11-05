@@ -92,8 +92,9 @@ function scene() {
 // from `themes/<name>/`, its theme.json resolved by the server (what it lacks is farm's); a sprite id not in its sprites.svg is farm's.
 let T = { poses: {}, glyphs: {}, words: {}, scene: {} }, RAW = '', PAL = {};
 const w = k => T.words[k] || k;
-// #239: heat is indoors (no night, no [A]); a lane wears the theme's look by the same hash as the Lanes avatars (serve.js).
-const heat = () => T.load_scene?.kind === 'heat';
+// #239: heat is indoors (no night, no [A]), as is #423's window light; a lane wears the theme's look by the same hash as
+// the Lanes avatars (serve.js).
+const indoor = () => ['heat', 'light'].includes(T.load_scene?.kind);
 // #292: nh() spreads a page's lanes over the looks (`l.look`), so neighbours don't wear the same hat.
 const look = l => { const L = T.looks || []; return L.length ? Object.entries(L[l.look ?? hash(l.name) % L.length]).map(e => e.join(':')).join(';') : l.coat; };
 const got = (u, j) => fetch(u).then(r => r.ok ? r[j ? 'json' : 'text']() : Promise.reject()).catch(() => j ? {} : '');
@@ -117,11 +118,12 @@ function theme(name) {
     defs.querySelectorAll('symbol').forEach(s => s.remove());
     // A symbol `id` of sprite `want` (else farm's `alt`): legs rotate by the inherited `--gait`, manes skew by `--mane`
     // (storm), so instances need no per-leaf DOM.
+    // #423: a sprite's `data-box` is its own box (a 24 × 24 row sprite), else `box`.
     const sym = (id, want, alt, box = '0 0 132 100') => {
       const g = (sprite(own, want) || sprite(farm, want) || sprite(farm, alt))?.cloneNode(true), s = document.createElementNS(NS, 'symbol');
       if (!g) return;
       s.id = id;
-      s.setAttribute('viewBox', box);
+      s.setAttribute('viewBox', g.getAttribute('data-box') || box);
       g.removeAttribute('id');
       s.append(g);
       s.querySelectorAll('.leg').forEach(l => {
@@ -139,6 +141,8 @@ function theme(name) {
     sym('hrail-n', T.rail?.needs, fj.rail?.needs);
     Object.entries(T.moments || {}).forEach(([k, m]) => sym('hm-' + k, m.sprite));
     sym('hfan', T.load_scene?.fan); // #239: an idle lane's sprite while the heat is held
+    // #423: each stage's plant per species (`hs-<id>`) and its Queue row one (`hq-<id>-row`), for serve.js's plant().
+    Object.values(T.stages || {}).forEach(id => [...(T.species || []).map(s => `${id}-${s.id}`), id].forEach(i => { sym('hs-' + i, i); sym('hq-' + i + '-row', i + '-row'); }));
     sym('hload', T.loading); // #337: the loading overlay's sprite; none (terminal): a spinning glyph
     $('#ld').classList.toggle('ld', !!defs.querySelector('#hload'));
     Object.keys(PAL).forEach(k => H.style.removeProperty(k));
@@ -187,13 +191,19 @@ try { data = DEMO ? null : JSON.parse(get('herd:data')); } catch (e) {}
 function horse(l, k) {
   const fail = l.state === 'done' && /\bFAIL\b/.test(l.shown || ''), a = l.state === 'working' && l.act || ACT(l);
   const use = fail && $('#hm-fail') ? 'hm-fail' : a === 'idle' && H.dataset.heat === 'held' && $('#hfan') ? 'hfan' : 'ha-' + a;
+  const art = duo(T, i => defs.querySelector('#' + i), use, use !== 'hm-fail' && l.grow, l.issue ?? -1); // #423: over its plant
   const said = l.state === 'working' && T.words[a] || l.shown, g = fail ? T.glyphs.blocked || '!' : T.glyphs[l.state] || '?';
   const mark = [g === '·' ? '' : g, said].filter(Boolean).join(' '), full = [mark, l.age, l.host].filter(Boolean).join(' · ');
-  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l))}"><use href="#${use}"/></svg>` +
+  return `<button type=button class="hh ${hx(l.state)}" data-agent="${hx(l.name)}" data-k=${k}${l.needs ? ` data-n=${l.issue}` : ''}${l.title ? ` title="${hx(l.title)}"` : ''}><svg viewBox="0 0 132 100" style="${hx(look(l))}">${art}</svg>` +
     `<span class=hl><b>${hx(l.name)}</b><span title="${hx(full)}"><i class=${hx(fail ? 'r' : l.tone)}${hint(l.shown) ? ` title="${hx(hint(l.shown))}"` : ''}>${hx(mark)}</i>${l.age ? ' · ' + hx(l.age) : ''}${l.host ? ' · ' + hx(l.host) : ''}</span></span></button>`;
 }
-const queued = q => `<button type=button class="hqh${q.needs ? ' n' : ''}" data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}"><use href="#hrail${q.needs ? '-n' : ''}"/></svg>` +
-  `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
+// #423: with a theme's `stages`, the issue's cutting (its `queued` plant), `rail.needs` over it while it needs you.
+const queued = q => {
+  const p = plant(T, 'queued', q.issue), id = p && p.ids.find(i => defs.querySelector('#hs-' + i));
+  const art = id ? `<use href="#hs-${id}" style="${p.style}"/>${q.needs ? '<use href="#hrail-n"/>' : ''}` : `<use href="#hrail${q.needs ? '-n' : ''}"/>`;
+  return `<button type=button class="hqh${q.needs ? ' n' : ''}" data-i=${q.issue}><svg viewBox="0 0 132 100" style="${hx(q.coat)}">${art}</svg>` +
+    `<span>#${q.issue}${q.needs ? '<br><i class=r>! needs you</i>' : q.blocked_by ? `<br><i class=r>⛔#${q.blocked_by}</i>` : ''}</span></button>`;
+};
 // #130: a fleet's `needs` (its needs-human issues): their horses wear a red `!` in the blocked band, an issue
 // with no lane waits at the gate; a tap opens its needs-you card.
 // #292: lanes of merged or closed issues (`gone`) aren't drawn (the Lanes tab and `clean` have them); each lane takes the next look
@@ -206,7 +216,7 @@ function nh(f) {
     for (let t = 0; L.length && t < L.length && (used.has(k) || hat(k) !== hats[i % hats.length]); t++) k = (k + 1) % L.length;
     used.add(k);
     l = Object.assign({}, l, { look: L.length ? k : null });
-    return n.includes(l.issue) ? Object.assign(l, { needs: true, state: 'blocked', act: 'blocked', tone: 'r', shown: 'needs you' }) : l;
+    return n.includes(l.issue) ? Object.assign(l, { needs: true, state: 'blocked', act: 'blocked', grow: 'blocked', tone: 'r', shown: 'needs you' }) : l;
   });
   const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
   return [f.name, lanes, queue, f.color];
@@ -227,7 +237,7 @@ function keyed(have, key, h) {
     const x = tpl(h);
     attrs(n, x);
     attrs(n.firstChild, x.firstChild); // the coat (also drops a stopped trot's transform)
-    n.firstChild.firstChild.setAttribute('href', x.firstChild.firstChild.getAttribute('href'));
+    if (n.firstChild.innerHTML !== x.firstChild.innerHTML) n.firstChild.innerHTML = x.firstChild.innerHTML; // the pose (#423: and plant)
     n.lastChild.innerHTML = x.lastChild.innerHTML;
   }
   n._h = h;
@@ -374,10 +384,9 @@ function weather(h) {
   H.classList.toggle('fog2', wx && h.pressure === 'critical');
   H.classList.toggle('gust', wind >= 0.5);
   if (!storm || still.matches) H.style.setProperty('--mane', '0deg');
-  // #239 heat: calm < 0.5 ≤ busy; held = the spawn gate refusing (the farm's storm).
-  const lv = heat() ? (h.gate ? 'held' : wind >= 0.5 ? 'busy' : 'calm') : '', was = H.dataset.heat || '';
-  H.classList.toggle('heat', !!lv);
-  ['calm', 'busy', 'held'].forEach(k => H.classList.toggle('heat-' + k, k === lv));
+  // #239 heat (#423: and the window light): calm < 0.5 ≤ busy; held = the spawn gate refusing (the farm's storm).
+  const kd = indoor() ? T.load_scene.kind : '', lv = kd ? (h.gate ? 'held' : wind >= 0.5 ? 'busy' : 'calm') : '', was = H.dataset.heat || '';
+  ['heat', 'light'].forEach(x => { H.classList.toggle(x, x === kd); ['calm', 'busy', 'held'].forEach(k => H.classList.toggle(`${x}-${k}`, x === kd && k === lv)); });
   H.dataset.heat = lv;
   if ((lv === 'held') !== (was === 'held') && data) draw();
   cap.textContent = `load ${h.load == null ? '?' : h.load.toFixed(2)} · mem ${h.pressure || '?'} · swap ${h.swapouts == null ? '?' : Math.round(h.swapouts)}`;
@@ -504,9 +513,9 @@ const LIGHTS = ['auto', 'day', 'night'], ICON = { auto: 'A', day: '☀', night: 
 const nightAt = (l, d) => l === 'night' || (l === 'auto' && (d.getHours() < 7 || d.getHours() >= 19));
 let light = [DBG.get('light'), get('herd-light')].find(l => LIGHTS.includes(l)) || 'auto';
 function ranch() {
-  const n = !heat() && nightAt(light, new Date());
+  const n = !indoor() && nightAt(light, new Date());
   H.classList.toggle('night', n);
-  lb.hidden = heat();
+  lb.hidden = indoor();
   lb.textContent = ICON[light];
   lb.setAttribute('aria-label', `${w('ranch')} light: ${light}${light === 'auto' ? ` (${n ? 'night' : 'day'} now)` : ''}`);
 }

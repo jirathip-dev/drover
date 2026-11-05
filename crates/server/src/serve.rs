@@ -56,6 +56,13 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("kitchen/icon-180.png", PNG),
     th!("kitchen/icon-192.png", PNG),
     th!("kitchen/icon-512.png", PNG),
+    // #423: the houseplant shop (docs/design/garden/build.mjs writes it).
+    th!("garden/sprites.svg", SVG),
+    th!("garden/theme.json", JSON),
+    th!("garden/scene.svg", SVG),
+    th!("garden/icon-180.png", PNG),
+    th!("garden/icon-192.png", PNG),
+    th!("garden/icon-512.png", PNG),
     th!("terminal/theme.json", JSON),
     th!("terminal/icon-180.png", PNG),
     th!("terminal/icon-192.png", PNG),
@@ -65,7 +72,7 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
 macro_rules! sc {
     ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
 }
-const SCHEMES: [(&str, &[u8]); 8] = sc![
+const SCHEMES: [(&str, &[u8]); 10] = sc![
     "github-dark",
     "solarized-dark",
     "gruvbox",
@@ -73,7 +80,9 @@ const SCHEMES: [(&str, &[u8]); 8] = sc![
     "dracula",
     "paper",
     "farm",
-    "kitchen"
+    "kitchen",
+    "garden-light",
+    "garden-dark"
 ];
 const PNG: &str = "image/png";
 const SVG: &str = "image/svg+xml";
@@ -104,9 +113,15 @@ const VER: u32 = {
         } else {
             FILES[k - ASSETS.len()].2
         };
+        // #423: four bytes a step (the garden's sprites outgrow the budget a byte at a time)
         while i < b.len() {
-            h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
-            i += 1;
+            let w = if i + 4 <= b.len() {
+                u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+            } else {
+                b[i] as u32
+            };
+            h = (h ^ w).wrapping_mul(0x0100_0193);
+            i += if i + 4 <= b.len() { 4 } else { 1 };
         }
         (k, i) = (k + 1, 0);
     }
@@ -1212,9 +1227,9 @@ impl<'a> Server<'a> {
         };
         match op {
             "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
-            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, agent, yes)?,
+            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
             "clean" => crate::check::clean(ctx, &cfg, self.r, &mut out, Some(&fleet), (None, Some(agent)), yes)?,
-            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent)?,
+            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
         if yes || op == "stop" {
@@ -1474,21 +1489,31 @@ impl<'a> Server<'a> {
                 )
             })
             .collect();
-        let b = SCHEMES
-            .iter()
-            .find(|s| def[name.as_str()] == s.0)
-            .unwrap_or(&SCHEMES[0]);
-        let b: serde_json::Value = serde_json::from_slice(b.1)?;
-        let tokens = b["tokens"]
-            .as_object()
-            .into_iter()
-            .flatten()
-            .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
-        let first = format!(
-            ":root{{{}color-scheme:{}}}",
-            tokens.collect::<String>(),
-            b["color-scheme"].as_str().unwrap_or("dark")
-        );
+        // #423: a `{light, dark}` default paints the phone's own by `prefers-color-scheme`.
+        let block = |want: &serde_json::Value| -> Result<String> {
+            let b = SCHEMES.iter().find(|s| *want == s.0).unwrap_or(&SCHEMES[0]);
+            let b: serde_json::Value = serde_json::from_slice(b.1)?;
+            let tokens = b["tokens"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(k, v)| format!("{k}:{};", v.as_str().unwrap_or_default()));
+            Ok(format!(
+                ":root{{{}color-scheme:{}}}",
+                tokens.collect::<String>(),
+                b["color-scheme"].as_str().unwrap_or("dark")
+            ))
+        };
+        let first = match &def[name.as_str()] {
+            d @ serde_json::Value::Object(_) => {
+                format!(
+                    "{}@media(prefers-color-scheme:dark){{{}}}",
+                    block(&d["light"])?,
+                    block(&d["dark"])?
+                )
+            }
+            d => block(d)?,
+        };
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
         // #406: the page opened at any other path (the SW's copy) moves to the root before the body, so its
         // relative URLs (a thread's files) resolve there.
@@ -1664,9 +1689,13 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..QueueTab::default()
         };
-        let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), read(&ctx.state)) else {
-            d.error = Some("cannot read fleet.toml".into());
-            return d;
+        // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
+        let (cfg, events) = match (Config::load(&ctx.config), read(&ctx.state)) {
+            (Ok(c), Ok(e)) => (c, e),
+            (Err(e), _) | (_, Err(e)) => {
+                d.error = Some(format!("{e:#}"));
+                return d;
+            }
         };
         let (cfg, events, st) = (&cfg, &events, &fold(&events));
         // The state of an open lane herdr shows no pane for: `dead`, or `parked` (#83).
@@ -1765,6 +1794,7 @@ impl<'a> Server<'a> {
                         // #367: the time it counts from too (fixed, so /live sends no change a second).
                         t: s.map_or(now, |s| s.last_ts),
                         act: act(["", "update"][usize::from(up)], state).into(),
+                        grow: stage(state, act(["", "update"][usize::from(up)], state)).into(),
                         coat: if lane.is_empty() {
                             String::new()
                         } else {
@@ -1936,6 +1966,7 @@ impl<'a> Server<'a> {
                     HerdLane {
                         name: l.name.clone(),
                         act: act.into(),
+                        grow: stage(is, act).into(),
                         issue: l.issue,
                         title,
                         role: l.role.clone(),
@@ -2122,6 +2153,7 @@ impl<'a> Server<'a> {
             role: l.role.clone(),
             state: l.state.clone(),
             act: act(&l.role, &l.state).into(),
+            grow: stage(s.map_or("", |s| s.state.as_str()), act(&l.role, &l.state)).into(),
             atone: self::tone(&l.state).into(),
             coat: coat(&l.name),
             tone: if sup.is_some() { "m" } else { tone }.into(),
@@ -2603,7 +2635,7 @@ const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again wh
 DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
 ALL_CAPPED|a|waiting|{why} · {then}
 CAP|a|waiting|{why} · starts when a lane finishes
-NO_HOST|a|waiting|{why}
+NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
 ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`
@@ -2672,7 +2704,7 @@ const THEME: [&str; 6] = [
     "icon-512.png",
 ];
 /// #241: the built-in themes, the `[theme]` picker's choices (a `[serve] theme` of your own joins them).
-const BUILT: [&str; 3] = ["farm", "kitchen", "terminal"];
+const BUILT: [&str; 4] = ["farm", "kitchen", "garden", "terminal"];
 /// #241: the actions a theme draws (docs/themes.md), each with the pose it falls back to.
 const ACTS: [(&str, &str); 7] = [
     ("impl", "working"),
@@ -2683,6 +2715,23 @@ const ACTS: [(&str, &str); 7] = [
     ("done", "done"),
     ("blocked", "blocked"),
 ];
+
+/// #423: an issue's growth stages, a theme's `stages` keys.
+const STAGES: [&str; 7] = ["queued", "impl", "review", "fix", "ready", "merged", "blocked"];
+
+/// #423: the growth stage of an issue in `state` whose lane draws action `act`: its pipeline state, wilted while it is
+/// stuck (blocked, dead, needs you); a lane's action where the state says nothing more.
+pub fn stage(state: &str, act: &str) -> &'static str {
+    match (state.split('(').next().unwrap_or_default(), act) {
+        ("blocked" | "dead" | "needs-human" | "⏸ waiting: decision", _) | (_, "blocked") => "blocked",
+        ("queued", _) => "queued",
+        ("fix", _) | ("", "fix") => "fix",
+        ("ready", _) | ("", "done") => "ready",
+        ("merged" | "closed", _) => "merged",
+        ("review" | "verify", _) | ("", "rev" | "update") => "review",
+        _ => "impl",
+    }
+}
 
 /// The board's theme: `[serve] theme`, default `farm`.
 fn active(ctx: &Ctx) -> String {
@@ -2727,8 +2776,9 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
     // #335: a row figure is one line of 3 (its 24 px box), the Host miniature's load one line of 5.
     let line = |x: &Value, n| narrow(x) && x.as_str().is_some_and(|t| !t.contains('\n') && t.chars().count() <= n);
     let (row, load) = (|x: &Value| line(x, 3), |x: &Value| line(x, 5));
-    let maps: [(&str, &[&str], Check, &str); 11] = [
+    let maps: [(&str, &[&str], Check, &str); 12] = [
         ("poses", &["working", "idle", "done", "blocked"], &id, "a sprite id"),
+        ("stages", &STAGES, &id, "a sprite id"), // #423
         ("glyphs", &[], &id, "a string"),
         ("words", &[], &id, "a string"),
         ("actions", &acts, &id, "a sprite id"),
@@ -2784,8 +2834,25 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
                 .all(|(k, y)| ["calm", "busy", "held"].contains(&k.as_str()) && y.is_string())
         })
     };
+    // #423: a species is a look with its sprite suffix, `id`.
+    let species = |x: &Value| {
+        x["id"].is_string()
+            && x.as_object().is_some_and(|m| {
+                m.iter()
+                    .all(|(k, y)| (k == "id" || k.starts_with("--")) && y.is_string())
+            })
+    };
+    let scheme = |x: &Value| {
+        x.is_string()
+            || x.as_object().is_some_and(|m| {
+                m.len() == 2
+                    && ["light", "dark"]
+                        .iter()
+                        .all(|k| m.get(*k).is_some_and(Value::is_string))
+            })
+    };
     let ls = |x: &Value| {
-        ["weather", "heat", "none"].contains(&x["kind"].as_str().unwrap_or_default())
+        ["weather", "heat", "light", "none"].contains(&x["kind"].as_str().unwrap_or_default())
             && x.get("levels").is_none_or(levels)
     };
     let modes = |x: &Value| {
@@ -2798,9 +2865,18 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
             !a.is_empty() && m.len() == a.len()
         })
     };
-    let rules: [(&str, Check, &str); 6] = [
+    let rules: [(&str, Check, &str); 7] = [
         ("scene", &Value::is_object, "an object"),
-        ("scheme", &Value::is_string, "a colour scheme's name"),
+        (
+            "scheme",
+            &scheme,
+            "a colour scheme's name, or {\"light\": name, \"dark\": name}",
+        ),
+        (
+            "species",
+            &|x| x.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(species)),
+            "a list of {\"id\": suffix, \"--var\": \"value\"} objects",
+        ),
         (
             "looks",
             &|x| x.as_array().is_some_and(|a| a.iter().all(look)),
@@ -2809,7 +2885,7 @@ pub fn validate(j: &[u8]) -> Result<serde_json::Value, String> {
         (
             "load_scene",
             &ls,
-            "{\"kind\": weather|heat|none, \"levels\": {calm, busy, held}}",
+            "{\"kind\": weather|heat|light|none, \"levels\": {calm, busy, held}}",
         ),
         ("modes", &modes, "a list of scene, ascii, glyph, each at most once"),
         (
@@ -3200,10 +3276,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing verify-no-recipe"
+        k if "stall orphan-lane orphan-issue conflict-predicted heads-up ready-unmerged ci-missing verify-no-recipe"
             .split(' ')
-            .any(|x| x == k)
-            || k.starts_with("orch-") =>
+            .any(|x| x == k) || k.starts_with("orch-") =>
         {
             ("!", "a", format!("{k}{r}"), false)
         }

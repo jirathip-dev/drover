@@ -1,0 +1,312 @@
+{
+ "scheme": {
+  "light": "garden-light",
+  "dark": "garden-dark"
+ },
+ "actions": {
+  "impl": "keeper-water",
+  "fix": "keeper-prune",
+  "rev": "keeper-inspect",
+  "update": "keeper-repot",
+  "idle": "keeper-idle",
+  "done": "keeper-done",
+  "blocked": "keeper-wilted"
+ },
+ "poses": {
+  "working": "keeper-water",
+  "idle": "keeper-idle",
+  "done": "keeper-done",
+  "blocked": "keeper-wilted"
+ },
+ "looks": [
+  {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#5a3a24",
+   "--sh": "#efe6d0",
+   "--sd": "#cfc3a6",
+   "--ap": "#6f8f5a",
+   "--as": "#58744a",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#1d1a17",
+   "--sh": "#efd98f",
+   "--sd": "#cdb76a",
+   "--ap": "#4f6f8f",
+   "--as": "#3f5a75",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "0",
+   "--hb": "1",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--sh": "#e7b7a8",
+   "--sd": "#c99484",
+   "--ap": "#4f6b3a",
+   "--as": "#3e552e",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "0",
+   "--hb": "0",
+   "--hk": "1"
+  },
+  {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#d8c9a8",
+   "--sh": "#bcd3e2",
+   "--sd": "#98b3c6",
+   "--ap": "#a8603e",
+   "--as": "#8a4c30",
+   "--hc": "#3f8f8a",
+   "--hs": "#2f6e6a",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#f1c7a5",
+   "--ss": "#d9a684",
+   "--hr": "#b5652d",
+   "--sh": "#efe6d0",
+   "--sd": "#cfc3a6",
+   "--ap": "#4f6b3a",
+   "--as": "#3e552e",
+   "--hc": "#d9a53a",
+   "--hs": "#b08528",
+   "--ht": "0",
+   "--hb": "1",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#d9a074",
+   "--ss": "#b98157",
+   "--hr": "#3a2a1e",
+   "--sh": "#bcd3e2",
+   "--sd": "#98b3c6",
+   "--ap": "#6f8f5a",
+   "--as": "#58744a",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "0",
+   "--hb": "0",
+   "--hk": "1"
+  },
+  {
+   "--sk": "#8a5a3c",
+   "--ss": "#6e452d",
+   "--hr": "#1d1a17",
+   "--sh": "#efd98f",
+   "--sd": "#cdb76a",
+   "--ap": "#a8603e",
+   "--as": "#8a4c30",
+   "--hc": "#c0453a",
+   "--hs": "#9a352d",
+   "--ht": "1",
+   "--hb": "0",
+   "--hk": "0"
+  },
+  {
+   "--sk": "#b97d50",
+   "--ss": "#9a6340",
+   "--hr": "#5a3a24",
+   "--sh": "#e7b7a8",
+   "--sd": "#c99484",
+   "--ap": "#4f6f8f",
+   "--as": "#3f5a75",
+   "--hc": "#3f8f8a",
+   "--hs": "#2f6e6a",
+   "--ht": "0",
+   "--hb": "1",
+   "--hk": "0"
+  }
+ ],
+ "stages": {
+  "queued": "plant-queued",
+  "impl": "plant-impl",
+  "review": "plant-review",
+  "fix": "plant-fix",
+  "ready": "plant-ready",
+  "merged": "plant-merged",
+  "blocked": "plant-blocked"
+ },
+ "species": [
+  {
+   "id": "monstera",
+   "--lf": "#3f8f45",
+   "--ld": "#2a6a34",
+   "--lv": "#7cc46a"
+  },
+  {
+   "id": "philodendron",
+   "--lf": "#4f9a3a",
+   "--ld": "#356f2a",
+   "--lv": "#b4dc5a"
+  },
+  {
+   "id": "peperomia",
+   "--lf": "#3c6b3a",
+   "--ld": "#294c2b",
+   "--lv": "#c2dcae"
+  },
+  {
+   "id": "alocasia",
+   "--lf": "#2b5a45",
+   "--ld": "#1c3f31",
+   "--lv": "#c4e2b4"
+  },
+  {
+   "id": "pothos",
+   "--lf": "#5aa040",
+   "--ld": "#3d7a2c",
+   "--lv": "#ecd96a"
+  },
+  {
+   "id": "calathea",
+   "--lf": "#4a7c50",
+   "--ld": "#2a4a31",
+   "--lv": "#e08aa8"
+  }
+ ],
+ "load_scene": {
+  "kind": "light",
+  "levels": {
+   "calm": "sun",
+   "busy": "overcast",
+   "held": "rain"
+  },
+  "minis": {
+   "calm": "light-sun",
+   "busy": "light-overcast",
+   "held": "light-rain"
+  }
+ },
+ "rail": {
+  "item": "plant-queued-pothos",
+  "needs": "thirsty-drop"
+ },
+ "moments": {
+  "merged": {
+   "sprite": "sold",
+   "anim": "hop"
+  },
+  "fail": {
+   "sprite": "leaf-drop",
+   "anim": "shake"
+  },
+  "needs-you": {
+   "sprite": "thirsty",
+   "anim": "pulse"
+  }
+ },
+ "row_sprites": {
+  "impl": "row-water",
+  "fix": "row-prune",
+  "rev": "row-inspect",
+  "update": "row-repot",
+  "idle": "row-idle",
+  "done": "row-done",
+  "blocked": "row-wilted",
+  "queued": "row-jar",
+  "needs": "row-thirsty",
+  "merged": "row-sold",
+  "fail": "row-fall"
+ },
+ "loading": "keeper-water",
+ "icons": {
+  "180": "icon-180.png",
+  "192": "icon-192.png",
+  "512": "icon-512.png",
+  "favicon": "icon-192.png"
+ },
+ "ascii": {
+  "impl": " o~. \\|/\n |=|  |\n     \\_/",
+  "fix": " 8<  \\|/\n      |/\n     \\_/",
+  "rev": " (o) \\|/\n   \\  |\n     \\_/",
+  "update": " =.  \\|/\n [#]  |\n     \\_/",
+  "idle": " c[] \\|/\n      |\n     \\_/",
+  "done": " *  \\Y/*\n    \\|/\n    \\_/",
+  "blocked": " !  ,  ,\n    \\|/\n    \\_/"
+ },
+ "modes": [
+  "scene",
+  "ascii"
+ ],
+ "ascii_rows": {
+  "impl": "~.Y",
+  "fix": "8<Y",
+  "rev": "oY.",
+  "update": "=uY",
+  "idle": "c.Y",
+  "done": "*Y*",
+  "blocked": ",v,"
+ },
+ "ascii_load": {
+  "calm": "-O-",
+  "busy": "~~~",
+  "held": "',',"
+ },
+ "ascii_loading": "~.Y\n~:Y",
+ "glyphs": {
+  "working": "~",
+  "idle": "·",
+  "unknown": "?",
+  "parked": "·",
+  "done": "✓",
+  "blocked": "!",
+  "dead": "✗"
+ },
+ "words": {
+  "horse": "plant",
+  "horses": "plants",
+  "herd": "shop",
+  "ranch": "shop",
+  "barn": "greenhouse",
+  "parked": "greenhouse",
+  "impl": "water",
+  "fix": "prune",
+  "rev": "inspect",
+  "update": "repot",
+  "queued": "cuttings",
+  "working": "being tended",
+  "idle": "resting",
+  "done": "ready for sale",
+  "blocked/dead": "wilting",
+  "dead": "composted",
+  "needs": "thirsty",
+  "merged": "sold",
+  "fail": "leaf drop",
+  "tab-queue": "the counter",
+  "tab-lanes": "the shelves",
+  "tab-host": "the shop",
+  "tab-events": "the ledger",
+  "empty-queue": "no cuttings on the counter",
+  "empty-lanes": "the shop's quiet",
+  "empty-events": "nothing in the ledger",
+  "loading": "watering…"
+ },
+ "scene": {
+  "weather": false,
+  "line": true,
+  "palette": {
+   "--pa": "repeating-linear-gradient(90deg,#8a5a34 0 46px,#7a4e2c 46px 48px)",
+   "--sky1": "#ead9b8",
+   "--sky2": "#ead9b8",
+   "--fp": "#9a6a44",
+   "--fr": "#b07a4a",
+   "--done": "1",
+   "--qw": "88px"
+  }
+ }
+}

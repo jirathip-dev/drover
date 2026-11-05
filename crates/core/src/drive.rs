@@ -172,12 +172,12 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
 }
 
-/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
+/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
+/// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
     a.push("--now".into());
@@ -453,7 +453,16 @@ pub fn drive(
             Err(e) => writeln!(out, "orphans: {e:#}")?,
         }
     }
+    if !fast {
+        if let Err(e) = repair(ctx, cfg, out) {
+            writeln!(out, "repair: {e:#}")?;
+        }
+    }
     let grew = log();
+    // #389: remote lanes' commands that found no route here, as the look read them.
+    if fast {
+        crate::outbox::drain(ctx, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
+    }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
     for name in &fleets {
@@ -502,6 +511,7 @@ pub fn drive(
         for n in &fleets {
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
         }
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: stale panes: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
@@ -511,6 +521,51 @@ pub fn drive(
 
 /// One fleet: each item's due step, reviews first. Each spawn samples the host afresh; false when a spawn met a
 /// busy host or full disk, so no fleet starts new work this pass. `fast`: verdicts and merges only (#212).
+/// #500: an issue parked `LANE_ENDS` whose every `lane gone` respawn followed a design lane's adoption (before #500 that
+/// adoption hid the issue's verdict) goes back to the state it had (`repaired`); once installed, none is left to find.
+fn repair(ctx: &Ctx, cfg: &Config, out: &mut dyn Write) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let reset = ["pushed", "verdict", "needs-human", "round-extended"];
+    for s in fold(&events)
+        .into_values()
+        .filter(|s| s.state == "needs-human" && cfg.fleet.contains_key(&s.fleet))
+    {
+        let mine: Vec<(usize, &Event)> = (events.iter().enumerate())
+            .filter(|(_, e)| e.fleet == s.fleet && e.issue == Some(s.issue))
+            .collect();
+        let Some(at) = mine.iter().rposition(|(_, e)| e.kind == "needs-human") else {
+            continue;
+        };
+        let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
+        let round = &mine[from.map_or(0, |i| i + 1)..at];
+        let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
+        let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
+            continue;
+        };
+        let gone = (round.iter()).all(|(_, e)| e.kind != "respawn" || e.str("why") == Some("lane gone"));
+        if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
+            continue;
+        }
+        let key = (s.fleet.clone(), s.issue);
+        let Some(was) = fold(&events[..mine[at].0]).remove(&key).map(|b| b.state) else {
+            continue;
+        };
+        writeln!(
+            out,
+            "{} #{} repaired: back to {was} (LANE_ENDS came from a design lane's adoption)",
+            s.fleet, s.issue
+        )?;
+        let why = "the lane gone came from a design lane's adoption, not the build round";
+        let d = json!({"code": "LANE_ENDS", "state": was, "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+        )?;
+    }
+    Ok(())
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -532,7 +587,8 @@ fn pass(
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
-        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live {
+        let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
+        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live || away {
             continue;
         }
         let text = format!("#{on} merged; rebase on {} and continue", f.integration);

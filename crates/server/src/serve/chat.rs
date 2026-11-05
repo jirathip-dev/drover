@@ -1,7 +1,7 @@
 //! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
-use crate::api::{Answered, ChatRepo, ChatTab, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
+use crate::api::{Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
 use crate::conductor;
 use crate::config::Config;
 use crate::events::{closed, Event};
@@ -182,7 +182,8 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 }
             }
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
-            ("conductor-sleep", _) => m("sleep", String::new()),
+            ("thread-model", _) => m("note", conductor::picked(e)),
+            ("conductor-sleep", _) if s("why") != "model" => m("sleep", String::new()),
             _ => continue,
         };
         if m.kind == "cmd" {
@@ -234,7 +235,8 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]
         q: *q,
         text: e.str("text").unwrap_or_default().into(),
     };
-    let role = conductor::role(cfg, &t.fleet).ok().map(|r| r.1);
+    let role = conductor::thread_role(cfg, events, t).ok().map(|r| r.1);
+    let role = role.as_ref();
     let (h, model) = (
         role.map_or("", |r| r.harness.as_str()),
         role.and_then(|r| r.model.as_deref()),
@@ -248,8 +250,34 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]
         waiting: waiting(ctx, events, id),
         since: (st == "working").then_some(turn.1),
         queued: queued(events, id).iter().map(q).collect(),
+        chips: role.map(|r| chips(cfg, r)).unwrap_or_default(),
         page: page(ctx, cfg, events, t, (u64::MAX, 30), open),
     }
+}
+
+/// #404: a chip of `name`'s choices; `cur` none: the default.
+fn chip(name: &str, cur: Option<&str>, all: &[&str]) -> Chip {
+    Chip {
+        name: name.into(),
+        cur: cur.map(Into::into),
+        all: all.iter().map(ToString::to_string).collect(),
+    }
+}
+
+/// #404: the thread's model and effort chips, its harness's choices (one with a single choice set is left out).
+fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
+    let mut models = conductor::harness_models(cfg, &r.harness);
+    if !models.is_empty() {
+        models.extend(r.model.as_deref().filter(|m| !models.contains(m)));
+    }
+    let effort = r.effort_or(&cfg.limits);
+    let all = [
+        chip("model", r.model.as_deref(), &models),
+        chip("effort", effort.as_deref(), crate::harness::efforts(&r.harness)),
+    ];
+    all.into_iter()
+        .filter(|c| c.all.len() > 1 || c.cur.is_none() && !c.all.is_empty())
+        .collect()
 }
 
 /// #460: the ids of the thread's config proposals that wait for the owner's tap.
@@ -293,15 +321,18 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, Thread
 
 /// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
 /// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
-pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
+pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
         rw,
         ..ChatTab::default()
     };
-    let Some(cfg) = cfg else {
-        tab.error = Some("cannot read fleet.toml".into());
-        return tab;
+    let cfg = match cfg {
+        Ok(c) => c,
+        Err(e) => {
+            tab.error = Some(e.into());
+            return tab;
+        }
     };
     let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
@@ -318,6 +349,11 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
             k: k.into(),
             rows: rows.into_iter().map(|r| r.1).collect(),
             archived: arch.into_iter().map(|r| r.1).collect(),
+            harness: chip(
+                "harness",
+                conductor::defaults(cfg, repo).ok().map(|d| d.1.harness).as_deref(),
+                &crate::harness::NAMES,
+            ),
         });
     }
     tab.threads = threads.iter().map(|t| thread(ctx, cfg, events, t, agents)).collect();
@@ -327,12 +363,16 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
 impl super::Server<'_> {
     /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads.
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> ChatTab {
-        let events = crate::events::read(&ctx.state).unwrap_or_default();
+        // #483: a config or log read error shows its own text (as the Queue tab does).
+        let (cfg, events) = match (Config::load(&ctx.config), crate::events::read(&ctx.state)) {
+            (Ok(c), Ok(e)) => (Ok(c), e),
+            (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), vec![]),
+        };
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        tab(ctx, Config::load(&ctx.config).ok().as_ref(), &events, &agents, rw)
+        tab(ctx, cfg.as_ref().map_err(String::as_str), &events, &agents, rw)
     }
 }
 
@@ -392,7 +432,13 @@ pub fn post(
                 conductor::role(&cfg, g("repo"))?;
                 conductor::text_ok(text)?;
                 conductor::files_ok(&files)?;
-                conductor::new(ctx, &cfg, g("repo"), &first(text))?
+                conductor::new(
+                    ctx,
+                    &cfg,
+                    g("repo"),
+                    &first(text),
+                    Some(g("harness")).filter(|h| !h.is_empty()),
+                )?
             } else {
                 conductor::find(&events, id)?;
                 id.to_string()
@@ -434,6 +480,10 @@ pub fn post(
                 "removed",
             )?;
             Ok("removed".into())
+        }
+        "model" => {
+            conductor::pick(ctx, &cfg, id, g("model"), g("effort"))?;
+            Ok("picked".into())
         }
         "stop" => {
             conductor::find(&events, id)?;
