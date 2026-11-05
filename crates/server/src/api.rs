@@ -96,10 +96,10 @@ pub struct Moment {
     pub n: Option<u64>,
 }
 
-/// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's `age` (once over 2 min),
-/// the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board
-/// takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue;
-/// `pair`: the page offers Pair this phone.
+/// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none;
+/// #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the
+/// `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
+/// export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
 #[allow(clippy::struct_excessive_bools)] // flags the cards' markup reads, one each
 pub struct NeedsTab {
     pub now: u64,
@@ -108,7 +108,7 @@ pub struct NeedsTab {
     pub paired: bool,
     pub pair: bool,
     pub mtime: String,
-    pub age: Option<String>,
+    pub snap: u64,
     pub choosing: usize,
     pub asks: Vec<NeedAsk>,
     pub blocked: Vec<Blocked>,

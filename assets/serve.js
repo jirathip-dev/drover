@@ -26,8 +26,8 @@ function tab(t) {
   if (window.boardTab) wait(window.boardTab(t).catch(() => have.delete(t)));
 }
 const have = new Set();
-// #337: a load, refresh or action over 300 ms shows the theme's loading animation, large, over a light scrim near the
-// top of the content (the page stays tappable; [↻] spins as well); it goes as soon as the data paints.
+// #337: a load, refresh or action over 300 ms shows the theme's loading mark; #450: in the strip under the header, the
+// page under it visible and tappable ([↻] spins as well); it goes as soon as the data paints.
 let waits = 0, ovt = 0;
 function wait(p) {
   if (!waits++) ovt = setTimeout(() => loading(true), 300);
@@ -36,7 +36,7 @@ function wait(p) {
 function loading(on) { $('#ld').hidden = !on; }
 // #60: a part of the page read on demand (null when it cannot be read).
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
-// A form POST of `data` (an object or FormData) to `path`; #403: `send` without the loading overlay (every chat post).
+// A form POST of `data` (an object or FormData) to `path`; #403: `send` without the loading strip (every chat post).
 const send = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
 const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
@@ -51,7 +51,7 @@ dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 // #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
 // herd.js loaded (docs/themes.md). #335: the look sheet's STYLE picks it (pixel: scene, ascii: ascii), no Lanes button. In
-// ascii the loading overlay runs the theme's `ascii_loading` frames: built once, then CSS swaps them (no node replaced).
+// ascii the loading mark runs the theme's `ascii_loading` frames: built once, then CSS swaps them (no node replaced).
 let TT = null, TM = ['scene', 'ascii'];
 function mode(m) {
   if (TM.includes(m)) put('mode', m); // a theme without it (terminal) keeps the pick for the next one
@@ -418,10 +418,6 @@ function words(root) {
     const h = TW()[k] ? `<b class=thw>${esc(TW()[k])}</b><small class=pw>${esc(t)}</small>` : esc(t);
     if (p.innerHTML !== h) p.innerHTML = h;
   });
-  const ld = $('#ld');
-  let q = ld.querySelector('.ldw');
-  if (!q) ld.append(q = el('p', 'ldw'));
-  if (q.innerHTML !== (TW().loading ? tw('loading', 'loading') : '')) q.innerHTML = TW().loading ? tw('loading', 'loading') : '';
   // A Host card's load: the theme's 48 × 16 mini (two frames) and its level word, `simmer · calm`; the same level keeps it.
   root.querySelectorAll('article.hcd').forEach(c => {
     const h = c.querySelector('.hhd .hnm'), had = h.querySelector('.lsm'), r = c.querySelector('details.rw[data-k=load]'), ls = TT.load_scene || {};
@@ -488,17 +484,22 @@ async function pushwords() {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = DEMO ? Date.now() : Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
   rf.classList.toggle('spin', s === 'a' || busy);
-  $('#stale').hidden = s !== 'r' && (DEMO || Date.now() - last < 120000); // #337: offline, or a copy over 2 min old
-  const at = new Date(last).toTimeString().slice(0, 5);
-  Object.assign($('#stale'), { textContent: 'as of ' + at, title: 'last update ' + at });
+  age();
   $$('form button, form select:not([data-off]), .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
   if (DEMO) $$('input:not(.bl *), textarea, .acts button').forEach(b => b.disabled = true); // #365: the backlog's search and ticks write nothing
 }
+// #450: the shown data's age in the strip, once it is over 2 min old: the last paint, or the step's look if older.
+function age() {
+  const t = Math.min(last, DEMO ? Infinity : (+$('#sts')?.dataset.ts || Infinity) * 1000), s = (Date.now() - t) / 1000 | 0;
+  const a = s < 7200 ? (s / 60 | 0) + 'm' : s < 172800 ? (s / 3600 | 0) + 'h' : (s / 86400 | 0) + 'd';
+  Object.assign($('#stale'), { hidden: s < 120, textContent: `as of ${a} ago`, title: 'last update ' + new Date(t).toTimeString().slice(0, 5) });
+}
+setInterval(age, 30000);
 function pulse() { dot.classList.remove('p'); void dot.offsetWidth; dot.classList.add('p'); }
 const live = () => es && es.readyState === 1;
 // Rows keep their open state across a swap (by agent, or heading + first cell); changed ones flash.
@@ -724,7 +725,7 @@ document.addEventListener('click', async e => {
     if (r.ok) refresh();
   } catch (err) { note(b, 'alerts failed: ' + err.message, false); }
 });
-// Network only (the SW passes the API through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
+// Network only (the SW passes the API through); spins ↻ until done; `quiet` (#403: after a chat post): no loading strip.
 async function refresh(quiet) {
   dbg('refresh');
   if (DEMO) return herdPull();
@@ -1104,7 +1105,7 @@ function wanted() {
   }
   want = null;
 }
-// [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the overlay's, herd.js builds #hload).
+// [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the strip's, herd.js builds #hload).
 rf.innerHTML = '<i>↻</i>';
 document.addEventListener('visibilitychange', () => document.documentElement.classList.toggle('bg', document.hidden));
 // #138 chat blocks: pure from here to `chat:end` (tests/chat_blocks.rs runs it under node). A role run is a block:
@@ -2015,7 +2016,7 @@ function chatFollow() {
 }
 // Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
 // (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
-// working thread's mark is the loading overlay's art (#ld: the theme's sprite, ascii frames or the glyph), and each
+// working thread's mark is the loading strip's art (#ld: the theme's sprite, ascii frames or the glyph), and each
 // message sent this session shows: `sending…`, then ✓ on the thread's copy; failed, red with [retry].
 const SENT = [];
 function chatPaint(root = $('#chat')) {
