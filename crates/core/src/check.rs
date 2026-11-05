@@ -50,6 +50,26 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).
     let remote = crate::hosts::survey(ctx, cfg, r, false);
     crate::cloud::tick(ctx, cfg, r, &remote, out)?;
+    // #478: a remote host's drop and its return alert once each; its lanes show `host offline` meanwhile.
+    for (name, a) in &remote {
+        let stopped = || crate::cloud::state(&events, name) == "stopped";
+        if cfg
+            .hosts
+            .get(name)
+            .is_none_or(|h| h.machine.is_none() || h.cloud.is_some() && stopped())
+        {
+            continue;
+        }
+        let was = |e: &&Event| e.str("host") == Some(name) && matches!(e.kind.as_str(), "host-offline" | "host-online");
+        let last = events.iter().rev().find(was);
+        if a.is_none() != last.is_some_and(|e| e.kind == "host-offline") {
+            let kind = ["host-online", "host-offline"][usize::from(a.is_none())];
+            let lanes = crate::hosts::lanes_on(cfg, &events, name);
+            let why = format!("{name} {}; lanes: {}", &kind[5..], lanes.join(", "));
+            let d = json!({"key": last.map_or(0, |e| e.ts), "host": name, "reason": why});
+            fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
+        }
+    }
     crate::setup::reap(ctx, r, &events)?;
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
@@ -979,16 +999,17 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<(
     Ok(())
 }
 
-/// The agent's newest spawn, unless a `lane-killed` followed it; else `NO_SUCH_AGENT`.
-fn spawned<'a>(events: &'a [Event], agent: &str) -> Result<&'a Event> {
-    let i = events
-        .iter()
-        .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(agent));
-    match i.filter(|i| {
-        !events[*i..]
-            .iter()
-            .any(|e| e.kind == "lane-killed" && e.str("agent") == Some(agent))
-    }) {
+/// The agent's newest spawn (#478: on `host`), unless a kill of its pane followed it; else `NO_SUCH_AGENT`.
+fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&'a Event> {
+    let i = events.iter().rposition(|e| {
+        e.kind == "spawn" && e.str("agent") == Some(agent) && host.is_none_or(|h| e.str("host") == Some(h))
+    });
+    let killed = |e: &Event, sp: &Event| {
+        matches!(e.kind.as_str(), "lane-killed" | "stale-pane-killed")
+            && e.str("agent") == Some(agent)
+            && (e.kind == "lane-killed" || e.str("pane") == sp.str("pane"))
+    };
+    match i.filter(|i| !events[*i..].iter().any(|e| killed(e, &events[*i]))) {
         Some(i) => Ok(&events[i]),
         None => crate::gate::refused("NO_SUCH_AGENT", format!("no live lane `{agent}` in the log")),
     }
@@ -997,7 +1018,7 @@ fn spawned<'a>(events: &'a [Event], agent: &str) -> Result<&'a Event> {
 /// `herdsman stop`: Esc to the agent's pane (it pauses); logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = read(&ctx.state)?;
-    let e = spawned(&events, agent)?;
+    let e = spawned(&events, agent, None)?;
     herdr::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;
     emit(
         &ctx.state,
@@ -1008,15 +1029,31 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
 }
 
 /// `herdsman close`: close a non-lane herdr agent's pane (by name or pane id); files stay. Logs `closed-other`.
-pub fn close(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
-    let (events, agents) = (read(&ctx.state)?, herdr::agents(r)?);
+/// #478: `host` picks that machine's agent when names collide (a lane is only the one its newest spawn there).
+pub fn close(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    agent: &str,
+    host: Option<&str>,
+) -> Result<()> {
+    if let Some(h) = host.filter(|h| !cfg.hosts.contains_key(*h)) {
+        return crate::gate::refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]"));
+    }
+    let on = On::new(r, host.and_then(|h| cfg.hosts[h].machine.as_deref()));
+    let (events, agents) = (read(&ctx.state)?, herdr::agents(&on)?);
     let a = agents.iter().find(|a| a["name"] == agent || a["pane_id"] == agent);
     let name = a.and_then(|a| a["name"].as_str()).unwrap_or(agent);
-    if last_spawn(&events, agent).or(last_spawn(&events, name)).is_some() {
+    let here = |e: &Event| host.is_none_or(|h| e.str("host") == Some(h));
+    if last_spawn(&events, agent)
+        .or(last_spawn(&events, name))
+        .is_some_and(here)
+    {
         return crate::gate::refused("IS_LANE", format!("`{name}` is a lane: use stop, kill or clean"));
     }
     let pane = a.and_then(|a| a["pane_id"].as_str()).context("no such herdr agent")?;
-    herdr::close(r, pane)?;
+    herdr::close(&on, pane)?;
     let ev = Event::new(ctx.now, "", None, "closed-other", json!({"agent": name}));
     emit(&ctx.state, cfg, ev)?;
     Ok(writeln!(out, "closed {name}'s pane; its worktree and files stay")?)
@@ -1025,9 +1062,18 @@ pub fn close(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent
 /// `herdsman kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to
 /// `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes.
 /// The worktree is kept.
-pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str, yes: bool) -> Result<()> {
+/// #478: `host` kills the agent's newest lane there; one an other host's lane superseded logs `stale-pane-killed`.
+pub fn kill(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (agent, host): (&str, Option<&str>),
+    yes: bool,
+) -> Result<()> {
     let events = read(&ctx.state)?;
-    let e = spawned(&events, agent)?;
+    let e = spawned(&events, agent, host)?;
+    let stale = !last_spawn(&events, agent).is_some_and(|l| std::ptr::eq(l, e));
     let role = e.str("role").unwrap_or_default();
     let st = e.issue.and_then(|n| fold(&events).remove(&(e.fleet.clone(), n)));
     let on = On::of(r, Some(e));
@@ -1085,17 +1131,49 @@ pub fn kill(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
-    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "wip": wip});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &e.fleet, e.issue, "lane-killed", d),
-    )?;
+    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip});
+    let kind = ["lane-killed", "stale-pane-killed"][usize::from(stale)];
+    emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, e.issue, kind, d))?;
     Ok(writeln!(
         out,
         "killed {agent}{}",
         wip.map_or(String::new(), |w| format!(": work pushed to {w}"))
     )?)
+}
+
+/// #478: each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once
+/// that host answers; a pane already gone there is only logged.
+pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let events = read(&ctx.state)?;
+    for s in events.iter().filter(|e| e.kind == "supersede") {
+        let (Some(h), Some(agent), pane) = (s.str("stale_host"), s.str("agent"), s.str("stale_pane")) else {
+            continue;
+        };
+        let done = |e: &Event| e.kind == "stale-pane-killed" && e.ts >= s.ts && e.str("agent") == Some(agent);
+        let machine = cfg.hosts.get(h).and_then(|c| c.machine.as_deref());
+        if events.iter().any(|e| done(e) && e.str("pane") == pane) || machine.is_none() {
+            continue;
+        }
+        let Ok(there) = host::agents(&On::new(r, machine)) else {
+            continue;
+        }; // still offline
+        if there
+            .iter()
+            .any(|a| a["name"] == agent && a["pane_id"].as_str() == pane)
+        {
+            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true) {
+                writeln!(out, "stale pane {h}:{agent}: {e:#}")?;
+            }
+        } else {
+            let d = json!({"agent": agent, "host": h, "pane": pane, "gone": true});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &s.fleet, s.issue, "stale-pane-killed", d),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
