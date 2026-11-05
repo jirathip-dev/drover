@@ -256,7 +256,12 @@ fn page(
             ("config-propose", _) if crate::propose::settled(events, s("id")).is_none() => {
                 let (q, d) = (esc(s("id")), esc(s("diff")));
                 let b = |v: &str| format!("<button name=act value={v}{dis}>{v}</button>");
-                let body = format!("<div class=md><p class=qid>config {q}</p><pre class=df>{d}</pre></div><form class=chc data-id=\"{q}\">{}{}</form>", b("apply"), b("discard"));
+                let act = if crate::propose::stale(ctx, e) {
+                    "<p class=m>stale: fleet.toml changed since</p>".into() // #460: it can no longer apply
+                } else {
+                    format!("<form class=chc data-id=\"{q}\">{}{}</form>", b("apply"), b("discard"))
+                };
+                let body = format!("<div class=md><p class=qid>config {q}</p><pre class=df>{d}</pre></div>{act}");
                 block(ctx.now, "ai", "conductor", &format!("proposes config {}", s("id")), &body, e.ts)
             }
             ("secret-request", _) if crate::secret::open(events, id, s("name")).is_some_and(|o| std::ptr::eq(o, e)) => {
@@ -280,6 +285,12 @@ fn page(
         }
     }
     fold(&mut h, &mut run);
+    // #460: a waiting config card is never cut from the first page: past its window it stays right under the marker
+    // (so older pages leave it out).
+    let pins: Vec<u64> = crate::propose::waiting(ctx, events, id).map(|e| e.seq).collect();
+    if before != u64::MAX {
+        h.retain(|b| !pins.contains(&b.0));
+    }
     let k = h.len().saturating_sub(n);
     let top = match h.get(k) {
         Some((s, _)) if k > 0 => format!("<p class=\"qs tmo\" data-b={s}>↑ older messages</p>"),
@@ -291,7 +302,19 @@ fn page(
             format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>")
         }
     };
-    h[k..].iter().fold(top, |a, b| a + &b.1)
+    let cut = h[..k].iter().filter(|b| pins.contains(&b.0));
+    cut.chain(&h[k..]).fold(top, |a, b| a + &b.1)
+}
+
+/// #460: `config c1 c2 waiting` while proposals wait for the owner's tap.
+fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> String {
+    let ids: Vec<&str> = crate::propose::waiting(ctx, events, id)
+        .filter_map(|e| e.str("id"))
+        .collect();
+    if ids.is_empty() {
+        return String::new();
+    }
+    format!("<b class=\"a cw\">config {} waiting</b>", esc(&ids.join(" ")))
 }
 
 /// #408: `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
@@ -335,8 +358,9 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
         "tlv".into()
     };
     format!(
-        "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span></div></div>\
+        "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span>{}</div></div>\
          <div class=tc>{h}</div><p class={tl}>{live}</p>{guest}{}</div>",
+        waiting(ctx, events, id),
         composer(id, "", &queue(events, id, dis), dis)
     )
 }
@@ -421,8 +445,9 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
         .filter_map(|e| conductor::link(e).filter(|_| e.str("from") != Some("system")))
         .collect();
     let lk: String = lk.into_iter().map(|l| chip(l) + " ").collect();
+    let cw = waiting(ctx, events, id);
     let html = format!(
-        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{lk}{st}{line}</span></a>"
+        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{lk}{cw}{st}{line}</span></a>"
     );
     (at, html)
 }
