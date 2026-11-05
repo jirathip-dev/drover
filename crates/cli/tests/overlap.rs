@@ -867,3 +867,36 @@ fn check_emits_cap_near_once_per_integration_sha() {
     assert_eq!(near().len(), 2, "500 lines of headroom is not near");
     assert!(!page().contains("cap-near"), "no banner after the raise");
 }
+
+/// #270: cap-check reports the web/src TypeScript lines as a soft budget: printed, never failing the check.
+#[test]
+fn cap_check_reports_web_lines_without_capping_them() {
+    let d = tmpdir("cap-web");
+    std::fs::create_dir_all(d.join("crates/a/src")).unwrap();
+    std::fs::create_dir_all(d.join("web/src/tabs")).unwrap();
+    std::fs::write(d.join("crates/a/src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+    std::fs::write(d.join("web/src/main.ts"), "let a = 1;\n".repeat(50)).unwrap();
+    std::fs::write(d.join("web/src/tabs/q.ts"), "let b = 2;\n".repeat(7)).unwrap();
+    std::fs::write(d.join("web/src/board.css"), "a {}\n".repeat(9)).unwrap();
+    let cap = |n: u32| {
+        std::fs::write(d.join("cap.toml"), format!("[fleet.x]\nline_cap = {n}\n")).unwrap();
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+            .args(["cap-check", "--config", "cap.toml"])
+            .current_dir(&d)
+            .output()
+            .unwrap();
+        (
+            o.status.code().unwrap(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        )
+    };
+    for (n, code) in [(2, 0), (1, 1)] {
+        let (got, out) = cap(n);
+        assert_eq!(got, code, "{out}");
+        assert!(out.contains(&format!("src lines (formatted): 2 / cap {n}")), "{out}");
+        assert!(
+            out.contains("web lines (TypeScript, soft budget, not capped): 57"),
+            "{out}"
+        );
+    }
+}

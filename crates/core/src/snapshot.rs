@@ -19,6 +19,9 @@ use std::sync::Mutex;
 pub struct Snapshot {
     pub ts: u64,
     pub reads: BTreeMap<String, Option<String>>,
+    /// #447: the step's waits, and what they were worked out from (`wait_key`).
+    pub waits: Vec<Waiting>,
+    pub key: String,
 }
 
 /// herdr where a host installs it (docs/hosts.md), for a non-login ssh shell.
@@ -181,6 +184,27 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &
     lanes::join(cfg, r, &ctx.worktrees, events, st, &agents, &ws)
 }
 
+/// #447: what waits are worked out from: the log's length and last row, and each lane's state.
+pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
+    let last = events.last().map_or(0, |e| e.seq);
+    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
+    format!("{} {last} {}", events.len(), lanes.join(" "))
+}
+
+/// The step's waits while its snapshot saw this log and these lanes; else worked out now.
+pub fn saved_waits(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    snap: &Snapshot,
+    (events, all): (&[Event], &[Lane]),
+) -> Vec<Waiting> {
+    if snap.key == wait_key(events, all) {
+        return snap.waits.clone();
+    }
+    waits(ctx, cfg, r, events, all)
+}
+
 /// Each lane's wait reason, from the cached PR reads.
 pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[Lane]) -> Vec<Waiting> {
     let live: Vec<_> = (all.iter())
@@ -205,9 +229,22 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
     s.fetch();
+    let s = Snap { miss: Miss::Live, ..s };
+    // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
+    let (mut key, mut ws) = (String::new(), vec![]);
+    if let Ok(list) = herdr::list(&s, "agent") {
+        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+        (key, ws) = (wait_key(&events, &all), waits(ctx, cfg, &s, &events, &all));
+    }
     let reads = lock(&s.reads).clone();
-    let text = serde_json::to_string(&Snapshot { ts: ctx.now, reads }).unwrap_or_default();
+    let snap = Snapshot {
+        ts: ctx.now,
+        reads,
+        waits: ws,
+        key,
+    };
+    let text = serde_json::to_string(&snap).unwrap_or_default();
     let tmp = crate::devices::tmp_name(&file(ctx));
     let _ = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file(ctx)));
-    Snap { miss: Miss::Live, ..s }
+    s
 }
