@@ -104,15 +104,7 @@ fn all_good_exits_zero_and_never_writes() {
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains('✗') && !out.contains('!'), "{out}");
-    for check in [
-        "herdr",
-        "host",
-        "gh",
-        "config",
-        "worktrees",
-        "gh demo",
-        "local demo",
-    ] {
+    for check in ["herdr", "host", "gh", "config", "worktrees", "gh demo", "local demo"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
@@ -134,7 +126,10 @@ fn all_good_exits_zero_and_never_writes() {
     for check in ["vapid.key", "push", "watchdog check", "watchdog drive", "timer"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
-    assert!(line(&out, "account main").contains("herdsman/all/TOKEN_MAIN in the store"), "{out}");
+    assert!(
+        line(&out, "account main").contains("herdsman/all/TOKEN_MAIN in the store"),
+        "{out}"
+    );
     let writes = [
         "gh pr",
         "gh issue",

@@ -100,10 +100,10 @@ impl<'a> On<'a> {
     pub fn write_private(&self, p: &Path, text: &str) -> Result<()> {
         if self.machine.is_none() {
             use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
             if let Some(d) = p.parent() {
                 std::fs::create_dir_all(d)?;
             }
-            use std::os::unix::fs::OpenOptionsExt;
             let mut f = std::fs::File::options()
                 .write(true)
                 .create(true)

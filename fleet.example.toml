@@ -114,7 +114,7 @@ profile = "lane-design"
 # model = "claude-opus-5-5"
 
 [accounts]
-accounts_env = "~/.config/herdsman/accounts/tokens.env"   # VAR=token lines; never copied anywhere
+# Each account: the name of its token secret in the main host's OS store (`herdsman accounts import` from tokens.env).
 A = "CLAUDE_CODE_OAUTH_TOKEN_A"
 B = "CLAUDE_CODE_OAUTH_TOKEN_B"
 C = "CLAUDE_CODE_OAUTH_TOKEN_C"
@@ -126,10 +126,10 @@ C = "CLAUDE_CODE_OAUTH_TOKEN_C"
 # [accounts.usage]
 # A = "~/.config/herdsman/accounts/A"
 
-# The DeepSeek balance row; the key is read from an env file, never from here.
+# The DeepSeek balance row; the key is read from an env file or the store, never from here.
 # [providers.deepseek]
 # key_env = "DEEPSEEK_API_KEY"
-# env_file = "~/.config/deepseek.env"   # default: accounts_env
+# env_file = "~/.config/deepseek.env"   # default: the store's herdsman/all/DEEPSEEK_API_KEY
 # warn_below = 5
 
 [limits]

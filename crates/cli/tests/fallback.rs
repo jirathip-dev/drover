@@ -10,7 +10,10 @@ fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     CONFIG
-        .replace("harness  =  \"hermes\"    # toggled in tests", &format!("harness = \"claude\"\n{role_extra}"))
+        .replace(
+            "harness  =  \"hermes\"    # toggled in tests",
+            &format!("harness = \"claude\"\n{role_extra}"),
+        )
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
         + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n"
 }

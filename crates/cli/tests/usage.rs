@@ -117,14 +117,14 @@ fn secret_in_config_is_refused() {
     }
     // Long env-var names, paths and model ids are not secrets.
     let legit = format!(
-        "{CONFIG}\nmodels = [\"deepseek-ai/DeepSeek-V3.2-Exp-instruct-20261031-preview\"]\n[accounts]\naccounts_env = \"/Users/someone/.config/claude-accounts/a1b2c3d4e5f6/tokens-for-personal-account.env\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_ACCOUNT_A1_PERSONAL\"\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\n"
+        "{CONFIG}\nmodels = [\"deepseek-ai/DeepSeek-V3.2-Exp-instruct-20261031-preview\"]\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_ACCOUNT_A1_PERSONAL\"\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"/Users/someone/.config/claude-accounts/a1b2c3d4e5f6/tokens-for-personal-account.env\"\n"
     );
     let ok = ctx(&tmpdir("usage-nosecret"), &legit);
     let (code, out) = run(&ok, &Fake::default(), &["accounts"]);
     assert_eq!(code, 0, "{out}");
 }
 
-/// A config with accounts A/B (lane tokens in `tokens.env`, which also holds the DeepSeek key) and A's usage login.
+/// A config with accounts A/B, A's usage login, and the DeepSeek key in an `env_file`.
 fn config(d: &Path) -> String {
     let env = d.join("tokens.env");
     std::fs::write(
@@ -134,9 +134,9 @@ fn config(d: &Path) -> String {
     .unwrap();
     CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"\naccounts = [\"A\", \"B\"]")
         + &format!(
-            "\n[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[accounts.usage]\nA = \"{}\"\n\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\n",
-            env.display(),
-            d.join("logins/A").display()
+            "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[accounts.usage]\nA = \"{}\"\n\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"{}\"\n",
+            d.join("logins/A").display(),
+            env.display()
         )
 }
 

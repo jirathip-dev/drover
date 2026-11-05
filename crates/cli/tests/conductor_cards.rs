@@ -259,11 +259,7 @@ fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
 
     // On account A with a `claude A` login configured: the card opens that login, and B carries on.
     let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
-    let c = setup(
-        "cards-signin-account",
-        "fallback = [\"claude:A\", \"claude:B\"]",
-        extra,
-    );
+    let c = setup("cards-signin-account", "fallback = [\"claude:A\", \"claude:B\"]", extra);
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
     let later = herdsman::Ctx {
@@ -323,10 +319,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
     for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {
-        assert!(
-            !text.contains(value),
-            "the secret is in {what}: {text}"
-        );
+        assert!(!text.contains(value), "the secret is in {what}: {text}");
     }
     assert!(show.contains("secret API_KEY set ✓ (by owner)") && !page.contains("class=chs"));
     // `secret:API_KEY` reaches the lane's own shell from the file spawn delivered: the conductor's start sourced it.

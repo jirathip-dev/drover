@@ -269,13 +269,26 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         "token in argv: {calls:?}"
     );
     let write = format!("{SSH}'sh' '-c' 'umask 077 && mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"' 'sh' '{WT}.env'");
-    let sent: Vec<_> = r.inputs.borrow().iter().filter(|i| i.1.contains(token)).cloned().collect();
+    let sent: Vec<_> = r
+        .inputs
+        .borrow()
+        .iter()
+        .filter(|i| i.1.contains(token))
+        .cloned()
+        .collect();
     assert_eq!(sent, [(write, format!("export CLAUDE_CODE_OAUTH_TOKEN='{token}'\n"))]);
     let export = calls.iter().position(|c| c.contains("pane run w9:p1 export")).unwrap();
-    assert!(calls[export].ends_with(&format!("&& . '{WT}.env'")), "{}", calls[export]);
+    assert!(
+        calls[export].ends_with(&format!("&& . '{WT}.env'")),
+        "{}",
+        calls[export]
+    );
     let rm = calls.iter().position(|c| c == &format!("{SSH}'rm' '-f' '{WT}.env'"));
     let start = calls.iter().position(|c| c.contains("agent start")).unwrap();
-    assert!(rm.is_some_and(|rm| rm > start), "the secrets file is removed after the start: {calls:?}");
+    assert!(
+        rm.is_some_and(|rm| rm > start),
+        "the secrets file is removed after the start: {calls:?}"
+    );
     let start = calls.iter().find(|c| c.contains("agent start")).unwrap();
     assert!(start.contains(&format!("Read {WT}/.brief.md")), "{start}");
     drop(calls);

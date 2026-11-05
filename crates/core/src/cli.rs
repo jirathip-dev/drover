@@ -917,7 +917,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
         Cmd::Serve { addr, read_only, .. } => {
-            crate::secret::probe(r)?; // #441: no usable store, no board
+            if let Ok(cfg) = Config::load(&ctx.config) {
+                crate::secret::probe(r, &cfg)?; // #441: no usable store, no board
+            }
             (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
         }
         Cmd::Push { cmd: PushCmd::Test } => {

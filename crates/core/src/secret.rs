@@ -32,8 +32,13 @@ pub fn lookup(r: &dyn Runner, fleet: &str, name: &str) -> Result<Option<String>>
     }
 }
 
-/// #441: a main host with no usable OS store refuses at startup; there is no plain-file fallback.
-pub fn probe(r: &dyn Runner) -> Result<()> {
+/// #441: a main host with no usable OS store refuses at startup when `cfg` names a secret (an `[accounts]` token or a
+/// `secret:` env); there is no plain-file fallback.
+pub fn probe(r: &dyn Runner, cfg: &Config) -> Result<()> {
+    let env = cfg.fleet.values().flat_map(|f| f.env.values());
+    if cfg.accounts.names.is_empty() && !env.into_iter().any(|v| v.starts_with("secret:")) {
+        return Ok(());
+    }
     match r.secret(&service("all", "HERDSMAN_PROBE")) {
         Ok(_) => Ok(()),
         Err(e) => refused(
