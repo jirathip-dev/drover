@@ -105,16 +105,14 @@ impl Service {
             ..self.ctx.clone()
         };
         let (r, a) = (self.r, args.clone());
-        let argv = std::iter::once("herdsman".to_string()).chain(a).collect();
-        let run = move || herdsman_core::main_with(argv, &c, r, &mut std::io::sink(), &mut std::io::empty());
-        match timeout(Duration::from_secs(secs), tokio::task::spawn_blocking(run)).await {
-            Ok(code) => code.ok(),
-            Err(_) => {
-                let d = json!({"job": args.join(" "), "secs": secs});
-                let _ = append(&self.ctx.state, &self.event("service-timeout", d));
-                None
-            }
+        let full = std::iter::once("herdsman".to_string()).chain(a).collect();
+        let run = move || herdsman_core::main_with(full, &c, r, &mut std::io::sink(), &mut std::io::empty());
+        if let Ok(code) = timeout(Duration::from_secs(secs), tokio::task::spawn_blocking(run)).await {
+            return code.ok();
         }
+        let d = json!({"job": args.join(" "), "secs": secs});
+        let _ = append(&self.ctx.state, &self.event("service-timeout", d));
+        None
     }
 
     /// The heartbeat a tokio task stamps each second, and the thread that exits the process when it stops.
@@ -184,12 +182,15 @@ impl Service {
         if !matches!(timeout(Duration::from_secs(2), read).await, Ok(Ok(_))) {
             return;
         }
-        let _ = wr.write_all(format!("{}\n", json!({"pid": std::process::id()})).as_bytes()).await;
+        let _ = wr
+            .write_all(format!("{}\n", json!({"pid": std::process::id()})).as_bytes())
+            .await;
         let v: Value = serde_json::from_str(&line).unwrap_or_default();
         let k = &v["kick"];
         if let (Some(f), Some(n)) = (k["fleet"].as_str(), k["issue"].as_u64()) {
             let why = k["why"].as_str().unwrap_or("kick");
-            self.job(argv(&["kick", f, &n.to_string(), "--why", why, "--now"]), KICK_SECS).await;
+            self.job(argv(&["kick", f, &n.to_string(), "--why", why, "--now"]), KICK_SECS)
+                .await;
         }
     }
 
@@ -249,12 +250,17 @@ impl Service {
             let mut out = String::new();
             for e in &rows[rows.len().saturating_sub(REPLAY)..] {
                 after = e.seq;
-                out += &format!("id: {}\ndata: {}\n\n", e.seq, serde_json::to_string(e).unwrap_or_default());
+                out += &format!(
+                    "id: {}\ndata: {}\n\n",
+                    e.seq,
+                    serde_json::to_string(e).unwrap_or_default()
+                );
             }
             if !out.is_empty() && c.write_all(out.as_bytes()).await.is_err() {
                 return;
             }
-            if timeout(Duration::from_secs(15), rx.changed()).await.is_err() && c.write_all(b": idle\n\n").await.is_err()
+            if timeout(Duration::from_secs(15), rx.changed()).await.is_err()
+                && c.write_all(b": idle\n\n").await.is_err()
             {
                 return;
             }
@@ -265,7 +271,12 @@ impl Service {
     async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
         let v: Value = serde_json::from_slice(body).unwrap_or_default();
         let token = v["token"].as_str().unwrap_or_default().to_string();
-        let mut args: Vec<String> = v["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(String::from)).collect();
+        let mut args: Vec<String> = v["args"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a.as_str().map(String::from))
+            .collect();
         let (ctx, r, files) = (self.ctx.clone(), self.r, v["files"].clone());
         let run = move || -> Result<(u16, Value)> {
             let ctx = Ctx {
@@ -295,8 +306,14 @@ impl Service {
         };
         match timeout(Duration::from_secs(CMD_SECS), tokio::task::spawn_blocking(run)).await {
             Ok(Ok(Ok((status, v)))) => reply(status, &v),
-            Ok(Ok(Err(e))) => reply(500, &json!({"code": 1, "stdout": "", "stderr": format!("herdsman: {e:#}\n")})),
-            _ => reply(504, &json!({"code": 1, "stdout": "", "stderr": "herdsman service: timed out\n"})),
+            Ok(Ok(Err(e))) => reply(
+                500,
+                &json!({"code": 1, "stdout": "", "stderr": format!("herdsman: {e:#}\n")}),
+            ),
+            _ => reply(
+                504,
+                &json!({"code": 1, "stdout": "", "stderr": "herdsman service: timed out\n"}),
+            ),
         }
     }
 }
@@ -309,7 +326,8 @@ async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>
             let head = String::from_utf8_lossy(&buf[..i]).into_owned();
             let len = head.lines().find_map(|l| {
                 let (k, v) = l.split_once(':')?;
-                k.eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<usize>().ok())?
+                k.eq_ignore_ascii_case("content-length")
+                    .then(|| v.trim().parse::<usize>().ok())?
             });
             let len = len.unwrap_or(0);
             if len > BODY {

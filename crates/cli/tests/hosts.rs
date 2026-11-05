@@ -924,7 +924,12 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
 /// ssh name; the token is in no plan output or event, and it is scoped to its issue.
 #[test]
 fn a_remote_lane_gets_the_service_url_and_its_own_token() {
-    let c = setup("hosts-service", "\n[service]\nurl = \"http://mini.tail:7778\"\n", true, 0);
+    let c = setup(
+        "hosts-service",
+        "\n[service]\nurl = \"http://mini.tail:7778\"\n",
+        true,
+        0,
+    );
     let r = remote_fake();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out}");
@@ -937,7 +942,13 @@ fn a_remote_lane_gets_the_service_url_and_its_own_token() {
         lane.contains(" HERDSMAN_SERVICE='http://mini.tail:7778'") && !lane.contains("HERDSMAN_MAIN"),
         "{lane}"
     );
-    let token = lane.split(" HERDSMAN_TOKEN='").nth(1).unwrap().split('\'').next().unwrap();
+    let token = lane
+        .split(" HERDSMAN_TOKEN='")
+        .nth(1)
+        .unwrap()
+        .split('\'')
+        .next()
+        .unwrap();
     assert_eq!(token.len(), 64, "{lane}");
     assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(token) && !out.contains(token));
     let cfg = Config::load(&c.config).unwrap();

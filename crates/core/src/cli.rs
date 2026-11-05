@@ -17,7 +17,8 @@ pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::ne
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
 /// #345: `herdsman service` (api addr, board addr), set by the binary from the service crate.
-pub static SERVICE: std::sync::OnceLock<fn(&Ctx, &str, Option<&str>) -> Result<()>> = std::sync::OnceLock::new();
+pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
+type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 
 #[derive(Parser)]
 #[command(
@@ -729,10 +730,18 @@ pub(crate) fn lane_scope(ctx: &Ctx, args: &[String]) -> Option<(String, u64, boo
     match cli.cmd {
         Cmd::Ask { fleet, issue, .. } => Some((fleet, issue.parse().ok()?, false)),
         Cmd::Verdict { fleet, issue, .. } => Some((fleet, issue, true)),
-        Cmd::Done { fleet, issue, .. } | Cmd::Kick { fleet, issue, now: false, .. } => Some((fleet, issue, false)),
+        Cmd::Done { fleet, issue, .. }
+        | Cmd::Kick {
+            fleet,
+            issue,
+            now: false,
+            ..
+        } => Some((fleet, issue, false)),
         Cmd::Answer { fleet, id, .. } => {
             let events = read(&ctx.state).ok()?;
-            let ask = events.iter().find(|e| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(&id));
+            let ask = events
+                .iter()
+                .find(|e| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(&id));
             Some((fleet, ask?.issue?, false))
         }
         _ => None,
@@ -1004,7 +1013,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
-        Cmd::Service { api, board, install: true } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
+        Cmd::Service {
+            api,
+            board,
+            install: true,
+        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;

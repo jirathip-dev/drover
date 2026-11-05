@@ -97,6 +97,9 @@ That host's own log (#344: its own `state.db`) is never written by a lane; herds
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `herdsman events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
+#345: with `[service] url` set, a remote lane gets `HERDSMAN_SERVICE` and its own token instead, and reports over
+HTTP to `herdsman service` (docs/service.md); no ssh back to the main host.
+
 An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` gives up
 (`timeout`, `agent_name_not_found`, `agent_launch_pending`; on any host, the main one under load too), herdsman
 confirms the pane over 120 s (#359): the harness's process runs there and its startup title (Claude: `✳`) or a

@@ -3,6 +3,9 @@
 herdsman has no daemon. Every command reads the config, folds the event log into the current state, acts, and
 appends what it did.
 
+#345 adds one optional long-running process, `herdsman service` (docs/service.md): kicks driven at once, the
+GitHub poll and API v1. With it stopped every command still works this way.
+
 ## State database (#344)
 
 The state lives in one SQLite file, `state.db` beside the `FLEET_STATE` path, in WAL mode with a busy timeout, mode

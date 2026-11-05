@@ -111,7 +111,10 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
 
 /// Write the job and load it (unless `!load`): `= already` when written (and loaded) as is, else `✓` or `✗ … → fix`.
 pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&str], load: bool) -> String {
-    let (every, files) = (!["serve", "service"].contains(&args[0]), expect(ctx, cfg, label, args, &path(ctx, cfg, r)));
+    let (every, files) = (
+        !["serve", "service"].contains(&args[0]),
+        expect(ctx, cfg, label, args, &path(ctx, cfg, r)),
+    );
     let [probe, up, down] = ctl(ctx, label, every);
     let live = load && exec(r, &probe).is_ok();
     let same = |(p, t): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x == *t);

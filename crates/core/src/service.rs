@@ -111,7 +111,8 @@ pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Resul
         .filter(mine)
         .rfind(|e| e.kind == "spawn" && e.str("role") == Some(&g.role));
     let closed = |sp: &Event| {
-        let dead = |e: &Event| e.kind == "lane-dead" && e.str("key").is_some_and(|k| k.ends_with(&format!(":{}", g.agent)));
+        let dead =
+            |e: &Event| e.kind == "lane-dead" && e.str("key").is_some_and(|k| k.ends_with(&format!(":{}", g.agent)));
         let gone = |e: &&Event| e.ts >= sp.ts && (e.kind == "lane-closed" && ends(e, sp) || dead(e));
         events.iter().filter(mine).any(|e| gone(&e))
     };
