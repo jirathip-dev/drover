@@ -8,7 +8,8 @@
   // #440: Host and Events are System's Hosts & health and Activity, opened over the Queue tab.
   const sys = s => { tab('queue'); sysopen(s); };
   // #68: each inline control's failure path with a canned long reply (the old 401 pair text, a 140-char refusal,
-  // a send error); measured after each step (`mid`), then with the rest at the end.
+  // a send error); measured after each step (`mid`), then with the rest at the end. #501: a canned 401's `pair/status`
+  // confirms unpaired, as the board answers an unpaired browser.
   const F = window.fetch, early = [], wait = () => new Promise(r => setTimeout(r, 300));
   const LONG = {
     pair: 'pair this device: tap Pair this phone, then `herdsman serve approve <code>` on the Mac',
@@ -17,7 +18,12 @@
     dry: 'dry run; would push 3 commits and 2 dirty files to wip/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx-20261031-1943, then close pane w1:p5',
     send: 'error: herdr pane send w1:p5 failed: pane closed while sending (exit 1); the message was not delivered, nothing was typed into the agent',
   };
-  const canned = async (status, text, then) => { window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status })) : F(u, o); then(); await wait(); };
+  const canned = async (status, text, then) => {
+    window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(text, { status }))
+      : status === 401 && String(u).endsWith('pair/status') ? Promise.resolve(Response.json({ paired: false })) : F(u, o);
+    then();
+    await wait();
+  };
   const mid = what => early.push(...measure().outliers.map(o => `${what}: ${o}`));
   // #234 gate 2: the Host groups in their fixed order (HOSTS, FLEET DISK, SERVICES, FLEETS, ALERTS), main's card first;
   // one tab is active, its label on the accent fill.
