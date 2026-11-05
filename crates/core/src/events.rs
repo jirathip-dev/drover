@@ -490,20 +490,29 @@ pub const PASSIVE: &[&str] = &[
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
-    let later = || {
-        events
-            .iter()
-            .skip_while(|e| !std::ptr::eq(*e, a))
-            .filter(|e| e.fleet == a.fleet)
-    };
-    let on = |k: &str| a.issue.is_some() && later().any(|e| e.kind == k && e.issue == a.issue);
-    let gone = later().any(|e| matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent"));
-    let answered = later()
-        .any(|e| e.kind == "decision" && e.str("id") == a.str("id"))
-        .then_some("answered");
-    answered
-        .or(on("merged").then_some("closed: merged"))
-        .or((gone || on("clean")).then_some("closed: lane gone"))
+    let why: Vec<_> = (events.iter())
+        .skip_while(|e| !std::ptr::eq(*e, a))
+        .filter_map(|e| closes(a, e))
+        .collect();
+    ["answered", "closed: merged", "closed: lane gone"]
+        .into_iter()
+        .find(|w| why.contains(w))
+}
+
+/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time).
+fn closes(a: &Event, e: &Event) -> Option<&'static str> {
+    let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
+    if e.fleet != a.fleet {
+        None
+    } else if e.kind == "decision" && e.str("id") == a.str("id") {
+        Some("answered")
+    } else if on("merged") {
+        Some("closed: merged")
+    } else if matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent") || on("clean") {
+        Some("closed: lane gone")
+    } else {
+        None
+    }
 }
 
 /// The first finding of `fleet` #`issue`'s last verdict (the line after `PASS`/`FAIL`).
@@ -513,11 +522,17 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 }
 
 /// `needs-decision` events not yet closed, oldest first.
+/// #447: one pass, each closing event checked against the asks still open.
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
-    events
-        .iter()
-        .filter(|a| a.kind == "needs-decision" && closed(events, a).is_none())
-        .collect()
+    let mut open: Vec<&Event> = vec![];
+    for e in events {
+        match e.kind.as_str() {
+            "needs-decision" => open.push(e),
+            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => open.retain(|a| closes(a, e).is_none()),
+            _ => {}
+        }
+    }
+    open
 }
 
 /// Current per-issue state (the states in `roles/usage-tail.md`).
