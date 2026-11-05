@@ -132,16 +132,26 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
-        // #499: each path in a word (`--opt=`, `of=`, `a>b` split off) resolved against the cwd; a conductor's
-        // write lands only in its own folder. The segment's own text is still checked unless it names that folder.
-        let paths: Vec<String> = (t.iter().flat_map(|w| w.split(['=', '>'])))
-            .filter(|w| !w.is_empty() && !w.starts_with('-'))
-            .map(|w| resolve(w, &cwd))
+        // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
+        // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
+        // its own-folder words left out, is still checked.
+        let paths = |w: &str| -> Vec<String> {
+            (w.split(['=', '>']))
+                .flat_map(|w| match w.strip_prefix('-') {
+                    Some(o) => o.char_indices().map(|(i, _)| &o[i..]).collect(),
+                    None => vec![w],
+                })
+                .filter(|w| !w.is_empty() && !w.starts_with('-'))
+                .map(|w| resolve(w, &cwd))
+                .collect()
+        };
+        let hit = (t.iter().flat_map(|w| paths(w)))
+            .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own_file(&f, p)))
+            .map(String::as_str);
+        let rest: Vec<&str> = (t.iter().copied())
+            .filter(|w| !paths(w).iter().any(|f| own_file(f, p)))
             .collect();
-        let hit = paths
-            .iter()
-            .find_map(|f| protected_path(f, p).filter(|_| !own_file(f, p)));
-        let seg_hit = protected_path(seg, p).filter(|_| !paths.iter().any(|f| own_file(f, p)));
+        let seg_hit = protected_path(&rest.join(" "), p);
         if let Some(pp) = hit.or(seg_hit) {
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))

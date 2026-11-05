@@ -582,6 +582,8 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         format!("sips -s format png a.jpg -o {own}/a.png"),
         format!("cat a.svg > {own}/a.svg"),
         format!("cd {own} && cp /tmp/a.png ./a.png"),
+        format!("sips -s format png a.jpg -o{own}/a.png"),
+        format!("cp -vt{own}/ui a.png"),
     ] {
         assert_eq!(run(cond, &cmd), "", "{cmd}");
     }
@@ -601,6 +603,10 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         (cond, format!("cp a.png {own}/a.png && echo x>{st}/events.jsonl")),
         ("synergy:7:impl", format!("cp --target-directory={st}/ a.png")),
         ("synergy:7:impl", format!("dd if=a of={st}/events.jsonl")),
+        (cond, format!("cp -t{st}/ a.png {own}/a.png")),
+        (cond, format!("sips -s format png a.jpg -o{st}/events.jsonl {own}/x")),
+        (cond, format!("cd {st}/conductor && cp -t6/x a.png")),
+        (cond, format!("cd {st} && cp -t. a.png {own}/a.png")),
     ] {
         assert!(run(lane, &cmd).contains("is blocked"), "{lane}: {cmd}");
     }
