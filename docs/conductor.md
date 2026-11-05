@@ -143,8 +143,11 @@ validated like fleet.toml itself, and its diff shows in the thread as a card wit
 owner applies it: a tap on a paired device, or `herdsman config apply|discard <id>` outside a lane (the lane hook
 refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
 new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
-to restore. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
-thread's system line, e.g. `config c1 applied by owner, backup kept, doctor ✓` (the conductor gets it too).
+to restore. If fleet.toml changed since the proposal, it refuses `STALE`, and the card shows `stale: fleet.toml
+changed since` instead of its buttons (#460). Settled, the card folds to the thread's system line, e.g. `config c1
+applied by owner, backup kept, doctor ✓` (the conductor gets it too). #460: while a card waits, the thread's bar and
+its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
+always carries it: past the last 30 messages it stays right under the older-messages marker.
 
 ## Accounts (#387)
 
