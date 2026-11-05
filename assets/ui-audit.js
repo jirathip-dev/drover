@@ -171,11 +171,12 @@
     // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
     // shoots blank); at 1440 the list and the thread side by side.
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
-    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); },
+    // (#443: on a phone the messages scroll inside the thread, so those go to the top too.)
+    'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; }); },
     // #409: t2's reply with a short and a long-line code box (the long one scrolls sideways inside its box), then
     // [copy] tapped on the short one: `copied` (the clipboard stubbed: headless Chrome's needs a permission).
     'chat-code': () => {
-      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' });
+      tab('chat'); chatOpen('t2'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; });
       const [a, b] = [...$$('#chat .cvp[data-t="t2"] .cb pre')];
       if (!b || a.scrollWidth > a.clientWidth || b.scrollWidth <= b.clientWidth || getComputedStyle(b).overflowX !== 'auto') early.push(`code boxes: ${a?.scrollWidth}/${a?.clientWidth}, ${b?.scrollWidth}/${b?.clientWidth}, not short whole and long scrolling`);
     },
@@ -299,7 +300,7 @@
       f.requestSubmit();
       await wait();
       const at = () => $('#chat .cvp[data-t=t3] .snt').getBoundingClientRect().top - Math.max(0, ...[$('header'), $('#chat .cvp[data-t=t3] .th')].map(e => e.getBoundingClientRect().bottom));
-      const end = () => Math.abs(scrollY + innerHeight - document.documentElement.scrollHeight) <= 1;
+      const c = innerWidth < 1000 ? $('#chat .cvp[data-t=t3] .tc') : document.scrollingElement, end = () => Math.abs(c.scrollTop + c.clientHeight - c.scrollHeight) <= 1; // (#443: a phone's messages scroll)
       if (Math.abs(at() - 16) > 1 || !end()) early.push(`pinned: ${at()} px under the bar (or the screen's top), not 16; at the end ${end()}`);
     },
     // #407 gate 2: a finished turn's commands fold into one `2 commands` row (t4), then open: its rows under it.
@@ -310,7 +311,7 @@
       if (!d) return;
       [...$$('#chat .cvp[data-t=t4] .tc>*')].slice(0, [...d.parentNode.children].indexOf(d) - 1).forEach(e => { e.hidden = true; });
       FOL = false; // read from the top, as after a drag up (a scrolled view shoots blank)
-      scrollTo({ top: 0, behavior: 'instant' });
+      scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; });
       if (DBG.get('check')) { d.open = true; if (!seen(d.querySelector('.blk.run'))) early.push('the open fold shows no rows'); }
     },
     // #407 gate 2: the pill: `working 1m 23s` with the art and [stop]; after [stop] `stopping…`; with the stream down
@@ -433,24 +434,27 @@
       const msg = i => `<details data-n=${i} class="blk ${i % 3 ? 'ai' : 'me'}" open><summary><span class=k>${i % 3 ? 'conductor' : 'you'}</span><span class=pv>older message ${i}</span><span class=ct data-ts=${at}></span><i class=cv></i></summary><div class=md><p>older message ${i}: the rate limit's burst, the retry window and the docs page.</p></div></details>`;
       const page = '<p class=qs>thread started by owner · 09:12</p>' + Array.from({ length: 30 }, (_, i) => msg(i + 1)).join('');
       window.threadOlder = t => Promise.resolve(t === 't4' ? page : null); // #269: the board's read of API v1 `thread/t4?before=`
-      scrollTo({ top: 1e6, behavior: 'instant' }); await wait();
-      scrollTo({ top: 0, behavior: 'instant' }); // headless paints no frames, so it fires no scroll event: send the page's own
+      // (#443: on a phone only the messages scroll, never the page.)
+      const sc = innerWidth < 1000 ? tc : null, to = top => sc ? (sc.scrollTop = top) : scrollTo({ top, behavior: 'instant' });
+      to(1e6); await wait();
+      to(0); // headless paints no frames, so it fires no scroll event: send the scroller's own
       const y = a.getBoundingClientRect().top;
-      dispatchEvent(new Event('scroll'));
+      (sc || window).dispatchEvent(new Event('scroll'));
       await wait();
       const n = tc.querySelectorAll(':scope>[data-n]').length, d = a.getBoundingClientRect().top - y;
       if (n < 40 || Math.abs(d) > 1 || tc.querySelector('.tmo')) early.push(`older page: ${n} messages, the one on screen moved ${d} px`);
       // A view scrolled past about one screen shoots blank (chat-thread): the shot keeps the page's last 3 at the top.
-      if (!DBG.get('check')) { [...tc.querySelectorAll(':scope>[data-n]')].slice(0, 27).forEach(e => { e.hidden = true; }); scrollTo({ top: 0, behavior: 'instant' }); }
+      if (!DBG.get('check')) { [...tc.querySelectorAll(':scope>[data-n]')].slice(0, 27).forEach(e => { e.hidden = true; }); scrollTo({ top: 0, behavior: 'instant' }); tc.scrollTop = 0; }
     },
     'chat-mid': async () => {
       await VIEWS['chat-older']();
-      scrollTo({ top: document.documentElement.scrollHeight / 2, behavior: 'instant' });
+      const tc = $('#chat .cvp[data-t="t4"] .tc');
+      if (innerWidth < 1000) tc.scrollTop = tc.scrollHeight / 2; else scrollTo({ top: document.documentElement.scrollHeight / 2, behavior: 'instant' });
       await wait();
       const th = $('#chat .cvp[data-t="t4"] .th'), r = th.getBoundingClientRect(), hb = $('header').getBoundingClientRect().bottom;
       if (Math.abs(r.top - hb) > 1 || !th.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))) early.push(`thread header at ${r.top} px, not pinned under the page header (${hb})`);
       // The shot can't scroll (chat-older): the banner and the thread above its middle go, the header over the rest.
-      if (!DBG.get('check')) { $('.msg.a').hidden = true; $$('#chat .cvp[data-t="t4"] .tc>*').forEach((e, i) => { e.hidden = i < 30; }); scrollTo({ top: 0, behavior: 'instant' }); }
+      if (!DBG.get('check')) { $('.msg.a').hidden = true; $$('#chat .cvp[data-t="t4"] .tc>*').forEach((e, i) => { e.hidden = i < 30; }); scrollTo({ top: 0, behavior: 'instant' }); tc.scrollTop = 0; }
     },
     // #405 gate 2: [+ thread]'s empty thread (`new-<repo>`, as the tap opens it): no title form, no blocks, the
     // composer (its first message starts the thread); the demo's controls inert, so enabled as a paired phone's.

@@ -1776,7 +1776,9 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !sysOn() && !typing ? e.touches[0] : null;
+  // #443: not in a phone's open thread: it is fixed, and its messages scroll by themselves
+  const thr = innerWidth < 1000 && e.target.closest && e.target.closest('#chat .cvp');
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !sysOn() && !typing && !thr ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
@@ -1891,11 +1893,32 @@ function pgraph(d) {
 // #407: kept on the device (IndexedDB), as each thread's draft text is (localStorage `draft:<t>`).
 var THR = DBG.get('thread') || sget('thread') || '', ATS = {};
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+// #443: `--kb`, the keyboard's height: the part of the layout viewport under the visual one (iOS never shrinks the
+// first); a phone's open thread ends there (serve.css). iOS scrolls the page to show a focused box: put back. A change
+// in the messages' height (the keyboard, the box growing, a turn) moves their scroll by as much, so the message just
+// above the box stays just above it.
+const kbFit = () => {
+  if (vv) document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) + 'px');
+  if (THR && document.documentElement.dataset.tab === 'chat' && innerWidth < 1000 && scrollY) scrollTo(0, 0);
+};
+if (vv) { vv.addEventListener('resize', kbFit); vv.addEventListener('scroll', kbFit); }
+addEventListener('resize', kbFit);
+// (Their bottom edge is kept, `end`: a scroll only moves it at the height last seen, so the browser clamping a grown
+// list's scroll is never counted.)
+const tcKeep = new ResizeObserver(es => es.forEach(({ target: c }) => {
+  const h = c.clientHeight;
+  if (c.kh && h) c.scrollTop = c.end - h;
+  c.kh = h;
+  c.end = c.scrollTop + h;
+}));
+document.addEventListener('scroll', e => { const c = e.target; if (c.kh && c.clientHeight === c.kh) c.end = c.scrollTop + c.kh; }, true);
+// The open thread's scroller: on a phone its messages, from 1000 px the page.
+const thrSc = () => innerWidth < 1000 && THR ? $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc`) : null;
 function chatOpen(t) {
   THR = t;
   sput('thread', t);
   const q = CSS.escape(t);
-  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}html[data-tab=chat],html[data-tab=chat] body{height:100%;overflow:hidden}html[data-tab=chat] .msg.r{position:fixed;top:calc(2 * var(--hit) + var(--s1) + 2 * var(--s2))}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
   if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
   if (es && (es.t || '') !== watching()) connect(); // #407: the stream names the open thread (no push for it)
@@ -1916,11 +1939,13 @@ var FOL = true, PIN = null, held = -1e9;
 addEventListener('touchstart', () => { held = 1; }, { passive: true });
 addEventListener('touchend', () => { held = performance.now(); }, { passive: true });
 addEventListener('wheel', () => { held = performance.now(); }, { passive: true });
-addEventListener('scroll', () => {
+addEventListener('scroll', e => {
   if (!THR || document.documentElement.dataset.tab !== 'chat') return;
-  const end = scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+  const c = thrSc();
+  if (c ? e.target !== c : e.target.matches) return;
+  const end = c ? c.scrollTop + c.clientHeight >= c.scrollHeight - 2 : scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
   if (end) FOL = true; else if (held === 1 || performance.now() - held < 500) FOL = false;
-}, { passive: true });
+}, { passive: true, capture: true });
 function chatPin() {
   const v = PIN && $(`#chat .cvp[data-t="${CSS.escape(PIN.t)}"]`), tc = v && v.querySelector('.tc');
   if (!tc) return;
@@ -1934,7 +1959,7 @@ function chatPin() {
   let pad = base;
   for (let i = 0; i < 5; i++) { // (room that a short page's screen still swallows takes another pass)
     tc.style.paddingBottom = pad + 'px';
-    scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+    chatBottom();
     const err = e.getBoundingClientRect().top - Math.max(0, ...[$('header'), v.querySelector('.th')].map(x => x.getBoundingClientRect().bottom)) - s4;
     if (Math.abs(err) < 1) break;
     pad = Math.max(base, pad + err);
@@ -1943,9 +1968,16 @@ function chatPin() {
 }
 // (Also when the thread's size changes under it: an image loading, the layout above settling.)
 if ($('#chat')) new ResizeObserver(() => chatFollow()).observe($('#chat'));
+function chatBottom() {
+  const c = thrSc();
+  if (!c) return void scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+  tcKeep.observe(c);
+  c.scrollTop = c.scrollHeight;
+  c.end = c.scrollTop + c.clientHeight;
+}
 function chatFollow() {
   chatPin();
-  if (FOL && THR && document.documentElement.dataset.tab === 'chat') scrollTo(0, document.documentElement.scrollHeight);
+  if (FOL && THR && document.documentElement.dataset.tab === 'chat') chatBottom();
 }
 // Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
 // (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
@@ -2015,9 +2047,14 @@ async function chatOlder() {
   t.innerHTML = h;
   clocks(t);
   m.replaceWith(...t.childNodes);
-  if (a) scrollBy(0, a.getBoundingClientRect().top - y);
+  // (#443: on a phone the messages scroll by themselves, the page never)
+  const c = innerWidth < 1000 ? a && a.parentElement : null;
+  if (a) c ? c.scrollTop += a.getBoundingClientRect().top - y : scrollBy(0, a.getBoundingClientRect().top - y);
 }
-addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
+addEventListener('scroll', e => {
+  const c = e.target;
+  if (document.documentElement.dataset.tab === 'chat' && (c.matches ? c.matches('#chat .tc') && c.scrollTop < c.clientHeight : scrollY < innerHeight)) chatOlder();
+}, { passive: true, capture: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 // #407: each thread's draft is kept as you type (not a queued message being edited).
