@@ -485,6 +485,12 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
         cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     }
+    // #345: the lane's service token is never shown (the plan is printed and `--json`).
+    if let Some(t) = p.env.get("HERDSMAN_TOKEN") {
+        cmds.iter_mut()
+            .flatten()
+            .for_each(|w| *w = w.replace(t.as_str(), "•••"));
+    }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base, "account": p.account.as_ref().map(|a| &a.0),
@@ -626,7 +632,11 @@ pub fn spawn(
         p.env.insert("HERDSMAN_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
         if pl.machine.is_some() {
             // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
-            p.env.insert("HERDSMAN_OUTBOX".into(), "1".into());
+            // #345: they go to the service over HTTP when `[service] url` is set (its token is added below the dry run).
+            match &cfg.service.url {
+                Some(url) => p.env.insert("HERDSMAN_SERVICE".into(), url.clone()),
+                None => p.env.insert("HERDSMAN_OUTBOX".into(), "1".into()),
+            };
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -644,6 +654,17 @@ pub fn spawn(
     // #478: an unreachable host takes no lane; its own lanes stay its (the log's LANE_LIVE still guards them).
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
         return refused("HOST_OFFLINE", why);
+    }
+    if p.env.contains_key("HERDSMAN_SERVICE") {
+        let g = crate::service::Grant {
+            fleet: fleet.into(),
+            issue,
+            role: role.into(),
+            agent: p.agent.clone(),
+            lane: p.lane.clone(),
+            at: ctx.now,
+        };
+        p.env.insert("HERDSMAN_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;
