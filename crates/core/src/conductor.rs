@@ -133,27 +133,142 @@ pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) ->
     Ok(out)
 }
 
-/// #413: `thread handoff`: a new thread in `to` (a repo or `all`) or thread `to`, linked; wakes its conductor as `from`.
+/// #413: `thread handoff`: to thread `to` at once, linked; wakes its conductor as `from`. #492: to a repo (or `all`), a
+/// choice card in `from` (an owner ask with `handoff`): the repo's threads or a new one; `pick` delivers on the tap.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
     let events = read(&ctx.state)?;
     let t = find(&events, from)?;
-    // The target's conductor is checked first: no thread or link is left behind without delivery.
-    let to = if is_id(to) {
-        role(cfg, &find(&events, to)?.fleet)?;
-        to.to_string()
-    } else {
-        role(cfg, to)?;
-        new(ctx, cfg, to, title)?
-    };
     if to == from {
         return refused("BAD_VALUE", "a thread hands off to another thread");
     }
-    let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text});
-    let e = Event::new(ctx.now, &t.fleet, None, "thread-handoff", d);
-    emit(&ctx.state, cfg, e)?;
-    say(ctx, cfg, r, (&to, text, &[]), (from, false))?;
+    let fwd = forwards(&events, from);
+    // The target's conductor is checked first: no thread or link is left behind without delivery.
+    if is_id(to) {
+        role(cfg, &find(&events, to)?.fleet)?;
+        return send(ctx, cfg, r, (from, to, to), (title, text), fwd);
+    }
+    role(cfg, to)?;
+    title_ok(title)?;
+    let open = |e: &&Event| e.kind == "thread-new" && e.fleet == to;
+    let mut rows: Vec<(u64, &str)> = (events.iter().filter(open))
+        .filter_map(|e| e.str("thread"))
+        .filter(|id| *id != from && !archived(&events, id))
+        .map(|id| (of(&events, id).map(|e| e.ts).max().unwrap_or(0), id))
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    let row = |(ts, id): &(u64, &str)| {
+        let last = items(&events, id).pop().unwrap_or_default();
+        let last = last["text"].as_str().or(last["question"].as_str()).unwrap_or_default();
+        let topic: String = last
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(60)
+            .collect();
+        let age = events::age(ctx.now.saturating_sub(*ts));
+        let topic = if topic.is_empty() {
+            String::new()
+        } else {
+            format!(" — {topic}")
+        };
+        format!("{} · {id}{topic} ({age} ago)", self::title(&events, id))
+    };
+    let mut opts: Vec<String> = rows.iter().map(row).collect();
+    let mut targets: Vec<&str> = rows.iter().map(|r| r.1).collect();
+    // The newest 4, then the new thread; the rest after it, behind the board's `more` row.
+    opts.insert(opts.len().min(4), format!("new thread: {title}"));
+    targets.insert(targets.len().min(4), "new");
+    let q = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
+    let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
+    let d = json!({"id": q, "question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
+        "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
+    )?;
+    Ok(format!(
+        "{q}: the owner picks the thread; nothing is delivered until then"
+    ))
+}
+
+/// #492: the owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there
+/// (`new`: a new thread in the card's repo); the target.
+pub fn pick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<String> {
+    let (h, from) = (&ask.data["handoff"], ask.str("thread").unwrap_or_default());
+    let opts = ask.data["options"].as_array().cloned().unwrap_or_default();
+    let n = choice
+        .parse::<usize>()
+        .ok()
+        .or_else(|| opts.iter().position(|o| o == choice).map(|i| i + 1));
+    let to = match n.and_then(|n| h["targets"].get(n.checked_sub(1)?)?.as_str()) {
+        Some(to) => to,
+        None if is_id(choice) && choice != from => find(&read(&ctx.state)?, choice).map(|_| choice)?,
+        None => return refused("BAD_VALUE", "tap a row, or name a thread id"),
+    };
+    let s = |k: &str| h[k].as_str().unwrap_or_default();
+    role(cfg, s("repo"))?;
+    send(ctx, cfg, r, (from, to, s("repo")), (s("title"), s("text")), None)
+}
+
+/// A handoff from `from` into thread `to` (`new`: a new thread in `repo`): the linked `thread-handoff` row and the text
+/// typed into its conductor, both naming the target as `<title> · <id>`.
+fn send(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (from, to, repo): (&str, &str, &str),
+    (title, text): (&str, &str),
+    fwd: Option<u64>,
+) -> Result<String> {
+    let to = if to == "new" {
+        new(ctx, cfg, repo, title)?
+    } else {
+        to.into()
+    };
+    let target = format!("{} · {to}", self::title(&read(&ctx.state)?, &to));
+    let d = json!({"thread": from, "from": from, "to": to, "title": title, "text": text, "target": target,
+        "forwards": fwd});
+    let t = find(&read(&ctx.state)?, from)?.fleet.clone();
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t, None, "thread-handoff", d))?;
+    say(
+        ctx,
+        cfg,
+        r,
+        (&to, &format!("handoff to {target}: {text}"), &[]),
+        (from, false),
+    )?;
     Ok(to)
+}
+
+/// #492: a handoff from `from` forwards the newest handoff it received that the owner has not written after and that
+/// is not forwarded yet (its seq): the conductor sends on what was not meant for it.
+fn forwards(events: &[Event], from: &str) -> Option<u64> {
+    let owner = |e: &Event| {
+        e.kind == "thread-msg"
+            && e.str("from")
+                .is_some_and(|f| !matches!(f, "conductor" | "system") && !is_id(f))
+    };
+    let got = |e: &&Event| e.kind == "thread-msg" && e.str("from").is_some_and(is_id) && !forwarded(events, e);
+    of(events, from)
+        .rev()
+        .take_while(|e| !owner(e))
+        .find(got)
+        .map(|e| e.seq)
+}
+
+/// #492: a received handoff row its thread sent on (a later handoff from that thread `forwards` it).
+pub fn forwarded(events: &[Event], row: &Event) -> bool {
+    let id = row.str("thread").unwrap_or_default();
+    of(events, id).any(|e| e.data.get("forwards").and_then(Value::as_u64) == Some(row.seq))
+}
+
+/// #492: a handoff row's text: its title and the target as `<title> · <id>`.
+pub fn handoff_text(e: &Event) -> String {
+    let title = e.str("title").unwrap_or_default();
+    e.str("target").map_or(title.into(), |t| format!("{title} → {t}"))
 }
 
 /// #413: a one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
@@ -552,6 +667,9 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             if let Some((w, t)) = link(e) {
                 m["link"] = json!(format!("{w} {t}"));
             }
+            if forwarded(events, e) {
+                m["text"] = json!(format!("{} (forwarded)", e.str("text").unwrap_or_default()));
+            }
             Some(m)
         }
         // #461: a conductor's `timer install`, a system line.
@@ -561,7 +679,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             Some(json!({"ts": e.ts, "from": "system", "text": text}))
         }
         "thread-handoff" => Some(
-            json!({"ts": e.ts, "from": "system", "text": e.str("title"), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
+            json!({"ts": e.ts, "from": "system", "text": handoff_text(e), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
         ),
         "needs-decision" => {
             let all = e.data["options"].as_array().cloned().unwrap_or_default();

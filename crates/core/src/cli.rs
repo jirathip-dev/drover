@@ -385,7 +385,7 @@ struct Scope {
 enum ThreadCmd {
     /// Start a thread for a fleet's repo (or `all`); prints its id. A conductor uses `thread handoff`
     New { repo: String, title: String },
-    /// A conductor hands off: a new thread in <to> (a repo or `all`) or thread <to>, linked both ways; <text> wakes its conductor as from <from>
+    /// A conductor hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its conductor as from <from>
     Handoff {
         from: String,
         to: String,

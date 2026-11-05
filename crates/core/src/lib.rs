@@ -352,6 +352,13 @@ pub fn answer(
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
     }
+    // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
+    if ask.data.get("handoff").is_some() {
+        let to = conductor::pick(ctx, cfg, r, ask, choice)?;
+        let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
+        return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
+    }
     // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
     let design = crate::design::is_ask(ask);
     if design {
