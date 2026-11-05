@@ -313,6 +313,8 @@ pub struct Fleet {
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
+    /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    pub ask_thread: Option<String>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits

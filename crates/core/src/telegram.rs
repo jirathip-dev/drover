@@ -213,8 +213,8 @@ fn outbound(ctx: &Ctx, cfg: &Config, bot: &Bot, events: &[Event], e: &Event) -> 
             Event::new(ctx.now, &e.fleet, None, "telegram-topic", d),
         );
     }
-    let Some(topic) = topic_of(events, id) else {
-        return Ok(());
+    let Some(topic) = topic_of(events, id).filter(|_| e.data.get("lane_ask").is_none()) else {
+        return Ok(()); // #541: a lane ask typed into the conductor stays off the chat
     };
     match (e.kind.as_str(), e.str("from")) {
         ("thread-msg", Some(from @ ("conductor" | "system"))) => {
@@ -241,7 +241,7 @@ fn outbound(ctx: &Ctx, cfg: &Config, bot: &Bot, events: &[Event], e: &Event) -> 
                 bot.call(method, &form)?;
             }
         }
-        ("needs-decision", _) => {
+        ("needs-decision" | "ask-owner", _) => {
             let rec = e.data.get("recommend").and_then(Value::as_u64);
             let opts = e
                 .data
