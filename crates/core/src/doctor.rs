@@ -54,6 +54,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line); // #333
+    let (n401, n503) = crate::devices::denials(ctx); // #501: a 503 is the board's devices unread
+    let log = ctx.state.with_file_name("serve.log");
+    let line = format!("board auth — 24 h: {n401} × 401, {n503} × 503 → see {}", log.display());
+    row(rows, n503 == 0, '!', &line);
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
     row(rows, ctx.worktrees.is_dir(), '✗', &line);
     for (name, fleet) in &cfg.fleet {

@@ -37,7 +37,15 @@ function loading(on) { $('#ld').hidden = !on; }
 // #60: a part of the page read on demand (null when it cannot be read).
 const part = src => fetch(R + src, { cache: 'no-store' }).then(r => r.ok ? r.text() : null).catch(() => null);
 // A form POST of `data` (an object or FormData) to `path`; #403: `send` without the loading strip (every chat post).
-const send = (path, data) => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) });
+const send = (path, data) => authed(() => fetch(R + path, { method: 'POST', body: new URLSearchParams(data) }));
+// #501: a 503 (the board could not read its paired devices) retries once after 2 s, saying "reconnecting"; an answer
+// to a paired device (`X-Paired`) undoes an unpaired page (`repaired`).
+async function authed(f, retry = true) {
+  const r = await f();
+  if (r.status === 503 && retry) { toast('reconnecting'); await new Promise(ok => setTimeout(ok, 2000)); return authed(f, false); }
+  if (r.headers.get('x-paired')) repaired();
+  return r;
+}
 const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
@@ -695,17 +703,33 @@ function note(b, msg, ok) {
   s.classList.toggle('r', !ok);
 }
 // Enable alerts: Home Screen app only (iOS allows push there alone); subscribe with the VAPID key, POST it.
-// Unpaired (any 401): `[enable alerts]` dims, "pair this phone first" under it; kept across live swaps.
+// Unpaired (a 401 `pair/status` confirms): `[enable alerts]` dims, "pair this phone first" under it; kept across live swaps
+// until a paired answer (#501).
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-let nopair = false;
+let nopair = false, other = false; // `other`: the open sheet is an Others agent's
 function alerts() {
   const b = $('#push');
   if (!b) return;
   b.hidden = !standalone || !('PushManager' in window);
-  if (nopair) { b.disabled = true; note(b, 'pair this phone first', false); }
+  b.disabled = nopair;
+  if (nopair) note(b, 'pair this phone first', false);
+  else if (b.nextElementSibling?.textContent === 'pair this phone first') b.nextElementSibling.remove();
 }
-// Also shows the sheet's Pair button (open() hides it again).
-function unpaired() { nopair = true; alerts(); $('.pairf').hidden = false; $$('[data-op=close]').forEach(b => b.hidden = true); }
+// #501: a 401 is a question, not the answer: only `pair/status` saying no shows the Pair UI (true then); its 503 says
+// "reconnecting". Also shows the sheet's Pair button (open() hides it again).
+async function unpaired() {
+  const r = await fetch(R + 'pair/status', { cache: 'no-store' }).catch(() => null);
+  if (r && r.status === 503) toast('reconnecting');
+  const j = r && r.ok ? await r.json().catch(() => null) : null;
+  if (!j || j.paired) return false;
+  nopair = true; alerts(); $('.pairf').hidden = false; $$('[data-op=close]').forEach(b => b.hidden = true);
+  return true;
+}
+// #501: a paired answer: the Pair buttons and notes go, the hidden buttons come back.
+function repaired() {
+  if (!nopair) return;
+  nopair = false; alerts(); $$('.pairf, .pairb').forEach(b => b.hidden = true); $('[data-op=close]').hidden = !other;
+}
 alerts();
 groups();
 badge();
@@ -1258,7 +1282,7 @@ function matters(lines, said, notices, harness) {
 const overlap = (a, b) => { for (let k = Math.min(a.length, b.length); k > 0; k--) if (a.slice(-k).every((x, i) => plain(x) === plain(b[i]))) return k; return 0; };
 // chat:end
 // #351: a chat opens with its last 10 turns (~64 KB at most, the server's cap); scrolling to the top loads 10 more.
-const lane = (q, a = agent) => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200&turns=' + turns + q);
+const lane = (q, a = agent) => authed(() => fetch(DEMO ? 'lane/' + encodeURIComponent(a) + '.json' : R + 'lane?agent=' + encodeURIComponent(a) + '&lines=200&turns=' + turns + q));
 // The settled lines seen (merged across reads by their overlap) plus the live block, drawn as blocks: a block whose key
 // and HTML are unchanged keeps its node (no scroll jump, #65), new lines land in the last block; open state per lane.
 let hist = [], tail = [], nlive = 0, harness = '', spin = false, said = null, notes = [], turns = 10;
@@ -1309,8 +1333,8 @@ async function poll() {
     const r = await lane('');
     // Unpaired (401): say so, with the Pair button; never a silent one-liner.
     if (r.status === 401) {
-      unpaired();
-      return now.replaceChildren(el('p', 'unp', 'Pair this phone to see the conversation'));
+      if (await unpaired()) now.replaceChildren(el('p', 'unp', 'Pair this phone to see the conversation'));
+      return;
     }
     if (!r.ok) return now.replaceChildren(el('p', 'm', (await r.text()).trim()));
     const j = await r.json(), done = j.lines.slice(0, j.lines.length - j.live), k = overlap(hist, done);
@@ -1392,7 +1416,7 @@ function open(e) {
   $('.fvr').hidden = !!spane;
   // #83: a lane with no pane has nothing to stop or kill; #95: an Others agent is no lane, only its pane closes.
   nopane = 'gone' in e.dataset;
-  const other = e.dataset.role === 'other';
+  other = e.dataset.role === 'other';
   $$('[data-op=stop], [data-op=kill]').forEach(b => b.hidden = nopane || other);
   $('[data-op=clean]').hidden = other;
   $('[data-op=close]').hidden = !other || nopair;
@@ -1770,7 +1794,7 @@ async function claim() {
   pairing = false;
   const r = await fetch(R + 'pair/claim', { method: 'POST' }).catch(() => null);
   if (!r || !r.ok) { pairing = true; return; }
-  nopair = false;
+  repaired();
   clearTimeout(ttl);
   pp.className = 'pairp g';
   pp.replaceChildren(el('p', '', (await r.text()).trim()));

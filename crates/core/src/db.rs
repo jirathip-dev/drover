@@ -191,13 +191,17 @@ pub fn put(state: &Path, key: &str, ts: u64, v: &impl Serialize) -> Result<()> {
 
 /// The `devices` or `push` rows, in order.
 pub fn list<T: DeserializeOwned>(state: &Path, table: &str) -> Vec<T> {
+    try_list(state, table).unwrap_or_default()
+}
+
+/// #501: `list`, its database error kept (a busy or unreadable `state.db` is no empty table).
+pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>> {
     let all = with(state, false, vec![], |c| {
         let mut q = c.prepare(&format!("SELECT json FROM {table} ORDER BY n"))?;
         let rows = q.query_map([], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    });
-    let all = all.unwrap_or_default().into_iter();
-    all.filter_map(|j| serde_json::from_str(&j).ok()).collect()
+    })?;
+    Ok(all.into_iter().filter_map(|j| serde_json::from_str(&j).ok()).collect())
 }
 
 /// Replace every row of `table` with `all`, in one transaction.

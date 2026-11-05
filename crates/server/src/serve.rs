@@ -15,6 +15,7 @@ use crate::snapshot::Snapshot;
 use crate::{devices, gh, herdr, lanes, queue, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::io::ErrorKind::{TimedOut, WouldBlock};
@@ -128,6 +129,12 @@ const VER: u32 = {
     h
 };
 
+/// #501: the request's paired device, else why not (`devices::check`).
+type Auth = std::result::Result<devices::Device, String>;
+/// #501: the devices could not be read: the board is busy (503), not the device unpaired (401).
+fn busy(a: &Auth) -> bool {
+    a.as_ref().is_err_and(|w| w.starts_with("db error: "))
+}
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>)>>>;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 /// A form op for `serve_on`'s job thread: (ctx, form, fleet).
@@ -714,21 +721,18 @@ impl<'a> Server<'a> {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
-        if req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8 {
+        let live = req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8;
+        let ctx = Ctx {
+            now: crate::now(),
+            ..self.ctx.clone()
+        };
+        // #501: a database error is no unpaired stream: the reply below says 503 and the page reconnects.
+        let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
+        if let Some(dev) = dev.filter(|d| !busy(d)) {
             s.set_write_timeout(Some(Duration::from_secs(10)))?;
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
-            clients.push((
-                tx,
-                self.device(
-                    &Ctx {
-                        now: crate::now(),
-                        ..self.ctx.clone()
-                    },
-                    &req,
-                )
-                .map(|d| d.hash),
-            ));
+            clients.push((tx, dev.ok().map(|d| d.hash)));
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
             );
@@ -962,16 +966,35 @@ impl<'a> Server<'a> {
             .is_some_and(|o| PAIRED_OPS.contains(&o.as_str()));
         let loopback =
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
+        // #501: the request's paired device, read once: a database error answers 503 ("board busy"), never 401.
+        let a = OnceCell::new();
+        let dev = || self.auth(ctx, head, &a).as_ref().ok();
+        let deny = |msg: &str| {
+            let busy = a.get().is_some_and(busy);
+            let status = if busy {
+                "503 Service Unavailable"
+            } else {
+                "401 Unauthorized"
+            };
+            (
+                status,
+                "text/plain",
+                text(if busy { "board busy, retrying\n" } else { msg }),
+            )
+        };
         let (status, ctype, body) = match (method, path) {
-            (_, p) if p.starts_with("/api/") => self.api(ctx, head, method, p, query, body),
+            (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
+            // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
+            ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
             ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
-            ("GET", "/") => self.page(ctx, &form(query), self.device(ctx, head).is_some())
+            ("GET", "/") => self.page(ctx, &form(query), dev().is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
             ("GET", "/frag") => Self::part(ctx, &form(query))
                 .map_or(("404 Not Found", "text/plain", text("no such part\n")), |h| ("200 OK", HTML, h.into_bytes())),
-            ("GET", "/lane") if self.device(ctx, head).is_none() => ("401 Unauthorized", "text/plain", text("pair this device to read transcripts\n")),
+            ("GET", "/lane") if dev().is_none() => deny("pair this device to read transcripts\n"),
+            ("GET", "/pair/status") => ("200 OK", JSON, json!({"paired": dev().is_some()}).to_string().into_bytes()),
             ("GET", "/lane") => self.transcript(ctx, &form(query)).map_or(
                 ("404 Not Found", "text/plain", text("no such agent pane\n")),
                 |j| ("200 OK", JSON, j.into_bytes()),
@@ -1028,9 +1051,7 @@ impl<'a> Server<'a> {
                 let a = ASSETS.iter().find(|a| p == format!("/a/{VER:08x}/{}", a.0)).inspect(|_| cache = "public, max-age=31536000, immutable");
                 a.or_else(|| FILES.iter().find(|f| p.strip_prefix('/') == Some(f.0)).inspect(|_| cache = "public, max-age=86400")).map_or(("404 Not Found", "text/plain", text("not found\n")), |f| ("200 OK", f.1, f.2.to_vec()))
             }
-            ("POST", "/") if paired_op && self.device(ctx, head).is_none() => {
-                ("401 Unauthorized", "text/plain", text("only a paired device may unpair, answer or drive\n"))
-            }
+            ("POST", "/") if paired_op && dev().is_none() => deny("only a paired device may unpair, answer or drive\n"),
             ("POST", "/") => {
                 let msg = self.op(ctx, form(body.trim())).unwrap_or_else(|e| shown(&e));
                 return see(&format!("/?msg={}", enc(&msg)));
@@ -1055,11 +1076,11 @@ impl<'a> Server<'a> {
                 Ok(()) => ("200 OK", "text/plain", text("pairing request cancelled\n")),
                 Err(e) => fail(e),
             },
-            ("POST", "/pair/claim") => match self.device(ctx, head) {
+            ("POST", "/pair/claim") => match dev() {
                 Some(d) => (extra = format!("Set-Cookie: {}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Strict\r\n", header(head, "cookie").unwrap_or_default().split(';').map(str::trim).find(|c| c.starts_with("hd=")).unwrap_or_default()), ("200 OK", "text/plain", format!("paired as {}\n", d.label).into_bytes())).1,
                 None => ("403 Forbidden", "text/plain", text("not approved yet: `herdsman serve approve <code>` on the Mac\n")),
             },
-            ("POST", "/push/subscribe" | "/push/unsubscribe") if self.device(ctx, head).is_none() => ("401 Unauthorized", "text/plain", text("pair this device first\n")),
+            ("POST", "/push/subscribe" | "/push/unsubscribe") if dev().is_none() => deny("pair this device first\n"),
             ("POST", "/push/subscribe") => {
                 let sub = Config::load(&ctx.config).ok().and_then(|c| c.webpush_sub().map(String::from));
                 match crate::webpush::subscribe(&ctx.state, &form(body.trim()), &kind(head), now, sub.as_deref()) {
@@ -1073,12 +1094,27 @@ impl<'a> Server<'a> {
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread" | "/report")) => {
-                let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
+                let (status, msg) = self.send(ctx, head, &form(body.trim()), p, &a);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
             ("POST", _) => ("404 Not Found", "text/plain", text("not found\n")),
             _ => ("405 Method Not Allowed", "text/plain", text("GET or POST only\n")),
         };
+        // #501: the page's sign that this browser is paired after all (serve.js `repaired`).
+        if a.get().is_some_and(Result::is_ok) {
+            extra += "X-Paired: 1\r\n";
+        }
+        if ["401", "503"].iter().any(|c| status.starts_with(c)) {
+            let why = match a.get() {
+                Some(Err(w)) if status.starts_with("401") || w.starts_with("db error: ") => w.clone(),
+                _ => String::from_utf8_lossy(&body)
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+            };
+            devices::denied(ctx, &status[..3], method, path, &why);
+        }
         let allow = if self.addr.is_some() { "GET, POST" } else { "GET" };
         let mut res = format!(
             "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAllow: {allow}\r\n{extra}Cache-Control: {cache}\r\nConnection: close\r\n\r\n",
@@ -1112,16 +1148,25 @@ impl<'a> Server<'a> {
         }
     }
 
-    /// The paired device whose token the request's `Cookie` carries.
-    #[allow(clippy::unused_self)] // a method so every route reads `self.device(..)` alike
-    fn device(&self, ctx: &Ctx, head: &str) -> Option<devices::Device> {
-        devices::find(ctx, header(head, "cookie").unwrap_or_default())
+    /// The paired device whose token the request's `Cookie` carries, else why not (`devices::check`), read once into `a`.
+    #[allow(clippy::unused_self)] // a method so every route reads `self.auth(..)` alike
+    fn auth<'c>(&self, ctx: &Ctx, head: &str, a: &'c OnceCell<Auth>) -> &'c Auth {
+        a.get_or_init(|| devices::check(ctx, header(head, "cookie").unwrap_or_default()))
     }
 
     /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
-    fn send(&self, ctx: &Ctx, head: &str, f: &BTreeMap<String, String>, path: &str) -> (&'static str, String) {
-        let Some(dev) = self.device(ctx, head) else {
-            return ("401 Unauthorized", "pair this device: tap Pair this phone".into());
+    fn send(
+        &self,
+        ctx: &Ctx,
+        head: &str,
+        f: &BTreeMap<String, String>,
+        path: &str,
+        a: &OnceCell<Auth>,
+    ) -> (&'static str, String) {
+        let dev = match self.auth(ctx, head, a) {
+            Ok(d) => d,
+            e if busy(e) => return ("503 Service Unavailable", "board busy, retrying".into()),
+            Err(_) => return ("401 Unauthorized", "pair this device: tap Pair this phone".into()),
         };
         let mut sent = lock(&self.sent);
         let times = sent.entry(dev.hash.clone()).or_default();
@@ -1140,15 +1185,15 @@ impl<'a> Server<'a> {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
             Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
         } else if pick {
-            self.pick(ctx, &dev, &body(f))
+            self.pick(ctx, dev, &body(f))
         } else if act {
-            self.act(ctx, &dev, &body(f))
+            self.act(ctx, dev, &body(f))
         } else if path == "/report" {
             Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(
-                || self.prompt(ctx, &dev, &s),
+                || self.prompt(ctx, dev, &s),
                 |p| crate::setup::send(ctx, self.r, p, &s.text),
             )
         };
