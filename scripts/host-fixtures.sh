@@ -69,7 +69,10 @@ EOF
   # #461: install logs `timer-install` at the wall clock; dropped, so export's now stays the fixture's last event + 60 s.
   if [ "$fx" = healthy ]; then
     "$bin" timer install --no-load >/dev/null
-    grep -v '"type":"timer-install"' "$FLEET_STATE" >"$d/ev" && mv "$d/ev" "$FLEET_STATE"
+    # #344: the install imported the log (and subs.json) into state.db; back to the files without its row.
+    "$bin" events --jsonl | grep -v '"type":"timer-install"' >"$d/ev"
+    rm -f "${d:?}/state.db" "${d:?}/state.db-wal" "${d:?}/state.db-shm" "${d:?}/events.jsonl.migrated"
+    mv "$d/ev" "$FLEET_STATE" && mv "$d/webpush/subs.json.migrated" "$d/webpush/subs.json"
   fi
   "$bin" serve --export "$site/$fx" --demo
   rm -rf "${d:?}"
