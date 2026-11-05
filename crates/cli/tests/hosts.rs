@@ -930,6 +930,7 @@ fn a_remote_lane_gets_the_service_url_and_its_own_token() {
         true,
         0,
     );
+    with_account(&c);
     let r = remote_fake();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out}");
@@ -950,7 +951,8 @@ fn a_remote_lane_gets_the_service_url_and_its_own_token() {
         .next()
         .unwrap();
     assert_eq!(token.len(), 64, "{lane}");
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(token) && !out.contains(token));
+    let log = herdsman::events::jsonl(&c.state).unwrap();
+    assert!(!log.contains(token) && !out.contains(token), "{log}\n{out}");
     let cfg = Config::load(&c.config).unwrap();
     let ask = |n: &str| herdsman::runner::argv(&["ask", "sendmeter", n, "Which?"]);
     let ok = herdsman::service::authorize(&c, &cfg, token, &ask("12"));

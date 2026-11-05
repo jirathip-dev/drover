@@ -437,6 +437,12 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
         cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     }
+    // #345: the lane's service token is never shown (the plan is printed and `--json`).
+    if let Some(t) = p.env.get("HERDSMAN_TOKEN") {
+        cmds.iter_mut()
+            .flatten()
+            .for_each(|w| *w = w.replace(t.as_str(), "•••"));
+    }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
         "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base, "account": p.account.as_ref().map(|a| &a.0),
