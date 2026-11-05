@@ -321,15 +321,18 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, Thread
 
 /// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
 /// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
-pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
+pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
         rw,
         ..ChatTab::default()
     };
-    let Some(cfg) = cfg else {
-        tab.error = Some("cannot read fleet.toml".into());
-        return tab;
+    let cfg = match cfg {
+        Ok(c) => c,
+        Err(e) => {
+            tab.error = Some(e.into());
+            return tab;
+        }
     };
     let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
@@ -360,12 +363,16 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
 impl super::Server<'_> {
     /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads.
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> ChatTab {
-        let events = crate::events::read(&ctx.state).unwrap_or_default();
+        // #483: a config or log read error shows its own text (as the Queue tab does).
+        let (cfg, events) = match (Config::load(&ctx.config), crate::events::read(&ctx.state)) {
+            (Ok(c), Ok(e)) => (Ok(c), e),
+            (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), vec![]),
+        };
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        tab(ctx, Config::load(&ctx.config).ok().as_ref(), &events, &agents, rw)
+        tab(ctx, cfg.as_ref().map_err(String::as_str), &events, &agents, rw)
     }
 }
 

@@ -67,9 +67,10 @@ fn fake(prs: &[(u64, &str)]) -> Fake {
         .reply("herdr agent", "{}")
         .reply("git -C", "");
     for (n, files) in prs {
-        f = f
-            .reply(&format!("gh pr view issue-{n}"), &pr(*n))
-            .reply(&format!("gh pr diff {}", 100 + n), files);
+        f = f.reply(&format!("gh pr view issue-{n}"), &pr(*n)).reply(
+            &format!("gh api repos/jirathip-dev/sendmeter/pulls/{}/files", 100 + n),
+            files,
+        );
     }
     f
 }
@@ -372,7 +373,10 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
     let view = json!({"number": 112, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks});
     let r = Fake::default()
         .reply("gh pr view issue-12", &view.to_string())
-        .reply("gh pr diff 112", "supabase/migrations/1.sql\nscripts/check-x.mjs\n")
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/pulls/112/files",
+            "supabase/migrations/1.sql\nscripts/check-x.mjs\n",
+        )
         .reply("herdr agent list", NO_AGENTS);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
