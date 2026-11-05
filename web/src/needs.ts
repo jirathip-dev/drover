@@ -39,9 +39,9 @@ function issue(d: NeedsTab, s: NeedIssue): string {
   return `<div class=ask data-n=${n}><p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</div>`;
 }
 
-/** The `#needs` strip: the snapshot's age (#337), the cards, and `[chat·N]`'s count (#386). */
+/** The `#needs` strip: the snapshot's time (#450: serve.js folds its age into the strip), the cards, and `[chat·N]`'s count (#386). */
 export function tab(d: NeedsTab): string {
-  const age = d.age == null ? '' : `<p class="msg a">as of the step's look ${d.age} ago</p>`;
+  const age = `<i id=sts hidden data-ts=${d.snap}></i>`;
   const asks = d.asks.map(a => {
     const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, a.ask, 'Send') : '';
     // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.

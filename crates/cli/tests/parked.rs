@@ -192,3 +192,27 @@ fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     let (code, waiting) = run(&c, &r, &["waiting"]);
     assert!(code == 0 && !waiting.contains("#14"), "{waiting}");
 }
+
+/// #513: a due fix round held only by spawn slots shows that wait, not parked.
+#[test]
+fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
+    let (c, r) = fixture("parked-slot", false);
+    let head = "6a258db".to_string() + &"0".repeat(33);
+    let ev = |ts, kind, d| append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    ev(
+        NOW - 600,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": head, "body": "FAIL\nsrc/x.rs:3 off"}),
+    );
+    let s = Server::new(&c, &r, None);
+    let shown = |s: &Server| {
+        let herd: serde_json::Value = serde_json::from_str(&get(s, "/herd.json")).unwrap();
+        let lanes = herd["fleets"][0]["lanes"].as_array().unwrap().clone();
+        lanes.into_iter().find(|l| l["name"] == SAFE).unwrap()["shown"].clone()
+    };
+    assert_eq!(shown(&s), json!("parked · work on PR #42"), "not yet tried");
+    let d = json!({"step": "fix", "result": "REFUSED SPAWN_PENDING: 6 spawns starting", "code": "SPAWN_PENDING"});
+    ev(NOW - 300, "driven", d);
+    let s = Server::new(&c, &r, None);
+    assert_eq!(shown(&s), json!("idle · waiting for a spawn slot (10m)"));
+}

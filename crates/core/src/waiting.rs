@@ -21,6 +21,9 @@ pub struct Waiting {
     pub next_cmd: Option<String>,
 }
 
+/// #513: an in-flight issue held only by `max_parallel_spawns`.
+pub const SLOT: &str = "waiting for a spawn slot";
+
 /// #447: a `who` read back from the snapshot (an alias: serde borrows a field spelled `&str`).
 type Who = &'static str;
 fn who<'de, D: Deserializer<'de>>(d: D) -> Result<Who, D::Error> {
@@ -609,6 +612,12 @@ pub fn scan(
             w.what = format!("PASS, PR lacks label `{l}`, so the full CI has not run");
         }
         w.what = w.what.replace("for drive", "for drive (next pass ≤ 5 min)");
+        // #513: a due spawn drive's last try refused for want of a slot waits for one (the lane row says so, not parked).
+        let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
+        let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
+        if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
+            w.what = SLOT.into();
+        }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
         if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {

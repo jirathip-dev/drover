@@ -29,12 +29,12 @@ export type Notice = { at: number, text: string, };
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
- * #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's `age` (once over 2 min),
- * the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board
- * takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue;
- * `pair`: the page offers Pair this phone.
+ * #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none;
+ * #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the
+ * `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
+ * export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
-export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, age?: string | null, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
