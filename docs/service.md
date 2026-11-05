@@ -72,3 +72,16 @@ To go back to direct mode, boot the service out and run `herdsman timer install`
 ## Line cap
 
 The service's budget is the planned +3,000, inside the 31,500 cap the owner set in q391 (#514).
+
+## Deferred (q409)
+
+The owner decided in #345's q409 (2026-11-06): "Defer (a)-(e) to a follow-up issue; list them in docs/service.md as
+deferred with this decision; merge #519 as the service base." Not built here:
+
+- (a) lane state from herdr (or berth) event streams; lanes are still read by the passes;
+- (b) batched GraphQL polling of GitHub with ETags; the fast step polls as before, every 15 s;
+- (c) one kept-open SSH connection per host and one GitHub client;
+- (d) the board served from memory with one live stream to each phone; the board still polls, and the future cooee
+  plugin is to use `/api/v1/events`;
+- (e) the week-long soak with flat memory and the measured latencies (board < 10 ms, push → review < 5 s,
+  verdict → merge < 5 s).
