@@ -209,9 +209,10 @@ const FIRST_RUN: [(&str, &str); 3] = [
 ];
 
 /// #476: an unnumbered menu: the rows at the `❯` cursor's indent next to it, and the cursor's row among them.
+/// #484: the last `❯` on screen, not the shell prompt's (starship's `❯ claude …`) above the dialog.
 fn cursor_menu(screen: &str) -> Option<(usize, Vec<String>)> {
     let lines: Vec<&str> = screen.lines().collect();
-    let c = lines.iter().position(|l| l.trim_start().starts_with('❯'))?;
+    let c = lines.iter().rposition(|l| l.trim_start().starts_with('❯'))?;
     let indent = |l: &str| l.chars().take_while(|c| c.is_whitespace()).count();
     let col = indent(lines[c]) + 2;
     let row = |l: &&&str| indent(l) == col && !l.trim().is_empty();
