@@ -572,6 +572,10 @@ pub fn scan(
                 format!("{why}{NO_PUSH}respawning {role}")
             };
         }
+        // #478: an active lane on a host the last look could not reach is not gone: nothing respawns it.
+        if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
+            (w.who, w.what, w.next_cmd) = ("none", format!("host offline: {h}"), None);
+        }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
         let m = w.what.starts_with("PASS · CI running").then(gone).flatten();
         w.what = m.map_or(w.what, |m| format!("PASS · {m}"));

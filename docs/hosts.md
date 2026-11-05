@@ -87,13 +87,16 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
 
-## Asks, answers and verdicts from another host (#275)
+## Asks, answers and verdicts from another host (#275, #389)
 
-A lane on another host gets `HERDSMAN_MAIN` (`<main host's [hosts] name>:<its herdsman path>`). Its `herdsman ask`,
-`answer`, `verdict` and its own events (`hook-denied`, `coauthor-trailer`) run on the main host over
-`ssh <main host's name>`, so the main host's log is the only one written and only the main host pushes. So the main
-host's `[hosts]` name must also work as an SSH name on every other host (an `~/.ssh/config` entry back to it, key-based).
-That host's own log (#344: its own `state.db`) is never written by a lane; herdsman warns when it finds one. Each
+A lane on another host never connects to the main host: it holds no key, token or ssh route to it. Spawn exports
+`HERDSMAN_OUTBOX=1`, and its `herdsman ask`, `answer`, `verdict`, `done` and its own events (`hook-denied`,
+`coauthor-trailer`) are appended to `<worktree>/.herdsman/outbox.jsonl` (exit 0: `queued for the main host: drive
+delivers it within 1 min`). Each fast drive pass pulls every live remote lane's outbox over main → host ssh and runs
+each line as that lane (from its spawn event, never the line), once per lane and timestamp; a line for another issue
+or role, or a verb a lane doesn't run itself, is refused and logged `outbox`. `check` raises `outbox-stale` once when a
+line sits there over 5 min. So the main host's log is the only one written and only the main host pushes.
+That host's own log (#344: its own `state.db`) is never written by a lane. Each
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `herdsman events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
@@ -123,6 +126,12 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
   swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
   values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
   (`offline · last seen 33m`) in the same layout, and its lanes never page (`lane-dead` and `stall` skip them).
+- #478: while a host is unreachable, a spawn onto it is refused `HOST_OFFLINE` (other hosts' spawns go on), its lanes
+  show `host offline: <host>` in `status`, `board` and `waiting` (drive neither respawns nor supersedes them), and
+  `check` logs `host-offline` once when it drops and `host-online` once when it is back. A supersede that could not
+  close the old pane there logs it (`stale_host`, `stale_pane`); drive kills it once the host answers (wip first, as
+  `kill` does) and logs `stale-pane-killed`. `herdsman kill|close --host <name> <agent>` picks that host's agent when
+  another host has a lane of the same name.
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
   disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under

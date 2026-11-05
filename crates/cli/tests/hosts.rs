@@ -902,7 +902,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
 }
 
-/// #275: a remote lane is told the main host (`HERDSMAN_MAIN`, its path never rehomed) and an answer to it lands
+/// #389: a remote lane gets an outbox, never a route to the main host (`HERDSMAN_MAIN`), and an answer to it lands
 /// with `--machine`: the prompt, then Enter, then the wait that confirms it.
 #[test]
 fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
@@ -915,7 +915,7 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let calls = r.calls.borrow().clone();
     let lane = calls.iter().find(|c| c.starts_with(export)).unwrap();
     assert!(
-        lane.contains(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
+        lane.contains(" HERDSMAN_OUTBOX='1'") && !lane.contains("HERDSMAN_MAIN"),
         "{lane}"
     );
     let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
