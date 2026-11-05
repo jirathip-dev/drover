@@ -368,7 +368,7 @@ fn model_chip(cfg: &Config, role: Option<&crate::config::Role>, dis: &str) -> St
         .iter()
         .filter(|c| c.2.len() > 1 || c.1.is_none() && !c.2.is_empty());
     let chips: String = chips
-        .map(|(k, v, all)| pick(k, &format!("default {k}"), *v, all, dis))
+        .map(|(k, v, all)| pick(k, &format!("{k}: default"), *v, all, dis))
         .collect();
     or(chips.is_empty(), "", &format!("<div class=cbar>{chips}</div>")).to_string()
 }
