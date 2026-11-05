@@ -68,6 +68,12 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("sonnet"), Some("low"))
     );
+    // `[chat]`'s model is a pick on the harness its fleets' conductors default to.
+    let m = Config::parse(&config("[chat]\nmodel = \"haiku\"\n")).unwrap();
+    assert_eq!(
+        herdsman::conductor::harness_models(&m, "claude"),
+        ["haiku", "opus", "sonnet"]
+    );
     // Another harness drops the role's model; its profile stays the conductor's.
     let h = Config::parse(&config("[chat]\nharness = \"hermes\"\n")).unwrap();
     let (_, r) = herdsman::conductor::defaults(&h, "sendmeter").unwrap();

@@ -367,7 +367,8 @@ pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(
     Ok((fleet, r))
 }
 
-/// #404: the models a thread on harness `h` can pick: those its roles on `h` (or `[chat]` on `h`) use, any fleet;
+/// #404: the models a thread on harness `h` can pick: those its roles on `h` (or `[chat]`, where a fleet's default
+/// conductor is on `h`) use, any fleet;
 /// none where `h`'s profile owns the model.
 pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
     if !harness::get(h).takes_model() {
@@ -378,11 +379,11 @@ pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
         .values()
         .flat_map(|f| f.role.values())
         .filter(|r| r.harness == h);
-    let chat = cfg
-        .chat
-        .model
-        .as_deref()
-        .filter(|_| cfg.chat.harness.as_deref().unwrap_or("claude") == h);
+    let chat = cfg.chat.model.as_deref().filter(|_| {
+        cfg.fleet
+            .keys()
+            .any(|n| defaults(cfg, n).is_ok_and(|d| d.1.harness == h))
+    });
     let all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
     all.into_iter().collect()
 }
