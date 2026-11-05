@@ -69,7 +69,7 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
         "HERDSMAN_LANE",
         "FLEET_LANE",
         "HERDSMAN_THREAD",
-        "HERDSMAN_MAIN",
+        "HERDSMAN_OUTBOX",
         "SHED",
         "BERTH",
     ] {
