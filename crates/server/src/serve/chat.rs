@@ -170,6 +170,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
             ("needs-decision", _) => ask(events, e, m("ask", s("question"))),
             ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
                 from: s("id"),
+                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
                 ..m("config", s("diff"))
             },
             ("secret-request", _)
@@ -193,6 +194,12 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
         }
     }
     fold(&mut msgs, &mut run);
+    // #460: a waiting config card is never cut from the first page: past its window it stays right under the marker
+    // (so older pages leave it out).
+    let pins: Vec<u64> = crate::propose::waiting(ctx, events, id).map(|e| e.seq).collect();
+    if before != u64::MAX {
+        msgs.retain(|m| !pins.contains(&m.seq));
+    }
     let k = msgs.len().saturating_sub(n);
     let dir = conductor::dir(ctx, cfg, id).display().to_string();
     let home = crate::config::home().display().to_string();
@@ -200,7 +207,11 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
         older: (k > 0).then(|| msgs[k].seq),
         started: t.ts,
         dir: dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}")),
-        msgs: msgs.split_off(k),
+        msgs: {
+            let w = msgs.split_off(k);
+            msgs.retain(|m| pins.contains(&m.seq));
+            msgs.into_iter().chain(w).collect()
+        },
     }
 }
 
@@ -236,6 +247,7 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]
         title: conductor::title(events, id).into(),
         ds: super::join(&[t.fleet.as_str(), h, model.unwrap_or_default(), shown]),
         state: st.into(),
+        waiting: waiting(ctx, events, id),
         since: (st == "working").then_some(turn.1),
         queued: queued(events, id).iter().map(q).collect(),
         chips: role.map(|r| chips(cfg, r)).unwrap_or_default(),
@@ -268,6 +280,12 @@ fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
         .collect()
 }
 
+/// #460: the ids of the thread's config proposals that wait for the owner's tap.
+fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> Vec<String> {
+    let w = crate::propose::waiting(ctx, events, id);
+    w.filter_map(|e| e.str("id").map(Into::into)).collect()
+}
+
 /// A thread's row: unread, title, age; its state and the last message; the threads it links to (not its flow-back
 /// lines), once each.
 fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, ThreadRow) {
@@ -288,6 +306,7 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, Thread
         age: ago(ctx.now, at),
         unread: conductor::unread(events, id),
         state: state(events, id, agents).into(),
+        waiting: waiting(ctx, events, id),
         links: lk
             .into_iter()
             .map(|(w, t)| Link {

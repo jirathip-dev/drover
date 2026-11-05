@@ -102,9 +102,10 @@ export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archiv
 export type Chip = { name: string, cur?: string | null, all: Array<string>, };
 
 /**
- * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line.
+ * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
+ * #460: the ids of the config proposals `waiting` for the owner.
  */
-export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, links: Array<Link>, line: string, };
+export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, waiting: Array<string>, links: Array<Link>, line: string, };
 
 /**
  * #413: a linked thread's chip: `from t5`, `continued in t6`.
@@ -113,9 +114,10 @@ export type Link = { w: string, t: string, };
 
 /**
  * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
- * working, the turn's start `since`, and the `queued` messages above the box; #404: its model and effort `chips`.
+ * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
+ * its model and effort `chips`.
  */
-export type ThreadView = { id: string, title: string, ds: string, state: string, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
+export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
 
 /**
  * #407: a message queued for the turn's end, by its id `q`.
@@ -131,7 +133,7 @@ export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: num
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
  * `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
- * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
+ * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
  * links to.
  */
@@ -198,7 +200,7 @@ export type Row = { name: string, tone: string, detail: string, fix: string, };
  * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
  * forms are inert); `mtime` the forms send back.
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, telegram: Telegram, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
@@ -254,6 +256,17 @@ export type Sub = { id: string, label: string, created: number, };
  * #59: a paired device, removable by `hash`.
  */
 export type Paired = { hash: string, label: string, created: number, used: number, };
+
+/**
+ * #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
+ */
+export type Notifier = { kind: string, on: string, };
+
+/**
+ * #440: the Telegram bridge: `on` with both `chat` and `owner` set, its `topics` (threads) and last poll's age; never
+ * the token or the chat's id.
+ */
+export type Telegram = { on: boolean, chat: boolean, owner: boolean, topics: number, polled: string, };
 
 /**
  * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml

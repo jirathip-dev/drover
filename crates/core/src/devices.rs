@@ -24,10 +24,6 @@ pub struct Device {
     pub ip: String,
 }
 
-fn dir(ctx: &Ctx) -> PathBuf {
-    ctx.state.parent().unwrap_or(&ctx.state).join("serve")
-}
-
 /// Write `v` as JSON, mode 0600.
 pub(crate) fn save(p: &Path, v: &impl Serialize) -> Result<()> {
     write0600(p, serde_json::to_string_pretty(v)?.as_bytes())
@@ -72,18 +68,16 @@ pub(crate) fn random(n: usize) -> Result<Vec<u8>> {
     Ok(b)
 }
 
+/// #344: the `devices` rows of the database.
 pub fn load(ctx: &Ctx) -> Vec<Device> {
-    std::fs::read_to_string(dir(ctx).join("devices.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    crate::db::list(&ctx.state, "devices")
 }
 
 /// #122: a failed write logs `state-write-failed` (notified, path and error kind only), at most once an hour.
 pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     let fresh = |e: &Event| e.kind == "state-write-failed" && e.ts + 3600 > ctx.now;
-    let p = dir(ctx).join("devices.json");
-    let r = save(&p, &d);
+    let p = crate::db::file(&ctx.state);
+    let r = crate::db::store(&ctx.state, "devices", d);
     let seen = || read(&ctx.state).unwrap_or_default().iter().any(fresh);
     if let Some(e) = r.as_ref().err().filter(|_| !seen()) {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);

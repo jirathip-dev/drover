@@ -775,7 +775,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
         "{body}"
     );
     assert!(body.contains("is behind the dev ledger"), "{body}");
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     assert!(!log.contains("sbp9f8e7d6c5b4a"), "secret in events: {log}");
     let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
     assert!(board.contains("migration-order failed: rename needed"), "{board}");

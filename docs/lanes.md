@@ -180,7 +180,7 @@ next pass. Starts fan out: a pass tries every startable item in queue order, eac
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
 the fleet's starts; `HOST_BUSY` and `ALL_CAPPED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
-`<state dir>/drive.lock` (taken over after 30 min), so cron and the button never overlap; the
+the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
 board shows `driver: herdsman · last pass <age> ago`.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,

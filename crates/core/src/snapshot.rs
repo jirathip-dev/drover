@@ -1,4 +1,4 @@
-//! #337: the board's one snapshot (`<state dir>/snapshot.json`): every read the board, `status` and `hosts` make, taken
+//! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
 //! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, States};
@@ -10,7 +10,6 @@ use crate::{herdr, Ctx};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Each read's stdout by command line (None: it failed), and when the step took them.
@@ -19,6 +18,9 @@ use std::sync::Mutex;
 pub struct Snapshot {
     pub ts: u64,
     pub reads: BTreeMap<String, Option<String>>,
+    /// #447: the step's waits, and what they were worked out from (`wait_key`).
+    pub waits: Vec<Waiting>,
+    pub key: String,
 }
 
 /// herdr where a host installs it (docs/hosts.md), for a non-login ssh shell.
@@ -33,12 +35,9 @@ pub fn remote(prog: &str, args: &[String]) -> bool {
     prog == "ssh" || prog == herdr::BIN && args.first().is_some_and(|a| a == "--machine")
 }
 
-pub fn file(ctx: &Ctx) -> PathBuf {
-    ctx.state.with_file_name("snapshot.json")
-}
-
+/// #344: the `board` row of the database's snapshots.
 pub fn load(ctx: &Ctx) -> Option<Snapshot> {
-    serde_json::from_str(&std::fs::read_to_string(file(ctx)).ok()?).ok()
+    crate::db::get(&ctx.state, "board").map(|s| s.1)
 }
 
 pub fn out(v: Option<String>) -> Out {
@@ -155,15 +154,15 @@ impl Runner for Snap<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: a call with stdin (`berth connect`, a file write) is never a cached read.
+    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         self.r.run_in(prog, args, input)
     }
-    fn berth(&self) -> Option<crate::berth::Berth> {
-        self.r.berth()
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        self.r.shed()
     }
 }
 
@@ -179,6 +178,27 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &
         .filter_map(|w| Some((w["workspace_id"].as_str()?.into(), w["label"].as_str()?.into())))
         .collect();
     lanes::join(cfg, r, &ctx.worktrees, events, st, &agents, &ws)
+}
+
+/// #447: what waits are worked out from: the log's length and last row, and each lane's state.
+pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
+    let last = events.last().map_or(0, |e| e.seq);
+    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
+    format!("{} {last} {}", events.len(), lanes.join(" "))
+}
+
+/// The step's waits while its snapshot saw this log and these lanes; else worked out now.
+pub fn saved_waits(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    snap: &Snapshot,
+    (events, all): (&[Event], &[Lane]),
+) -> Vec<Waiting> {
+    if snap.key == wait_key(events, all) {
+        return snap.waits.clone();
+    }
+    waits(ctx, cfg, r, events, all)
 }
 
 /// Each lane's wait reason, from the cached PR reads.
@@ -205,9 +225,20 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
     s.fetch();
+    let s = Snap { miss: Miss::Live, ..s };
+    // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
+    let (mut key, mut ws) = (String::new(), vec![]);
+    if let Ok(list) = herdr::list(&s, "agent") {
+        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+        (key, ws) = (wait_key(&events, &all), waits(ctx, cfg, &s, &events, &all));
+    }
     let reads = lock(&s.reads).clone();
-    let text = serde_json::to_string(&Snapshot { ts: ctx.now, reads }).unwrap_or_default();
-    let tmp = crate::devices::tmp_name(&file(ctx));
-    let _ = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file(ctx)));
-    Snap { miss: Miss::Live, ..s }
+    let snap = Snapshot {
+        ts: ctx.now,
+        reads,
+        waits: ws,
+        key,
+    };
+    let _ = crate::db::put(&ctx.state, "board", ctx.now, &snap);
+    s
 }

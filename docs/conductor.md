@@ -114,7 +114,8 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
   overlay.
 - **On a phone (#403):** `[send]` clears the box at once and shows the message `sending…`, then `✓`; failed, red
   with `[retry]` and the text (and file) back in the box. The box grows to 6 lines, then scrolls; with the keyboard
-  up the tab bar hides. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
+  up the tab bar hides and (#443) the composer sits flush on the keyboard: the page never scrolls, only the
+  messages do, and the message just above the box stays there as the keyboard opens or closes or the box grows. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
   returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
   above the box.
 - **Comfort (#407, from t3code's mobile app):**
@@ -158,8 +159,11 @@ validated like fleet.toml itself, and its diff shows in the thread as a card wit
 owner applies it: a tap on a paired device, or `herdsman config apply|discard <id>` outside a lane (the lane hook
 refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
 new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
-to restore. If fleet.toml changed since the proposal, it refuses `STALE`. Settled, the card folds to the
-thread's system line, e.g. `config c1 applied by owner, backup kept, doctor ✓` (the conductor gets it too).
+to restore. If fleet.toml changed since the proposal, it refuses `STALE`, and the card shows `stale: fleet.toml
+changed since` instead of its buttons (#460). Settled, the card folds to the thread's system line, e.g. `config c1
+applied by owner, backup kept, doctor ✓` (the conductor gets it too). #460: while a card waits, the thread's bar and
+its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
+always carries it: past the last 30 messages it stays right under the older-messages marker.
 
 ## Accounts (#387)
 

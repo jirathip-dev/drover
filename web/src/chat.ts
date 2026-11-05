@@ -100,7 +100,8 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
     case 'ask': b = ask(now, m, dis); break;
     case 'config': {
       const q = esc(m.from), btn = (v: string) => `<button name=act value=${v}${dis}>${v}</button>`;
-      b = block(now, 'ai', 'conductor', `proposes config ${m.from}`, `<div class=md><p class=qid>config ${q}</p><pre class=df>${esc(m.text)}</pre></div><form class=chc data-id="${q}">${btn('apply')}${btn('discard')}</form>`, m.ts);
+      const act = m.open ? `<form class=chc data-id="${q}">${btn('apply')}${btn('discard')}</form>` : '<p class=m>stale: fleet.toml changed since</p>'; // #460: stale, it can no longer apply
+      b = block(now, 'ai', 'conductor', `proposes config ${m.from}`, `<div class=md><p class=qid>config ${q}</p><pre class=df>${esc(m.text)}</pre></div>${act}`, m.ts);
       break;
     }
     case 'secret': {
@@ -147,11 +148,14 @@ const LIVE: Record<string, string> = {
   new: 'a message starts the conductor',
 };
 
+/** #460: `config c1 c2 waiting` while proposals wait for the owner's tap. */
+const cw = (w: string[]) => (w.length ? `<b class="a cw">config ${esc(w.join(' '))} waiting</b>` : '');
+
 /** One thread: the bar, its last messages, the live line and the composer (inert off a paired owner device). */
 function thread(d: ChatTab, t: ThreadView): string {
   const dis = or(d.rw, '', ' disabled'), dot = or(['asleep', 'new'].includes(t.state), '', '<i class=dt></i>');
   const guest = or(d.rw, '', '<p class="ns m">pair this phone to answer or write</p>');
-  return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>${esc(t.title)}</b><span class=ds>${dot}${esc(t.ds)}</span></div></div>`
+  return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>${esc(t.title)}</b><span class=ds>${dot}${esc(t.ds)}</span>${cw(t.waiting)}</div></div>`
     + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', queue(t, dis), dis, t.chips)}</div>`; // #407: working, serve.js floats the line as a pill
 }
 
@@ -168,7 +172,7 @@ const ST: Record<string, string> = { choose: '<b class=r>! choose</b>', working:
  * row swiped left shows [archive], an archived one [restore]. */
 function row(r: ThreadRow, b: string, dis: string): string {
   const lk = r.links.map(l => chip(l) + ' ').join('');
-  const a = `<a class="tr${or(r.unread, '', ' rd')}" href=#chat data-t="${r.id}"><i class=ud>${or(r.unread, '●', '')}</i><span class=tt>${esc(r.title)}</span><span class=ta>${r.age}</span><span class=tp>${lk}${ST[r.state] ?? ''}${esc(r.line)}</span></a>`;
+  const a = `<a class="tr${or(r.unread, '', ' rd')}" href=#chat data-t="${r.id}"><i class=ud>${or(r.unread, '●', '')}</i><span class=tt>${esc(r.title)}</span><span class=ta>${r.age}</span><span class=tp>${lk}${cw(r.waiting)}${ST[r.state] ?? ''}${esc(r.line)}</span></a>`;
   return `<div class=sw>${a}<button type=button class=sb name=${b} data-t="${r.id}"${dis}>${b}</button></div>`;
 }
 

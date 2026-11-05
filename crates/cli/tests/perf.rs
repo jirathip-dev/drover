@@ -95,6 +95,12 @@ fn serve(c: herdsman::Ctx, r: Slow) -> (&'static herdsman::Ctx, &'static Slow, s
 
 /// One GET over the socket: (ms, response bytes).
 fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
+    let (t, text) = fetch(addr, path);
+    (t, text.len())
+}
+
+/// One GET over the socket: (ms, response text).
+fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
@@ -107,7 +113,7 @@ fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
         "{path}: {}",
         &text[..text.len().min(300)]
     );
-    (ms(t), res.len())
+    (ms(t), text.into_owned())
 }
 
 /// What a `/live` stream sends within `ms`.
@@ -336,4 +342,99 @@ fn a_steady_state_live_change_is_one_part_under_5kb() {
         drawn[0]
     );
     assert_eq!(drawn[0], drawn[1]);
+}
+
+/// #447: a 30,000-event log and 200 idle lanes, each with an answered ask, a review round and the step's chatter;
+/// ten asks still open.
+fn big() -> (herdsman::Ctx, Fake) {
+    let c = ctx(&tmpdir("perf-big"), CONFIG);
+    let ev = |ts, n, kind, d| serde_json::to_string(&Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
+    let (mut log, mut agents) = (vec![], vec![]);
+    for n in 1..=200u64 {
+        let (agent, t) = (format!("sendmeter-impl-{n}"), NOW - 9_000 + n);
+        let d = json!({"role": "impl", "agent": agent, "pane": format!("w{n}:p1"), "worktree": format!("/wt/{agent}")});
+        log.push(ev(t, n, "spawn", d));
+        let ask = json!({"id": format!("a{n}"), "agent": agent, "question": "?", "options": [], "recommend": null});
+        log.push(ev(t + 1, n, "needs-decision", ask));
+        if n > 10 {
+            log.push(ev(t + 2, n, "decision", json!({"id": format!("a{n}"), "answer": "1"})));
+        }
+        log.push(ev(t + 3, n, "pushed", json!({"sha": "a".repeat(40)})));
+        let rev = format!("sendmeter-rev-{n}-r1");
+        let d = json!({"role": "rev", "agent": rev, "pane": format!("w{n}:p2"), "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
+        log.push(ev(t + 4, n, "spawn", d));
+        log.push(ev(
+            t + 5,
+            n,
+            "verdict",
+            json!({"verdict": "FAIL", "sha": "a".repeat(40)}),
+        ));
+        agents.push(json!({"name": agent, "agent_status": "idle", "pane_id": format!("w{n}:p1"), "cwd": format!("/wt/{agent}")}));
+    }
+    for i in 0..30_000 - log.len() as u64 {
+        log.push(ev(
+            NOW - 5_000 + i / 10,
+            1 + i % 200,
+            "driven",
+            json!({"step": "review", "code": "EXIT"}),
+        ));
+    }
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
+    let f = Fake::default()
+        .reply("herdr agent list", &json!({"result": {"agents": agents}}).to_string())
+        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+        .reply("herdr pane read", "⏺ Working on it\n\n❯ \n")
+        .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    (c, f)
+}
+
+/// #447: the waits are linear in the log: `snapshot::waits` under 200 ms, and the Lanes tab's data
+/// (`/api/v1/lanes`, `/herd.json`, served from the step's snapshot) under 300 ms on 30,000 events and 200 lanes, in a release build (CI's perf step; a debug build
+/// reports only).
+#[test]
+fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
+    let (c, r) = big();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let events = herdsman::events::read(&c.state).unwrap();
+    assert_eq!(events.len(), 30_000);
+    let list = herdsman::herdr::list(&r, "agent").unwrap();
+    let st = herdsman::events::fold(&events);
+    let all = herdsman::snapshot::lanes(&cfg, &r, &c, (&events, &st), &list);
+    assert_eq!(all.len(), 200);
+    let t = Instant::now();
+    let w = herdsman::snapshot::waits(&c, &cfg, &r, &events, &all);
+    let waits = ms(t);
+    let owner: Vec<_> = w
+        .iter()
+        .filter(|w| w.who == "owner" && w.lane.contains("impl"))
+        .collect();
+    assert_eq!(owner.len(), 10, "{owner:?}");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let mut snap = herdsman::snapshot::load(&c).unwrap();
+    assert_eq!(snap.waits.len(), w.len(), "the step saves the waits the board reads");
+    // Tag the saved waits: a request that shows the tag read the snapshot instead of scanning the log.
+    for w in &mut snap.waits {
+        w.what = format!("snaphit {}", w.what);
+    }
+    herdsman::db::put(&c.state, "board", snap.ts, &snap).unwrap();
+    let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
+    let mut lanes = 0;
+    for path in ["/api/v1/lanes", "/herd.json"] {
+        fetch(addr, path);
+        let (t, body) = fetch(addr, path);
+        assert!(
+            body.contains("snaphit"),
+            "{path} worked the waits out again instead of reading the snapshot"
+        );
+        lanes = lanes.max(t);
+    }
+    report(&format!(
+        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /herd.json {lanes} ms"
+    ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(waits < 200, "snapshot::waits took {waits} ms (target < 200)");
+    assert!(lanes < 300, "the lanes reads took {lanes} ms (target < 300)");
 }

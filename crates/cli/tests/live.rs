@@ -404,7 +404,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
         json!({"via": "web", "agent": "sendmeter-impl-12", "device": e.str("device").unwrap(), "choice": "2"})
     );
     assert!(
-        !std::fs::read_to_string(&c.state).unwrap().contains("proceed"),
+        !herdsman::events::jsonl(&c.state).unwrap().contains("proceed"),
         "never the question text"
     );
     // The prompt is still there after the key: "still waiting". A reviewer may answer a permission prompt.

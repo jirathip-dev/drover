@@ -169,11 +169,20 @@ impl Harness for Claude {
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
         pending(screen)
     }
-    /// #463: a new folder's trust dialog or the bypass-permissions warning (Claude Code 2.x): its "Yes" option.
-    fn startup_prompt(&self, screen: &str) -> Option<(&'static str, String)> {
+    /// #463: a new folder's trust dialog or the bypass-permissions warning (Claude Code 2.x): its "Yes" option, by its
+    /// number or (#476: an unnumbered `❯` menu) by moving the cursor to it, then Enter.
+    fn startup_prompt(&self, screen: &str) -> Option<(&'static str, Vec<String>)> {
         let (name, _) = FIRST_RUN.iter().find(|(_, t)| screen.contains(t))?;
-        let n = pending(screen)?.1.iter().position(|o| o.starts_with("Yes"))?;
-        Some((name, self.answer_keys(n + 1)))
+        let yes = |o: &Vec<String>| o.iter().position(|o| o.starts_with("Yes"));
+        if let Some(n) = pending(screen).and_then(|p| yes(&p.1)) {
+            return Some((name, vec![self.answer_keys(n + 1)]));
+        }
+        let (at, opts) = cursor_menu(screen)?;
+        let n = yes(&opts)?;
+        let key = if n > at { "Down" } else { "Up" };
+        let mut keys = vec![key.to_string(); n.abs_diff(at)];
+        keys.push("Enter".into());
+        Some((name, keys))
     }
 
     /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
@@ -202,6 +211,20 @@ const FIRST_RUN: [(&str, &str); 3] = [
     ("folder-trust", "trust this folder"),
     ("bypass-permissions", "Bypass Permissions mode"),
 ];
+
+/// #476: an unnumbered menu: the rows at the `❯` cursor's indent next to it, and the cursor's row among them.
+/// #484: the last `❯` on screen, not the shell prompt's (starship's `❯ claude …`) above the dialog.
+fn cursor_menu(screen: &str) -> Option<(usize, Vec<String>)> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let c = lines.iter().rposition(|l| l.trim_start().starts_with('❯'))?;
+    let indent = |l: &str| l.chars().take_while(|c| c.is_whitespace()).count();
+    let col = indent(lines[c]) + 2;
+    let row = |l: &&&str| indent(l) == col && !l.trim().is_empty();
+    let top = c - lines[..c].iter().rev().take_while(row).count();
+    let end = c + 1 + lines[c + 1..].iter().take_while(row).count();
+    let text = |l: &str| l.trim_start().trim_start_matches('❯').trim().to_string();
+    Some((c - top, lines[top..end].iter().map(|l| text(l)).collect()))
+}
 
 /// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run
 /// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.

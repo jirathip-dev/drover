@@ -355,7 +355,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         )]
     );
     let calls = r.0.calls.borrow().join("\n");
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
     for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {

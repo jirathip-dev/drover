@@ -14,7 +14,7 @@ fn config() -> String {
 }
 
 fn log(c: &herdsman::Ctx) -> String {
-    std::fs::read_to_string(&c.state).unwrap_or_default()
+    herdsman::events::jsonl(&c.state).unwrap_or_default()
 }
 
 #[test]

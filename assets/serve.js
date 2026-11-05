@@ -147,7 +147,7 @@ function colours() {
   $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
   put('sb', b);
   hostrow(document);
-  if (lopen()) lsheet(); // #290: an open look sheet moves its ticks
+  if (sysOn()) lsheet(); // #290: Appearance (#440: in System) moves its ticks
 }
 // #244: the Host tab's `theme` row names this phone's theme and colours; under it, each refused scheme with why.
 function hostrow(root) {
@@ -166,10 +166,10 @@ function hostrow(root) {
     return p;
   }));
 }
-// #290: `[◐]` (every tab) opens the look sheet in the board's own sheet, not the system picker: THEME (each theme's 24 px
-// impl row sprite, else its favicon) and COLOURS (each passing scheme's bg, fg, green, amber, red), each a listbox. A tap,
-// or Enter on the focused row, applies it in place (#206: no reload) and the sheet stays open over a light backdrop, so
-// the board behind it shows the change. Picking the theme's default colours forgets the pick: they follow the theme again.
+// #290: the look sheet's content, #440: System's Appearance: THEME (each theme's 24 px impl row sprite, else its
+// favicon) and COLOURS (each passing scheme's bg, fg, green, amber, red), each a listbox. A tap, or Enter on the focused
+// row, applies it in place (#206: no reload) and the sheet stays open, so the board behind it shows the change. Picking
+// the theme's default colours forgets the pick: they follow the theme again.
 const LS = {};
 const lsprite = n => LS[n] || (LS[n] = Promise.all(['theme.json', 'sprites.svg'].map(f => fetch(`${R}themes/${n}/${f}`).then(r => r.ok ? r.text() : '').catch(() => ''))).then(([j, s]) => {
   let t = {};
@@ -190,14 +190,10 @@ function lrow(k, n, on, art, def) {
   if (def) o.append(el('small', '', '(theme default)'));
   return o;
 }
-// Open is shown, not closing, and still the look sheet: a closed sheet keeps its class until another sheet replaces it.
-const lopen = () => !!$('.sh.look') && shown() && !shut;
-function lsheet(kb) {
-  const h = document.documentElement, re = lopen(), f = re && document.activeElement.closest('.lko');
+function lsheet() {
+  const h = document.documentElement, top = $('#sy-appearance>.look'), f = top && top.contains(document.activeElement) && document.activeElement.closest('.lko');
+  if (!top) return;
   const key = f && Object.entries(f.dataset)[0];
-  agent = null;
-  sh.className = 'sh lg look';
-  $('.hd b').textContent = 'look';
   const grp = (k, title, hint, rows) => {
     const g = el('section', 'cg lkg'), t = el('h3', '', title), l = el('div', 'lkl');
     t.append(el('span', '', hint));
@@ -221,13 +217,10 @@ function lsheet(kb) {
   lsprite(h.dataset.theme).then(x => { px.innerHTML = x; });
   as.append(el('b', 'asc', TT && TT.ascii_rows && TT.ascii_rows.impl));
   const st = TM.includes('ascii') ? [grp('style', 'style', 'rows, lanes, host, loading', [lrow('y', 'pixel', B.dataset.mode !== 'ascii', px), lrow('y', 'ascii', B.dataset.mode === 'ascii', as)])] : [];
-  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
+  top.replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
     el('p', 'lkn', 'this phone only · the home-screen icon keeps its install-time look'));
-  if (key) $(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
-  else if (!re) {
-    show(innerWidth >= 720 ? 'half' : 'mid');
-    if (kb) $('.lko[aria-selected=true]').focus({ preventScroll: true }); // opened from the keyboard: on the current theme
-  }
+  if (key) top.querySelector(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
+  $('#sy-appearance .sym').textContent = `${h.dataset.theme} · ${h.dataset.scheme}${B.dataset.mode === 'ascii' ? ' · ascii' : ''}`;
 }
 // #335: STYLE applies in place: pixel is the scene mode, ascii the ascii mode, on every tab.
 function style(y) {
@@ -248,7 +241,6 @@ function lpick(o) {
   colours();
 }
 document.addEventListener('click', e => {
-  if (e.target.closest('#look')) return lsheet(e.detail === 0);
   const o = e.target.closest('.look .lko');
   if (o) lpick(o);
 });
@@ -364,6 +356,7 @@ function words(root) {
     if (!p) s.prepend(p = el('p', 'tsub'));
     p.innerHTML = tw('tab-' + t, t);
   }
+  if (root === document) syswords();
   root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
   root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
   root.querySelectorAll('details.q').forEach(d => {
@@ -519,7 +512,9 @@ function frag(id, html) {
   again();
   bshow(el);
   nows();
-  if (id === 'host') groups();
+  if (id === 'host') { groups(); alarm(); }
+  if (id === 'sy-fleets') sysfleets(el);
+  if (sysPin && sysOn()) sysgo(sysPin); // the board's first draws move the sections: the one asked for stays on top
   if (scrollY !== y) scrollTo(0, y);
   if (id === 'chat') chatFollow();
   if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
@@ -528,7 +523,7 @@ function frag(id, html) {
   alerts();
   badge();
   if (id === 'needs') fold();
-  if (id !== 'host' && id !== 'events') sync(dot.classList[0]); // #268, #269: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
+  if (id !== 'host' && id !== 'events' && !id.startsWith('sy-')) sync(dot.classList[0]); // #268, #269: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
   if (id === 'queue' && want) wanted();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
@@ -723,7 +718,7 @@ function connect() {
   if (DEMO) return;
   if (es) es.close();
   const t = watching(); // #407: the open thread: no push for it while this stream lives
-  try { es = new EventSource('live?tab=' + document.documentElement.dataset.tab + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live?tab=' + (sysOn() ? 'host' : document.documentElement.dataset.tab) + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
@@ -1433,22 +1428,8 @@ function legend() {
   $('.top').replaceChildren(...Object.entries(HINT).map(([w, h]) => el('p', '', `${w} = ${h}`)), ...[...dots, ...serial].map(t => el('p', '', t)));
   show('mid');
 }
-// #162: [config] shows the fleet's settings in the same sheet, the lane parts hidden and its bar in the fleet's colour.
-// #268: the TypeScript board draws it from the Queue tab's last data.
-async function config(b) {
-  const f = b.dataset.f, h = window.queueSheet?.(f) ?? null;
-  if (h === null) return toast('error: cannot read the config');
-  agent = null;
-  sh.className = 'sh lg cs ' + [...b.closest('.fc').classList].find(c => c.startsWith('k-'));
-  $('.hd b').textContent = f + ' · config';
-  const top = $('.top');
-  top.innerHTML = h;
-  top.querySelectorAll('[data-pipe]').forEach(pipeline); // #173
-  top.scrollTop = 0;
-  tidy(top);
-  top.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
-  show('full');
-}
+// #162: [config] on a Queue card, #440: System opened at that fleet's row (the button stays, a shortcut).
+function config(b) { sysopen('fleets', b.dataset.f); }
 // A role's effort list follows its harness (each harness option's data-e).
 document.addEventListener('change', e => {
   const s = e.target, ef = s.name === 'harness' && s.form.elements.effort;
@@ -1474,7 +1455,6 @@ function show(d) {
 // (or 250 ms on) it turns invisible.
 function close() {
   if (!shown() || shut) return;
-  if (sh.classList.contains('look')) $('#look').focus({ preventScroll: true });
   clearInterval(timer);
   agent = null;
   d0 = null;
@@ -1796,7 +1776,9 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing ? e.touches[0] : null;
+  // #443: not in a phone's open thread: it is fixed, and its messages scroll by themselves
+  const thr = innerWidth < 1000 && e.target.closest && e.target.closest('#chat .cvp');
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !sysOn() && !typing && !thr ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
@@ -1911,11 +1893,35 @@ function pgraph(d) {
 // #407: kept on the device (IndexedDB), as each thread's draft text is (localStorage `draft:<t>`).
 var THR = DBG.get('thread') || sget('thread') || '', ATS = {}, HP = {}; // #404 HP: an empty thread's harness pick
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
+// #443: `--kb`, the keyboard's height: the part of the layout viewport under the visual one (iOS never shrinks the
+// first); a phone's open thread ends there (serve.css). iOS scrolls the page to show a focused box: put back. A change
+// in the messages' height (the keyboard, the box growing, a turn) moves their scroll by as much, so the message just
+// above the box stays just above it.
+// #488: the layout viewport is the root's clientHeight: iOS shrinks `innerHeight` with the visual one. A Home Screen
+// app may fire no `resize` as the keyboard opens or closes, so a focus change measures again as the keyboard moves.
+const kbFit = () => {
+  if (vv) document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(document.documentElement.clientHeight - vv.height - vv.offsetTop)) + 'px');
+  if (THR && document.documentElement.dataset.tab === 'chat' && innerWidth < 1000 && scrollY) scrollTo(0, 0);
+};
+if (vv) { vv.addEventListener('resize', kbFit); vv.addEventListener('scroll', kbFit); }
+addEventListener('resize', kbFit);
+['focusin', 'focusout'].forEach(k => addEventListener(k, () => [0, 150, 300, 600, 1000].forEach(ms => setTimeout(kbFit, ms))));
+// (Their bottom edge is kept, `end`: a scroll only moves it at the height last seen, so the browser clamping a grown
+// list's scroll is never counted.)
+const tcKeep = new ResizeObserver(es => es.forEach(({ target: c }) => {
+  const h = c.clientHeight;
+  if (c.kh && h) c.scrollTop = c.end - h;
+  c.kh = h;
+  c.end = c.scrollTop + h;
+}));
+document.addEventListener('scroll', e => { const c = e.target; if (c.kh && c.clientHeight === c.kh) c.end = c.scrollTop + c.kh; }, true);
+// The open thread's scroller: on a phone its messages, from 1000 px the page.
+const thrSc = () => innerWidth < 1000 && THR ? $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc`) : null;
 function chatOpen(t) {
   THR = t;
   sput('thread', t);
   const q = CSS.escape(t);
-  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}html[data-tab=chat],html[data-tab=chat] body{height:100%;overflow:hidden}html[data-tab=chat] .msg.r{position:fixed;top:calc(2 * var(--hit) + var(--s1) + 2 * var(--s2))}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
   if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
   if (es && (es.t || '') !== watching()) connect(); // #407: the stream names the open thread (no push for it)
@@ -1936,11 +1942,13 @@ var FOL = true, PIN = null, held = -1e9;
 addEventListener('touchstart', () => { held = 1; }, { passive: true });
 addEventListener('touchend', () => { held = performance.now(); }, { passive: true });
 addEventListener('wheel', () => { held = performance.now(); }, { passive: true });
-addEventListener('scroll', () => {
+addEventListener('scroll', e => {
   if (!THR || document.documentElement.dataset.tab !== 'chat') return;
-  const end = scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+  const c = thrSc();
+  if (c ? e.target !== c : e.target.matches) return;
+  const end = c ? c.scrollTop + c.clientHeight >= c.scrollHeight - 2 : scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
   if (end) FOL = true; else if (held === 1 || performance.now() - held < 500) FOL = false;
-}, { passive: true });
+}, { passive: true, capture: true });
 function chatPin() {
   const v = PIN && $(`#chat .cvp[data-t="${CSS.escape(PIN.t)}"]`), tc = v && v.querySelector('.tc');
   if (!tc) return;
@@ -1954,7 +1962,7 @@ function chatPin() {
   let pad = base;
   for (let i = 0; i < 5; i++) { // (room that a short page's screen still swallows takes another pass)
     tc.style.paddingBottom = pad + 'px';
-    scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+    chatBottom();
     const err = e.getBoundingClientRect().top - Math.max(0, ...[$('header'), v.querySelector('.th')].map(x => x.getBoundingClientRect().bottom)) - s4;
     if (Math.abs(err) < 1) break;
     pad = Math.max(base, pad + err);
@@ -1963,9 +1971,16 @@ function chatPin() {
 }
 // (Also when the thread's size changes under it: an image loading, the layout above settling.)
 if ($('#chat')) new ResizeObserver(() => chatFollow()).observe($('#chat'));
+function chatBottom() {
+  const c = thrSc();
+  if (!c) return void scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+  tcKeep.observe(c);
+  c.scrollTop = c.scrollHeight;
+  c.end = c.scrollTop + c.clientHeight;
+}
 function chatFollow() {
   chatPin();
-  if (FOL && THR && document.documentElement.dataset.tab === 'chat') scrollTo(0, document.documentElement.scrollHeight);
+  if (FOL && THR && document.documentElement.dataset.tab === 'chat') chatBottom();
 }
 // Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
 // (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
@@ -2018,7 +2033,8 @@ function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.t
 function chatKeep(root) {
   root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
     const tc = $(`#chat .cvp[data-t="${CSS.escape(m.closest('.cvp').dataset.t)}"] .tc`);
-    const old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b) : [];
+    // #460: a block the copy carries anyway (a waiting config card kept under its marker) is not taken twice.
+    const nu = m.closest('.tc'), old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b && !nu.querySelector(`:scope>[data-n="${c.dataset.n}"]`)) : [];
     if (old.length) m.replaceWith(tc.firstElementChild.cloneNode(true), ...old.map(c => c.cloneNode(true)));
   });
 }
@@ -2035,9 +2051,14 @@ async function chatOlder() {
   t.innerHTML = h;
   clocks(t);
   m.replaceWith(...t.childNodes);
-  if (a) scrollBy(0, a.getBoundingClientRect().top - y);
+  // (#443: on a phone the messages scroll by themselves, the page never)
+  const c = innerWidth < 1000 ? a && a.parentElement : null;
+  if (a) c ? c.scrollTop += a.getBoundingClientRect().top - y : scrollBy(0, a.getBoundingClientRect().top - y);
 }
-addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
+addEventListener('scroll', e => {
+  const c = e.target;
+  if (document.documentElement.dataset.tab === 'chat' && (c.matches ? c.matches('#chat .tc') && c.scrollTop < c.clientHeight : scrollY < innerHeight)) chatOlder();
+}, { passive: true, capture: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 // #407: each thread's draft is kept as you type (not a queued message being edited).
@@ -2099,6 +2120,7 @@ document.addEventListener('click', async e => {
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .tmo')) chatOlder();
+  else if (t.closest('#chat .th .cw')) { FOL = false; t.closest('.cvp').querySelector('.tc .chc')?.closest('.blk').scrollIntoView({ block: 'center' }); } // #460: to the waiting card
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }
@@ -2350,3 +2372,97 @@ for (const k of ['touchend', 'touchcancel']) addEventListener(k, e => {
   v.style.transform = '';
   if (back) chatBack();
 });
+// #440: [⚙] (every tab, in [◐]'s place) opens the System sheet: one scroller, a section index on top (a rail at ≥ 900
+// px), the sections in the owner's order. Hosts & health and Activity are the old Host and Events tabs' sections (same
+// ids: the TypeScript board, `/live` and frag() paint them here); Agent providers, Fleets, Notifications and Conductor
+// are the board's (web/src/system.ts), Appearance the look sheet's. Its own layer: a lane or setup sheet opens over it.
+const SECS = [['providers', 'agent providers', 'providers'], ['fleets', 'fleets'], ['hosts', 'hosts & health', 'hosts', 'tab-host'],
+  ['activity', 'activity', 'activity', 'tab-events'], ['notifications', 'notifications & devices', 'alerts'], ['conductor', 'conductor'], ['appearance', 'appearance', 'look']];
+const syh = (n, w) => `<h2 class=syh><span class=syt data-p="${n}"${w ? ` data-w=${w}` : ''}>${n}</span><small class=sym></small></h2>`;
+B.insertAdjacentHTML('beforeend', `<div id=sys hidden><div class=sbd></div><div class="sh lg sys full" role=dialog aria-modal=true aria-labelledby=syst>
+<div class=hd><p><b id=syst>system</b><button type=button class=sxc aria-label="close system">close</button></p></div>
+<div class=sxi role=navigation aria-label="system sections">${SECS.map(([id, , c]) => `<a href=#system/${id} data-s=${id}><span>${c || id}</span><i class=sd hidden></i></a>`).join('')}</div>
+<div class=top>${SECS.map(([id, n, , w]) => `<section class=sy id=sy-${id} data-s=${id}>${id === 'hosts' ? syh(n, w) + '<section id=host></section>' : id === 'activity' ? syh(n, w) + '<section id=events></section>' : id === 'appearance' ? syh(n) + '<div class=look></div>' : ''}</section>`).join('')}</div></div></div>`);
+// `var`: connect() and frag() may ask before this line runs.
+var SY = $('#sys'), ytop = SY.querySelector('.top'), sysb = $('#sysb');
+function sysOn() { return !!SY && !SY.hidden; }
+var sysBack = 'queue', sysWant = '', sysPin = '';
+// Open at a section (Fleets: and that fleet's row, open); the hash says `#system/<section>[/<fleet>]`.
+function sysopen(sec = 'providers', sub = '', smooth = false) {
+  if (!SECS.some(s => s[0] === sec)) sec = 'providers';
+  if (!sysOn()) {
+    sysBack = document.documentElement.dataset.tab;
+    SY.hidden = false;
+    document.documentElement.classList.add('sysopen');
+    if (es) connect(); // the stream names `host` while System is open (#352: process sampling on)
+  }
+  lsheet();
+  sysWant = sec === 'fleets' ? sub || '' : '';
+  sysPin = smooth ? '' : sec;
+  sysgo(sec, smooth);
+  history.replaceState(null, '', `#system/${sec}${sysWant ? '/' + sysWant : ''}`);
+}
+function sysgo(sec, smooth) {
+  const d = sysWant && [...$$('.sfl')].find(x => x.dataset.f === sysWant);
+  if (d) d.open = true;
+  const t = d || $('#sy-' + sec);
+  ytop.scrollTo({ top: sec === 'providers' && !d ? 0 : t.offsetTop, behavior: smooth ? 'smooth' : 'instant' });
+  spy();
+}
+function sysshut() {
+  if (!sysOn()) return;
+  SY.hidden = true;
+  document.documentElement.classList.remove('sysopen');
+  history.replaceState(null, '', '#' + sysBack);
+  sysb.focus({ preventScroll: true });
+  if (es) connect();
+}
+// The index follows the scroll: the section at the top is filled (the last one at the end) and kept in view.
+function spy() {
+  const y = ytop.scrollTop + 8, all = [...$$('.sy')], end = ytop.scrollTop + ytop.clientHeight >= ytop.scrollHeight - 2;
+  const cur = end ? all[all.length - 1] : all.filter(s => s.offsetTop <= y).pop() || all[0];
+  $$('.sxi a').forEach(a => {
+    const on = a.dataset.s === cur.dataset.s, n = a.parentNode, l = a.offsetLeft - n.offsetLeft;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+    if (on && (l < n.scrollLeft || l + a.offsetWidth > n.scrollLeft + n.clientWidth)) n.scrollLeft = l - 16;
+  });
+}
+ytop.addEventListener('scroll', () => requestAnimationFrame(spy), { passive: true });
+for (const k of ['pointerdown', 'wheel', 'keydown']) ytop.addEventListener(k, () => { sysPin = sysWant = ''; }, { passive: true });
+// Fleets as the board drew it: each pipeline graph, the pickers off in a demo or offline, the row a link named opened.
+function sysfleets(root) {
+  root.querySelectorAll('[data-pipe]').forEach(pipeline);
+  root.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
+  if (sysWant && sysOn()) sysgo('fleets');
+}
+// [⚙]'s dot and the [hosts] chip's: a host card is red (past a limit, under a floor, or down); the Hosts head says why.
+function alarm() {
+  const r = [...$$('#host .hcd')].filter(c => c.dataset.c === 'r');
+  const why = r.length ? `${r.map(c => c.dataset.h).join(', ')}: ${(r[0].querySelector('.hw')?.textContent || 'alert').split(' · ').pop()}` : '';
+  $$('#sysb .sd, .sxi a[data-s=hosts] .sd').forEach(d => { d.hidden = !r.length; });
+  sysb.setAttribute('aria-label', r.length ? `system (host alert: ${why})` : 'system');
+  sysb.title = r.length ? `host alert · ${why}` : 'system';
+  $('#sy-hosts').dataset.t = r.length ? 'r' : '';
+  $('#sy-hosts .sym').textContent = r.length ? `alert · ${why}` : `${$$('#host .hcd').length} hosts · all clear`;
+}
+// The old tabs' theme words name their sections now: `barn · hosts & health`, `logbook · activity`.
+function syswords() { $$('#sys .syt[data-w]').forEach(p => { const h = tw(p.dataset.w, p.dataset.p); if (p.innerHTML !== h) p.innerHTML = h; }); }
+// Routes: `#system/<section>[/<fleet>]` opens there; the old `#host`, `#events`, `#config[/<fleet>]` land on the Queue
+// tab with the sheet at Hosts & health, Activity, Fleets (the head script already took a stored `host`/`events` to Queue).
+const OLD = { host: 'hosts', events: 'activity', config: 'fleets' };
+function sysroute() {
+  const [h, sec, sub] = decodeURIComponent(location.hash.slice(1)).split('/');
+  if (h === 'system') return sysopen(sec, sub);
+  if (OLD[h]) { tab('queue'); sysopen(OLD[h], sec); }
+}
+addEventListener('hashchange', sysroute);
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.closest('#sysb')) return sysopen();
+  if (t.closest('.sxc, .sbd')) return sysshut();
+  const a = t.closest('.sxi a, #sys a.go');
+  if (a) { e.preventDefault(); const [, s, f] = a.getAttribute('href').slice(1).split('/'); sysopen(s, f && decodeURIComponent(f), true); }
+});
+addEventListener('keydown', e => { if (e.key === 'Escape' && sysOn() && !shown()) sysshut(); });
+sysroute();

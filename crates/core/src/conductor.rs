@@ -276,6 +276,11 @@ pub fn post(
 /// #403: `say`'s second half: type `line` into thread `t`'s conductor, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
+    // #477: one delivery per thread at a time (across processes too): a message waits for a start in flight.
+    let dir = dir(ctx, cfg, id);
+    std::fs::create_dir_all(&dir)?;
+    let lock = std::fs::File::create(dir.join(".deliver.lock"))?;
+    lock.lock()?;
     let events = read(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;
@@ -548,17 +553,39 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     h.ready(ctx, r, &p)?;
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
-    let pane = &herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
-    let wsid = pane.split(':').next().unwrap_or(pane);
-    herdr::ok(r, &p.lane_cmd(pane))?;
-    let o = herdr::exec(r, &p.start_cmd(ctx, pane))?;
+    let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
+    let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
+    herdr::ok(r, &p.lane_cmd(&new))?;
+    let o = herdr::exec(r, &p.start_cmd(ctx, &new))?;
+    let mut pane = new.clone();
     if o.code != 0 {
-        let _ = herdr::workspace_close(r, wsid);
-        bail!("herdr agent start failed: {}", o.stderr.trim());
+        // #477: a start that timed out (or found its name taken) whose agent is up in the thread's folder is adopted.
+        let soft = ["timeout", "agent_name_taken"]
+            .iter()
+            .any(|c| herdr::failed_with(&o, c));
+        let list = if soft { herdr::agents(r)? } else { vec![] };
+        let mine = |a: &&Value| {
+            a["name"] == agent.as_str() && a["cwd"].as_str().map(std::path::Path::new) == Some(dir.as_path())
+        };
+        let up = list.iter().find(mine).and_then(|a| a["pane_id"].as_str());
+        if up.is_none_or(|p| ws(p) != ws(&new)) {
+            let _ = herdr::workspace_close(r, &ws(&new));
+        }
+        pane = match up {
+            Some(p) => p.into(),
+            None => bail!("herdr agent start failed: {}", herdr::message(&o)),
+        };
     }
-    let kicked = h.kick(r, &p, pane).unwrap_or(false);
-    let d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": wsid, "harness": p.harness, "model": p.model, "effort": p.effort,
+    // Its own new pane gets the kick; one elsewhere (the name taken) or a kick that didn't land gets the line.
+    let kicked = pane == new && h.kick(r, &p, &pane).unwrap_or(false);
+    if o.code != 0 && !kicked {
+        herdr::reply(r, p.harness == "dsh", &agent, &pane, &line.replace('\n', " "))?;
+    }
+    let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
         "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
+    if o.code != 0 {
+        d["adopted"] = json!(true);
+    }
     emit(
         &ctx.state,
         cfg,

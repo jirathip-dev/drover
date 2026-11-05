@@ -49,6 +49,13 @@ fn seed(home: &Path, name: &str) {
     std::fs::write(state.join("events.jsonl"), serde_json::to_string(&ev).unwrap() + "\n").unwrap();
 }
 
+/// `seed`, then its log imported into `state.db` as a build after #344 left it (this test's own HOME is not `h`).
+fn seed_db(home: &Path, name: &str) {
+    seed(home, name);
+    let state = home.join(".local/state").join(name).join("events.jsonl");
+    herdsman::db::migrate(&state, &mut std::io::sink()).unwrap();
+}
+
 /// Every path under `dir` with its mtime and (for files) contents.
 fn snapshot(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, Vec<u8>)> {
     let md = std::fs::symlink_metadata(dir).unwrap();
@@ -89,8 +96,8 @@ fn version_and_help_touch_nothing() {
 #[test]
 fn status_reads_old_paths_in_place_and_hints_once() {
     let h = tmpdir("migrate-fallback");
-    seed(&h, "fleet");
-    let before = snapshot(&h);
+    seed_db(&h, "fleet");
+    let before = snapshot(&h.join(".config"));
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!(code, 0, "{err}");
     assert!(
@@ -106,7 +113,8 @@ fn status_reads_old_paths_in_place_and_hints_once() {
     assert_eq!(err.matches(&hint("config", ".config/fleet")).count(), 1, "{err}");
     assert_eq!(err.matches(&hint("state", ".local/state/fleet")).count(), 1, "{err}");
     assert_eq!(err.lines().count(), 2, "{err}");
-    assert_eq!(snapshot(&h), before, "nothing moved");
+    assert!(h.join(".local/state/fleet/state.db").exists());
+    assert_eq!(snapshot(&h.join(".config")), before, "nothing moved");
     assert!(!moved(&h));
 }
 
@@ -121,12 +129,12 @@ fn status_with_neither_home_is_an_empty_board_without_hint() {
 #[test]
 fn existing_new_dirs_win_and_old_ones_are_left_alone() {
     let h = tmpdir("migrate-both");
-    seed(&h, "fleet");
-    seed(&h, "herdsman");
+    seed_db(&h, "fleet");
+    seed_db(&h, "herdsman");
     std::fs::write(h.join(".config/fleet/fleet.toml"), "# old\n").unwrap();
     let (code, _, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
-    let (code, out, _) = run(&h, &["migrate"]);
+    let (code, out, _) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0);
     assert_eq!(out.matches("already exists").count(), 2, "{out}");
     assert_eq!(
@@ -137,14 +145,14 @@ fn existing_new_dirs_win_and_old_ones_are_left_alone() {
         std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
         CONFIG
     );
-    assert!(h.join(".local/state/fleet/events.jsonl").exists());
+    assert!(h.join(".local/state/fleet/state.db").exists());
 }
 
 #[test]
 fn migrate_moves_both_once() {
     let h = tmpdir("migrate-move");
     seed(&h, "fleet");
-    let (code, out, err) = run(&h, &["migrate"]);
+    let (code, out, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     for d in [".config", ".local/state"] {
         let line = format!(
@@ -159,13 +167,19 @@ fn migrate_moves_both_once() {
         std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
         CONFIG
     );
-    assert!(h.join(".local/state/herdsman/events.jsonl").exists());
-    // Second run: a no-op.
-    let before = snapshot(&h);
-    let (code, again, err) = run(&h, &["migrate"]);
+    // #344: and its log imported into the database there.
+    let st = h.join(".local/state/herdsman");
+    assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
+    // Second run: a no-op (#344: nothing left to import either; the database's own files may be touched).
+    let before = snapshot(&h.join(".config"));
+    let (code, again, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     assert!(!again.contains("moved") && again.contains("nothing to move"), "{again}");
-    assert_eq!(snapshot(&h), before);
+    assert!(
+        again.contains("imported 0 log file(s)") && again.contains("holds 1 events"),
+        "{again}"
+    );
+    assert_eq!(snapshot(&h.join(".config")), before);
     // And status reads the new paths, no hint.
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
@@ -175,7 +189,7 @@ fn migrate_moves_both_once() {
 #[test]
 fn migrate_with_nothing_to_move_says_so() {
     let h = tmpdir("migrate-empty");
-    let (code, out, err) = run(&h, &["migrate"]);
+    let (code, out, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(out.matches("nothing to move").count(), 2, "{out}");
     assert!(!h.join(".config").exists());
@@ -188,7 +202,7 @@ fn failed_state_move_rolls_the_config_move_back() {
     seed(&h, "fleet");
     let parent = h.join(".local/state");
     std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let (code, out, err) = run(&h, &["migrate"]);
+    let (code, out, err) = run(&h, &["migrate", "--live"]);
     std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_ne!(code, 0, "{out}");
     let (old, new) = (parent.join("fleet"), parent.join("herdsman"));
@@ -216,7 +230,7 @@ fn symlinked_old_dir_migrates_as_a_link() {
     seed(&h, "real");
     std::os::unix::fs::symlink(h.join(".config/real"), h.join(".config/fleet")).unwrap();
     std::os::unix::fs::symlink(h.join(".local/state/real"), h.join(".local/state/fleet")).unwrap();
-    let (code, _, err) = run(&h, &["migrate"]);
+    let (code, _, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
@@ -261,7 +275,7 @@ const EMPTY: [(&str, &str); 4] = [
 #[test]
 fn empty_path_vars_resolve_to_the_defaults() {
     let h = tmpdir("migrate-empty-vars");
-    seed(&h, "herdsman");
+    seed_db(&h, "herdsman");
     for home in ["", h.to_str().unwrap()] {
         let envs: Vec<_> = EMPTY.iter().copied().chain([("HERDSMAN_HOME", home)]).collect();
         let (code, out, err) = run_in(&h, &["status"], &envs, "");
@@ -273,7 +287,7 @@ fn empty_path_vars_resolve_to_the_defaults() {
     }
     // Empty HERDSMAN_HOME falls back to $HOME, pre-rename hint included.
     let old = tmpdir("migrate-empty-vars-old");
-    seed(&old, "fleet");
+    seed_db(&old, "fleet");
     let envs: Vec<_> = EMPTY.iter().copied().chain([("HERDSMAN_HOME", "")]).collect();
     let (code, out, err) = run_in(&old, &["status"], &envs, "");
     assert_eq!(code, 0, "{err}");
@@ -308,4 +322,30 @@ fn migrate_refuses_an_empty_herdsman_home_and_leaves_the_cwd_alone() {
         (bh, bc),
         "neither $HOME nor ./.config touched"
     );
+}
+
+/// #344: a build run on the owner's default state dir never imports its log on its own: the installed build still
+/// reads `events.jsonl`. Only `migrate --live` does.
+#[test]
+fn the_live_state_dir_is_migrated_only_with_live() {
+    let h = tmpdir("migrate-live");
+    seed(&h, "herdsman");
+    let st = h.join(".local/state/herdsman");
+    let before = snapshot(&st);
+    for args in [&["status"][..], &["migrate"]] {
+        let (code, _, err) = run(&h, args);
+        assert_ne!(code, 0, "{args:?} refuses");
+        assert!(err.contains("migrate --live"), "{args:?}: {err}");
+    }
+    assert_eq!(snapshot(&st), before, "the log stays, no database made");
+    let (code, out, err) = run(&h, &["migrate", "--live"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.contains("imported 1 log file(s)") && out.contains("holds 1 events"),
+        "{out}"
+    );
+    assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
+    let (code, out, err) = run(&h, &["status"]);
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert!(out.contains("merged"), "{out}");
 }

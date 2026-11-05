@@ -321,7 +321,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules): (Option<&str>, Option<&str>),
+    (fix, rules, repro): (Option<&str>, Option<&str>, bool),
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -343,6 +343,14 @@ fn brief(
             issue = issue
         ),
     };
+    // #420: a `--repro` issue's steps: impl's failing test first, rev's proof it fails on base and passes at head.
+    let steps = match (repro, p.family, p.stage.as_str()) {
+        (false, ..) | (_, "design", _) => "",
+        (_, "rev", "verify") => include_str!("../roles/brief-repro-verify.md"),
+        (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
+        _ => include_str!("../roles/brief-repro-impl.md"),
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
@@ -373,7 +381,7 @@ fn create_argv(local: &str, p: &Plan, reopen: bool) -> Vec<String> {
     }
 }
 
-/// #298: a berth lane's labels.
+/// #298: a shed lane's labels.
 fn labels(p: &Plan) -> [(&'static str, String); 4] {
     let issue = p.lane.split(':').nth(1).unwrap_or_default().to_string();
     let fleet = p.lane.split(':').next().unwrap_or_default().to_string();
@@ -385,7 +393,7 @@ fn labels(p: &Plan) -> [(&'static str, String); 4] {
     ]
 }
 
-/// #298: `git worktree add` for a berth lane: its branch checked out if it exists (`have`), else made at the base.
+/// #298: `git worktree add` for a shed lane: its branch checked out if it exists (`have`), else made at the base.
 fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     let wt = p.worktree.to_string_lossy();
     if have {
@@ -406,22 +414,22 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         "git",
         argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
     )];
-    if on.berth().is_some() {
-        // #298: plain git makes the worktree; the lane is berth terminal `<agent>`, its shell typed into.
+    if on.shed().is_some() {
+        // #298: plain git makes the worktree; the lane is shed terminal `<agent>`, its shell typed into.
         let pane = p.agent.as_str();
         cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
-        let run = herdr::Berth::run_params(pane, &labels(p), &p.worktree.to_string_lossy());
-        cmds.push(sent("berth", argv(&["run", &json!(run).to_string()])));
+        let run = herdr::Shed::run_params(pane, &labels(p), &p.worktree.to_string_lossy());
+        cmds.push(sent("shed", argv(&["run", &json!(run).to_string()])));
         let typed = [
             home(p.lane_cmd(pane)),
             herdr::typed(pane, &home(p.start_cmd(ctx, pane))),
         ];
-        let shown = |a: Vec<String>| herdr::berth_line(&a)[1..].to_vec();
+        let shown = |a: Vec<String>| herdr::shed_line(&a)[1..].to_vec();
         cmds.extend(
             typed
                 .into_iter()
                 .chain(p.kick_cmds(pane))
-                .map(|a| sent("berth", shown(a))),
+                .map(|a| sent("shed", shown(a))),
         );
     } else {
         cmds.push(sent(herdr::BIN, create_argv(local, p, reopen)));
@@ -591,7 +599,7 @@ pub fn spawn(
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;
-    let bt = r.berth().map(herdr::Berth);
+    let bt = r.shed().map(herdr::Shed);
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     // Duplicate guard.
@@ -777,7 +785,11 @@ pub fn spawn(
                 &p,
                 title,
                 &decided.fold(body.to_string(), |b, d| b + &d),
-                (fix, on.read(&p.worktree.join(".herdsman/rules.md")).as_deref()),
+                (
+                    fix,
+                    on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
+                    crate::queue::repro(&events, fleet, issue),
+                ),
             ),
         )
     };
@@ -847,7 +859,9 @@ pub fn spawn(
         if start.code != 0 && !late {
             screen = tail(r, &pane);
             if let Some((prompt, keys)) = h.startup_prompt(&screen) {
-                herdr::keys(r, &pane, &keys)?;
+                for k in &keys {
+                    herdr::keys(r, &pane, k)?;
+                }
                 event(
                     "startup-prompt",
                     json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
@@ -923,7 +937,7 @@ pub fn spawn(
             };
             let mut d = lane_data(&p, &pane, &ws);
             if bt.is_some() {
-                d["runtime"] = json!("berth");
+                d["runtime"] = json!("shed");
             }
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d["confirmed"] = json!(confirmed);

@@ -331,7 +331,18 @@ enum Cmd {
         cmd: ProfilesCmd,
     },
     /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
-    Migrate,
+    Migrate {
+        /// Allow it on the live state dir (~/.local/state/herdsman); without it migrate refuses there
+        #[arg(long)]
+        live: bool,
+    },
+    /// The event log in its JSONL format (one event a line, with its seq), for external readers
+    #[command(hide = true)]
+    Events {
+        /// Print it as JSONL (the only format)
+        #[arg(long, required = true)]
+        jsonl: bool,
+    },
     /// Landing numbers: `stats land <fleet>`
     Stats {
         #[command(subcommand)]
@@ -472,6 +483,9 @@ enum QueueCmd {
         /// Force the verify stage on (plain) or off, whatever the PR touches
         #[arg(long, num_args = 0..=1, default_missing_value = "on", value_parser = ["on", "off"])]
         verify: Option<String>,
+        /// A bug fix: impl's first commit is a failing test, rev proves it fails on base and passes at head
+        #[arg(long)]
+        repro: bool,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -489,10 +503,10 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
-    /// Replace a queued issue's `needs` host tags, serial groups, design or verify mark (`queue set 12 needs docker,gpu`; `design on|off`)
+    /// Replace a queued issue's `needs` host tags, serial groups, design, verify or repro mark (`queue set 12 needs docker,gpu`; `design on|off`)
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs", "serial", "design", "verify"])]
+        #[arg(value_parser = ["needs", "serial", "design", "verify", "repro"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -582,8 +596,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #404's `thread new --harness`, +1 for #461's conductor `timer install`).
-pub const HELP_AGENT_MAX: usize = 289;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +1 for #404's `thread new --harness`).
+pub const HELP_AGENT_MAX: usize = 291;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -637,7 +651,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     };
     if !matches!(
         cli.cmd,
-        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate | Cmd::Help { .. }
+        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate { .. } | Cmd::Help { .. }
     ) {
         for h in &ctx.hints {
             eprintln!("{h}");
@@ -653,11 +667,11 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "berth"`: lanes start, and are reached, on berth.
+    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed.
     let with = Config::load(&ctx.config)
         .ok()
-        .and_then(|c| c.runtime.berth())
-        .map(|b| crate::berth::With(r, b));
+        .and_then(|c| c.runtime.shed())
+        .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
         Some(o) => o.map(|o| {
@@ -687,8 +701,9 @@ pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Resu
     let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
     let main = std::env::var("HERDSMAN_MAIN").ok()?;
     let (host, exe) = main.split_once(':')?;
-    if ctx.state.exists() {
-        let s = ctx.state.display();
+    if crate::db::file(&ctx.state).exists() {
+        let s = crate::db::file(&ctx.state);
+        let s = s.display();
         eprintln!("herdsman: warning: {s} exists on a lane's host; only the main host's log counts");
     }
     let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
@@ -703,10 +718,25 @@ pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write)
 
 fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read) -> Result<i32> {
     match cmd {
-        Cmd::Migrate if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
+        Cmd::Migrate { .. } if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
             bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
         }
-        Cmd::Migrate => migrate(&ctx.home, out)?,
+        Cmd::Migrate { live: false } if crate::db::live(&ctx.state) => bail!(
+            "{} is the live state dir: `herdsman migrate --live` to migrate it",
+            ctx.state.parent().unwrap_or(std::path::Path::new(".")).display()
+        ),
+        Cmd::Migrate { live } => {
+            crate::db::LIVE.store(live, std::sync::atomic::Ordering::Relaxed);
+            migrate(&ctx.home, out)?;
+            // The log where the move above put it: this command's own state, never the environment's.
+            let old = ctx.home.join(".local/state/fleet");
+            let state = match ctx.state.strip_prefix(&old) {
+                Ok(rest) if !old.exists() => ctx.home.join(".local/state/herdsman").join(rest),
+                _ => ctx.state.clone(),
+            };
+            crate::db::migrate(&state, out)?;
+        }
+        Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -913,6 +943,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 if r["design"] == true {
                     on += "  design";
+                }
+                if r["repro"] == true {
+                    on += "  repro";
                 }
                 if let Some(v) = r["verify"].as_bool() {
                     on += if v { "  verify on" } else { "  verify off" };
@@ -1221,6 +1254,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             needs,
                             design,
                             verify,
+                            repro,
                         } => {
                             // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
                             let g =
@@ -1246,6 +1280,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             if let Some(v) = verify {
                                 d["verify"] = json!(v);
                             }
+                            if repro {
+                                d["repro"] = json!(true);
+                            }
                             d
                         }
                         QueueCmd::Set { issue, key, tags } => {
@@ -1254,7 +1291,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 "no such serial group: {tags:?}"
                             );
                             let on = ["on", "off"].iter().any(|o| tags == [*o]);
-                            anyhow::ensure!(!["design", "verify"].contains(&&*key) || on, "{key} is `on` or `off`");
+                            anyhow::ensure!(
+                                !["design", "verify", "repro"].contains(&&*key) || on,
+                                "{key} is `on` or `off`"
+                            );
                             let mut d = queue::op("set", &[issue], false, None, None, None);
                             d[key.as_str()] = json!(tags);
                             d
@@ -1310,23 +1350,24 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         eprintln!("herdsman hook: input is not JSON; allowing");
         return Ok(());
     };
-    // #298: in a berth terminal (`$BERTH`) the hook reports the turn's state, so nothing reads it off the screen.
-    if let (Ok(name), Some(state)) = (std::env::var("BERTH"), hook::reported(&input)) {
-        let w = r.berth().map_or_else(
-            || crate::berth::Wire::Socket(crate::berth::default_socket()),
-            |b| b.wire,
-        );
-        let report = berth_proto::Reported {
+    // #298: in a shed terminal (`$SHED`; #455: or berth's `$BERTH`) the hook reports the turn's state, so nothing
+    // reads it off the screen.
+    let term = std::env::var("SHED").or_else(|_| std::env::var("BERTH"));
+    if let (Ok(name), Some(state)) = (term, hook::reported(&input)) {
+        let w = r
+            .shed()
+            .map_or_else(|| crate::shed::Wire::Socket(crate::shed::default_socket()), |b| b.wire);
+        let report = shed_proto::Reported {
             state: state.into(),
             note: None,
         };
-        if let Err(e) = crate::berth::call(
+        if let Err(e) = crate::shed::call(
             r,
             &w,
-            berth_proto::Method::State,
-            json!(berth_proto::StateParams { name, report }),
+            shed_proto::Method::State,
+            json!(shed_proto::StateParams { name, report }),
         ) {
-            eprintln!("herdsman hook: berth state: {e:#}");
+            eprintln!("herdsman hook: shed state: {e:#}");
         }
     }
     // #304: a turn's end or a push that went through kicks the lane's issue at once.

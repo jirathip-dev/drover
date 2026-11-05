@@ -245,8 +245,10 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
     let host = host_tab(&s, ADDR, T);
     assert!(
-        host.contains("`herdsman serve approve &lt;code&gt;` here") && !(page.clone() + &host).contains("<code>"),
-        "the hint is text, never an open tag"
+        host.contains(
+            "no paired device yet: tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code>"
+        ) && !(page.clone() + &host).contains("approve <code>"),
+        "the hint's placeholder is text, never an open tag"
     );
     let res = req(
         &s,
@@ -338,7 +340,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{ev:?}"
     );
     assert!(
-        !std::fs::read_to_string(&c.state)
+        !herdsman::events::jsonl(&c.state)
             .unwrap()
             .contains(&mine[11..mine.len() - 2]),
         "no token in the log"
@@ -441,8 +443,8 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(String::from_utf8_lossy(&s.respond(evil, T)).starts_with("HTTP/1.1 403 "));
     // A valid code sets the cookie; only the token's hash is stored, 0600.
     let cookie = paired(&s, &c);
-    let file = c.state.parent().unwrap().join("serve/devices.json");
-    let stored = std::fs::read_to_string(&file).unwrap();
+    let file = herdsman::db::file(&c.state); // #344: the devices' home
+    let stored = serde_json::to_string(&herdsman::devices::load(&c)).unwrap();
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let tok = &cookie[11..cookie.len() - 2];
@@ -470,7 +472,7 @@ fn pairing_codes_devices_and_prompt_events() {
         json!({"via": "web", "agent": "sendmeter-impl-12", "device": label, "chars": 18})
     );
     assert!(
-        !std::fs::read_to_string(&c.state).unwrap().contains("secret"),
+        !herdsman::events::jsonl(&c.state).unwrap().contains("secret"),
         "no message text in the log"
     );
     // ESC, Ctrl-C, DEL, CR and tab are refused; a leading `-` goes through verbatim as herdr's text argument.
