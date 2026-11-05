@@ -27,6 +27,7 @@ pub mod pipeline;
 pub mod propose;
 pub mod protection;
 pub mod queue;
+pub mod report;
 pub mod runner;
 pub mod secret;
 pub mod setup;

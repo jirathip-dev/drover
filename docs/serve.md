@@ -138,8 +138,8 @@ herdsman can only close its pane"; read-only pages and unpaired phones don't get
 actions: `"acts": ["close"]` (with `"pane"`) for Others, `["stop", "kill", "clean"]` for lanes. Each POSTs `/act {agent, op, confirm}`:
 a paired device, the Host/Origin checks and the 10-a-minute limit, logged
 `{"type":"act","via":"web","agent","device","op"}` (dry runs are not logged). Typing `/` first in
-the reply box lists `/stop`, `/kill`, `/clean` (the actions) and `/compact`, `/clear`, `/status`
-(sent to the agent as text), filtered as you type; tap or Enter picks. Inputs are 16 px (iOS
+the reply box lists `/stop`, `/kill`, `/clean` (the actions), `/compact`, `/clear`, `/status`
+(sent to the agent as text) and `/report` (report mode, below), filtered as you type; tap or Enter picks. Inputs are 16 px (iOS
 never zooms), the page under the sheet is scroll-locked and the sheet follows `visualViewport`,
 so the composer stays above the keyboard and is still there when it closes.
 
@@ -261,6 +261,18 @@ rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[â—
 default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
 writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
+
+## Report mode (#363)
+
+`/report` in the reply box's `/` menu closes the sheet and turns the board into report mode: a tap outlines an
+element (a tap on the toast stops), a second tap on it opens a one-line note box at the bottom. **Send** POSTs
+`/report`: the element's outerHTML (trimmed to 8 KB), its key computed styles, the board's context (tab, theme,
+scheme, style, viewport and the last `/live` id) and a PNG of the element plus 24 px around it, drawn on a canvas
+from the layout (each box's background and border, then each word; no images or gradients). A paired device only,
+with the Host/Origin checks and the 10-a-minute limit; nothing leaves the Mac. `serve` keeps the bundle as
+`state/reports/<id>/bundle.json` (plus the build) and `shot.png`, and emits a `report` event whose line names the
+bundle path to every notifier but web push, whatever its `on` (the first fleet's notifiers). `herdsman report` lists the reports,
+newest first; `herdsman report <id>` prints one bundle.
 
 ## Alerts (web push)
 
