@@ -97,6 +97,11 @@ issue and PR comments, `gh pr review`, `git push` to main, master, staging or th
 integration branch, and edits to fleet and Hermes profile config. Reviewer lanes are
 read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`.
 
+The hook fails closed (#508): in a lane, a call whose input isn't JSON or names no tool, under a fleet.toml that
+doesn't load, or from a lane whose fleet isn't in it is denied `REFUSED HOOK_FAILED_CLOSED: <what failed>; fix it,
+or ask the owner`. Each logs `hook-failed-closed` (lane and cause, never the command), alerted once per cause an
+hour. Its rules come from the binary and the loaded fleet.toml only, never from a file in the lane's worktree.
+
 ### Kicks (#304)
 
 The same hook runs on Claude `PostToolUse` (Bash) and `Stop`, and on Hermes `post_tool_call`: a
