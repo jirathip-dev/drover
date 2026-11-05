@@ -2,6 +2,7 @@
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default)]
 pub struct Out {
@@ -40,23 +41,7 @@ impl Runner for Real {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
-        use std::io::Write;
-        use std::process::Stdio;
-        let mut c = Command::new(prog)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("cannot run {prog}"))?;
-        let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
-        let o = c.wait_with_output()?;
-        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        Ok(Out {
-            code: o.status.code().unwrap_or(-1),
-            stdout: text(&o.stdout),
-            stderr: text(&o.stderr),
-        })
+        self.within(prog, args, input, limit(prog, args))
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
@@ -81,6 +66,69 @@ impl Runner for Real {
         std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
         Ok(pid)
     }
+}
+
+impl Real {
+    /// `run_in`, killed (exit 124) once `limit` has passed.
+    pub fn within(&self, prog: &str, args: &[String], input: &str, limit: Option<Duration>) -> Result<Out> {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut c = Command::new(prog)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("cannot run {prog}"))?;
+        let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
+        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+        let Some(limit) = limit else {
+            let o = c.wait_with_output()?;
+            let code = o.status.code().unwrap_or(-1);
+            return Ok(Out {
+                code,
+                stdout: text(&o.stdout),
+                stderr: text(&o.stderr),
+            });
+        };
+        let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
+        let end = Instant::now() + limit;
+        while Instant::now() < end {
+            if let Some(st) = c.try_wait()? {
+                let (stdout, stderr) = (
+                    text(&so.join().unwrap_or_default()),
+                    text(&se.join().unwrap_or_default()),
+                );
+                return Ok(Out {
+                    code: st.code().unwrap_or(-1),
+                    stdout,
+                    stderr,
+                });
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = (c.kill(), c.wait()); // its readers may outlive it while a grandchild (ssh) holds the pipes
+        let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
+        Ok(Out {
+            code: 124,
+            stderr,
+            ..Out::default()
+        })
+    }
+}
+
+/// #478: another host's `herdr --machine m … list` (its ssh has no timeout of its own) answers in 20 s.
+pub fn limit(prog: &str, args: &[String]) -> Option<Duration> {
+    let remote = prog == crate::herdr::BIN && args.first().is_some_and(|a| a == "--machine");
+    (remote && args.get(3).is_some_and(|a| a == "list")).then(|| Duration::from_secs(20))
+}
+
+fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut v = vec![];
+        let _ = p.map(|mut p| p.read_to_end(&mut v));
+        v
+    })
 }
 
 pub fn argv(args: &[&str]) -> Vec<String> {

@@ -282,7 +282,7 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
-    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane; idempotent, safe from cron
+    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
     Accounts {
@@ -317,13 +317,21 @@ enum Cmd {
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
-    Close { agent: String },
+    Close {
+        agent: String,
+        /// The agent on this `[hosts.<name>]` (when another host has one of the same name)
+        #[arg(long)]
+        host: Option<String>,
+    },
     /// Close an agent's pane, pushing unpushed or dirty work to `wip/<agent>-<stamp>` first; the worktree stays. Dry run unless --yes
     Kill {
         agent: String,
         /// Actually kill
         #[arg(long)]
         yes: bool,
+        /// Its lane on this `[hosts.<name>]` (a pane a supersede left there under the same name)
+        #[arg(long)]
+        host: Option<String>,
     },
     /// Manage per-role Claude Code config folders
     Profiles {
@@ -590,8 +598,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`).
-pub const HELP_AGENT_MAX: usize = 290;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`).
+pub const HELP_AGENT_MAX: usize = 292;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -667,7 +675,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         .and_then(|c| c.runtime.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
-    let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
+    let res = match lane_write.then(|| forward(&sent)).flatten() {
         Some(o) => o.map(|o| {
             let _ = write!(out, "{}", o.stdout);
             eprint!("{}", o.stderr);
@@ -689,19 +697,32 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
 }
 
-/// #275: a lane on another host has `HERDSMAN_MAIN` (`<main host's ssh name>:<its herdsman>`): its `args` run on the
-/// main host over ssh, so the main log is the only one written and only the main host pushes.
-pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
-    let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
-    let main = std::env::var("HERDSMAN_MAIN").ok()?;
-    let (host, exe) = main.split_once(':')?;
-    if crate::db::file(&ctx.state).exists() {
-        let s = crate::db::file(&ctx.state);
-        let s = s.display();
-        eprintln!("herdsman: warning: {s} exists on a lane's host; only the main host's log counts");
-    }
-    let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
-    Some(crate::hosts::On::new(r, Some(host)).run("env", &a))
+/// #389: a lane on another host (`HERDSMAN_OUTBOX`) never connects to the main host: its `args` wait in its
+/// worktree's outbox, which drive pulls over main → host ssh and runs as the lane.
+pub(crate) fn forward(args: &[String]) -> Option<Result<runner::Out>> {
+    let lane = crate::outbox::lane()?;
+    Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
+        code: 0,
+        stdout: crate::outbox::QUEUED.into(),
+        stderr: format!("herdsman: queued in {}\n", p.display()),
+    }))
+}
+
+/// #389: why a lane's outbox line is not its own to run (`None`: it is): `ask`, `done`, `verdict`, `answer` for its
+/// issue, events.
+pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
+    let cli = Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().map(String::as_str)));
+    let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
+    let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
+    let (f, n) = match cli.map(|c| c.cmd) {
+        Err(e) => return Some(format!("unparsable: {}", e.kind())),
+        Ok(Cmd::LaneEvent { .. }) => return None,
+        Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
+        Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. }) => (fleet, issue.to_string()),
+        Ok(Cmd::Answer { fleet, id, .. }) => (fleet.clone(), asked(&fleet, &id).map_or("-".into(), |n| n.to_string())),
+        _ => return Some(format!("`{}` is no lane's own verb", args[0])),
+    };
+    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
 }
 
 /// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
@@ -748,7 +769,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let env = |k: &str| std::env::var(k).unwrap_or_default();
             crate::usage::statusline(ctx, &env("HERDSMAN_ACCOUNT"), &env("HERDSMAN_LANE"), &buf, out);
         }
-        Cmd::LaneEvent { kind, data } => lane_event(ctx, r, &kind, serde_json::from_str(&data)?),
+        Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
@@ -866,7 +887,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let cfg = Config::load(&ctx.config).ok();
             let boards: Vec<_> = all
                 .iter()
-                .map(|f| queue::board(&events, f, ctx.now, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
+                .map(|f| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
                 .collect();
             write!(out, "{}", boards.join("\n"))?;
         }
@@ -1171,8 +1192,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
-                Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
-                Cmd::Kill { agent, yes } => check::kill(ctx, &cfg, r, out, &agent, yes)?,
+                Cmd::Close { agent, host } => check::close(ctx, &cfg, r, out, &agent, host.as_deref())?,
+                Cmd::Kill { agent, yes, host } => check::kill(ctx, &cfg, r, out, (&agent, host.as_deref()), yes)?,
                 Cmd::Verdict {
                     fleet,
                     issue,
@@ -1434,7 +1455,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
-            lane_event(ctx, r, "hook-denied", json!({"rule": reason}));
+            lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
         return Ok(());
@@ -1444,7 +1465,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
-        lane_event(ctx, r, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
+        lane_event(ctx, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
     }
     Ok(())
 }
@@ -1456,12 +1477,12 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
         return;
     };
     eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
-    lane_event(ctx, r, "coauthor-trailer", json!({"line": trailer}));
+    lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
 }
 
 /// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
-fn lane_event(ctx: &Ctx, r: &dyn Runner, kind: &str, mut d: serde_json::Value) {
-    if forward(ctx, r, &runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
+fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
+    if forward(&runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
         return;
     }
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
@@ -1526,7 +1547,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let diff = runner::ok(r, "git", &args).unwrap_or_default();
         let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
-            lane_event(ctx, r, "hook-denied", json!({"rule": d.reason()}));
+            lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
             writeln!(out, "herdsman: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
             return Ok(1);
         }

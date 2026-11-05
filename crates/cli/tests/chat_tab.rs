@@ -1144,7 +1144,8 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
 }
 
 /// #443: WebKit at 390 × 844, a long thread on a paired phone; the keyboard (a 336 px `visualViewport` shrink, as
-/// iOS reports it) opens with the box focused: the composer's bottom is the visual viewport's, the page never scrolls,
+/// iOS reports it; #488: `innerHeight` shrinks with it, and as a Home Screen app the first open and the close come
+/// after the focus change with no `resize` event) opens with the box focused: the composer's bottom is the visual viewport's, the page never scrolls,
 /// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
 #[test]
 fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
@@ -1170,15 +1171,15 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           const frame = () => new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); st(r, 300); }); await frame(); \
           const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
           const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
-          const kb = h => { Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - h }); vv.dispatchEvent(new Event('resize')); }; \
+          const H = innerHeight, kb = (h, ev) => { for (const [o, k] of [[vv, 'height'], [window, 'innerHeight']]) Object.defineProperty(o, k, { configurable: true, get: () => H - h }); if (ev) vv.dispatchEvent(new Event('resize')); }; \
           const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
           const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
             const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
             let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
-          box.focus(); kb(336); await look(); \
+          box.focus(); await new Promise(r => st(r, 100)); kb(336); await look(); \
           box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
-          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
-          box.focus(); kb(336); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
+          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
+          box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
     let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")

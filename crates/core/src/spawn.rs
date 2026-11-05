@@ -579,10 +579,8 @@ pub fn spawn(
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
 
-            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh).
-            if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
-                p.env.insert("HERDSMAN_MAIN".into(), format!("{}:{}", main.0, ctx.exe));
-            }
+            // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
+            p.env.insert("HERDSMAN_OUTBOX".into(), "1".into());
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -596,6 +594,10 @@ pub fn spawn(
         pj["dry_run"] = json!(true);
         print_plan(out, &pj, o.json)?;
         return Ok(true);
+    }
+    // #478: an unreachable host takes no lane; its own lanes stay its (the log's LANE_LIVE still guards them).
+    if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
+        return refused("HOST_OFFLINE", why);
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;
@@ -703,14 +705,22 @@ pub fn spawn(
         let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
-        for a in host::live_in(&host::agents(&old).unwrap_or_default(), &p.agent, Path::new(owt)) {
+        let listed = host::agents(&old);
+        for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
                 herdr::close(&old, pane)?;
             }
         }
-        crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
+        // #478: its host unreachable: the pane it left is drive's to kill once that host is back (`check::stale`).
+        let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
+        if stale.is_none() {
+            crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
+        }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")});
+        if let Some(e) = stale {
+            (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
+        }
         event("supersede", d)?;
     }
 
@@ -1304,7 +1314,10 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
         // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
-        let logged = events.iter().filter(|e| e.kind == "spawn" || young(e)).any(|e| at(&e));
+        // #500: one adoption per pane, ever: a pane adopted once is never an orphan again.
+        let logged = (events.iter())
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-adopted") || young(e))
+            .any(|e| at(&e));
         let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
             continue;
         };

@@ -1014,7 +1014,7 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
     );
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &pr(&head, "green"))
-        .reply("gh pr diff 100", files)
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/100/files", files)
         .reply("gh pr merge 100", "")
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "");
@@ -2184,4 +2184,90 @@ fn a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass() {
     assert_eq!(kinds(&c, "respawn")[0].str("why"), Some("prompt never landed"));
     let done = kinds(&c, "lane-closed");
     assert!(done.iter().all(|e| e.str("reason") != Some("done")), "{done:?}");
+}
+
+const PROOFLESS: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n";
+const PROVEN: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
+
+/// #491: a rev lane at `head` whose verdict.md is `body`, and a Fake on which that reviewer is gone or idle.
+fn proofless(name: &str, body: &str, live: bool) -> (herdsman::Ctx, PathBuf, Fake) {
+    let c = setup(name);
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
+    std::fs::write(rev.join("verdict.md"), body).unwrap();
+    let head = sha("abc");
+    let list = agents(&[("sendmeter-rev-12-r1", "idle", &rev.to_string_lossy(), "w9:p1")]);
+    let r = fake(if live { &list } else { NO_AGENTS })
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
+        .reply("git -C", "");
+    (c, rev, r)
+}
+
+#[test]
+fn a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_head() {
+    let (c, rev, r) = proofless("drive-noproof-ended", PROOFLESS, false);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict", "review"], "{out}");
+    assert!(out.contains("REFUSED NO_PROOF"), "{out}");
+    assert_eq!(r.count("herdr agent start sendmeter-rev-12-r1"), 1, "{out}");
+    let all = read(&c.state).unwrap();
+    let d = all.iter().rfind(|e| e.kind == "driven").unwrap();
+    assert_eq!(
+        d.str("cmd"),
+        Some("herdsman spawn sendmeter 12 rev --supersede"),
+        "{out}"
+    );
+    let lost = all.iter().rfind(|e| e.kind == "lane-lost").unwrap();
+    assert_eq!(lost.str("why"), Some("verdict refused NO_PROOF: re-review"));
+    assert_eq!(
+        (kinds(&c, "verdict").len(), state(&c)),
+        (0, "review(1)".into()),
+        "{out}"
+    );
+    assert!(!rev.join("verdict.md").exists(), "the fresh review starts clean");
+}
+
+fn told(r: &Fake) -> usize {
+    r.count("herdr agent prompt sendmeter-rev-12-r1 herdsman verdict refused your verdict.md: REFUSED NO_PROOF")
+}
+
+#[test]
+fn an_idle_reviewer_is_told_once_then_the_unchanged_file_is_not_retried_but_re_reviewed() {
+    let (mut c, _, r) = proofless("drive-noproof-told", PROOFLESS, true);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict"], "{out}");
+    assert_eq!(told(&r), 1, "{:?}", r.calls.borrow());
+    assert!(!r.called("herdr agent start"), "{out}");
+    // Past drive's 1 h quiet for a repeated refusal: the same file at the same head is not tried again, nor the
+    // reviewer told twice; idle again, it has ended.
+    c.now += 7200;
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert_eq!(told(&r), 1);
+    assert_eq!(r.count("herdr agent start sendmeter-rev-12-r1"), 1, "{out}");
+    assert_eq!(
+        (kinds(&c, "verdict").len(), state(&c)),
+        (0, "review(1)".into()),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_told_reviewers_corrected_fail_is_recorded() {
+    let (c, rev, r) = proofless("drive-noproof-fixed", PROOFLESS, true);
+    let (out, _) = drive(&c, &r);
+    assert_eq!(told(&r), 1, "{out}");
+    std::fs::write(rev.join("verdict.md"), PROVEN).unwrap();
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict"], "{out}");
+    let v = kinds(&c, "verdict");
+    assert_eq!((v.len(), v[0].str("verdict")), (1, Some("FAIL")), "{out}");
+    assert_eq!(state(&c), "fix(1)", "{out}");
+    assert_eq!(told(&r), 1);
+    assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
 }
