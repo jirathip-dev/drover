@@ -90,7 +90,12 @@ fn own_file(file: &str, p: &Policy) -> bool {
         return false;
     };
     let normal = rel.components().all(|c| matches!(c, Component::Normal(_)));
-    normal && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
+    // A symlink there could point anywhere: writing through it is not writing into the folder.
+    let linked = Path::new(&file)
+        .ancestors()
+        .take_while(|a| *a != Path::new(own))
+        .any(|a| a.symlink_metadata().is_ok_and(|m| m.is_symlink()));
+    normal && !linked && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
 }
 
 /// #499: `w` as an absolute path, resolved against `cwd` (`..` and `.` folded), past a redirection's `2>>`.
@@ -145,11 +150,13 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                 .map(|w| resolve(w, &cwd))
                 .collect()
         };
+        // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
+        let own = |f: &str| !t.contains(&"ln") && own_file(f, p);
         let hit = (t.iter().flat_map(|w| paths(w)))
-            .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own_file(&f, p)))
+            .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
             .map(String::as_str);
         let rest: Vec<&str> = (t.iter().copied())
-            .filter(|w| !paths(w).iter().any(|f| own_file(f, p)))
+            .filter(|w| !paths(w).iter().any(|f| own(f)))
             .collect();
         let seg_hit = protected_path(&rest.join(" "), p);
         if let Some(pp) = hit.or(seg_hit) {

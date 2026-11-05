@@ -576,6 +576,9 @@ fn a_conductor_copies_into_its_own_thread_folder() {
     };
     let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
     let cond = "synergy:-:conductor";
+    // A symlink already in the folder (pointing at the state dir) is no way out of it.
+    std::fs::create_dir_all(c.join("t6")).unwrap();
+    std::os::unix::fs::symlink("../..", c.join("t6/link")).unwrap();
     for cmd in [
         format!("cp a.png {own}/a.png"),
         format!("mv /tmp/b.png {own}/ui/b.png"),
@@ -607,6 +610,10 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         (cond, format!("sips -s format png a.jpg -o{st}/events.jsonl {own}/x")),
         (cond, format!("cd {st}/conductor && cp -t6/x a.png")),
         (cond, format!("cd {st} && cp -t. a.png {own}/a.png")),
+        (cond, format!("ln -s ../../events.jsonl {own}/x")),
+        (cond, format!("cd {own} && ln -s ../../events.jsonl x")),
+        (cond, format!("cp a.png {own}/link/a.png")),
+        (cond, format!("echo hi > {own}/link")),
     ] {
         assert!(run(lane, &cmd).contains("is blocked"), "{lane}: {cmd}");
     }
