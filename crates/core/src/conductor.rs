@@ -553,6 +553,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     h.ready(ctx, r, &p)?;
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
+    let _secrets = crate::spawn::deliver(&on, &p)?;
     let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
     let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
     herdr::ok(r, &p.lane_cmd(&new))?;

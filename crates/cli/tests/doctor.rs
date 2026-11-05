@@ -22,7 +22,6 @@ harness = "{harness}"
 profile = "fleet-impl"
 
 [accounts]
-accounts_env = "{env}"
 main = "TOKEN_MAIN"
 
 [serve]
@@ -33,7 +32,6 @@ type = "webpush"
 sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
-        env = d.join("accounts.env").display(),
     )
 }
 
@@ -49,7 +47,6 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
-    write(&d.join("accounts.env"), &format!("export TOKEN_MAIN={TOKEN}\n"), 0o600);
     write(
         &c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist"),
         PLIST,
@@ -77,6 +74,7 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
 
 fn good() -> Fake {
     Fake::default()
+        .stored("herdsman/all/TOKEN_MAIN", TOKEN)
         .reply("herdr status", HERDR)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1")
         .reply("vm_stat", "Swapouts: 5.\n")
@@ -106,16 +104,7 @@ fn all_good_exits_zero_and_never_writes() {
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains('✗') && !out.contains('!'), "{out}");
-    for check in [
-        "herdr",
-        "host",
-        "gh",
-        "config",
-        "worktrees",
-        "gh demo",
-        "local demo",
-        "accounts_env",
-    ] {
+    for check in ["herdr", "host", "gh", "config", "worktrees", "gh demo", "local demo"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
@@ -137,7 +126,10 @@ fn all_good_exits_zero_and_never_writes() {
     for check in ["vapid.key", "push", "watchdog check", "watchdog drive", "timer"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
-    assert!(line(&out, "account main").contains("TOKEN_MAIN set"), "{out}");
+    assert!(
+        line(&out, "account main").contains("herdsman/all/TOKEN_MAIN in the store"),
+        "{out}"
+    );
     let writes = [
         "gh pr",
         "gh issue",
@@ -177,25 +169,18 @@ fn all_good_exits_zero_and_never_writes() {
 
 #[test]
 fn secrets_never_echo() {
-    let (c, d) = setup("doc-secret", "claude");
-    // Wrong mode and a fake token: the line names the file and mode, never its content.
-    std::fs::set_permissions(d.join("accounts.env"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    // #441: the account's token is in the store; doctor checks it is there, never shows it.
+    let (c, _) = setup("doc-secret", "claude");
     for args in [&["doctor"][..], &["doctor", "--json"]] {
         let (code, out) = run(&c, &good(), args);
-        assert_eq!(code, 1, "{out}");
+        assert_eq!(code, 0, "{out}");
         assert!(
             !out.contains(TOKEN) && !out.contains("FAKEtoken") && !out.contains("S3CRET"),
             "{out}"
         );
     }
     let (_, out) = run(&c, &good(), &["doctor"]);
-    let l = line(&out, "accounts_env");
-    assert!(
-        l.starts_with("✗")
-            && l.contains("mode 644")
-            && l.ends_with(&format!("&& chmod 600 {}", d.join("accounts.env").display())),
-        "{l}"
-    );
+    assert!(line(&out, "account main").starts_with('✓'), "{out}");
 }
 
 /// Each failure: (what breaks, the check, its fix).
@@ -225,20 +210,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ mkdir -p",
         ),
         (
-            |_, d, r| {
-                std::fs::remove_file(d.join("accounts.env")).unwrap();
-                r
-            },
-            "accounts_env",
-            "missing",
-        ),
-        (
-            |_, d, r| {
-                write(&d.join("accounts.env"), "OTHER=x\n", 0o600);
+            |_, _, r| {
+                r.store.borrow_mut().clear();
                 r
             },
             "account main",
-            "→ add TOKEN_MAIN=…",
+            "herdsman/all/TOKEN_MAIN in the store → herdsman accounts import",
         ),
         (|_, _, r| r.once("which claude", 1, ""), "harness", "→ install claude"),
         (
@@ -317,9 +294,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         assert_eq!(code, 1, "{check}: {out}");
         let l = line(&out, check);
         assert!(l.starts_with('✗') && l.contains(fix), "{check}: {l}");
-        // A missing accounts file also leaves its variables unset.
-        let n = if check == "accounts_env" { 2 } else { 1 };
-        assert_eq!(out.matches('✗').count(), n, "{check}: {out}");
+        assert_eq!(out.matches('✗').count(), 1, "{check}: {out}");
     }
 }
 
@@ -352,6 +327,9 @@ fn tailscale_missing_is_a_warning() {
             self.0.run(prog, args)
         }
         fn sleep(&self, _: u64) {}
+        fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+            self.0.secret(svc)
+        }
     }
     let (c, _) = setup("doc-nots", "claude");
     let (code, out) = run(&c, &NoTailscale(good()), &["doctor"]);

@@ -1,5 +1,5 @@
 //! `herdsman doctor`: read-only host check, a `✓|✗|! <check> — <detail> [→ <fix>]` row each. Never prints a secret.
-use crate::config::{expand, Config};
+use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::Result;
@@ -127,16 +127,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    if let Some(path) = cfg.accounts.accounts_env.as_deref().map(expand) {
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let perm = mode(&path);
-        let shown = path.display();
-        let line = format!("accounts_env — {shown} {perm} → touch {shown} && chmod 600 {shown}");
-        row(rows, perm == "mode 600", '✗', &line);
-        for (name, var) in &cfg.accounts.names {
-            let line = format!("account {name} — {var} set → add {var}=… to {shown}");
-            row(rows, crate::access::has_var(&text, var), '✗', &line);
-        }
+    for (name, var) in &cfg.accounts.names {
+        let svc = crate::secret::service("all", var);
+        let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
+        row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), '✗', &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();

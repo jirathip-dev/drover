@@ -19,6 +19,7 @@ base64.workspace = true
 shed-proto.workspace = true
 clap.workspace = true
 hkdf.workspace = true
+keyring.workspace = true
 p256.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

@@ -248,6 +248,12 @@ impl Runner for Memo<'_> {
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()
     }
+    fn secret(&self, svc: &str) -> Result<Option<String>> {
+        self.0.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
+        self.0.set_secret(svc, value)
+    }
 }
 
 /// The mutex's data, even after a thread panicked holding it.

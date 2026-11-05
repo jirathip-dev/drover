@@ -562,6 +562,11 @@ enum StatsCmd {
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
+    /// Owner only: copy each account's token from the old tokens.env into the secret store, checked by hash
+    Import {
+        #[arg(default_value = "~/.config/herdsman/accounts/tokens.env")]
+        file: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -938,7 +943,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             demo,
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
+        Cmd::Serve { addr, read_only, .. } => {
+            if let Ok(cfg) = Config::load(&ctx.config) {
+                crate::secret::probe(r, &cfg)?; // #441: no usable store, no board
+            }
+            (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
+        }
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
@@ -1181,6 +1191,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Accounts {
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
+                Cmd::Accounts {
+                    cmd: Some(AccountsCmd::Import { file }),
+                } => crate::secret::import(ctx, &cfg, r, out, &file)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },
@@ -1501,17 +1514,21 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     }
 }
 
-/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top.
+/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top;
+/// #502: `pkill` and `killall` always.
 fn deny_list(ctx: &Ctx) -> Vec<crate::config::Deny> {
     let cfg = Config::load(&ctx.config).unwrap_or_default();
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let f = cfg.fleet.get(lane.split(':').next().unwrap_or_default());
     let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
     let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
-    match cfg.hosts.get(&host) {
+    let mut d = match cfg.hosts.get(&host) {
         Some(h) => h.deny(d),
         None => d,
-    }
+    };
+    // #502: no fleet or host drops the broad-kill ban.
+    d.extend(hook::broad_kill());
+    d
 }
 
 /// main, master, staging and every fleet's integration branch.
