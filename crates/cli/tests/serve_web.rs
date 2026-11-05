@@ -126,7 +126,7 @@ fn queue_buttons_move_like_queue_mv() {
         location(&res).starts_with("/?msg=error: #99 is not queued"),
         "an error is kept: {res}"
     );
-    assert!(get(&s, "/").contains("events"), "page still renders");
+    assert!(get(&s, "/").contains("</nav>"), "page still renders");
 }
 
 #[test]
@@ -685,12 +685,13 @@ fn page_fits_390px_without_horizontal_scroll() {
         html.contains("class=tl title=\"Queue rows show issue and PR titles from the cached reads · PR #33 · src: titles in Queue\">"),
         "title line"
     );
-    for t in ["queue", "lanes", "host", "events"] {
+    for t in ["queue", "lanes", "chat"] {
         assert!(
             html.contains(&format!("<section id={t}>")) && html.contains(&format!("<a href=#{t}>")),
             "{t} tab"
         );
     }
+    // #440: Host and Events are System's sections (tests/system_sheet.rs measures them at 390 px).
     if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
         eprintln!("skipping the WebKit scrollWidth check: no swift/WebKit here");
         return;
@@ -698,7 +699,7 @@ fn page_fits_390px_without_horizontal_scroll() {
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-    for tab in ["queue", "lanes", "host", "events"] {
+    for tab in ["queue", "lanes"] {
         for mode in ["horse", "ascii", "glyph"] {
             let o = swift()
                 .args([script, file.to_str().unwrap(), "390", tab, mode])
@@ -824,10 +825,9 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "paused fleet's lane is not counted"
     );
     // Events: noise folded into one count, `?all=1` unfolds it.
-    assert_eq!(
-        section("events"),
-        "<section id=events>",
-        "#60: Events loads on tab open"
+    assert!(
+        !page.contains("id=events"),
+        "#60: Events loads when opened; #440: in System (serve.js makes its section)"
     );
     // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red (#266: the
     // board's tab, from API v1).

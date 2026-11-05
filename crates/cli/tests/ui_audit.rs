@@ -1,6 +1,6 @@
 //! #58 amendment B: one terminal-style control system. The `tests/ui/audit.js` console audit on every
-//! screen (Queue with rows open, a fleet's [config] sheet, Lanes, Host, Events, the sheet, Herd): zero outliers. 390 px
-//! screenshots go to `$HERDSMAN_SNAPSHOTS`.
+//! screen (Queue with rows open, a fleet's [config] in System, Lanes, System's Hosts & health and Activity, the sheet,
+//! Herd): zero outliers. 390 px screenshots go to `$HERDSMAN_SNAPSHOTS`.
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
@@ -52,30 +52,12 @@ fn fixture() -> (String, String) {
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = req(&s, "GET", "/?all=1", "", &ck);
     // #60: the parts the live page loads on demand, spliced in as the page shows them once loaded. #268: the board's
-    // Queue tab, and its [config] sheet as the board hands it to serve.js (`queueSheet`); #269: the needs cards,
-    // Lanes and [chat] as the board draws them for this paired phone.
-    let sheet = serde_json::to_string(&queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')")).unwrap();
-    let html = with_board(&page[page.find("<!doctype").unwrap()..], &s, ADDR, &ck, T)
-        .replace(
-            "<section id=lanes>",
-            &format!(
-                "<script>window.queueSheet = f => f === 'sendmeter' ? {} : null</script><section id=lanes>",
-                sheet.replace("</", "<\\/")
-            ),
-        )
-        .replace(
-            "<section id=events></section>",
-            // #266: the board's Events as it draws them, without the board (it would read this file's base server).
-            &format!(
-                "<section id=events>{}</section>",
-                events_tab(&s, ADDR, T, "{}").unwrap_or_default()
-            ),
-        )
-        .replace(
-            "<section id=host></section>",
-            &format!("<section id=host>{}</section>", host_tab(&s, ADDR, T)), // #267: and its Host tab
-        );
-    let html = html[..html.find("<script type=module").unwrap()].to_string() + "</body></html>\n";
+    // Queue tab; #269: the needs cards, Lanes and [chat] as the board draws them for this paired phone; #266, #267,
+    // #440: its Events, Host and System parts (a fleet's [config] in Fleets), without the board (it would read this
+    // file's base server).
+    let html = with_board(&page[page.find("<!doctype").unwrap()..], &s, ADDR, &ck, T);
+    let parts = system_frags(&s, ADDR, T, &events_tab(&s, ADDR, T, "{}").unwrap_or_default());
+    let html = html[..html.find("<script type=module").unwrap()].to_string() + &parts + "</body></html>\n";
     assert!(
         html.contains("▲ up") && html.contains("class=pick") && html.contains("<select name=model"),
         "fixture has arrows, a menu and pickers"
@@ -99,10 +81,19 @@ fn every_control_passes_the_audit_at_390px() {
     let scenes = [
         // The header (`[↻]` and the horse) is in every tab's frame and audit.
         ("ui-queue", "queue", "body", String::new()),
-        ("ui-config", "queue", "#sheet", config.to_string()),
+        ("ui-config", "queue", "#sys", config.to_string()),
         ("ui-lanes", "lanes", "body", String::new()),
-        ("ui-host", "host", "body", String::new()),
-        ("ui-events", "events", "body", String::new()),
+        ("ui-host", "queue", "#sys", "sysopen('hosts')".to_string()),
+        ("ui-events", "queue", "#sys", "sysopen('activity')".to_string()),
+        ("ui-providers", "queue", "#sys", "sysopen('providers')".to_string()),
+        (
+            "ui-notifications",
+            "queue",
+            "#sys",
+            "sysopen('notifications')".to_string(),
+        ),
+        ("ui-conductor", "queue", "#sys", "sysopen('conductor')".to_string()),
+        ("ui-appearance", "queue", "#sys", "sysopen('appearance')".to_string()),
         (
             "ui-sheet",
             "lanes",
@@ -178,19 +169,21 @@ fn closing_a_sheet_never_repaints_the_page() {
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let mut bad = vec![];
-    for (name, tab, open) in [
+    for (name, tab, open, shut) in [
         (
             "chat",
             "lanes",
             "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))",
+            "close()",
         ),
-        // Opened full, it covers the page; at mid the page shows above it.
+        // #440: a fleet's [config] is System's Fleets row; System covers the page and its close uncovers it.
         (
             "config",
             "queue",
-            "config(document.querySelector('.cfg[data-f=\"sendmeter\"]')); snap('mid')",
+            "config(document.querySelector('.cfg[data-f=\"sendmeter\"]'))",
+            "sysshut()",
         ),
-        ("legend", "queue", "legend()"),
+        ("legend", "queue", "legend()", "close()"),
     ] {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("close-{name}.png"))
@@ -204,7 +197,7 @@ fn closing_a_sheet_never_repaints_the_page() {
                 "horse",
                 png.to_str().unwrap(),
                 &format!("{stub}; {open}"),
-                "close()",
+                shut,
             ])
             .output()
             .unwrap();
@@ -249,8 +242,8 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
         format!("{}</body></html>", &html[..html.find("<script src=").unwrap()]),
     )
     .unwrap();
-    // Shown or not: Queue, Lanes, Host, Events, [?]; then each Queue row's height and `#n` width.
-    let measure = "window.measure = [...['#queue', '#lanes', '#host', '#events', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
+    // Shown or not: Queue, Lanes, Chat, [?]; then each Queue row's height and `#n` width.
+    let measure = "window.measure = [...['#queue', '#lanes', '#chat', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
         ...[...document.querySelectorAll('details.q')].flatMap(d => [d.querySelector('summary').getBoundingClientRect().height, d.querySelector('summary>span').getBoundingClientRect().width])]";
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let shot = |tab: &str, frame: &str, file: &std::path::Path| {
@@ -279,17 +272,20 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
         );
         v[2..].to_vec()
     };
+    // #440: a stored `events` (or `host`) tab, gone to System, paints Queue from the first frame on.
     for (tab, shown) in [
-        ("events", [0.0, 0.0, 0.0, 1.0, 0.0]),
-        ("queue", [1.0, 0.0, 0.0, 0.0, 1.0]),
+        ("lanes", [0.0, 1.0, 0.0, 0.0]),
+        ("events", [1.0, 0.0, 0.0, 1.0]),
+        ("host", [1.0, 0.0, 0.0, 1.0]),
+        ("queue", [1.0, 0.0, 0.0, 1.0]),
     ] {
         let (a, b) = (shot(tab, "first", &first), shot(tab, "settled", &settled));
         assert_eq!(
-            a[..5],
+            a[..4],
             shown,
-            "{tab}: the first frame's sections (queue lanes host events [?])"
+            "{tab}: the first frame's sections (queue lanes chat [?])"
         );
-        assert_eq!(b[..5], shown, "{tab}: the settled sections");
+        assert_eq!(b[..4], shown, "{tab}: the settled sections");
         assert_eq!(
             a, b,
             "{tab}: first paint vs settled (sections, then row height and #n width per Queue row)"

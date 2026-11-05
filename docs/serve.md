@@ -316,7 +316,7 @@ logged, printed or served; the page gets only the public key and each device's l
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
-berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
+shed runtime only, shed-proto (shed's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
 for the state database (#344, docs/architecture.md). CI's deps gate fails on any other direct dependency.
 
 ## JSON API v1 (#265)

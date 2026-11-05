@@ -56,11 +56,13 @@ pub struct ConductorCfg {
 pub enum RuntimeKind {
     #[default]
     Herdr,
+    Shed,
+    /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
     Berth,
 }
 
-/// #298: `kind`, herdr or berth; berth's `socket` (default its per-user one), and an ACP agent id its lanes run
-/// instead of the harness's terminal UI (`berth run --acp`), with berth's permission `acp_policy` (default `ask`).
+/// #298: `kind`, herdr or shed; shed's `socket` (default its per-user one), and an ACP agent id its lanes run
+/// instead of the harness's terminal UI (`shed run --acp`), with shed's permission `acp_policy` (default `ask`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Runtime {
@@ -71,10 +73,10 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// The berth runtime, when it is the kind.
-    pub fn berth(&self) -> Option<crate::berth::Berth> {
-        (self.kind == RuntimeKind::Berth).then(|| crate::berth::Berth {
-            wire: crate::berth::Wire::Socket(self.socket.as_deref().map_or_else(crate::berth::default_socket, expand)),
+    /// The shed runtime, when it is the kind.
+    pub fn shed(&self) -> Option<crate::shed::Shed> {
+        matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth).then(|| crate::shed::Shed {
+            wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
             acp: self.acp.clone(),
             policy: self.acp_policy.clone().unwrap_or_else(|| "ask".into()),
         })
@@ -585,6 +587,9 @@ impl Config {
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");
+        }
+        if c.runtime.kind == RuntimeKind::Berth {
+            eprintln!("herdsman: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::harness::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {

@@ -46,8 +46,8 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
     let page = req(&s, "GET", "/", "", &format!("{cookie}Cookie: tab=chat\r\n"), now);
     assert!(
-        page.contains("<a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a><a href=#host>"),
-        "[chat] is the middle tab"
+        page.contains("<a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav>"),
+        "[chat] is the last of three tabs (#440)"
     );
     let (chat, needs) = frags(&s, &cookie, now);
     // The list: all repos first, then the fleets by name; newest thread first, the state and the last message.

@@ -28,8 +28,8 @@ pub trait Runner: Sync {
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
-    /// #298: the berth runtime this runner's lanes use (`[runtime] kind = "berth"`); None: herdr only.
-    fn berth(&self) -> Option<crate::berth::Berth> {
+    /// #298: the shed runtime this runner's lanes use (`[runtime] kind = "shed"`); None: herdr only.
+    fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
 }

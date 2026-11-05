@@ -245,8 +245,10 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
     let host = host_tab(&s, ADDR, T);
     assert!(
-        host.contains("`herdsman serve approve &lt;code&gt;` here") && !(page.clone() + &host).contains("<code>"),
-        "the hint is text, never an open tag"
+        host.contains(
+            "no paired device yet: tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code>"
+        ) && !(page.clone() + &host).contains("approve <code>"),
+        "the hint's placeholder is text, never an open tag"
     );
     let res = req(
         &s,
