@@ -608,6 +608,7 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .th>div{flex:1;min-width:0}
 .th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .th .ds{font-size:var(--fs-meta);color:var(--mute)}
+.th .cw{font-size:var(--fs-meta);font-weight:400} /* #460: `config c1 waiting` under the title while a proposal waits */
 .th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
 .tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
 .tmo{cursor:pointer}

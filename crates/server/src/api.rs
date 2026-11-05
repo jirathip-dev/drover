@@ -247,13 +247,15 @@ pub struct ChatRepo {
     pub archived: Vec<ThreadRow>,
 }
 
-/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line.
+/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
+/// #460: the ids of the config proposals `waiting` for the owner.
 pub struct ThreadRow {
     pub id: String,
     pub title: String,
     pub age: String,
     pub unread: bool,
     pub state: String,
+    pub waiting: Vec<String>,
     pub links: Vec<Link>,
     pub line: String,
 }
@@ -265,12 +267,13 @@ pub struct Link {
 }
 
 /// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
-/// working, the turn's start `since`, and the `queued` messages above the box.
+/// working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`.
 pub struct ThreadView {
     pub id: String,
     pub title: String,
     pub ds: String,
     pub state: String,
+    pub waiting: Vec<String>,
     pub since: Option<u64>,
     pub queued: Vec<QueuedMsg>,
     pub page: ThreadPage,
@@ -293,7 +296,7 @@ pub struct ThreadPage {
 
 /// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
 /// `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
-/// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
+/// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
 /// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
 /// links to.
 pub struct Msg {

@@ -499,28 +499,37 @@ pub const PASSIVE: &[&str] = &[
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
-    let later = || {
-        events
-            .iter()
-            .skip_while(|e| !std::ptr::eq(*e, a))
-            .filter(|e| e.fleet == a.fleet)
-    };
-    let on = |k: &str| a.issue.is_some() && later().any(|e| e.kind == k && e.issue == a.issue);
-    // #446: a `spawn` logged after the ask whose `spawn-started` came before it is the asking lane itself.
-    let own = |sp: &Event| {
-        let started = |e: &Event| {
-            e.kind == "spawn-started" && e.str("agent") == sp.str("agent") && e.str("pane") == sp.str("pane")
-        };
-        sp.kind == "spawn" && events.iter().take_while(|e| !std::ptr::eq(*e, a)).any(started)
-    };
-    let mine = |e: &Event| matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let gone = later().any(|e| mine(e) && !own(e));
-    let answered = later()
-        .any(|e| e.kind == "decision" && e.str("id") == a.str("id"))
-        .then_some("answered");
-    answered
-        .or(on("merged").then_some("closed: merged"))
-        .or((gone || on("clean")).then_some("closed: lane gone"))
+    let before = || events.iter().take_while(|e| !std::ptr::eq(*e, a));
+    let why: Vec<_> = (events.iter())
+        .skip_while(|e| !std::ptr::eq(*e, a))
+        .filter_map(|e| closes(a, e, || before().any(|x| started(x, e))))
+        .collect();
+    ["answered", "closed: merged", "closed: lane gone"]
+        .into_iter()
+        .find(|w| why.contains(w))
+}
+
+/// #446: `e` is the `spawn-started` of spawn `sp` (same agent and pane).
+fn started(e: &Event, sp: &Event) -> bool {
+    e.kind == "spawn-started" && e.str("agent") == sp.str("agent") && e.str("pane") == sp.str("pane")
+}
+
+/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
+/// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
+fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
+    let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
+    let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
+    if e.fleet != a.fleet {
+        None
+    } else if e.kind == "decision" && e.str("id") == a.str("id") {
+        Some("answered")
+    } else if on("merged") {
+        Some("closed: merged")
+    } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
+        Some("closed: lane gone")
+    } else {
+        None
+    }
 }
 
 /// The first finding of `fleet` #`issue`'s last verdict (the line after `PASS`/`FAIL`).
@@ -530,11 +539,24 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 }
 
 /// `needs-decision` events not yet closed, oldest first.
+/// #447: one pass, each closing event checked against the asks still open.
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
-    events
-        .iter()
-        .filter(|a| a.kind == "needs-decision" && closed(events, a).is_none())
-        .collect()
+    let (mut open, mut first): (Vec<(usize, &Event)>, std::collections::HashMap<_, usize>) =
+        (vec![], std::collections::HashMap::default());
+    for (i, e) in events.iter().enumerate() {
+        let at = (e.str("agent"), e.str("pane"));
+        match e.kind.as_str() {
+            "spawn-started" => {
+                first.entry(at).or_insert(i);
+            }
+            "needs-decision" => open.push((i, e)),
+            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => {
+                open.retain(|(n, a)| closes(a, e, || first.get(&at).is_some_and(|f| f < n)).is_none());
+            }
+            _ => {}
+        }
+    }
+    open.into_iter().map(|x| x.1).collect()
 }
 
 /// Current per-issue state (the states in `roles/usage-tail.md`).

@@ -96,9 +96,10 @@ export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: 
 export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, };
 
 /**
- * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line.
+ * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
+ * #460: the ids of the config proposals `waiting` for the owner.
  */
-export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, links: Array<Link>, line: string, };
+export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, waiting: Array<string>, links: Array<Link>, line: string, };
 
 /**
  * #413: a linked thread's chip: `from t5`, `continued in t6`.
@@ -107,9 +108,9 @@ export type Link = { w: string, t: string, };
 
 /**
  * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
- * working, the turn's start `since`, and the `queued` messages above the box.
+ * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`.
  */
-export type ThreadView = { id: string, title: string, ds: string, state: string, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
+export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
 
 /**
  * #407: a message queued for the turn's end, by its id `q`.
@@ -125,7 +126,7 @@ export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: num
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
  * `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
- * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
+ * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
  * links to.
  */

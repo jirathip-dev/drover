@@ -259,7 +259,15 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     let s = &fold(&ev)[&("sendmeter".to_string(), 12)];
     let merged = json!({"number": 34, "state": "MERGED", "headRefOid": HEAD});
     let cfg = Config::load(&c.config).unwrap();
-    let w = herdsman::waiting::waiting_on(&ev, s, None, &merged, &cfg.fleet["sendmeter"], None);
+    let w = herdsman::waiting::waiting_on(
+        &herdsman::waiting::Log::new(&ev),
+        &ev,
+        s,
+        None,
+        &merged,
+        &cfg.fleet["sendmeter"],
+        None,
+    );
     assert!(
         w.next_cmd.as_deref().is_some_and(|c| c.contains("spawn sendmeter 12")),
         "{w:?}"
