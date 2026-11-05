@@ -7,14 +7,14 @@ import { prLine } from './queue.ts';
 
 const GALLOP = ['    _/>\n~(___)\n /  \\', '    _/>\n~(___)\n  ><'], STAND = '    _/>\n~(___)\n  | |', REST = '\n    _/>\n~(___)_', REAR = '     />\n ~(_/\n  / \\';
 
-/** The state as an avatar in each mode (CSS shows `body[data-mode]`'s), its sprite the role's action (#241); its coat
- * stable per name. */
-export function avatar(a: Pick<LaneRow, 'state' | 'act' | 'atone' | 'coat'>): string {
+/** The state as an avatar in each mode (CSS shows `body[data-mode]`'s), its sprite the role's action (#241; #423: over
+ * its issue's plant, serve.js); its coat stable per name. */
+export function avatar(a: Pick<LaneRow, 'state' | 'act' | 'grow' | 'issue' | 'atone' | 'coat'>): string {
   const [glyph, art] = a.state === 'working' ? ['▶', `<i class="asc run"><b>${GALLOP[0]}</b><b>${GALLOP[1]}</b></i>`]
     : a.state === 'done' ? ['✓', `<i class=asc><b>${REST}</b></i>`]
     : a.state === 'blocked' || a.state === 'dead' ? ['✗', `<i class=asc><b>${REAR}</b></i>`]
     : ['⏸', `<i class=asc><b>${STAND}</b></i>`];
-  return `<span class="av ${a.atone} ${a.state}" data-act=${a.act}><i class=gl>${glyph}</i>${art}<svg class=px viewBox="0 0 132 100" style="${a.coat}"><use href=#ha-${a.act} /></svg></span>`;
+  return `<span class="av ${a.atone} ${a.state}" data-act=${a.act} data-grow=${a.grow}${a.issue == null ? '' : ` data-i=${a.issue}`}><i class=gl>${glyph}</i>${art}<svg class=px viewBox="0 0 132 100" style="${a.coat}"><use href=#ha-${a.act} /></svg></span>`;
 }
 
 /** #53: line 1 the name + `state age`; line 2 the reason, or `superseded by`; then the activity or #276's `now:` line. */
