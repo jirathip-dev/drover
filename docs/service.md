@@ -47,6 +47,14 @@ a timeout logs `service-timeout` and frees its slot, so a stuck job never blocks
 connections, 4 MiB a request, 64 KiB a socket line. A watchdog thread exits the process when the event loop's
 heartbeat is 30 s late.
 
+A timed-out kick frees its issue's spawn slot (the marker's pid is the service's own, which outlives the kick). A
+`--file` must come with its text: a lane never makes the service read a path on the main host.
+
+Killed mid-spawn (`kill -9`), the service leaves nothing that blocks: its spawn marker and kick lock name its pid, so
+they are stale at once; the CLI goes on in direct mode, and a remote lane's command fails fast instead of hanging. The
+next service starts over the dead one's socket, the next pass sweeps the marker and spawns again
+(`crates/cli/tests/service.rs`).
+
 ## Install
 
 `herdsman service --install [--api <addr>] [--board <addr>]` writes the unit (`dev.herdsman.service`) and prints the

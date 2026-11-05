@@ -189,8 +189,11 @@ impl Service {
         let k = &v["kick"];
         if let (Some(f), Some(n)) = (k["fleet"].as_str(), k["issue"].as_u64()) {
             let why = k["why"].as_str().unwrap_or("kick");
-            self.job(argv(&["kick", f, &n.to_string(), "--why", why, "--now"]), KICK_SECS)
-                .await;
+            let k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
+            // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
+            if self.job(k, KICK_SECS).await.is_none() {
+                herdsman_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
+            }
         }
     }
 
@@ -290,7 +293,12 @@ impl Service {
             };
             let dir = ctx.state.with_file_name("service-files");
             for i in 1..args.len() {
-                if let Some(text) = files[&args[i]].as_str().filter(|_| args[i - 1] == "--file") {
+                if args[i - 1] == "--file" {
+                    // Only the text the lane sent: never a path on this host.
+                    let Some(text) = files[&args[i]].as_str() else {
+                        let e = format!("herdsman: --file {} came without its text\n", args[i]);
+                        return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
+                    };
                     std::fs::create_dir_all(&dir)?;
                     let p = dir.join(herdsman_core::devices::sha256(text.as_bytes()) + ".md");
                     std::fs::write(&p, text)?;

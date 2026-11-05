@@ -95,6 +95,9 @@ pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Resul
     let Some((_, g)) = crate::db::get::<Grant>(&ctx.state, &key(token)) else {
         return refused("TOKEN", "unknown token");
     };
+    if args.is_empty() {
+        return refused("TOKEN", "no command");
+    }
     let events = read(&ctx.state)?;
     if let Some(why) = crate::cli::foreign(args, &g.lane, &events) {
         return refused("TOKEN", why);

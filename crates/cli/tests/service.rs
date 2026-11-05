@@ -4,7 +4,7 @@
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use herdsman::runner::{argv, Out, Runner};
 use herdsman::service::{grant, Grant};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -154,6 +154,25 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     }
     assert_eq!(asks(&c), 0);
 
+    // An empty command is refused; a `--file` that came without its text is never read on this host.
+    let (status, v) = post(&addr, &json!({"token": imp, "args": []}));
+    assert_eq!(status, 403, "{v}");
+    let secret = c.state.with_file_name("secret.md");
+    std::fs::write(&secret, "the main host's own file").unwrap();
+    let v_args = json!([
+        "verdict",
+        "sendmeter",
+        "12",
+        "FAIL",
+        "--sha",
+        "a".repeat(40),
+        "--file",
+        secret
+    ]);
+    let (status, v) = post(&addr, &json!({"token": rev, "args": v_args, "files": {}}));
+    assert_eq!(status, 400, "{v}");
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "verdict"), "{v}");
+
     // Its own lane's ask runs as that lane: logged on this host.
     let (status, v) = post(&addr, &json!({"token": imp, "args": ask}));
     assert_eq!((status, v["code"].as_i64()), (200, Some(0)), "{v}");
@@ -184,4 +203,145 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
         got.starts_with("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream"),
         "{got}"
     );
+}
+
+/// A real `herdsman service` process on `c`'s config and state, `bin` first on its PATH; killed when dropped.
+struct Proc(std::process::Child);
+
+impl Drop for Proc {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn service(c: &herdsman::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
+    let home = c.state.parent().unwrap().parent().unwrap();
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        .args(["service", "--api", api])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("HERDSMAN_HOME", home)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("FLEET_WORKTREES", &c.worktrees)
+        .env("FLEET_HERMES_PROFILES", &c.hermes)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let p = Proc(child);
+    for _ in 0..200 {
+        if let Some(pid) = herdsman::service::up(c) {
+            return (p, pid);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("the service never answered");
+}
+
+/// Waits up to 20 s for `f`.
+fn until(what: &str, f: impl Fn() -> bool) {
+    for _ in 0..400 {
+        if f() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("never: {what}");
+}
+
+/// Chaos: the service is killed (`kill -9`) mid-spawn. Its spawn marker and kick lock are stale at once (its pid is gone), the CLI
+/// goes on in direct mode and a lane's HTTP command fails fast instead of hanging; a new service starts over the dead
+/// one's socket, the next pass sweeps the marker and launches the spawn again, and the lane's command goes through.
+#[test]
+fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
+    let d = tmpdir("service-chaos");
+    // The real host's disk and memory never refuse the service's spawn.
+    let cfg = CONFIG.replace(
+        "max_parallel_spawns = 0",
+        "max_parallel_spawns = 2\nmin_free_gb = 0\nmin_free_mem_gb = 0",
+    );
+    let mut c = ctx(&d, &cfg);
+    c.now = herdsman::now();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
+    // Its tools: `gh issue view` (the spawn's first GitHub read) logs and hangs, so the spawn is caught midway.
+    let (bin, log) = (d.join("bin"), d.join("gh.log"));
+    std::fs::create_dir_all(&bin).unwrap();
+    let tools = [
+        (
+            "gh",
+            format!(
+                "case \"$*\" in *'issue view'*) echo \"$*\" >> '{}'; exec sleep 60;; *) echo '[]';; esac",
+                log.display()
+            ),
+        ),
+        ("herdr", format!("echo '{NO_AGENTS}'")),
+        ("hermes", "exit 0".into()),
+    ];
+    for (name, body) in tools {
+        let p = bin.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    }
+    let pass = |r: &Fake| assert_eq!(run(&c, r, &["drive"]).0, 0);
+    let host = || {
+        Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+            .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+            .reply("herdr", "{}")
+            .reply("git -C", "")
+    };
+    let cfgv = herdsman::config::Config::load(&c.config).unwrap();
+    let live = || herdsman::drive::markers(&c, &cfgv, &herdsman::runner::Real, false).0;
+    let marker = || lease_on(&c, "spawn-sendmeter-1.pending");
+    // A lane on issue 12 (logged spawn and token) with a command for the service.
+    let tok = lane(&c, "impl", c.now);
+    let ask = argv(&["ask", "sendmeter", "12", "Which colour?", "--option", "red"]);
+
+    let (a, pid_a) = service(&c, &bin, "127.0.0.1:0");
+    // The pass launches the spawn as a kick the service takes: the marker is the service's, and live.
+    pass(&host());
+    assert_eq!(marker().map(|l| u64::from(l.pid)), Some(pid_a));
+    until("the spawn reached GitHub", || {
+        std::fs::read_to_string(&log).is_ok_and(|s| s.contains("issue view 1"))
+    });
+    // Its spawn marker and the kick's lock, both the service's.
+    assert_eq!(live(), ["spawn-sendmeter-1.pending", "kick-sendmeter-1.lock"]);
+
+    // kill -9 mid-spawn: the marker is stale at once, no service answers, and a lane's command errs fast.
+    let api_a = read(&c.state)
+        .unwrap()
+        .iter()
+        .rfind(|e| e.kind == "service-started")
+        .and_then(|e| e.str("api").map(String::from))
+        .unwrap();
+    drop(a);
+    assert!(live().is_empty(), "{:?}", live());
+    assert_eq!(herdsman::service::up(&c), None);
+    let t0 = std::time::Instant::now();
+    let down = herdsman::service::post(&herdsman::runner::Real, &format!("http://{api_a}"), &tok, &ask);
+    assert!(down.is_err() && t0.elapsed().as_secs() < 10, "{down:?}");
+
+    // A new service starts over the dead one's socket; the next pass sweeps the marker and launches again.
+    let (_b, pid_b) = service(&c, &bin, "127.0.0.1:0");
+    assert_ne!(pid_a, pid_b);
+    pass(&host());
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "stale-marker" && e.issue == Some(1)));
+    assert_eq!(marker().map(|l| u64::from(l.pid)), Some(pid_b));
+    until("the spawn was retried", || {
+        std::fs::read_to_string(&log).is_ok_and(|s| s.matches("issue view 1").count() == 2)
+    });
+    let api_b = read(&c.state)
+        .unwrap()
+        .iter()
+        .rfind(|e| e.kind == "service-started")
+        .and_then(|e| e.str("api").map(String::from))
+        .unwrap();
+    let up = herdsman::service::post(&herdsman::runner::Real, &format!("http://{api_b}"), &tok, &ask).unwrap();
+    assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
 }
