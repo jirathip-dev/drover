@@ -1877,7 +1877,7 @@ function chatOpen(t) {
   THR = t;
   sput('thread', t);
   const q = CSS.escape(t);
-  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}html[data-tab=chat],html[data-tab=chat] body{height:100%;overflow:hidden}}
+  $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}html[data-tab=chat],html[data-tab=chat] body{height:100%;overflow:hidden}html[data-tab=chat] .msg.r{position:fixed;top:calc(2 * var(--hit) + var(--s1) + 2 * var(--s2))}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
   if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
   if (t) chatEnd();
@@ -1946,9 +1946,9 @@ async function chatOlder() {
   const c = innerWidth < 1000 ? a && a.parentElement : null;
   if (a) c ? c.scrollTop += a.getBoundingClientRect().top - y : scrollBy(0, a.getBoundingClientRect().top - y);
 }
-document.addEventListener('scroll', e => {
+addEventListener('scroll', e => {
   const c = e.target;
-  if (document.documentElement.dataset.tab === 'chat' && (c === document ? scrollY < innerHeight : c.matches('#chat .tc') && c.scrollTop < c.clientHeight)) chatOlder();
+  if (document.documentElement.dataset.tab === 'chat' && (c.matches ? c.matches('#chat .tc') && c.scrollTop < c.clientHeight : scrollY < innerHeight)) chatOlder();
 }, { passive: true, capture: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
