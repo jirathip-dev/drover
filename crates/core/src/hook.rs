@@ -147,8 +147,11 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
         // #499: a `cd` moves the later segments' cwd, so their relative paths resolve where they run.
-        if let ["cd", dir, ..] = t[..] {
-            cwd = resolve(dir, &cwd);
+        // Its options (`-P`, `--`) are skipped; `pushd` moves it the same way.
+        if let ["cd" | "pushd", ref args @ ..] = t[..] {
+            if let Some(dir) = args.iter().find(|a| !a.starts_with('-')) {
+                cwd = resolve(dir, &cwd);
+            }
         }
         let found = gh(&t)
             .or_else(|| git_push(&t, &cwd, p, cur_branch))
