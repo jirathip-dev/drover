@@ -154,7 +154,8 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     }
     std::fs::write(&p, text).unwrap();
     checkpoint(&p).unwrap();
-    write(&p, &log(7, 50, seq * 600));
+    // #344: the rows after the checkpoint as live writers add them.
+    log(7, 50, seq * 600).iter().for_each(|e| append(&p, e).unwrap());
     let t = std::time::Instant::now();
     let st = states(&p).unwrap();
     let ms = t.elapsed().as_secs_f64() * 1e3;

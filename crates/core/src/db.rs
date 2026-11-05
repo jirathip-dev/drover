@@ -4,6 +4,8 @@ use crate::events::{self, Event};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{de::DeserializeOwned, Serialize};
+use std::cell::RefCell;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 const SCHEMA: &str = "
@@ -22,13 +24,41 @@ pub fn file(state: &Path) -> PathBuf {
     state.with_file_name("state.db")
 }
 
-/// The database, created on first use; files from before #344 left beside it are imported first (`import`).
-pub fn open(state: &Path) -> Result<Connection> {
+thread_local! {
+    /// Each thread's open databases by file and inode, reused: opening one (WAL, schema) costs about a millisecond.
+    static OPEN: RefCell<Vec<(PathBuf, u64, Connection)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Run `f` on the database (`create`: made on first use; else none yet, and nothing to import, is `empty`, and
+/// nothing is created). Files from before #344 left beside it are imported first (`import`).
+fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    let (p, (logs, lists)) = (file(state), legacy(state));
+    let ino = |p: &Path| std::fs::metadata(p).map(|m| m.ino()).ok();
+    if !create && ino(&p).is_none() && logs.is_empty() && !lists.iter().any(|p| p.exists()) {
+        return Ok(empty);
+    }
+    let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
+    let mut c = match cached {
+        Some((_, i, c)) if ino(&p) == Some(i) => c,
+        _ => open(state)?,
+    };
+    if !logs.is_empty() || lists.iter().any(|p| p.exists()) {
+        import(&mut c, state)?;
+    }
+    let r = f(&mut c);
+    if let Some(i) = ino(&p) {
+        OPEN.with_borrow_mut(|v| v.push((p, i, c)));
+    }
+    r
+}
+
+/// The database, created on first use, in WAL mode with its tables.
+fn open(state: &Path) -> Result<Connection> {
     std::fs::create_dir_all(state.parent().unwrap_or(Path::new(".")))?;
     // Paired devices and push keys live here: owner-only, as their files were.
     let mut o = std::fs::OpenOptions::new();
     drop(std::os::unix::fs::OpenOptionsExt::mode(o.create(true).append(true), 0o600).open(file(state))?);
-    let mut c = Connection::open(file(state)).with_context(|| format!("cannot open {}", file(state).display()))?;
+    let c = Connection::open(file(state)).with_context(|| format!("cannot open {}", file(state).display()))?;
     c.busy_timeout(std::time::Duration::from_secs(60))?;
     // Switching to WAL needs the file alone and SQLite does not wait for it: a new database's first openers retry.
     let mode = |c: &Connection| c.pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0));
@@ -40,17 +70,7 @@ pub fn open(state: &Path) -> Result<Connection> {
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
-    import(&mut c, state)?;
     Ok(c)
-}
-
-/// A reader's database: none yet, and nothing to import, reads as empty and creates nothing.
-fn peek(state: &Path) -> Result<Option<Connection>> {
-    let (logs, lists) = legacy(state);
-    if !file(state).exists() && logs.is_empty() && !lists.iter().any(|p| p.exists()) {
-        return Ok(None);
-    }
-    open(state).map(Some)
 }
 
 fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
@@ -64,12 +84,12 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
 
 /// One event, numbered next: a single insert, its own transaction.
 pub fn append(state: &Path, ev: &Event) -> Result<()> {
-    insert(&open(state)?, ev, None, false)
+    with(state, true, (), |c| insert(c, ev, None, false))
 }
 
 /// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
 pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
-    peek(state)?.map_or(Ok(vec![]), |c| rows(&c, filter, arg))
+    with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
 fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
@@ -87,77 +107,73 @@ fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
 
 /// #343: the live log's size, and the rotation that moves events out of `read` (kept for `history`).
 pub fn live_bytes(state: &Path) -> Result<u64> {
-    let Some(c) = peek(state)? else { return Ok(0) };
-    Ok(c.query_row(
-        "SELECT COALESCE(SUM(LENGTH(json)), 0) FROM events WHERE archived = 0",
-        [],
-        |r| r.get(0),
-    )?)
+    let q = "SELECT COALESCE(SUM(LENGTH(json)), 0) FROM events WHERE archived = 0";
+    with(state, false, 0, |c| Ok(c.query_row(q, [], |r| r.get(0))?))
 }
 
 pub(crate) fn archive(state: &Path, seqs: &[u64]) -> Result<()> {
-    let mut c = open(state)?;
-    let tx = c.transaction()?;
-    for s in seqs {
-        tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?;
-    }
-    Ok(tx.commit()?)
+    with(state, true, (), |c| {
+        let tx = c.transaction()?;
+        for s in seqs {
+            tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?;
+        }
+        Ok(tx.commit()?)
+    })
 }
 
 /// A snapshot row (`board`: #337's reads; `states`: the fold's checkpoint).
 pub fn get<T: DeserializeOwned>(state: &Path, key: &str) -> Option<(u64, T)> {
-    let c = peek(state).ok()??;
     let q = "SELECT ts, json FROM snapshot WHERE key = ?1";
-    let (ts, json) = c
-        .query_row(q, [key], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))
-        .ok()?;
+    let row = |r: &rusqlite::Row| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?));
+    let (ts, json) = with(state, false, None, |c| Ok(c.query_row(q, [key], row).optional()?)).ok()??;
     Some((ts, serde_json::from_str(&json).ok()?))
 }
 
 /// A snapshot row's version: a new one each `put`.
 pub fn stamp(state: &Path, key: &str) -> Option<u64> {
     let q = "SELECT n FROM snapshot WHERE key = ?1";
-    peek(state).ok()??.query_row(q, [key], |r| r.get(0)).ok()
+    with(state, false, None, |c| {
+        Ok(c.query_row(q, [key], |r| r.get(0)).optional()?)
+    })
+    .ok()?
 }
 
 /// The newest event's seq (0: none): the page's change check.
 pub fn last_seq(state: &Path) -> u64 {
     let q = "SELECT COALESCE(MAX(seq), 0) FROM events";
-    let c = peek(state).ok().flatten();
-    c.and_then(|c| c.query_row(q, [], |r| r.get(0)).ok()).unwrap_or(0)
+    with(state, false, 0, |c| Ok(c.query_row(q, [], |r| r.get(0))?)).unwrap_or(0)
 }
 
 pub fn put(state: &Path, key: &str, ts: u64, v: &impl Serialize) -> Result<()> {
     let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES (?1, ?2, ?3)";
-    open(state)?.execute(q, params![key, ts, serde_json::to_string(v)?])?;
-    Ok(())
+    let json = serde_json::to_string(v)?;
+    with(state, true, 0, |c| Ok(c.execute(q, params![key, ts, json])?)).map(|_| ())
 }
 
 /// The `devices` or `push` rows, in order.
 pub fn list<T: DeserializeOwned>(state: &Path, table: &str) -> Vec<T> {
-    let Ok(Some(c)) = peek(state) else { return vec![] };
-    let Ok(mut q) = c.prepare(&format!("SELECT json FROM {table} ORDER BY n")) else {
-        return vec![];
-    };
-    let rows = q.query_map([], |r| r.get::<_, String>(0));
-    rows.into_iter()
-        .flatten()
-        .filter_map(|j| serde_json::from_str(&j.ok()?).ok())
-        .collect()
+    let all = with(state, false, vec![], |c| {
+        let mut q = c.prepare(&format!("SELECT json FROM {table} ORDER BY n"))?;
+        let rows = q.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    });
+    let all = all.unwrap_or_default().into_iter();
+    all.filter_map(|j| serde_json::from_str(&j).ok()).collect()
 }
 
 /// Replace every row of `table` with `all`, in one transaction.
 pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
-    let mut c = open(state)?;
-    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute(&format!("DELETE FROM {table}"), [])?;
-    for v in all {
-        tx.execute(
-            &format!("INSERT INTO {table} (json) VALUES (?1)"),
-            [serde_json::to_string(v)?],
-        )?;
-    }
-    Ok(tx.commit()?)
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(&format!("DELETE FROM {table}"), [])?;
+        for v in all {
+            tx.execute(
+                &format!("INSERT INTO {table} (json) VALUES (?1)"),
+                [serde_json::to_string(v)?],
+            )?;
+        }
+        Ok(tx.commit()?)
+    })
 }
 
 /// A lease: who holds `key` (pid on host), since `at`, until `expires_at`, with the holder's `data`.
@@ -183,11 +199,13 @@ pub fn host() -> String {
 
 /// Every lease whose key starts with `prefix`.
 pub fn leases(state: &Path, prefix: &str) -> Vec<Lease> {
-    let Ok(Some(c)) = peek(state) else { return vec![] };
     let q = format!("{LEASE} WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key");
-    let Ok(mut q) = c.prepare(&q) else { return vec![] };
-    let rows = q.query_map([prefix], lease);
-    rows.into_iter().flatten().flatten().collect()
+    let all = with(state, false, vec![], |c| {
+        let mut q = c.prepare(&q)?;
+        let rows = q.query_map([prefix], lease)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    });
+    all.unwrap_or_default()
 }
 
 const LEASE: &str = "SELECT key, pid, host, at, expires_at, data FROM leases";
@@ -206,16 +224,6 @@ fn lease(r: &rusqlite::Row) -> rusqlite::Result<Lease> {
 /// Take `key` for `secs` from `now`, as this process: an atomic insert-if-free. Free: no lease, an expired one, or one
 /// `dead` says has lost its holder. `None` while another holds it.
 pub fn take(state: &Path, key: &str, now: u64, secs: u64, data: &str, dead: &dyn Fn(&Lease) -> bool) -> Option<Lease> {
-    let mut c = open(state).ok()?;
-    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).ok()?;
-    let held = tx
-        .query_row(&format!("{LEASE} WHERE key = ?1"), [key], lease)
-        .optional()
-        .ok()?;
-    let held = held.filter(|l| l.expires_at > now && !dead(l));
-    if held.is_some() {
-        return None;
-    }
     let l = Lease {
         key: key.into(),
         pid: std::process::id(),
@@ -225,10 +233,18 @@ pub fn take(state: &Path, key: &str, now: u64, secs: u64, data: &str, dead: &dyn
         data: data.into(),
     };
     let q = "INSERT OR REPLACE INTO leases (key, pid, host, at, expires_at, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
-    tx.execute(q, params![l.key, l.pid, l.host, l.at, l.expires_at, l.data])
-        .ok()?;
-    tx.commit().ok()?;
-    Some(l)
+    let took = with(state, true, false, |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let held = tx
+            .query_row(&format!("{LEASE} WHERE key = ?1"), [key], lease)
+            .optional()?;
+        if held.is_some_and(|h| h.expires_at > now && !dead(&h)) {
+            return Ok(false);
+        }
+        tx.execute(q, params![l.key, l.pid, l.host, l.at, l.expires_at, l.data])?;
+        Ok(tx.commit().map(|()| true)?)
+    });
+    took.unwrap_or(false).then_some(l)
 }
 
 /// Hand lease `old` on as `new` (a later expiry, another pid or data); false if `old` no longer holds it.
@@ -244,19 +260,20 @@ pub fn renew(state: &Path, old: &Lease, new: &Lease) -> bool {
         old.host,
         old.at
     ];
-    open(state).is_ok_and(|c| c.execute(q, p).is_ok_and(|n| n > 0))
+    with(state, false, 0, |c| Ok(c.execute(q, p)?)).is_ok_and(|n| n > 0)
 }
 
 /// Drop `key`, whoever holds it (`Some(l)`: only while `l` does); true if a lease went.
 pub fn release(state: &Path, key: &str, l: Option<&Lease>) -> bool {
-    let Ok(c) = open(state) else { return false };
-    let n = match l {
-        None => c.execute("DELETE FROM leases WHERE key = ?1", [key]),
-        Some(l) => c.execute(
-            "DELETE FROM leases WHERE key = ?1 AND pid = ?2 AND host = ?3 AND at = ?4",
-            params![key, l.pid, l.host, l.at],
-        ),
-    };
+    let n = with(state, false, 0, |c| {
+        Ok(match l {
+            None => c.execute("DELETE FROM leases WHERE key = ?1", [key])?,
+            Some(l) => c.execute(
+                "DELETE FROM leases WHERE key = ?1 AND pid = ?2 AND host = ?3 AND at = ?4",
+                params![key, l.pid, l.host, l.at],
+            )?,
+        })
+    });
     n.is_ok_and(|n| n > 0)
 }
 
@@ -341,8 +358,9 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
 /// `herdsman migrate`'s #344 step: import what is left, say what the database holds.
 pub fn migrate(state: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let left = legacy(state).0.len();
-    let c = open(state)?;
-    let n: u64 = c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?;
+    let n: u64 = with(state, true, 0, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?)
+    })?;
     writeln!(
         out,
         "imported {left} log file(s); {} holds {n} events",
