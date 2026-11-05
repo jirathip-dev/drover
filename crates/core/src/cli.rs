@@ -16,6 +16,9 @@ use std::path::PathBuf;
 pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
+/// #345: `herdsman service` (api addr, board addr), set by the binary from the service crate.
+pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
+type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 
 #[derive(Parser)]
 #[command(
@@ -282,6 +285,18 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
+    /// One supervised process: the board, kicks driven at once, the GitHub poll, API v1 for remote lanes (docs/service.md)
+    Service {
+        /// API v1 listen address (remote lanes reach it over the tailnet)
+        #[arg(long, default_value = "127.0.0.1:7778")]
+        api: String,
+        /// Also serve the board here (the `serve` job's address)
+        #[arg(long)]
+        board: Option<String>,
+        /// Write its launchd/systemd unit and print the commands that load it; loads nothing
+        #[arg(long)]
+        install: bool,
+    },
     /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
@@ -562,6 +577,11 @@ enum StatsCmd {
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
+    /// Owner only: copy each account's token from the old tokens.env into the secret store, checked by hash
+    Import {
+        #[arg(default_value = "~/.config/herdsman/accounts/tokens.env")]
+        file: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -614,8 +634,8 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "setup", "stats",
-        "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "service", "setup",
+        "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -681,7 +701,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         .and_then(|c| c.runtime.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
-    let res = match lane_write.then(|| forward(&sent)).flatten() {
+    let res = match lane_write.then(|| forward(r, &sent)).flatten() {
         Some(o) => o.map(|o| {
             let _ = write!(out, "{}", o.stdout);
             eprint!("{}", o.stderr);
@@ -705,7 +725,11 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
 
 /// #389: a lane on another host (`HERDSMAN_OUTBOX`) never connects to the main host: its `args` wait in its
 /// worktree's outbox, which drive pulls over main → host ssh and runs as the lane.
-pub(crate) fn forward(args: &[String]) -> Option<Result<runner::Out>> {
+/// #345: with `HERDSMAN_SERVICE` it goes over HTTP to the main host's service with the lane's own token instead.
+pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
+    if let (Ok(url), Ok(token)) = (std::env::var("HERDSMAN_SERVICE"), std::env::var("HERDSMAN_TOKEN")) {
+        return Some(crate::service::post(r, &url, &token, args));
+    }
     let lane = crate::outbox::lane()?;
     Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
         code: 0,
@@ -724,7 +748,9 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
         Ok(Cmd::LaneEvent { .. }) => return None,
         Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
-        Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. }) => (fleet, issue.to_string()),
+        Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
+            (fleet, issue.to_string())
+        }
         Ok(Cmd::Answer { fleet, id, .. }) => (fleet.clone(), asked(&fleet, &id).map_or("-".into(), |n| n.to_string())),
         _ => return Some(format!("`{}` is no lane's own verb", args[0])),
     };
@@ -938,7 +964,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             demo,
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
+        Cmd::Serve { addr, read_only, .. } => {
+            if let Ok(cfg) = Config::load(&ctx.config) {
+                crate::secret::probe(r, &cfg)?; // #441: no usable store, no board
+            }
+            (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
+        }
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
@@ -996,6 +1027,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Service {
+            api,
+            board,
+            install: true,
+        } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
+        Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;
             let kick = |f: &str, n, why| {
@@ -1181,6 +1218,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Accounts {
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
+                Cmd::Accounts {
+                    cmd: Some(AccountsCmd::Import { file }),
+                } => crate::secret::import(ctx, &cfg, r, out, &file)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },
@@ -1489,7 +1529,12 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
 
 /// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
-    if forward(&runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
+    if forward(
+        &crate::runner::Real,
+        &runner::argv(&["lane-event", kind, &d.to_string()]),
+    )
+    .is_some()
+    {
         return;
     }
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
@@ -1501,17 +1546,21 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     }
 }
 
-/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top.
+/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top;
+/// #502: `pkill` and `killall` always.
 fn deny_list(ctx: &Ctx) -> Vec<crate::config::Deny> {
     let cfg = Config::load(&ctx.config).unwrap_or_default();
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let f = cfg.fleet.get(lane.split(':').next().unwrap_or_default());
     let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
     let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
-    match cfg.hosts.get(&host) {
+    let mut d = match cfg.hosts.get(&host) {
         Some(h) => h.deny(d),
         None => d,
-    }
+    };
+    // #502: no fleet or host drops the broad-kill ban.
+    d.extend(hook::broad_kill());
+    d
 }
 
 /// main, master, staging and every fleet's integration branch.

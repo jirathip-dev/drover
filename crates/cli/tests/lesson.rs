@@ -111,6 +111,10 @@ const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-n
 #[test]
 fn tick_runs_lesson_once_a_week_and_never_when_off() {
     let c = ctx(&tmpdir("lesson-tick"), &(CONFIG.to_string() + OFF));
+    // #517: a fleet over a week old with 2 FAILs this week.
+    ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
+    ev(&c, NOW, Some(12), "verdict", fail("unwrap on a missing config"));
+    ev(&c, NOW, Some(13), "verdict", fail("unwrap on a missing env"));
     let fake = || {
         Fake::default()
             .reply("herdr status", "server:\n  status: running\n")
@@ -144,6 +148,46 @@ fn tick_runs_lesson_once_a_week_and_never_when_off() {
     assert_eq!(q.first().map(|i| i.issue), Some(77));
     assert!(tick(NOW + 6 * 86400).is_empty(), "within the week");
     assert_eq!(tick(NOW + 7 * 86400).len(), 1, "a week on");
+}
+
+/// #517: a fleet under a week old, or with under 2 FAIL verdicts this week, skips its weekly run: `lesson-skipped`.
+#[test]
+fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
+    let c = ctx(&tmpdir("lesson-young"), CONFIG);
+    let r = Fake::default()
+        .reply("herdr status", "server:\n  status: running\n")
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply(
+            "gh issue create",
+            "https://github.com/jirathip-dev/sendmeter/issues/77\n",
+        );
+    let skipped = |c: &herdsman::Ctx| -> Vec<Event> {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "lesson-skipped")
+            .collect()
+    };
+    // A day old, 2 FAILs: too young.
+    ev(&c, NOW - 86400, Some(12), "verdict", fail("unwrap on a missing config"));
+    ev(&c, NOW - HOUR, Some(13), "verdict", fail("unwrap on a missing env"));
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!r.called("gh issue create"), "{out}");
+    let s = skipped(&c);
+    assert_eq!(
+        (s.len(), s[0].fleet.as_str(), s[0].str("why")),
+        (1, "sendmeter", Some("fleet under a week old"))
+    );
+    // Over a week old, 1 FAIL this week: no repeated class to find either.
+    let c = ctx(&tmpdir("lesson-quiet"), CONFIG);
+    ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
+    ev(&c, NOW - HOUR, Some(12), "verdict", fail("unwrap on a missing config"));
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!r.called("gh issue create"), "{out}");
+    assert_eq!(skipped(&c)[0].str("why"), Some("under 2 FAIL verdicts this week"));
 }
 
 /// The fake for one spawn, issue `n`'s spec as `title`.

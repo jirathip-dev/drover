@@ -10,6 +10,7 @@ build = "../core/build.rs"
 [dependencies]
 herdsman-core.workspace = true
 herdsman-server.workspace = true
+herdsman-service.workspace = true
 
 [dev-dependencies]
 aes-gcm.workspace = true

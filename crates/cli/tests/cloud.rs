@@ -30,16 +30,14 @@ fn rc(verb: &str) -> String {
     format!("sh -c IFS= read -r K; export FAKE_CLOUD_KEY=\"$K\"; unset K; fakecloud {verb} cloud1")
 }
 
-/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); the key in accounts_env.
+/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); the key in the store.
 fn setup(name: &str) -> herdsman::Ctx {
     let dir = tmpdir(name);
-    let env = dir.join("keys.env");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(&env, format!("FAKE_CLOUD_KEY={KEY}\n")).unwrap();
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let hosts = "[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"fake\"\nsize = \"small\"\n\
 budget_usd_month = 10\nmax_hours_day = 20\ntags = [\"docker\"]\n";
-    let cfg = format!("{base}\n[accounts]\naccounts_env = \"{}\"\n\n{hosts}", env.display());
+    let cfg = format!("{base}\n{hosts}");
     let c = ctx(&dir, &cfg);
     std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
@@ -65,7 +63,8 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
 /// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.reply("herdr --machine cloud1 agent list", NO_AGENTS)
+    f.stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
+        .reply("herdr --machine cloud1 agent list", NO_AGENTS)
         .reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
         .reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
@@ -474,6 +473,9 @@ impl Runner for Stdin {
         self.1.borrow_mut().push(input.into());
         self.0.run(prog, args)
     }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
 }
 
 #[test]
@@ -515,6 +517,7 @@ fn boot_fake(gh_in: bool) -> Fake {
         herdsman::VERSION
     );
     let f = Fake::default()
+        .stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
         .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
         .reply(&step("herdr --version | grep -qx 'herdr 0.9.5'"), "")

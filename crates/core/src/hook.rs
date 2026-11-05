@@ -30,6 +30,20 @@ const GIT_WRITES: &[&str] = &[
 ];
 const WRITERS: &[&str] = &["rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd"];
 
+/// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
+pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
+                                 '& echo $! > f', stop with kill \"$(cat f)\"";
+
+/// #502: `pkill` and `killall`, denied to every lane on top of its fleet's and host's `deny_commands`.
+pub fn broad_kill() -> Vec<Deny> {
+    ["pkill", "killall"]
+        .map(|c| Deny::Why {
+            cmd: c.into(),
+            why: NO_BROAD_KILL.into(),
+        })
+        .into()
+}
+
 /// The call's tool input: the first of any dialect's input keys holding an object.
 fn tool_input(input: &Value) -> &Value {
     let mut keys = dialects().flat_map(|d| d.input.iter());
@@ -95,6 +109,11 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     let cmd = &unquote(cmd);
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
+    }
+    // #502: `pgrep x | xargs kill` and `kill $(pgrep x)` kill by pattern too.
+    let runs = |c: &str| denied(cmd, &[Deny::Cmd(c.into())]).is_some();
+    if runs("pgrep") && runs("kill") {
+        return Some(NO_BROAD_KILL.into());
     }
     let seg_breaks: &[char] = &[';', '|', '&', '\n', '(', ')', '`'];
     for seg in cmd.split(seg_breaks) {
@@ -295,7 +314,7 @@ fn gh(t: &[&str]) -> Option<String> {
 }
 
 /// `herdsman spawn … design` (or pre-rename `fleet`; a conductor's too, #410), `setup`, `serve
-/// approve|unpair|devices --revoke`, `config apply|discard` and `secret ls|rm`: owner-only.
+/// approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm` and `accounts import`: owner-only.
 fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     let i = t
         .iter()
@@ -306,7 +325,9 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     }
     if matches!(
         (r.first(), r.get(1)),
-        (Some(&"config"), Some(&("apply" | "discard"))) | (Some(&"secret"), Some(&("ls" | "rm")))
+        (Some(&"config"), Some(&("apply" | "discard")))
+            | (Some(&"secret"), Some(&("ls" | "rm")))
+            | (Some(&"accounts"), Some(&"import"))
     ) {
         return Some(
             "REFUSED OWNER_ONLY: only the owner applies config or lists and removes secrets, never a lane (#387)"

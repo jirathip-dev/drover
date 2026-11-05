@@ -5,19 +5,17 @@ use herdsman::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B from `<dir>/tokens.env`, local repo `<dir>/repo`.
+/// Claude impl role with `role_extra` lines, `[accounts]` A/B (tokens in `fake`'s store), local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
-    let env = d.join("tokens.env");
-    std::fs::write(&env, "CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\n").unwrap();
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     CONFIG
-        .replace("harness  =  \"hermes\"    # toggled in tests", &format!("harness = \"claude\"\n{role_extra}"))
-        .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
-        + &format!(
-            "\n[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n",
-            env.display()
+        .replace(
+            "harness  =  \"hermes\"    # toggled in tests",
+            &format!("harness = \"claude\"\n{role_extra}"),
         )
+        .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
+        + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n"
 }
 
 const CHAIN: &str = "fallback = [\"claude:A\", \"claude:B\", \"dsh\"]";
@@ -28,6 +26,8 @@ fn fake(c: &herdsman::Ctx, n: u64) -> Fake {
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
     Fake::default()
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", "a")
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_B", "b")
         .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)

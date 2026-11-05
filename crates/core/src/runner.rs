@@ -32,9 +32,22 @@ pub trait Runner: Sync {
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
+    /// #441: keychain service `svc`'s secret in the main host's OS store (None: not set); fakes and wrappers forward.
+    fn secret(&self, svc: &str) -> Result<Option<String>> {
+        bail!("no secret store on this host (wanted {svc})")
+    }
+    /// #441: save `svc`'s secret (None: delete it) in the main host's OS store.
+    fn set_secret(&self, svc: &str, _value: Option<&str>) -> Result<()> {
+        bail!("no secret store on this host (wanted {svc})")
+    }
 }
 
 pub struct Real;
+
+/// #441: the OS store's entry for `svc`, under the `herdsman` account `security` used (#387), so old items keep working.
+fn entry(svc: &str) -> Result<keyring::Entry> {
+    keyring::Entry::new(svc, "herdsman").with_context(|| format!("secret store: {svc}"))
+}
 
 impl Runner for Real {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
@@ -65,6 +78,17 @@ impl Runner for Real {
         let pid = child.id();
         std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
         Ok(pid)
+    }
+    fn secret(&self, svc: &str) -> Result<Option<String>> {
+        match entry(svc)?.get_password() {
+            Err(keyring::Error::NoEntry) => Ok(None),
+            x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
+        }
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
+        let e = entry(svc)?;
+        let done = value.map_or_else(|| e.delete_credential(), |v| e.set_password(v));
+        done.with_context(|| format!("secret store: {svc}"))
     }
 }
 
