@@ -908,6 +908,7 @@
       if (!H.matches('.night.storm')) early.push(`#herd is "${H.className}", not night and storm`);
     },
     'herd-scroll': () => herd(true),
+    'herd-dupes': () => herd(true),
     // #291 gate 2: 3 repos; [›], a dot, →, a horizontal wheel (one gesture of three events), shift+wheel and a mouse drag
     // across a horse each move exactly one repo; a vertical wheel and a drag in a text field none; the drag's click opens nothing, a plain click does.
     'herd-nav': async () => {
@@ -1330,6 +1331,24 @@
       if (n !== 2) bad.push(`${n} horse nodes removed, 2 agents/issues left`);
       for (const [k, e] of keep) if (p.querySelector(`[data-agent="${k}"], [data-i="${k}"]`) !== e && (l.some(x => x.name === k) || next.fleets[0].queue.some(q => String(q.issue) === k))) bad.push(`${k}: horse replaced, not patched`);
       return { view: V, controls: keep.size, outliers: bad };
+    },
+    // #516: herd.json repeating a lane's name (one copy in another band), and a stale copy of its card already on the
+    // page: after 5 refreshes every name has one card, the page none more, and "N here" counts the cards.
+    'herd-dupes': () => {
+      const base = structuredClone(data), bad = [], f = base.fleets[0], l = f.lanes.find(x => !x.gone);
+      f.lanes.push({ ...l }, { ...l, state: 'idle', shown: 'idle' });
+      herdData(structuredClone(base));
+      const p = hp(0), names = () => [...p.querySelectorAll('.hh')].map(e => e.dataset.agent);
+      const c = p.querySelector(`.hh[data-agent="${CSS.escape(l.name)}"]`);
+      c.after(c.cloneNode(true));
+      const n = [];
+      for (let i = 0; i < 5; i++) { herdData(structuredClone(base)); n.push(names().length); }
+      const ks = names(), want = new Set(f.lanes.filter(x => !x.gone).map(x => x.name)).size;
+      if (new Set(ks).size !== ks.length) bad.push(`a name drawn twice: ${ks.join(' ')}`);
+      if (n.some(x => x !== want)) bad.push(`cards per refresh ${n.join(',')}, not ${want} each`);
+      const here = p.querySelector('.hs .n').textContent;
+      if (here !== `· ${want} here`) bad.push(`"${here}", not ${want} here`);
+      return { view: V, controls: ks.length, outliers: bad };
     },
     'queue-scroll': () => {
       const q = $('#queue'), x = q.cloneNode(true), rows = x.querySelectorAll('details.q'), bad = [];
