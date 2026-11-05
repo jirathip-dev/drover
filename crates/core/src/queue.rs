@@ -1,6 +1,6 @@
 //! The per-fleet work queue (`queue` events): `herdsman queue`, `next` and `board`.
 use crate::config::{Fleet, Serial};
-use crate::events::{age, fold, Event, IssueState, States};
+use crate::events::{age, fold, last_spawn, Event, IssueState, States};
 use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
@@ -290,7 +290,14 @@ pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
 pub const WIDTH: usize = 60;
 
 /// One fleet's board, lines ≤ 60 cols: the queue, other open issues, issues merged in the last 24 h.
-pub fn board(events: &[Event], fleet: &str, now: u64, cfg: Option<&crate::config::Config>, c: &Conflicts) -> String {
+pub fn board(
+    ctx: &crate::Ctx,
+    events: &[Event],
+    fleet: &str,
+    cfg: Option<&crate::config::Config>,
+    c: &Conflicts,
+) -> String {
+    let now = ctx.now;
     let st = fold(events);
     let q = view(events, &st, fleet);
     let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == fleet).collect();
@@ -329,6 +336,9 @@ pub fn board(events: &[Event], fleet: &str, now: u64, cfg: Option<&crate::config
         let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
         let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
+        // #478: its own line too: an active lane on a host the last look could not reach.
+        let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
+        let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
         let last = last.unwrap_or_else(|| if ev.is_empty() { "-".into() } else { ev.into() });
         format!(
             "{pos:>2} #{n:<5} {:<11} {lane:<20} {eff:<5} {a:<4} {last}{warn}",

@@ -126,6 +126,12 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
   swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
   values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
   (`offline · last seen 33m`) in the same layout, and its lanes never page (`lane-dead` and `stall` skip them).
+- #478: while a host is unreachable, a spawn onto it is refused `HOST_OFFLINE` (other hosts' spawns go on), its lanes
+  show `host offline: <host>` in `status`, `board` and `waiting` (drive neither respawns nor supersedes them), and
+  `check` logs `host-offline` once when it drops and `host-online` once when it is back. A supersede that could not
+  close the old pane there logs it (`stale_host`, `stale_pane`); drive kills it once the host answers (wip first, as
+  `kill` does) and logs `stale-pane-killed`. `herdsman kill|close --host <name> <agent>` picks that host's agent when
+  another host has a lane of the same name.
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
   disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
