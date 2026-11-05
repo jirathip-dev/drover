@@ -93,8 +93,9 @@ A lane on another host gets `HERDSMAN_MAIN` (`<main host's [hosts] name>:<its he
 `answer`, `verdict` and its own events (`hook-denied`, `coauthor-trailer`) run on the main host over
 `ssh <main host's name>`, so the main host's log is the only one written and only the main host pushes. So the main
 host's `[hosts]` name must also work as an SSH name on every other host (an `~/.ssh/config` entry back to it, key-based).
-That host's own `events.jsonl` is never written; herdsman warns when it finds one. Each `check` imports the asks a lane
-left in a remote host's own log (lanes started before this) under a new id, with `from` naming the old one.
+That host's own log (#344: its own `state.db`) is never written by a lane; herdsman warns when it finds one. Each
+`check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
+`herdsman events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
 An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` gives up
 (`timeout`, `agent_name_not_found`, `agent_launch_pending`; on any host, the main one under load too), herdsman

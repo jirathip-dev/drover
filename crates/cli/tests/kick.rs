@@ -68,15 +68,13 @@ fn a_kick_runs_only_its_issue() {
 #[test]
 fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
     let c = fan("kick-debounce");
-    let dir = c.state.parent().unwrap().to_path_buf();
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("kick-sendmeter-2.lock"), "4242").unwrap();
+    lease_as(&c, "kick-sendmeter-2.lock", 4242, c.now, 300);
     // Two kicks while one runs: coalesced, nothing driven.
     let r = fake(2);
     kick(&c, &r, "2");
     kick(&c, &r, "2");
     assert!(kicks(&c).is_empty() && !r.called("herdr agent start"));
-    assert!(dir.join("kick-sendmeter-2.again").exists());
+    assert!(lease_on(&c, "kick-sendmeter-2.again").is_some());
     // The running kick's turn: its run, then the one follow-up, then none.
     let r = fake(0);
     kick(&c, &r, "2");
@@ -87,22 +85,20 @@ fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
         1,
         "the follow-up finds it started"
     );
-    assert!(!dir.join("kick-sendmeter-2.again").exists() && !dir.join("kick-sendmeter-2.lock").exists());
+    assert!(lease_on(&c, "kick-sendmeter-2.again").is_none() && lease_on(&c, "kick-sendmeter-2.lock").is_none());
 }
 
 /// #318: a kick holds its issue's locks only, so a pass holding `drive.lock` never delays it.
 #[test]
 fn a_held_drive_lock_does_not_delay_a_kick() {
     let c = fan("kick-busy");
-    let dir = c.state.parent().unwrap().to_path_buf();
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("drive.lock"), "4242").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = fake(1);
     kick(&c, &r, "2");
     assert_eq!(kicks(&c).len(), 1);
     assert_eq!(r.count("herdr agent start"), 1);
     assert_eq!(r.count("sleep 10"), 1, "no follow-up");
-    assert!(dir.join("drive.lock").exists(), "the pass's lock is left alone");
+    assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
 }
 
 #[test]

@@ -168,7 +168,7 @@ fn assert_no_leaks(c: &herdsman::Ctx, r: &Stdin, outs: &[&str], page: &str) {
     for o in outs {
         no_secret("CLI output", o);
     }
-    no_secret("event log", &std::fs::read_to_string(&c.state).unwrap_or_default());
+    no_secret("event log", &herdsman::events::jsonl(&c.state).unwrap_or_default());
     for f in std::fs::read_dir(c.state.parent().unwrap().join("usage")).unwrap() {
         no_secret("cache", &std::fs::read_to_string(f.unwrap().path()).unwrap_or_default());
     }

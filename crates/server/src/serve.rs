@@ -328,7 +328,7 @@ pub struct Server<'a> {
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
-    snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
+    snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
 }
@@ -762,14 +762,12 @@ impl<'a> Server<'a> {
         let now = crate::now();
         let known: Vec<String> = devices::load(self.ctx).into_iter().map(|d| d.hash).collect();
         lock(&self.clients).retain(|c| c.1.as_ref().is_none_or(|h| known.contains(h)));
-        let log = std::fs::metadata(&self.ctx.state)
-            .ok()
-            .map(|m| (m.len(), m.modified().ok()));
+        let log = Some((crate::db::last_seq(&self.ctx.state), None));
         let kicked = self.kick.swap(false, Relaxed);
         if kicked {
             self.purge();
         }
-        let driving = self.ctx.state.with_file_name("drive.lock").exists();
+        let driving = crate::drive::running(self.ctx, "");
         if log != w.log {
             let ev = read(&self.ctx.state).unwrap_or_default();
             let top = ev.last().map_or(0, |e| e.seq);
@@ -866,11 +864,9 @@ impl<'a> Server<'a> {
         )
     }
 
-    /// #337: the step's snapshot (reloaded when its file changes) and the file's mtime; none: empty.
-    fn snapshot(&self) -> (Option<std::time::SystemTime>, Arc<Snapshot>) {
-        let at = std::fs::metadata(crate::snapshot::file(self.ctx))
-            .and_then(|m| m.modified())
-            .ok();
+    /// #337: the step's snapshot (reloaded when a new one is saved) and its version (#344); none: empty.
+    fn snapshot(&self) -> (Option<u64>, Arc<Snapshot>) {
+        let at = crate::db::stamp(&self.ctx.state, "board");
         let mut s = lock(&self.snap);
         if s.0 != at {
             *s = (at, Arc::new(crate::snapshot::load(self.ctx).unwrap_or_default()));
@@ -2870,13 +2866,40 @@ fn theme(ctx: &Ctx, name: &str, file: &str) -> (Option<Vec<u8>>, Result<(), Stri
 }
 
 /// `serve --export <dir> [--demo]` (#39, docs/serve.md): the page and its files as static files with relative URLs.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        if e.file_type()?.is_dir() {
+            copy_dir(&e.path(), &to.join(e.file_name()))?;
+        } else {
+            std::fs::copy(e.path(), to.join(e.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> Result<()> {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let canned = if demo {
         Canned(serde_json::from_str(&std::fs::read_to_string(
             ctx.config.with_file_name("runner.json"),
         )?)?)
     } else {
         Canned::default()
+    };
+    // #344: the demo's state is read from a copy, so its log is imported there and `demo/` stays as committed.
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("herdsman-demo-{}-{n}", std::process::id()));
+    let ctx = &Ctx {
+        state: if demo {
+            let _ = std::fs::remove_dir_all(&tmp);
+            copy_dir(ctx.state.parent().unwrap_or(&ctx.state), &tmp)?;
+            tmp.join(ctx.state.file_name().unwrap_or_default())
+        } else {
+            ctx.state.clone()
+        },
+        ..ctx.clone()
     };
     let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, read(&ctx.state)?);
     let ctx = &Ctx {
@@ -2981,6 +3004,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         {
             std::fs::write(dir.join("lane").join(format!("{}.json", l.name)), j)?;
         }
+    }
+    if demo {
+        let _ = std::fs::remove_dir_all(&tmp);
     }
     Ok(())
 }

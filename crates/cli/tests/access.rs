@@ -66,7 +66,7 @@ fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
 }
 
 fn no_token_in_log(c: &herdsman::Ctx) {
-    let log = std::fs::read_to_string(&c.state).unwrap_or_default();
+    let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
     assert!(
         !log.contains(TOKEN_A) && !log.contains(TOKEN_B),
         "token in events: {log}"

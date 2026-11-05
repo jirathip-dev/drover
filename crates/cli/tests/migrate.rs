@@ -90,7 +90,7 @@ fn version_and_help_touch_nothing() {
 fn status_reads_old_paths_in_place_and_hints_once() {
     let h = tmpdir("migrate-fallback");
     seed(&h, "fleet");
-    let before = snapshot(&h);
+    let before = snapshot(&h.join(".config"));
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!(code, 0, "{err}");
     assert!(
@@ -106,7 +106,10 @@ fn status_reads_old_paths_in_place_and_hints_once() {
     assert_eq!(err.matches(&hint("config", ".config/fleet")).count(), 1, "{err}");
     assert_eq!(err.matches(&hint("state", ".local/state/fleet")).count(), 1, "{err}");
     assert_eq!(err.lines().count(), 2, "{err}");
-    assert_eq!(snapshot(&h), before, "nothing moved");
+    // #344: the log is imported in place (`state.db`, the file kept as `events.jsonl.migrated`); no dir moves.
+    let st = h.join(".local/state/fleet");
+    assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
+    assert_eq!(snapshot(&h.join(".config")), before, "nothing moved");
     assert!(!moved(&h));
 }
 
@@ -159,13 +162,19 @@ fn migrate_moves_both_once() {
         std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
         CONFIG
     );
-    assert!(h.join(".local/state/herdsman/events.jsonl").exists());
-    // Second run: a no-op.
-    let before = snapshot(&h);
+    // #344: and its log imported into the database there.
+    let st = h.join(".local/state/herdsman");
+    assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
+    // Second run: a no-op (#344: nothing left to import either; the database's own files may be touched).
+    let before = snapshot(&h.join(".config"));
     let (code, again, err) = run(&h, &["migrate"]);
     assert_eq!(code, 0, "{err}");
     assert!(!again.contains("moved") && again.contains("nothing to move"), "{again}");
-    assert_eq!(snapshot(&h), before);
+    assert!(
+        again.contains("imported 0 log file(s)") && again.contains("holds 1 events"),
+        "{again}"
+    );
+    assert_eq!(snapshot(&h.join(".config")), before);
     // And status reads the new paths, no hint.
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));

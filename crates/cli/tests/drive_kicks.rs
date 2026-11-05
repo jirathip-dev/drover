@@ -54,8 +54,8 @@ fn launched(r: &Fake, n: u64) -> usize {
     ))
 }
 
-fn marker(c: &herdsman::Ctx, n: u64) -> std::path::PathBuf {
-    c.state.with_file_name(format!("spawn-sendmeter-{n}.pending"))
+fn marker(c: &herdsman::Ctx, n: u64) -> Option<herdsman::db::Lease> {
+    lease_on(c, &format!("spawn-sendmeter-{n}.pending"))
 }
 
 fn pass(c: &herdsman::Ctx, r: &Fake) -> serde_json::Value {
@@ -80,7 +80,7 @@ fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
         "{:?}",
         r.calls.borrow()
     );
-    assert!((1..=10).all(|n| launched(&r, n) == 1 && marker(&c, n).exists()));
+    assert!((1..=10).all(|n| launched(&r, n) == 1 && marker(&c, n).is_some()));
     assert_eq!(d["spawns_launched"], 10, "{d}");
     assert!(d["secs"].is_number());
 }
@@ -104,7 +104,7 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
     let (code, out) = run(&c, &busy, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("HOST_BUSY"), "{out}");
-    assert!(!busy.called("herdr agent start") && !marker(&c, 1).exists());
+    assert!(!busy.called("herdr agent start") && marker(&c, 1).is_none());
     // Its slot is free again: the next pass launches #1 once more and #4, not #2/#3 still starting.
     let r = fake("1.0");
     pass(&c, &r);
@@ -125,7 +125,7 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
     let c = fleet("kicks-fail", 6, 1);
     let r = fake("1.0");
     pass(&c, &r);
-    assert!(marker(&c, 1).exists());
+    assert!(marker(&c, 1).is_some());
     // The kick's spawn fails (no herdr worktree): the marker goes with the kick.
     let broken = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
@@ -134,7 +134,7 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
     let _ = run(&c, &broken, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
-    assert!(!broken.called("herdr agent start") && !marker(&c, 1).exists());
+    assert!(!broken.called("herdr agent start") && marker(&c, 1).is_none());
     let r = fake("1.0");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
@@ -143,11 +143,8 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
 #[test]
 fn a_stale_marker_does_not_hold_the_issue_forever() {
     let c = fleet("kicks-stale", 6, 1);
-    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let f = std::fs::File::create(marker(&c, 1)).unwrap();
-    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-    f.set_modified(old).unwrap();
-    let r = fake("1.0");
+    mark(&c, 1, 4242, 3600);
+    let r = fake("1.0").reply("kill -0 4242", "");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1);
 }
@@ -180,20 +177,22 @@ fn a_hook_kick_never_clears_a_launched_kicks_marker() {
     pass(&c, &fake("1.0"));
     let (code, out) = run(&c, &fake("1.0"), &["kick", "sendmeter", "1", "--why", "stop", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(marker(&c, 1).exists());
+    assert!(marker(&c, 1).is_some());
     let r = fake("1.0");
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 0);
 }
 
-/// #333: a marker for `n` holding `pid`, last written `age` secs ago.
+/// #333: a marker for `n` holding `pid`, taken `age` secs ago (#344: a lease for `spawn_pending_max_secs`).
 fn mark(c: &herdsman::Ctx, n: u64, pid: u32, age: u64) {
-    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": n, "type": "spawn", "role": "impl", "pid": pid});
-    std::fs::write(marker(c, n), e.to_string()).unwrap();
-    let f = std::fs::File::options().append(true).open(marker(c, n)).unwrap();
-    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(age))
-        .unwrap();
+    let key = format!("spawn-sendmeter-{n}.pending");
+    let l = herdsman::db::take(&c.state, &key, c.now - age, 300, &e.to_string(), &|_| true).unwrap();
+    assert!(herdsman::db::renew(
+        &c.state,
+        &l,
+        &herdsman::db::Lease { pid, ..l.clone() }
+    ));
 }
 
 fn stale(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
@@ -208,7 +207,7 @@ fn stale(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
 fn a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies() {
     let c = fleet("kicks-pid", 6, 1);
     pass(&c, &fake("1.0").reply("sh -c nohup", "4242\n"));
-    let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(marker(&c, 1)).unwrap()).unwrap();
+    let m: serde_json::Value = serde_json::from_str(&marker(&c, 1).unwrap().data).unwrap();
     assert_eq!(m["pid"], 4242, "{m}");
     // The kick runs: the issue is held back, no second launch.
     let r = fake("1.0")
@@ -256,7 +255,7 @@ fn six_dead_markers_never_hold_a_new_spawn() {
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 1), d["spawns_launched"].as_u64()), (1, Some(1)), "{d}");
     assert_eq!(stale(&c).len(), 6);
-    assert!((11..=16).all(|n| !marker(&c, n).exists()));
+    assert!((11..=16).all(|n| marker(&c, n).is_none()));
 }
 
 /// A runner whose harness start panics.
@@ -276,14 +275,13 @@ impl herdsman::runner::Runner for Panics {
 fn a_panicking_kick_leaves_no_marker_or_lock() {
     let c = fleet("kicks-panic", 6, 1);
     pass(&c, &fake("1.0"));
-    assert!(marker(&c, 1).exists());
+    assert!(marker(&c, 1).is_some());
     let p = Panics(fake("1.0"));
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run(&c, &p, &["kick", "sendmeter", "1", "--why", "drive", "--now"])
     }));
     assert!(res.is_err(), "the kick panicked");
-    let lock = c.state.with_file_name("kick-sendmeter-1.lock");
-    assert!(!marker(&c, 1).exists() && !lock.exists());
+    assert!(marker(&c, 1).is_none() && lease_on(&c, "kick-sendmeter-1.lock").is_none());
 }
 
 #[test]
@@ -350,11 +348,12 @@ fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
         &herdsman::events::Event::new(1, "sendmeter", Some(1), "spawn", d),
     )
     .unwrap();
-    let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": 1, "type": "spawn", "role": "impl"});
-    std::fs::write(marker(&c, 1), e.to_string()).unwrap();
+    mark(&c, 1, 4242, 0);
     let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
-    let r = fake("1.0").reply(&format!("{ssh}'df' '-k' '/'"), df);
+    let r = fake("1.0")
+        .reply(&format!("{ssh}'df' '-k' '/'"), df)
+        .reply("kill -0 4242", "");
     let d = pass(&c, &r);
     assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
     assert_eq!((launched(&r, 1), launched(&r, 2)), (0, 1), "{d}");

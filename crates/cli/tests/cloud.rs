@@ -496,7 +496,7 @@ fn the_provider_key_never_reaches_argv_or_the_log() {
         "{:?}",
         r.0.calls.borrow()
     );
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     assert!(!log.contains(KEY) && log.contains("cloud-up"), "{log}");
 }
 
@@ -622,7 +622,7 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         !written.contains("SEKRIT") && !written.contains("accounts_env"),
         "{written}"
     );
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     assert!(
         log.contains("host-bootstrap") && !log.contains("SEKRIT") && !log.contains(KEY),
         "{log}"
@@ -671,7 +671,7 @@ fn a_snapshot_needs_a_green_health_check_first() {
     assert!(!r.called(&rc("snapshot")));
     let r = healthy(Fake::default()).reply(&rc("snapshot"), "");
     herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap();
-    assert!(r.called(&rc("snapshot")) && std::fs::read_to_string(&c.state).unwrap().contains("cloud-snapshot"));
+    assert!(r.called(&rc("snapshot")) && herdsman::events::jsonl(&c.state).unwrap().contains("cloud-snapshot"));
     assert!(
         herdsman::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"

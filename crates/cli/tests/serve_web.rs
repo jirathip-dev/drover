@@ -265,7 +265,7 @@ fn set_refuses_toml_injection_on_web_and_cli() {
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let text = |c: &herdsman::Ctx| std::fs::read_to_string(&c.config).unwrap();
-    let (before, log) = (text(&web), std::fs::read_to_string(&web.state).unwrap());
+    let (before, log) = (text(&web), herdsman::events::jsonl(&web.state).unwrap());
     // `opus"\n[[notify]]\ncmd = "touch /tmp/pwned"\n#`, form-encoded, as model and as effort.
     let evil = "opus%22%0A%5B%5Bnotify%5D%5D%0Acmd+%3D+%22touch+%2Ftmp%2Fpwned%22%0A%23";
     for field in ["model", "effort"] {
@@ -280,7 +280,7 @@ fn set_refuses_toml_injection_on_web_and_cli() {
         );
     }
     assert_eq!(text(&web), before, "fleet.toml byte-identical");
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log, "no event");
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "no event");
     let before = text(&cli);
     for v in [
         "opus\"\n[[notify]]\ncmd = \"touch /tmp/pwned\"\n#",
@@ -304,7 +304,7 @@ fn stale_mtime_refuses_without_writing() {
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let (cfg, log) = (
         std::fs::read_to_string(&web.config).unwrap(),
-        std::fs::read_to_string(&web.state).unwrap(),
+        herdsman::events::jsonl(&web.state).unwrap(),
     );
     for body in [
         "op=pause&fleet=sendmeter&mtime=1",
@@ -316,7 +316,7 @@ fn stale_mtime_refuses_without_writing() {
         assert!(location(&res).starts_with("/?msg=REFUSED STALE: "), "{res}");
     }
     assert_eq!(std::fs::read_to_string(&web.config).unwrap(), cfg);
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log);
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log);
     assert!(get(&s, "/?msg=REFUSED%20STALE%3A%20x").contains("<p class=\"msg r\">REFUSED STALE: x</p>"));
 }
 
@@ -326,7 +326,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let body = format!("op=pause&fleet=sendmeter&mtime={}", mtime(&s));
-    let log = std::fs::read_to_string(&web.state).unwrap();
+    let log = herdsman::events::jsonl(&web.state).unwrap();
     for extra in [
         "Origin: https://evil.example\r\n",
         "Origin: http://127.0.0.1:7777.evil\r\n",
@@ -339,7 +339,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
         body.len()
     );
     assert!(String::from_utf8_lossy(&s.respond(&wrong, 1_000_000)).starts_with("HTTP/1.1 403 "));
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log, "nothing written");
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "nothing written");
     // `tailscale serve`: the ts.net name from [serve].allowed_hosts, over https.
     let ts = format!(
         "POST / HTTP/1.1\r\nHost: mac.tail1.ts.net:7443\r\nOrigin: https://mac.tail1.ts.net:7443\r\nContent-Length: {}\r\n\r\n{body}",

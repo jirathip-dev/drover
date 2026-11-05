@@ -29,14 +29,13 @@ fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
 
 /// The asks as `herdsman ask` logs them inside `LANE` (`HERDSMAN_LANE` is process-wide, so not set here).
 fn from_lane(c: &herdsman::Ctx) {
-    let Ok(log) = std::fs::read_to_string(&c.state) else {
+    let Ok(log) = herdsman::events::jsonl(&c.state) else {
         return;
     }; // a refused ask logs nothing
-    std::fs::write(
+    rewrite_log(
         &c.state,
-        log.replace("\"agent\":null", &format!("\"agent\":\"{LANE}\"")),
-    )
-    .unwrap();
+        &log.replace("\"agent\":null", &format!("\"agent\":\"{LANE}\"")),
+    );
 }
 
 fn ask(c: &herdsman::Ctx) -> String {

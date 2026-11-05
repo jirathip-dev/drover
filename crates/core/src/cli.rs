@@ -332,6 +332,13 @@ enum Cmd {
     },
     /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
     Migrate,
+    /// The event log in its JSONL format (one event a line, with its seq), for external readers
+    #[command(hide = true)]
+    Events {
+        /// Print it as JSONL (the only format)
+        #[arg(long, required = true)]
+        jsonl: bool,
+    },
     /// Landing numbers: `stats land <fleet>`
     Stats {
         #[command(subcommand)]
@@ -681,8 +688,9 @@ pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Resu
     let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
     let main = std::env::var("HERDSMAN_MAIN").ok()?;
     let (host, exe) = main.split_once(':')?;
-    if ctx.state.exists() {
-        let s = ctx.state.display();
+    if crate::db::file(&ctx.state).exists() {
+        let s = crate::db::file(&ctx.state);
+        let s = s.display();
         eprintln!("herdsman: warning: {s} exists on a lane's host; only the main host's log counts");
     }
     let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
@@ -700,7 +708,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Migrate if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
             bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
         }
-        Cmd::Migrate => migrate(&ctx.home, out)?,
+        Cmd::Migrate => {
+            migrate(&ctx.home, out)?;
+            crate::db::migrate(&Ctx::from_env().state, out)?;
+        }
+        Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,

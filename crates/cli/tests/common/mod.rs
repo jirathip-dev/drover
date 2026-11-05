@@ -549,3 +549,28 @@ pub fn drawn(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, no
     let end = at + page[at..].find("</script>").unwrap() + 9;
     format!("{}{}", &page[..at], &page[end..])
 }
+
+/// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read
+/// imports `text`. Leases, devices and snapshots go with it.
+pub fn rewrite_log(state: &Path, text: &str) {
+    for f in ["state.db", "state.db-wal", "state.db-shm"] {
+        let _ = std::fs::remove_file(state.with_file_name(f));
+    }
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(state, text).unwrap();
+}
+
+/// #344: lease `key` as process `pid` would hold it: taken at `at` for `secs`.
+pub fn lease_as(c: &Ctx, key: &str, pid: u32, at: u64, secs: u64) {
+    let l = herdsman::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
+    assert!(herdsman::db::renew(
+        &c.state,
+        &l,
+        &herdsman::db::Lease { pid, ..l.clone() }
+    ));
+}
+
+/// #344: the lease on `key`, expired or not.
+pub fn lease_on(c: &Ctx, key: &str) -> Option<herdsman::db::Lease> {
+    herdsman::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
+}
