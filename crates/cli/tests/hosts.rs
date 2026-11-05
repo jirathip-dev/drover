@@ -205,6 +205,35 @@ fn with_account(c: &herdsman::Ctx) -> &'static str {
     TOKEN
 }
 
+/// #539: before the import, a config's retired `accounts_env` file still serves the token the store lacks.
+#[test]
+fn a_lane_gets_its_token_from_the_retired_accounts_env_before_the_import() {
+    let c = setup("hosts-legacy-token", "", true, 0);
+    let token = with_account(&c);
+    let env = c.config.with_file_name("tokens.env");
+    std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={token}\n")).unwrap();
+    let toml = std::fs::read_to_string(&c.config).unwrap().replace(
+        "[accounts]\n",
+        &format!("[accounts]\naccounts_env = \"{}\"\n", env.display()),
+    );
+    std::fs::write(&c.config, toml).unwrap();
+    run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "--needs", "docker"],
+    );
+    let r = remote_fake();
+    r.store.borrow_mut().clear();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let sent = r
+        .inputs
+        .borrow()
+        .iter()
+        .any(|i| i.1 == format!("export CLAUDE_CODE_OAUTH_TOKEN='{token}'\n"));
+    assert!(sent, "{:?}", r.inputs.borrow());
+}
+
 /// A fresh lane on bazzite: its clone, worktree, pane and agent start all answer.
 fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;

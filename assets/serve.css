@@ -635,6 +635,9 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .chq .oth{display:flex;gap:var(--s4);align-items:center;margin-top:var(--s1)}
 .chq .oth input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
 .blk:has(>.md+.chq){--k:var(--a)}
+/* #492: a handoff card's older threads behind [more]. */
+.chq .more>summary{display:flex;align-items:center;min-height:var(--hit);color:var(--mute)}
+.chq .more>button{margin-top:var(--s2)}
 /* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
 .df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
 /* #409: a fenced block in a message: its exact text in a box that scrolls sideways, [copy] in its top corner (no

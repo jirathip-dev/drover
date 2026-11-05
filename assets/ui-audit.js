@@ -179,6 +179,8 @@
     chat: () => { tab('chat'); chatOpen(''); $('.lall')?.click(); },
     // (#443: on a phone the messages scroll inside the thread, so those go to the top too.)
     'chat-thread': () => { tab('chat'); chatOpen('t4'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; }); },
+    // #492: t5's handoff card: acme-api's thread as `<title> · <id>` with its last topic and age, then [new thread].
+    'chat-handoff': () => { tab('chat'); chatOpen('t5'); $('.lall')?.click(); scrollTo({ top: 0, behavior: 'instant' }); $$('#chat .tc').forEach(c => { c.scrollTop = 0; }); },
     // #409: t2's reply with a short and a long-line code box (the long one scrolls sideways inside its box), then
     // [copy] tapped on the short one: `copied` (the clipboard stubbed: headless Chrome's needs a permission).
     'chat-code': () => {

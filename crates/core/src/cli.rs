@@ -308,6 +308,9 @@ enum Cmd {
     Doctor {
         #[arg(long)]
         json: bool,
+        /// Only load the config (the pre-install gate, #539): exit 1 if this binary can't, warnings are fine
+        #[arg(long)]
+        config_only: bool,
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
@@ -414,7 +417,7 @@ enum ThreadCmd {
         #[arg(long)]
         harness: Option<String>,
     },
-    /// A conductor hands off: a new thread in <to> (a repo or `all`) or thread <to>, linked both ways; <text> wakes its conductor as from <from>
+    /// A conductor hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its conductor as from <from>
     Handoff {
         from: String,
         to: String,
@@ -921,6 +924,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 .iter()
                 .map(|f| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
                 .collect();
+            // #539: each retired config key, its own line above the boards.
+            for (k, _) in cfg.iter().flat_map(Config::warnings) {
+                writeln!(out, "! {k} is retired → herdsman doctor")?;
+            }
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
@@ -1015,7 +1022,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 )?;
             }
         }
-        Cmd::Doctor { json } => return crate::doctor::doctor(ctx, r, out, json),
+        Cmd::Doctor { json, config_only } => return crate::doctor::doctor(ctx, r, out, json, config_only),
         Cmd::Setup { host, name, no_load } => {
             let Some((h, n)) = host.zip(name) else {
                 return crate::timer::setup(ctx, r, out, !no_load);

@@ -122,7 +122,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         let backup = format!("{}.bak-{}", ctx.config.display(), ctx.now);
         std::fs::write(&backup, &cur)?;
         crate::devices::write0600(&ctx.config, p.str("text").unwrap_or_default().as_bytes())?;
-        let ok = crate::doctor::doctor(ctx, r, &mut vec![], false)? == 0;
+        let ok = crate::doctor::doctor(ctx, r, &mut vec![], false, false)? == 0;
         d.as_object_mut()
             .unwrap()
             .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);

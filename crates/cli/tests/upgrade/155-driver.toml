@@ -1,0 +1,6 @@
+# Before #155/#156: a fleet's `driver` key, ignored.
+[fleet.app]
+repo = "o/app"
+local = "/tmp/app"
+integration = "staging"
+driver = "herdsman"

@@ -434,6 +434,95 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
 }
 
 #[test]
+fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_trees() {
+    let d = tmpdir("clean-shots");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+    };
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    std::fs::write(local.join(".gitignore"), "site/\n").unwrap();
+    git(&local, &["add", ".gitignore"]);
+    git(&local, &["commit", "-q", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let c = ctx(
+        &d,
+        &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
+    );
+    let wt = |n: &str, files: &[&str]| {
+        let p = c.worktrees.join("sendmeter").join(n);
+        git(&local, &["worktree", "add", "-q", "-b", n, p.to_str().unwrap()]);
+        for f in files {
+            std::fs::create_dir_all(p.join(f).parent().unwrap()).unwrap();
+            std::fs::write(p.join(f), "x").unwrap();
+        }
+        p
+    };
+    let shots = wt(
+        "issue-15",
+        &["ui-390/board.png", "ui-1440/board.png", "verdict.md", "site/index.html"],
+    );
+    let dirt = wt("issue-17", &["ui-390/board.png", "notes.txt"]);
+    // No spawn names these reviewer trees (#518): only the merged issue's goes.
+    let rev = wt("rev-15-r1", &["verdict.md", ".mcp.lane.json"]);
+    let open = wt("rev-16-r1", &["verdict.md"]);
+    for (issue, p) in [(15, &shots), (17, &dirt)] {
+        let d = json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": p.to_str().unwrap()});
+        ev(&c, 10, issue, "spawn", d);
+        ev(
+            &c,
+            50,
+            issue,
+            "merged",
+            json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+        );
+    }
+    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, dry) = run(&c, &r(), &["clean"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(dry.contains(&format!("would remove {} ", shots.display())), "{dry}");
+    assert!(dry.contains(&format!("would remove {} ", rev.display())), "{dry}");
+    assert!(
+        dry.contains(&format!(
+            "would save {} to wip/ (1 uncommitted change(s))",
+            dirt.display()
+        )),
+        "{dry}"
+    );
+    assert!(
+        !dry.contains(&open.display().to_string()),
+        "an open issue's rev tree stays: {dry}"
+    );
+
+    let (code, done) = run(&c, &r(), &["clean", "--yes"]);
+    assert_eq!(code, 0, "{done}");
+    assert!(!shots.exists() && !rev.exists() && !dirt.exists(), "{done}");
+    assert!(open.exists(), "{done}");
+    let wip = std::process::Command::new("git")
+        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-17-1000000:notes.txt"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&wip.stdout),
+        "x",
+        "other dirt is saved first: {done}"
+    );
+    assert_eq!(kinds(&c, "clean"), 3);
+}
+
+#[test]
 fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     let d = tmpdir("clean-closed");
     let c = ctx(&d, CONFIG);
