@@ -66,7 +66,11 @@ sub = {"endpoint": "https://web.push.apple.com/demo", "p256dh": "p", "auth": "a"
 json.dump([sub], open(f"{d}/webpush/subs.json", "w"))
 EOF
   export HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl"
-  [ "$fx" = healthy ] && "$bin" timer install --no-load >/dev/null
+  # #461: install logs `timer-install` at the wall clock; dropped, so export's now stays the fixture's last event + 60 s.
+  if [ "$fx" = healthy ]; then
+    "$bin" timer install --no-load >/dev/null
+    grep -v '"type":"timer-install"' "$FLEET_STATE" >"$d/ev" && mv "$d/ev" "$FLEET_STATE"
+  fi
   "$bin" serve --export "$site/$fx" --demo
   rm -rf "${d:?}"
 done
