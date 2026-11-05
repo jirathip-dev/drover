@@ -28,6 +28,9 @@ and `webpush/subs.json`. The import runs in one transaction and is checked: the 
 the files' must equal the fold after the import, or nothing is imported. Each file is then renamed to
 `<name>.migrated`, which is the backup. A second run finds nothing to import. Rows keep their seq unless the database
 already has a later one (an old build that wrote `events.jsonl` again: its rows are added after).
+The owner's own state dir (`~/.local/state/herdsman`, or the pre-rename `fleet`) is the exception: no command imports
+there on its own, and `herdsman migrate` refuses it without `--live`. A test build run without `FLEET_STATE` would
+otherwise take the log away from the installed build, which still reads `events.jsonl`.
 
 **Export:** `herdsman events --jsonl` prints the whole log in its old format, one event per line with its seq, for
 readers outside herdsman (scripts, a cron watchdog). Remote hosts each keep their own database; a lane there

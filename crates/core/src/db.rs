@@ -65,17 +65,23 @@ thread_local! {
 fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
     let (p, (logs, lists)) = (file(state), legacy(state));
     let ino = |p: &Path| std::fs::metadata(p).map(|m| m.ino()).ok();
-    if !create && ino(&p).is_none() && logs.is_empty() && !lists.iter().any(|p| p.exists()) {
+    let old = !logs.is_empty() || lists.iter().any(|p| p.exists());
+    if !create && ino(&p).is_none() && !old {
         return Ok(empty);
     }
+    // A scratch database imports once: its files stay.
+    let scratch = SCRATCH.with_borrow(Option::is_some);
+    anyhow::ensure!(
+        !old || scratch || !live(state) || LIVE.load(std::sync::atomic::Ordering::Relaxed),
+        "{} still has files from before #344: run `herdsman migrate --live` to import them",
+        state.parent().unwrap_or(Path::new(".")).display()
+    );
     let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
     let (mut c, fresh) = match cached {
         Some((_, i, c)) if ino(&p) == Some(i) => (c, false),
         _ => (open(state)?, true),
     };
-    // A scratch database imports once: its files stay.
-    let scratch = SCRATCH.with_borrow(Option::is_some);
-    if (fresh || !scratch) && (!logs.is_empty() || lists.iter().any(|p| p.exists())) {
+    if (fresh || !scratch) && old {
         import(&mut c, state)?;
     }
     let r = f(&mut c);
@@ -339,6 +345,18 @@ fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
             || p == state
     });
     (logs, [dir.join("serve/devices.json"), dir.join("webpush/subs.json")])
+}
+
+/// Set by `herdsman migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
+pub static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The owner's default state dir, `$HOME/.local/state/herdsman` (or its pre-rename `fleet`): never imported on its
+/// own, so a test build run without `FLEET_STATE` cannot take the installed build's log away.
+pub fn live(state: &Path) -> bool {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let dir = canon(state.parent().unwrap_or(Path::new(".")));
+    let root = crate::config::home().join(".local/state");
+    ["herdsman", "fleet"].iter().any(|d| canon(&root.join(d)) == dir)
 }
 
 /// `herdsman migrate` and every first open: the log (and its archives), devices and push subscriptions into the

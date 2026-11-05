@@ -331,7 +331,11 @@ enum Cmd {
         cmd: ProfilesCmd,
     },
     /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
-    Migrate,
+    Migrate {
+        /// Allow it on the live state dir (~/.local/state/herdsman); without it migrate refuses there
+        #[arg(long)]
+        live: bool,
+    },
     /// The event log in its JSONL format (one event a line, with its seq), for external readers
     #[command(hide = true)]
     Events {
@@ -586,8 +590,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`).
-pub const HELP_AGENT_MAX: usize = 289;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`).
+pub const HELP_AGENT_MAX: usize = 290;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -641,7 +645,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     };
     if !matches!(
         cli.cmd,
-        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate | Cmd::Help { .. }
+        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate { .. } | Cmd::Help { .. }
     ) {
         for h in &ctx.hints {
             eprintln!("{h}");
@@ -708,12 +712,23 @@ pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write)
 
 fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read) -> Result<i32> {
     match cmd {
-        Cmd::Migrate if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
+        Cmd::Migrate { .. } if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
             bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
         }
-        Cmd::Migrate => {
+        Cmd::Migrate { live: false } if crate::db::live(&ctx.state) => bail!(
+            "{} is the live state dir: `herdsman migrate --live` to migrate it",
+            ctx.state.parent().unwrap_or(std::path::Path::new(".")).display()
+        ),
+        Cmd::Migrate { live } => {
+            crate::db::LIVE.store(live, std::sync::atomic::Ordering::Relaxed);
             migrate(&ctx.home, out)?;
-            crate::db::migrate(&Ctx::from_env().state, out)?;
+            // The log where the move above put it: this command's own state, never the environment's.
+            let old = ctx.home.join(".local/state/fleet");
+            let state = match ctx.state.strip_prefix(&old) {
+                Ok(rest) if !old.exists() => ctx.home.join(".local/state/herdsman").join(rest),
+                _ => ctx.state.clone(),
+            };
+            crate::db::migrate(&state, out)?;
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
