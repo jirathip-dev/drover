@@ -240,7 +240,16 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 }
 
 /// #318: a pass's spawn as its own detached kick, at most `max_parallel_spawns` at once, admitted counting those starting.
-fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
+/// #513: a new `start` never takes the last free slot (unless it is the only one): in-flight work keeps it.
+fn launch(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    ev: &[Event],
+    (fleet, n): (&str, u64),
+    role: &str,
+    start: bool,
+) -> Result<i32> {
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
     // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
@@ -252,7 +261,8 @@ fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n:
             .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
     };
     let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
-    if n_live >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+    let max = cfg.limits.max_parallel_spawns;
+    if n_live >= max - usize::from(start && max > 1) || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
@@ -288,6 +298,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("DISK_LOW") => format!("disk nearly full ({why})"),
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
+        Some("SPAWN_PENDING") => crate::waiting::SLOT.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
         Some("LANE_LIVE") => "a lane is already on it".into(),
@@ -642,7 +653,9 @@ fn pass(
             .as_deref()
             .is_some_and(|c| c.starts_with("herdsman verdict "))
     };
-    waits.sort_by_key(|(s, w)| (!verdict(w), !rev(w), conflicts.contains_key(&s.issue)));
+    // #513: in-flight spawns first (fix rounds and respawns, then reviews), then verdicts before any merge.
+    let fix = |w: &Waiting| !rev(w) && w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
+    waits.sort_by_key(|(s, w)| (!fix(w), !rev(w), !verdict(w), conflicts.contains_key(&s.issue)));
     let (mut go, mut updated) = (true, false);
     for (s, w) in waits
         .iter()
@@ -1274,7 +1287,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let kicks = c[0] == "spawn" && KICK.get().is_none() && cfg.limits.max_parallel_spawns > 0;
     IN_ACT.set(!kicks);
     let res = match issue.filter(|_| kicks) {
-        Some(n) => launch(ctx, cfg, r, ev, fleet, n, c[3]),
+        Some(n) => launch(ctx, cfg, r, ev, (fleet, n), c[3], step == "start"),
         None => crate::cli::run(c, ctx, r, &mut buf),
     };
     IN_ACT.set(false);
