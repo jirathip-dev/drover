@@ -309,6 +309,12 @@ pub fn remote_agents(cfg: &Config, r: &dyn Runner) -> Vec<Value> {
     all
 }
 
+/// #478: the host spawn `sp`'s lane runs on, when the last look (`survey`) could not reach it.
+pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
+    let h = sp.filter(|e| e.str("machine").is_some())?.str("host")?;
+    cached(ctx).get(h).is_some_and(|s| !s.up).then_some(h)
+}
+
 /// This host's live agents, then the remote ones.
 pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
     Ok([host::agents(r)?, remote_agents(cfg, r)].concat())
@@ -400,7 +406,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
     let (hs, refusal) = match cloud.map_or_else(|| host::agents(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
-        Err(None) => (Host::default(), Some(("NO_HOST", "unreachable".to_string()))),
+        Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
         Ok(_) => gate(ctx, cfg, &on),
     };
