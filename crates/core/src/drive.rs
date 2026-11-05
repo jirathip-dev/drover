@@ -191,12 +191,12 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
 }
 
-/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
+/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
+/// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
     a.push("--now".into());

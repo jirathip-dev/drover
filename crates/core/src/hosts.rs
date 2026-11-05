@@ -621,17 +621,7 @@ pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Optio
 pub fn rehome(a: Vec<String>, home: Option<&str>) -> Vec<String> {
     let mine = crate::config::home().to_string_lossy().into_owned();
     match home.filter(|_| mine.len() > 1) {
-        // #275: `HERDSMAN_MAIN` names a path on the main host.
-        Some(h) => a
-            .into_iter()
-            .map(|w| {
-                if w.starts_with("HERDSMAN_MAIN=") {
-                    w
-                } else {
-                    w.replace(&mine, h)
-                }
-            })
-            .collect(),
+        Some(h) => a.into_iter().map(|w| w.replace(&mine, h)).collect(),
         None => a,
     }
 }

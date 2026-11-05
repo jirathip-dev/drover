@@ -1,13 +1,12 @@
-//! #389: a lane on another host whose ssh forward to the main host fails queues its command in the worktree's
-//! outbox; drive's fast step drains it over main → host ssh, as the lane its spawn names. One test: the lane's env
-//! vars and cwd are process-wide.
+//! #389: a lane on another host never connects to the main host: every command it runs waits in its worktree's
+//! outbox; drive's fast step pulls it over main → host ssh and runs it as the lane its spawn names, and `check`
+//! alerts on a line left there 5 min. One test: the lane's env vars and cwd are process-wide.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
 use herdsman::runner::{Out, Runner};
 use serde_json::json;
 
-const MAIN_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m mini -- ";
 const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
 
 /// The main host's runner: a shell line over ssh to `air` runs here (the lane's worktree is a local folder).
@@ -30,7 +29,7 @@ impl Runner for Air {
 }
 
 #[test]
-fn a_lane_without_a_route_queues_and_drive_drains_it_once() {
+fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (md, ld) = (tmpdir("outbox-main"), tmpdir("outbox-lane"));
     let (main, lane) = (ctx(&md, CONFIG), ctx(&ld, CONFIG));
     let wt = ld.join("worktree");
@@ -38,36 +37,49 @@ fn a_lane_without_a_route_queues_and_drive_drains_it_once() {
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(wt.join("src")).unwrap();
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
-    std::env::set_var("HERDSMAN_MAIN", "mini:/opt/herdsman/bin/herdsman");
-    let no_route = "ssh: Could not resolve hostname mini: nodename nor servname provided";
-    let r = Fake::default()
-        .once_err(MAIN_SSH, 255, no_route)
-        .once_err(MAIN_SSH, 255, no_route);
+    std::env::set_var("HERDSMAN_OUTBOX", "1");
+    // The main host would answer over ssh: the lane never tries it.
+    let r = Fake::default().reply("ssh", "q9\n");
     let (code, out) = run(
         &lane,
         &r,
         &["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
     );
-    assert_eq!(
-        (code, out.as_str()),
-        (0, herdsman::outbox::QUEUED),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert_eq!((code, out.as_str()), (0, herdsman::outbox::QUEUED));
+    // A verdict queues too, its file as an absolute path (drive reads it over ssh on this host).
+    let sha = "a".repeat(40);
+    let verdict = [
+        "verdict",
+        "sendmeter",
+        "12",
+        "PASS",
+        "--sha",
+        &sha,
+        "--file",
+        "verdict.md",
+    ];
+    assert_eq!(run(&lane, &r, &verdict).0, 0);
     // A command for another issue is queued too: drive refuses it.
     let (code, _) = run(&lane, &r, &["done", "sendmeter", "13", "--no-change", "nothing"]);
     assert_eq!(code, 0);
     assert!(!lane.state.exists(), "the lane host's log is never written");
+    assert!(
+        r.calls.borrow().is_empty(),
+        "no ssh, nothing run: {:?}",
+        r.calls.borrow()
+    );
     let ob = wt.join(".herdsman/outbox.jsonl");
     let mut lines = std::fs::read_to_string(&ob).unwrap();
-    assert_eq!(lines.lines().count(), 2, "{lines}");
+    assert_eq!(lines.lines().count(), 3, "{lines}");
+    let file = wt.canonicalize().unwrap().join("src/verdict.md").display().to_string();
+    assert!(lines.contains(&format!("\"--file\",\"{file}\"")), "{lines}");
     // A line that names another role of the issue is refused as well.
     let forged = json!({"args": ["done", "sendmeter", "12", "--no-change", "x"], "lane": "sendmeter:12:rev", "ts": 1});
     lines += &format!("{forged}\n");
     std::fs::write(&ob, &lines).unwrap();
 
-    // The main host: the lane's spawn names its host and worktree; its ssh session has no `HERDSMAN_MAIN`.
-    std::env::remove_var("HERDSMAN_MAIN");
+    // The main host: the lane's spawn names its host and worktree.
+    std::env::remove_var("HERDSMAN_OUTBOX");
     std::env::remove_var("HERDSMAN_LANE");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1", "workspace": "w9",
                    "worktree": wt, "branch": "issue-12", "host": "air", "machine": "air"});
@@ -104,6 +116,14 @@ fn a_lane_without_a_route_queues_and_drive_drains_it_once() {
         "{:?}",
         refused[1]
     );
+    let ran: Vec<_> = ev
+        .iter()
+        .filter(|e| e.kind == "outbox" && e.data["args"][0] == "verdict")
+        .collect();
+    assert!(
+        ran.len() == 1 && ran[0].data.get("refused").is_none(),
+        "its own verdict runs: {ran:?}"
+    );
     assert!(!ob.exists() && !wt.join(".herdsman/outbox.jsonl.draining").exists());
     let (_, board) = run(&main, &r, &["board", "sendmeter"]);
     let row = board.lines().find(|l| l.contains("#12")).unwrap_or_default();
@@ -119,6 +139,24 @@ fn a_lane_without_a_route_queues_and_drive_drains_it_once() {
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "needs-decision").count(), 1);
-    assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 3);
+    assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 4);
     assert!(!wt.join(".herdsman/outbox.jsonl.draining").exists());
+
+    // A line drive has not delivered: `check` alerts once it is 5 min old, and once only.
+    let at = |s: u64| json!({"args": ["ask", "sendmeter", "12", "Late?"], "lane": "sendmeter:12:impl", "ts": s * 1000});
+    std::fs::write(&ob, format!("{}\n", at(1_000_000 - 200))).unwrap();
+    run(&main, &r, &["check"]);
+    let stale = |c: &herdsman::Ctx| {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "outbox-stale")
+            .count()
+    };
+    assert_eq!(stale(&main), 0, "4 min old is not stale yet");
+    std::fs::write(&ob, format!("{}\n{}\n", at(1_000_000 - 400), at(1_000_000 - 200))).unwrap();
+    run(&main, &r, &["check"]);
+    run(&main, &r, &["check"]);
+    assert_eq!(stale(&main), 1);
+    std::env::remove_var("HERDSMAN_LANE");
 }

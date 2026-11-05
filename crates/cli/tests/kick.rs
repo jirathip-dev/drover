@@ -139,7 +139,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
         assert_eq!(herdsman::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
         assert!(out.is_empty());
     };
-    std::env::remove_var("HERDSMAN_MAIN");
+    std::env::remove_var("HERDSMAN_OUTBOX");
     std::env::remove_var("HERDSMAN_LANE");
     let r = Fake::default();
     hook(&r);

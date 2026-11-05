@@ -560,10 +560,8 @@ pub fn spawn(
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
 
-            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh).
-            if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
-                p.env.insert("HERDSMAN_MAIN".into(), format!("{}:{}", main.0, ctx.exe));
-            }
+            // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
+            p.env.insert("HERDSMAN_OUTBOX".into(), "1".into());
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());

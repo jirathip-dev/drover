@@ -251,6 +251,15 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
+    // #389: a remote lane's outbox line drive has not delivered in 5 min; once per lane and line.
+    for (e, lane, ts) in crate::outbox::stale(r, &events, ctx.now) {
+        let why = format!(
+            "{lane}'s outbox holds a line from {} ago that drive has not delivered",
+            age(ctx.now.saturating_sub(ts / 1000))
+        );
+        let d = json!({"key": format!("{lane}:{ts}"), "agent": e.str("agent"), "reason": why});
+        fire(ctx, cfg, out, &events, (&e.fleet, e.issue), "outbox-stale", d)?;
+    }
     let open = open_asks(&events);
     // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
     for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {

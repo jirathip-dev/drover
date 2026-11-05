@@ -1,11 +1,18 @@
-//! #389: a remote lane's command with no route to the main host waits in its worktree's outbox; drive runs it (#249).
+//! #389: a remote lane's command never reaches the main host itself: it waits in its worktree's outbox, which drive
+//! pulls over main → host ssh (#249) and runs.
 use crate::events::{append, fold, last_spawn, read, Event};
 use crate::{hosts::On, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf};
 
-pub const QUEUED: &str = "queued for the main host (no route): drive delivers it within 1 min\n";
+pub const QUEUED: &str = "queued for the main host: drive delivers it within 1 min\n";
+
+/// A lane on another host (spawn exports `HERDSMAN_OUTBOX`): its `HERDSMAN_LANE`.
+pub fn lane() -> Option<String> {
+    std::env::var_os("HERDSMAN_OUTBOX")?;
+    std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())
+}
 
 /// The lane's side: `args` as one line (`args`, `lane`, `ts` in ms) in the worktree holding the cwd.
 pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
@@ -89,4 +96,22 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
         d["error"] = json!(res.err().map(|e| format!("{e:#}")));
     }
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
+}
+
+/// `check`'s side: each live remote lane whose outbox holds a line drive has not delivered in 5 min, with its oldest ts.
+pub fn stale(r: &dyn Runner, events: &[Event], now: u64) -> Vec<(Event, String, u64)> {
+    let sh = "cat \"$1\" \"$1.draining\" 2>/dev/null; exit 0";
+    let oldest = |sp: &Event, p: &str| {
+        let text = crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]));
+        let ts = text
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["ts"].as_u64())
+            .min();
+        ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > 5 * 60 * 1000)
+    };
+    boxes(events)
+        .into_iter()
+        .filter_map(|(sp, lane, p)| Some((sp.clone(), lane, oldest(sp, &p)?)))
+        .collect()
 }
