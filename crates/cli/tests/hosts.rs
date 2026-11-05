@@ -526,6 +526,7 @@ fn lane_cards_and_the_herd_name_the_host() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+    let page = with_queue(&page, &s, ADDR, NOW); // #269: Lanes as the board draws it
     let card = &page[page.find("data-agent=\"sendmeter-impl-12\"").expect("lane row")..];
     assert!(
         card[..card.find("</div></div>").unwrap()].contains("impl · bazzite · round 0 · claude"),

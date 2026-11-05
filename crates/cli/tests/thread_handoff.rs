@@ -4,7 +4,7 @@ mod common;
 use common::*;
 use herdsman::events::{read, Event};
 use herdsman::serve::Server;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -311,8 +311,7 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let j: Value = serde_json::from_str(&req(&s, "GET", "/frags?tab=chat", &cookie, c.now)).unwrap();
-    let chat = j["chat"].as_str().unwrap();
+    let chat = &parts(&s, ADDR, &cookie, c.now)[2]; // #269: the [chat] tab as the board draws it
     let view = |t: &str| {
         let v = &chat[chat.find(&format!("<div class=cvp data-t=\"{t}\">")).unwrap()..];
         v[..v.find("</form></div>").unwrap()].to_string()
@@ -352,13 +351,8 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let page = req(&s, "GET", "/", &format!("{cookie}Cookie: tab=chat\r\n"), c.now);
-    let j: Value = serde_json::from_str(&req(&s, "GET", "/frags?tab=chat", &cookie, c.now)).unwrap();
-    let html = page.replacen(
-        "<section id=chat>",
-        &format!("<section id=chat>{}", j["chat"].as_str().unwrap()),
-        1,
-    );
+    let page = req(&s, "GET", "/", &cookie, c.now);
+    let html = drawn(&page, &s, ADDR, &cookie, c.now); // #269: the [chat] tab as the board draws it
     assert!(html.contains("class=lc data-go"), "the chat tab is on the page");
     let d = tmpdir("handoff-tap-page");
     let (file, png) = (d.join("page.html"), d.join("tap.png"));

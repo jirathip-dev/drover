@@ -51,9 +51,15 @@ fn runner() -> Fake {
         .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
 }
 
+/// The response at `path`; the page (#269) with its needs cards as the board draws them.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
-    String::from_utf8_lossy(&res).into_owned()
+    let res = String::from_utf8_lossy(&res).into_owned();
+    if path == "/" {
+        with_board(&res, s, ADDR, cookie, NOW)
+    } else {
+        res
+    }
 }
 
 /// The `#needs` strip's card for #12.

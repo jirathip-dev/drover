@@ -445,14 +445,107 @@ pub fn queue_html(json: &str, expr: &str) -> String {
 }
 
 /// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`
-/// the request's Host, else an empty one: a read-only server's).
+/// the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws
+/// (`with_board`, for an unpaired request).
 pub fn with_queue(res: &str, s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+    with_board(res, s, host, "", now)
+}
+
+/// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1
+/// data `json` (the first `d`, …), under node: their strings.
+pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
+    let d = tmpdir("board-ts");
+    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts"));
+    let mut js = format!(
+        "import * as lanes from {:?}; import * as needs from {:?}; import * as chat from {:?}; import fs from 'node:fs';\nconst out = [];\n",
+        src("lanes"),
+        src("needs"),
+        src("chat")
+    );
+    for (i, (json, expr)) in parts.iter().enumerate() {
+        std::fs::write(d.join(format!("{i}.json")), json).unwrap();
+        js += &format!(
+            "{{ const d = JSON.parse(fs.readFileSync({:?})); out.push(String({expr})); }}\n",
+            d.join(format!("{i}.json"))
+        );
+    }
+    js += "process.stdout.write(JSON.stringify(out));";
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/*.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    serde_json::from_slice(&o.stdout).unwrap()
+}
+
+/// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and
+/// `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
+pub fn api(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
+    let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
+    let mut r = String::from_utf8_lossy(&s.respond(&req(host), now)).into_owned();
+    if !r.starts_with("HTTP/1.1 200") {
+        r = String::from_utf8_lossy(&s.respond(&req(""), now)).into_owned();
+    }
+    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/{path}: {r}");
+    r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+}
+
+/// #269: the needs cards, the Lanes tab and the [chat] tab as the board draws them for that request (`api`'s).
+pub fn parts(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> [String; 3] {
+    let [n, l, c] = ["needs", "lanes", "chat"].map(|p| api(s, host, extra, now, p));
+    let v = board_js(&[(&n, "needs.tab(d)"), (&l, "lanes.tab(d)"), (&c, "chat.tab(d)")]);
+    [v[0].clone(), v[1].clone(), v[2].clone()]
+}
+
+/// #269: what `/frags?tab=` sent before the board drew them: `needs` and the tab's part (`lanes`, `chat`) by id.
+pub fn frags(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+    let [needs, lanes, chat] = parts(s, host, extra, now);
+    serde_json::json!({ "needs": needs, "lanes": lanes, "chat": chat })
+}
+
+/// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows
+/// them once drawn, for the request with Host `host` and `extra` header lines.
+pub fn with_board(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
     let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
     let q = queue_tab(s, if ok { host } else { "" }, now);
+    let [needs, lanes, chat] = parts(s, host, extra, now);
     res.replacen(
         "<section id=queue></section>",
         &format!("<section id=queue>{q}</section>"),
         1,
     )
+    .replacen("<div id=needs></div>", &format!("<div id=needs>{needs}</div>"), 1)
+    .replacen(
+        "<section id=lanes></section>",
+        &format!("<section id=lanes>{lanes}</section>"),
+        1,
+    )
+    .replacen(
+        "<section id=chat></section>",
+        &format!("<section id=chat>{chat}</section>"),
+        1,
+    )
+}
+
+/// #269: the Lanes row's avatar (web/src/lanes.ts's `avatar`) for each (name, role, herdr state), under node.
+pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
+    use herdsman::serve::{act, coat, tone};
+    let j: Vec<String> = of
+        .iter()
+        .map(|(n, r, s)| {
+            serde_json::json!({"state": s, "act": act(r, s), "atone": tone(s), "coat": coat(n)}).to_string()
+        })
+        .collect();
+    board_js(&j.iter().map(|j| (j.as_str(), "lanes.avatar(d)")).collect::<Vec<_>>())
+}
+
+/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page
+/// file): without the board's module, which would read the API of the server the copy's assets come from.
+pub fn drawn(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
+    let page = with_board(res, s, host, extra, now);
+    let at = page.find("<script type=module").expect("the board's module");
+    let end = at + page[at..].find("</script>").unwrap() + 9;
+    format!("{}{}", &page[..at], &page[end..])
 }
