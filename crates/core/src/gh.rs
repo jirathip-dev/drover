@@ -238,7 +238,8 @@ pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Re
     Ok(closed)
 }
 
-/// Files PR `num` changes at `head` (`gh pr diff --name-only`), cached per head sha.
+/// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. #490: the paginated files API (the
+/// diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.
 pub fn diff_names(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -251,8 +252,16 @@ pub fn diff_names(
     let files = if let Some(c) = load::<Value>(&p).filter(|c| c["head"] == head) {
         c["files"].clone()
     } else {
-        let out = crate::runner::ok(r, "gh", &["pr", "diff", num, "-R", &f.repo, "--name-only"])?;
-        let v = json!(out.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>());
+        let jq = r#".[] | [.filename, .previous_filename // empty] | join("\t")"#;
+        let path = format!("repos/{}/pulls/{num}/files", f.repo);
+        let mut out = ok(r, "gh", &["api", &path, "--paginate", "--jq", jq])?;
+        if out.lines().filter(|l| !l.trim().is_empty()).count() >= 3000 {
+            let (dir, range) = (f.local_path(), format!("origin/{}...{head}", f.integration));
+            crate::overlap::git(r, &dir, &["fetch", "-q", "origin"])?;
+            out = crate::overlap::git(r, &dir, &["diff", "--name-only", "--no-renames", &range])?;
+        }
+        let names = out.lines().flat_map(|l| l.split('\t')).map(str::trim);
+        let v = json!(names.filter(|l| !l.is_empty()).collect::<Vec<_>>());
         store(&p, &json!({"head": head, "files": v}))?;
         v
     };
