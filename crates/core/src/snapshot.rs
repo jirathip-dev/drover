@@ -224,6 +224,7 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     }
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
+    crate::outbox::look(&s, &events);
     s.fetch();
     let s = Snap { miss: Miss::Live, ..s };
     // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
