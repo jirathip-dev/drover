@@ -1913,7 +1913,8 @@ impl<'a> Server<'a> {
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
-        crate::snapshot::waits(ctx, cfg, &self.cached(ctx.now, 30), events, all)
+        let snap = self.snapshot().1;
+        crate::snapshot::saved_waits(ctx, cfg, &self.cached(ctx.now, 30), &snap, (events, all))
     }
 
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
