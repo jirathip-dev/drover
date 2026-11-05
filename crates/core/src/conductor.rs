@@ -633,6 +633,12 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             Some(m)
         }
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
+        // #461: a conductor's `timer install`, a system line.
+        "timer-install" => {
+            let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);
+            let text = format!("{by} ran `herdsman timer install`: wrote {w}, reloaded {l}");
+            Some(json!({"ts": e.ts, "from": "system", "text": text}))
+        }
         "thread-handoff" => Some(
             json!({"ts": e.ts, "from": "system", "text": e.str("title"), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
         ),

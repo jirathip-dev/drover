@@ -412,6 +412,28 @@ fn only_a_conductor_runs_lesson() {
     }
 }
 
+/// #461: a conductor (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
+/// may not; no other `timer` verb changes for a conductor.
+#[test]
+fn only_a_conductor_runs_timer_install() {
+    let run = |lane: Option<&str>, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(lane, "impl", input)
+    };
+    let install = "herdsman timer install";
+    assert_eq!(run(Some("synergy:-:conductor"), install), "", "a conductor may");
+    assert_eq!(run(None, install), "", "the owner may");
+    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
+        let out = run(Some(lane), install);
+        assert!(
+            out.contains("REFUSED CONDUCTOR_ONLY") && out.contains("timer install"),
+            "{lane}: {out}"
+        );
+        assert!(!run(Some(lane), "herdsman timer status").contains("REFUSED"), "{lane}");
+    }
+    assert!(run(Some("synergy:-:conductor"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
+}
+
 /// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
 #[test]
 fn quoted_text_is_not_a_command() {
