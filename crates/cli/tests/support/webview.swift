@@ -115,7 +115,10 @@ final class Nav: NSObject, WKNavigationDelegate {
         \(png == nil ? "document.querySelectorAll('details').forEach(d => d.open = true);" : "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });")
         [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]
         """
-        w.evaluateJavaScript(js) { r, e in
+        // #269: on a real server the TypeScript board draws every tab from the API: the tab's first draw lands before
+        // `js` runs (a file's page comes drawn, `common::drawn`).
+        let drawn = tab == "-" || url == nil ? "" : "tab('\(tab)'); await window.boardReady; await window.boardTab?.('\(tab)');"
+        w.callAsyncJavaScript(drawn + " return 1", arguments: [:], in: nil, in: .page) { _ in w.evaluateJavaScript(js) { r, e in
             guard let v = r as? [Double] else { print("js error: \(String(describing: e))"); exit(2) }
             let wide = [Int(v[0]), Int(v[1])].map { "\($0)" }
             guard let png else { print((wide + v.dropFirst(3).map { "\($0)" }).joined(separator: " ")); exit(0) }
@@ -131,7 +134,7 @@ final class Nav: NSObject, WKNavigationDelegate {
                     }
                 }
             }
-        }
+        } }
     }
 }
 let nav = Nav()
