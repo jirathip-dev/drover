@@ -126,6 +126,21 @@ fn demo_page_is_inert_and_relative() {
         "the page has no Queue HTML"
     );
     let page = page + &queue_html(&std::fs::read_to_string(site.join("api/v1/queue")).unwrap(), "tab(d)");
+    // #269: likewise the needs cards, Lanes and [chat], from `api/v1/needs`, `lanes` and `chat`.
+    assert!(
+        html.contains("<div id=needs></div>")
+            && html.contains("<section id=lanes></section><section id=chat></section>"),
+        "the page has no needs, Lanes or [chat] HTML"
+    );
+    let file = |n: &str| std::fs::read_to_string(site.join("api/v1").join(n)).unwrap();
+    let (needs, lanes, chat) = (file("needs"), file("lanes"), file("chat"));
+    let drawn = board_js(&[
+        (&needs, "needs.tab(d)"),
+        (&lanes, "lanes.tab(d)"),
+        (&chat, "chat.tab(d)"),
+    ]);
+    let page = page + &drawn.concat();
+    let cards = &drawn[0];
     assert!(html.contains(&format!(
         "<script src=a/{}/serve.js>",
         v.file_name().unwrap().to_string_lossy()
@@ -137,8 +152,8 @@ fn demo_page_is_inert_and_relative() {
     assert!(page.contains("Demo with fake data. Install herdsman to run your own."));
     assert_eq!(page.matches("<span class=g>merged</span>").count(), 4, "4 merges today");
     // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down.
-    assert_eq!(html.matches("<div class=ask>").count(), 2, "two needs-you cards");
-    let card = &html[html.find("<div class=ask>").unwrap()..];
+    assert_eq!(cards.matches("<div class=ask>").count(), 2, "two needs-you cards");
+    let card = &cards[cards.find("<div class=ask>").unwrap()..];
     assert!(
         card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-api · #21 · 18m</span>"),
         "{card:.300}"

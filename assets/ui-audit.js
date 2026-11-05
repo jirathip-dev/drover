@@ -430,7 +430,7 @@
       tc.firstElementChild.outerHTML = `<p class="qs tmo" data-b=${a.dataset.n}>↑ older messages</p>`;
       const msg = i => `<details data-n=${i} class="blk ${i % 3 ? 'ai' : 'me'}" open><summary><span class=k>${i % 3 ? 'conductor' : 'you'}</span><span class=pv>older message ${i}</span><span class=ct data-ts=${at}></span><i class=cv></i></summary><div class=md><p>older message ${i}: the rate limit's burst, the retry window and the docs page.</p></div></details>`;
       const page = '<p class=qs>thread started by owner · 09:12</p>' + Array.from({ length: 30 }, (_, i) => msg(i + 1)).join('');
-      window.fetch = (u, o) => /thread\/t4\?before=/.test(u) ? Promise.resolve(new Response(page)) : F(u, o);
+      window.threadOlder = t => Promise.resolve(t === 't4' ? page : null); // #269: the board's read of API v1 `thread/t4?before=`
       scrollTo({ top: 1e6, behavior: 'instant' }); await wait();
       scrollTo({ top: 0, behavior: 'instant' }); // headless paints no frames, so it fires no scroll event: send the page's own
       const y = a.getBoundingClientRect().top;

@@ -27,11 +27,10 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
+/// The [chat] tab as the board draws it (#269: web/src/chat.ts from API v1's `chat`).
 fn chat(s: &Server, cookie: &str) -> String {
-    let r = format!("GET /frags?tab=chat HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    let res = String::from_utf8_lossy(&s.respond(&r, T)).into_owned();
-    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    j["chat"].as_str().unwrap().into()
+    let [_, _, chat] = parts(s, ADDR, cookie, T);
+    chat
 }
 
 /// herdr ready to start conductors (`agents`: its agent list), dsh-tui at the pinned profile.
@@ -206,7 +205,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
     let page = chat(&s, &cookie);
     assert!(
-        page.contains(" class=qs>model sonnet · effort low from the next turn</p>"),
+        page.contains(" class=\"qs note\">model sonnet · effort low from the next turn</p>"),
         "{page}"
     );
     assert!(

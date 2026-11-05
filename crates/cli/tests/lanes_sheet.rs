@@ -65,7 +65,8 @@ fn section<'a>(page: &'a str, id: &str) -> &'a str {
 #[test]
 fn lanes_group_by_state_then_repo_with_counts() {
     let (c, r) = fixture("group");
-    let page = req(&Server::new(&c, &r, None), "GET", "/?all=1", "", "", T);
+    let s = Server::new(&c, &r, None);
+    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T); // #269: Lanes as the board draws it
     let lanes = section(&page, "lanes");
     let mut got = vec![];
     for part in lanes.split("<h").skip(1) {
@@ -122,7 +123,8 @@ fn lane_card_shows_its_port() {
     let (c, r) = fixture("port");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "port": 41234});
     append(&c.state, &Event::new(900_800, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let page = req(&Server::new(&c, &r, None), "GET", "/?all=1", "", "", T);
+    let s = Server::new(&c, &r, None);
+    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T); // #269: Lanes as the board draws it
     assert!(section(&page, "lanes").contains(" · :41234 · "), "{page}");
 }
 
@@ -239,7 +241,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         (0, "now: open the page, tap Pair, then run serve approve <code>\n")
     );
     // An unpaired page has the Pair button; a request sets a short-lived HttpOnly cookie and shows a 6-digit code.
-    let page = req(&s, "GET", "/?all=1", "", "", T);
+    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T);
     assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
     let host = host_tab(&s, ADDR, T);
     assert!(
@@ -540,12 +542,14 @@ fn reply_refusals_rate_limit_and_read_only() {
 fn page_has_no_dash_placeholders() {
     let (c, r) = fixture("dash");
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "12"]);
-    let page = req(&Server::new(&c, &r, Some(ADDR.into())), "GET", "/?all=1", "", "", T);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let page = req(&s, "GET", "/?all=1", "", "", T);
     let mut html = page[page.find("<body").unwrap()..].to_string();
     html.truncate(html.find("<script").unwrap());
-    // #60: and the parts the page loads on demand (#266: the board's Events; #268: its Queue tab and [config] sheet).
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    // #60: and the parts the page loads on demand (#266: the board's Events; #268: its Queue tab and [config] sheet;
+    // #269: the needs cards, Lanes and [chat]).
     html += &queue_js(&s, ADDR, T, "tab(d) + sheet(d, 'sendmeter')");
+    html += &parts(&s, ADDR, "", T).concat();
     html += &events_tab(&s, ADDR, T, "{}").unwrap_or_default();
     assert!(
         !html.contains(" - ") && !html.contains(">-<") && !html.contains(" · -") && !html.contains('—'),
@@ -569,8 +573,10 @@ fn page_has_no_dash_placeholders() {
 /// 3-line ASCII horses, per state; working gallops in 2 frames.
 #[test]
 fn ascii_horse_snapshots() {
+    let states = ["working", "idle", "unknown", "done", "blocked", "dead"];
+    let all = avatars(&states.map(|s| ("x", "impl", s)));
     let asc = |state: &str| {
-        let a = herdsman::serve::avatar("x", "impl", state);
+        let a = &all[states.iter().position(|s| *s == state).unwrap()];
         a[a.find("</i>").unwrap() + 4..a.find("</i><svg").unwrap() + 4].to_string()
     };
     let stand = "<i class=asc><b>    _/>\n~(___)\n  | |</b></i>";
@@ -588,8 +594,17 @@ fn ascii_horse_snapshots() {
 /// Corral's vector horse: pose per state, a stable coat per name, the gait on working legs.
 #[test]
 fn vector_horses_keep_a_coat_per_name() {
-    use herdsman::serve::avatar;
-    let w = avatar("sendmeter-impl-12", "impl", "working");
+    let names: Vec<String> = (0..40).map(|i| format!("agent-{i}")).collect();
+    let mut of = vec![
+        ("sendmeter-impl-12", "impl", "working"),
+        ("a", "impl", "blocked"),
+        ("a", "impl", "done"),
+        ("synergy-impl-7", "impl", "idle"),
+        ("synergy-impl-7", "impl", "idle"),
+    ];
+    of.extend(names.iter().map(|n| (n.as_str(), "impl", "idle")));
+    let all = avatars(&of);
+    let w = &all[0];
     assert!(
         w.contains("class=\"av g working\"") && w.contains("<use href=#ha-impl />") && w.contains("data-act=impl"),
         "{w}"
@@ -607,16 +622,10 @@ fn vector_horses_keep_a_coat_per_name() {
             .contains("class=\"leg leg-nf\" style=\"--a:28deg\"")
             && horses.contains("fill=\"var(--c)\"")
     );
-    assert!(
-        avatar("a", "impl", "blocked").contains("class=\"av r blocked\"")
-            && avatar("a", "impl", "done").contains("av g done")
-    );
-    let coat = |n: &str| {
-        let a = avatar(n, "impl", "idle");
-        a[a.find("--c:").unwrap()..a.find(";--d").unwrap()].to_string()
-    };
-    assert_eq!(coat("synergy-impl-7"), coat("synergy-impl-7"));
-    let coats: std::collections::BTreeSet<String> = (0..40).map(|i| coat(&format!("agent-{i}"))).collect();
+    assert!(all[1].contains("class=\"av r blocked\"") && all[2].contains("av g done"));
+    let coat = |a: &String| a[a.find("--c:").unwrap()..a.find(";--d").unwrap()].to_string();
+    assert_eq!(coat(&all[3]), coat(&all[4]));
+    let coats: std::collections::BTreeSet<String> = all[5..].iter().map(coat).collect();
     assert_eq!(coats.len(), 8, "all 8 Corral coats in use: {coats:?}");
     assert_eq!(
         herdsman::devices::sha256(b"abc"),
@@ -677,7 +686,7 @@ fn lanes_and_sheet_fit_390px() {
     let dir = std::env::var("HERDSMAN_SNAPSHOTS").ok();
     let d = tmpdir("shots-png");
     let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
+    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let scenes = [
         ("lanes-horse", "horse", String::new()),
@@ -795,7 +804,7 @@ fn chat_views_never_blank() {
     let page = req(&s, "GET", "/?all=1", "", "", T);
     let d = tmpdir("never-blank-png");
     let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
+    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
     for (agent, lane) in [
         ("sendmeter-impl-12", local),
         ("sendmeter-impl-12", empty),

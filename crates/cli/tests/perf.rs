@@ -3,7 +3,7 @@
 //! first paint in WebKit stay under their targets (hard: a miss fails). The numbers go to `$GITHUB_STEP_SUMMARY`.
 //! #351: every timing goes through the real server (`serve_on` on a socket, its sampler and watcher threads up, this
 //! fixture's runner), never a hand-built page: a call-count probe on the runner proves it; and a steady-state `/live`
-//! change is a patch of the changed pieces, under 5 KB. Budgets: docs/performance.md.
+//! change is the changed part's data only (#269: JSON the board draws), under 5 KB. Budgets: docs/performance.md.
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
@@ -148,8 +148,8 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     get(addr, "/"); // warm, as a phone's second load is
     let (page, size) = get(addr, "/");
     let (herd, _) = get(addr, "/herd.json");
-    let (frags, _) = get(addr, "/frags?tab=lanes");
-    // The probe: these timings ran `serve_on` on this fixture's runner (its renders read through it).
+    let (lanes, _) = get(addr, "/api/v1/lanes"); // #269: the Lanes tab's data
+                                                 // The probe: these timings ran `serve_on` on this fixture's runner (its renders read through it).
     assert!(r.2.load(Relaxed) > before, "serve_on never called the fixture's runner");
     let t = Instant::now();
     let (code, out) = run(c, r, &["status", "sendmeter"]);
@@ -160,7 +160,7 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert!(calls.is_empty(), "remote calls on a request or status: {calls:?}");
     report(&format!(
         "#337 perf (30 lanes, 2 hosts, +300 ms per remote call): step {step} ms (drive --fast) · via serve_on's socket: \
-         GET / {page} ms ({} KB) · /herd.json {herd} ms · /frags?tab=lanes {frags} ms · status {status} ms (the CLI)",
+         GET / {page} ms ({} KB) · /herd.json {herd} ms · /api/v1/lanes {lanes} ms · status {status} ms (the CLI)",
         size / 1024
     ));
     assert!(page < 150, "GET / took {page} ms (target < 150)");
@@ -191,9 +191,10 @@ fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
     assert!(!keys.iter().any(|k| k.contains("issue-17'")), "{keys:?}");
 }
 
-/// #337: the page carries the open tab only (the `tab` cookie, else Queue); `/frags?tab=` is that tab and the needs cards.
+/// #337: the page carries no tab (#269: the TypeScript board draws each from API v1); API v1's Lanes is the lanes, its
+/// needs cards the cards only.
 #[test]
-fn the_page_and_frags_carry_one_tab() {
+fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
@@ -201,15 +202,19 @@ fn the_page_and_frags_carry_one_tab() {
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), NOW);
         String::from_utf8_lossy(&res).into_owned()
     };
-    let page = body("/", "");
-    // #268: the Queue tab is the TypeScript board's (API v1's `queue`): the page never carries it.
-    assert!(page.contains("<section id=lanes></section>") && page.contains("<section id=queue></section>"));
     let page = body("/", "Cookie: tab=lanes\r\n");
-    assert!(page.contains("sendmeter-impl-20") && page.contains("<section id=queue></section>"));
-    let j: serde_json::Value =
-        serde_json::from_str(body("/frags?tab=chat", "").split_once("\r\n\r\n").unwrap().1).unwrap();
-    let ids: Vec<&String> = j.as_object().unwrap().keys().collect();
-    assert_eq!(ids, ["chat", "needs"]);
+    assert!(
+        page.contains("<div id=needs></div>")
+            && page.contains("<section id=queue></section><section id=lanes></section><section id=chat></section>")
+            && !page.contains("sendmeter-impl-20"),
+        "{page}"
+    );
+    assert!(body("/api/v1/lanes", "").contains("\"name\":\"sendmeter-impl-20\""));
+    let needs = body("/api/v1/needs", "");
+    assert!(
+        needs.contains("\"asks\":[") && !needs.contains("sendmeter-impl-20"),
+        "{needs}"
+    );
 }
 
 /// #337: the first contentful paint in WebKit (warm: the second load in one WebKit, its caches and service worker up;
@@ -254,11 +259,11 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     assert!(warm < 300.0, "first contentful paint {warm:.0} ms (target < 300)");
 }
 
-/// #351: after a part's first copy on a stream, `/live` sends only its changed pieces: an ask is one `patch` for the
-/// needs-you cards (#266: Events, the old probe, is the TypeScript board's), no lane row and no other card, under
-/// 5 KB, on the 30-lane board served by `serve_on`.
+/// #351: after a part's first copy on a stream, `/live` sends only what changed: an ask is one `needs` (#269: the
+/// cards' data, the TypeScript board draws it; #266: Events, the old probe, is the board's), no Lanes and no [chat],
+/// under 5 KB, on the 30-lane board served by `serve_on`.
 #[test]
-fn a_steady_state_live_change_is_a_patch_under_5kb() {
+fn a_steady_state_live_change_is_one_part_under_5kb() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let ask = |id: String, q: String| json!({"id": id, "question": q, "options": ["yes", "no"], "recommend": null});
@@ -280,8 +285,8 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
     note(1);
     let first = drain(&mut s, 2_500);
     assert!(
-        first.contains("event: frag\n") && first.contains("probe-1"),
-        "the first copy is whole: {first}"
+        first.contains("event: needs\n") && first.contains("probe-1"),
+        "the first change: {first}"
     );
     note(2);
     let got = drain(&mut s, 2_500);
@@ -290,57 +295,45 @@ fn a_steady_state_live_change_is_a_patch_under_5kb() {
         got.len()
     ));
     assert!(r.2.load(Relaxed) > before, "serve_on never called the fixture's runner");
-    assert!(!got.contains("event: frag\n"), "no whole part again: {got}");
-    let patches: Vec<serde_json::Value> = got
-        .split("event: patch\ndata: ")
-        .skip(1)
-        .map(|m| serde_json::from_str(m.split("\n\n").next().unwrap()).unwrap())
+    let parts: Vec<&str> = got
+        .split("\n\n")
+        .filter_map(|m| m.split_once("\nevent: ")?.1.split('\n').next())
+        .filter(|k| *k != "ev")
         .collect();
-    let ids: Vec<&str> = patches.iter().map(|p| p["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["needs"], "{got}");
-    let (p, set) = (&patches[0], patches[0]["set"].as_object().unwrap());
+    assert_eq!(parts, ["needs"], "{got}");
     assert!(
-        set.len() <= 4 && p["n"].as_u64().unwrap() > set.len() as u64 + 4,
-        "only the changed pieces: {p}"
-    );
-    assert!(set.values().any(|v| v.as_str().unwrap().contains("probe-2")), "{p}");
-    assert!(
-        !got.contains("seed-") && !got.contains("sendmeter-impl-"),
-        "unchanged rows stay home: {got}"
+        got.contains("probe-2") && !got.contains("sendmeter-impl-"),
+        "unchanged lanes stay home: {got}"
     );
     assert!(
         got.len() < 5 * 1024,
         "a steady-state /live change is {} bytes (target < 5 KB)",
         got.len()
     );
-    // serve.js rebuilds the part from its first copy and the patch: the same HTML the server renders now.
+    // The board draws the part from that data: the same cards it draws from API v1's `needs` now.
     if std::process::Command::new("node").arg("--version").output().is_err() {
         return eprintln!("skipping the client half: no node here");
     }
-    let data = |m: &str, ev: &str| {
-        let mut msgs = m
-            .split("\n\n")
-            .filter_map(|x| x.split_once(&format!("event: {ev}\ndata: ")));
-        msgs.find(|x| x.1.contains("\"id\":\"needs\"")).unwrap().1.to_string()
-    };
-    let src = include_str!("../../server/assets/serve.js");
-    let part = &src[src.find("  const got = ").unwrap()..src.find("  es.addEventListener('herd'").unwrap()];
-    let js = format!(
-        "let P = {{}}, out = {{}}; const h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }}, at = () => 0;\n\
-         const frag = (id, html) => (out[id] = html), sync = () => 0, pulse = () => 0, claim = () => 0, refresh = () => 0;\n\
-         {part}\nh.frag({{ data: {} }}); h.patch({{ data: {} }}); process.stdout.write(out.needs);",
-        json!(data(&first, "frag")),
-        json!(data(&got, "patch"))
-    );
-    let d = tmpdir("patch-js");
-    std::fs::write(d.join("t.js"), js).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let data = got
+        .split("event: needs\ndata: ")
+        .nth(1)
+        .unwrap()
+        .split("\n\n")
+        .next()
+        .unwrap();
     let mut now = std::net::TcpStream::connect(addr).unwrap();
-    now.write_all(format!("GET /frags?tab=queue HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+    now.write_all(format!("GET /api/v1/needs HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
         .unwrap();
     let mut res = String::new();
     now.read_to_string(&mut res).unwrap();
-    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    assert_eq!(String::from_utf8_lossy(&o.stdout), j["needs"].as_str().unwrap());
+    let drawn = board_js(&[
+        (data, "needs.tab(d)"),
+        (&res[res.find("\r\n\r\n").unwrap() + 4..], "needs.tab(d)"),
+    ]);
+    assert!(
+        drawn[0].contains("probe-2?") && drawn[0].contains("seed-9?"),
+        "{}",
+        drawn[0]
+    );
+    assert_eq!(drawn[0], drawn[1]);
 }

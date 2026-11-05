@@ -774,3 +774,115 @@ fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
     let s = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(s.str("pane"), Some("w9:p2"));
 }
+
+// --- #463: a start that fails shows its screen; a known first-start prompt is answered ---
+
+const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent sendmeter-impl-12 is blocked during startup and is not ready for prompts"}}"#;
+
+/// A one-entry fallback chain, so a failed start logs `spawn-failed` (its `error` the printed one).
+fn chain(harness: &str) -> String {
+    let cfg = CONFIG.replace("harness  =  \"hermes\"", &format!("harness = \"{harness}\""));
+    cfg.replace(
+        "model = \"opus\"",
+        &format!("model = \"opus\"\nfallback = [\"{harness}\"]"),
+    )
+}
+
+/// The error a failed start logged.
+fn failed(c: &herdsman::Ctx) -> String {
+    let ev = read(&c.state).unwrap();
+    let f = ev
+        .iter()
+        .find(|e| e.kind == "spawn-failed")
+        .expect("spawn-failed logged");
+    f.str("error").unwrap().to_string()
+}
+
+/// A start that fails: the pane's last 40 lines (secrets redacted) are in the error and the `spawn-failed` event.
+#[test]
+fn a_start_failure_records_the_pane_screen() {
+    let d = tmpdir("not-ready-screen");
+    let c = ctx(&d, &chain("hermes"));
+    let token = "ghp_0123456789abcdefghijklmnopqrstuv";
+    let mut screen: String = (1..=50).map(|i| format!("old line {i}\n")).collect();
+    screen += &format!("Hermes setup: paste your key\nkey: {token}\n");
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, NOT_READY)
+        .once("herdr pane read w9:p1", 0, &screen);
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out}");
+    assert!(r.called("herdr pane close w9:p1"));
+    let err = failed(&c);
+    assert!(err.contains("agent_not_ready"), "{err}");
+    assert!(err.contains("Hermes setup: paste your key"), "{err}");
+    assert!(!err.contains(token) && err.contains("key: •••"), "redacted: {err}");
+    assert!(
+        !err.contains("old line 12\n") && err.contains("old line 13\n"),
+        "the last 40 lines: {err}"
+    );
+}
+
+fn claude_ctx(name: &str) -> (PathBuf, herdsman::Ctx) {
+    let d = tmpdir(name);
+    let c = ctx(&d, &chain("claude"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    (d, c)
+}
+
+const TRUST: &str = " Accessing workspace:\n\n /tmp/cooee/design-1\n\n Quick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel\n";
+const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
+
+/// A new folder's trust dialog (and the bypass warning, "Yes" second) is answered, then the lane confirms and runs.
+#[test]
+fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
+    for (screen, prompt, key) in [(TRUST, "folder-trust", "1"), (BYPASS, "bypass-permissions", "2")] {
+        let (_d, c) = claude_ctx("first-start");
+        let up =
+            json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "terminal_title": "✳ Claude Code"}}});
+        let r = happy(&c, NO_AGENTS)
+            .once_err("herdr agent start", 1, NOT_READY)
+            .once("herdr pane read w9:p1", 0, screen)
+            .once("herdr pane get w9:p1", 0, &up.to_string())
+            .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+        let (exit, out) = spawn(&c, &r, &[]);
+        assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
+        let keys = format!("herdr pane send-keys w9:p1 {key}");
+        assert_eq!(r.count(&keys), 1, "{:?}", r.calls.borrow());
+        assert!(
+            r.index(&keys) < r.index("herdr pane get w9:p1"),
+            "answered, then confirmed"
+        );
+        assert!(!r.called("herdr pane close"), "{:?}", r.calls.borrow());
+        let ev = read(&c.state).unwrap();
+        let sp = ev
+            .iter()
+            .find(|e| e.kind == "startup-prompt")
+            .expect("startup-prompt logged");
+        assert_eq!((sp.str("prompt"), sp.str("pane")), (Some(prompt), Some("w9:p1")));
+        let s = ev.iter().find(|e| e.kind == "spawn").expect("spawn logged");
+        assert_eq!(
+            (s.str("pane"), s.data["confirmed"].clone()),
+            (Some("w9:p1"), json!(true))
+        );
+    }
+}
+
+/// A prompt herdsman does not know is never answered: the spawn fails with that screen in its error.
+#[test]
+fn an_unknown_first_start_prompt_fails_with_its_screen() {
+    let (_d, c) = claude_ctx("first-start-unknown");
+    let screen = " Choose the text style that looks best with your terminal?\n\n ❯ 1. Dark mode\n   2. Light mode\n";
+    let r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, NOT_READY)
+        .once("herdr pane read w9:p1", 0, screen);
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out}");
+    let err = failed(&c);
+    assert!(
+        err.contains("agent_not_ready") && err.contains("❯ 1. Dark mode"),
+        "{err}"
+    );
+    assert!(!r.called("herdr pane send-keys"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr pane close w9:p1"));
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "startup-prompt"));
+}

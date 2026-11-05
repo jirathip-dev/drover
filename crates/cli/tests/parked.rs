@@ -42,8 +42,14 @@ fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, Fake) {
     (c, r)
 }
 
+/// The body at `path`; the page (#269) with every tab as the board draws it.
 fn get(s: &Server, path: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\n\r\n"), NOW)).into_owned();
+    let res = if path.starts_with("/?") {
+        with_queue(&res, s, "", NOW)
+    } else {
+        res
+    };
     res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
@@ -59,7 +65,7 @@ fn lane<'a>(page: &'a str, agent: &str) -> &'a str {
 fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     let (c, r) = fixture("parked-sheet", true);
     let s = Server::new(&c, &r, None);
-    let page = get(&s, "/?all=1") + &queue_tab(&s, "", NOW); // #268: the board's Queue tab
+    let page = get(&s, "/?all=1"); // #268, #269: the board's tabs
     let safe = lane(&page, SAFE);
     assert!(
         safe.contains("data-role=impl data-gone>"),
