@@ -545,6 +545,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "wip-blocked",
     "spawn-held",
     "cap-near",
+    "orphan-issue",
 ];
 
 impl Notify {

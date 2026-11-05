@@ -1114,21 +1114,43 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let all = crate::waiting::scan(
-                        ctx,
-                        &cfg,
-                        r,
-                        &read(&ctx.state)?,
-                        &all_agents(&cfg, r).unwrap_or_default(),
-                        true,
-                    );
-                    let rows: Vec<_> = all
+                    let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let mut rows: Vec<_> = all
                         .into_iter()
                         // #445: every open issue, with the reason, nothing-due ones too.
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")
                         .map(|x| x.1)
-                        .filter(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet))
                         .collect();
+                    // #493: a working or next-to-start issue too; one nothing drives says so.
+                    let log = crate::waiting::Log::new(&events);
+                    for s in crate::waiting::guarded(&events, &cfg) {
+                        let (f, pr) = (&cfg.fleet[&s.fleet], crate::gh::cached_pr(ctx, &s.fleet, s.issue));
+                        let un = crate::waiting::undriven(&log, &s, f, &pr, &agents, ctx.now);
+                        let note = un.map_or(String::new(), |t| {
+                            format!(" · nothing drives this (since {})", crate::events::age(ctx.now - t))
+                        });
+                        if let Some(w) = rows.iter_mut().find(|w| w.fleet == s.fleet && w.issue == s.issue) {
+                            w.what += &note;
+                            continue;
+                        }
+                        let (who, what) = match &s.lane {
+                            Some(l) => ("none", format!("waiting on {l} (working){note}")),
+                            None => ("drive", format!("next in the queue: drive starts it{note}")),
+                        };
+                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, None);
+                        let lane = s.lane.unwrap_or_default();
+                        rows.push(crate::waiting::Waiting {
+                            fleet,
+                            issue,
+                            lane,
+                            who,
+                            what,
+                            since,
+                            next_cmd,
+                        });
+                    }
+                    rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     }
