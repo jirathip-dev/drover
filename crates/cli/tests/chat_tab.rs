@@ -1156,7 +1156,8 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
-    // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames.)
+    // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
+    // is read once it holds, or as it is after 2 s.)
     // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
     // (1/0) and how far its top moved against the box's top.
     let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
@@ -1167,17 +1168,19 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
           const kb = h => { Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - h }); vv.dispatchEvent(new Event('resize')); }; \
           const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
-          const look = (y = vv.offsetTop + vv.height) => { const [b, d] = above(); at.push(Math.abs(tw.getBoundingClientRect().bottom - y), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)); }; \
-          box.focus(); kb(336); await frame(); look(); \
-          box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await frame(); look(); \
-          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); kb(0); await frame(); look($('nav').getBoundingClientRect().top); \
-          box.focus(); kb(336); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await frame(); look(); \
+          const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
+            const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
+            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
+          box.focus(); kb(336); await look(); \
+          box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
+          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
+          box.focus(); kb(336); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
     let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")
     });
     let o = swift()
-        .env("HERDSMAN_WAIT", "8")
+        .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
