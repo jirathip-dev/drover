@@ -65,6 +65,10 @@ impl Harness for Dsh {
     }
 
     fn prepare(&self, ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
+        // #404: a conductor has no branch (its folder is no worktree): nothing to push.
+        if p.branch.is_empty() {
+            return Ok(());
+        }
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
