@@ -36,6 +36,7 @@ pub mod spawn;
 pub mod telegram;
 pub mod timer;
 pub mod usage;
+pub mod verify;
 pub mod waiting;
 pub mod webpush;
 
