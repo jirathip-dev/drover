@@ -1,8 +1,9 @@
 //! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
-    body, Account, BacklogIssue, Balance, Bar, Cell, Chat, Disk, FleetRow, Frag, Herd, HerdFleet, HerdHost, HerdLane,
-    HerdQueued, HostCard, HostTab, Leftovers, Meter, Moment, Notice, Paired, Patch, Row, Sub,
+    body, Account, Backlog, BacklogIssue, Balance, Bar, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
+    DriveAct, FleetRow, Frag, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, Leftovers,
+    Meter, Moment, Notice, Paired, Patch, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, fold, read, Event, IssueState, States};
@@ -260,6 +261,8 @@ struct Watch {
     frags: BTreeMap<(bool, &'static str), u64>,
     /// #267: the hash of the last Host tab data (its `now` left out).
     host: u64,
+    /// #268: the Queue tab's likewise.
+    queue: u64,
     /// #166: `drive.lock` was there: a pass starting or ending re-renders (`⟳ driving…`).
     driving: bool,
     /// #241, #259: the log's last seq at the last look (none yet: nothing to play).
@@ -433,10 +436,10 @@ fn enc(s: &str) -> String {
         .collect()
 }
 
-/// #166, #162 A: a fleet card's second line: `⟳ driving…`, else the last pass's age and result in its colour
-/// (`drive::result`); a tap lists `meta` (stall check, lanes, serial), then each action
-/// in plain words, a tap on one its raw code.
-fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, meta: &[String]) -> String {
+/// #166, #162 A: a fleet card's drive line: `⟳ driving…`, else the last pass's age and result in its colour
+/// (`drive::result`); a tap lists `meta` (stall check, lanes, serial), then each action in plain words, a tap on one
+/// its raw code.
+fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
     let pass = events.iter().rev().find(|e| e.kind == "drive-pass" && e.fleet == fleet);
     let (tone, line) = match pass {
         _ if crate::drive::running(ctx, fleet) => ("m", "⟳ driving…".to_string()),
@@ -453,33 +456,20 @@ fn drive_line(ctx: &Ctx, events: &[Event], fleet: &str, meta: &[String]) -> Stri
     let acts = pass
         .and_then(|e| e.data.get("actions").and_then(serde_json::Value::as_array).cloned())
         .unwrap_or_default();
-    let items: String = acts
-        .iter()
-        .map(|a| {
-            let who = a["issue"]
-                .as_u64()
-                .map_or_else(|| a["step"].as_str().unwrap_or_default().into(), |n| format!("#{n}"));
-            let (w, code) = (
-                a["words"].as_str().unwrap_or_default(),
-                a["code"].as_str().unwrap_or("ok"),
-            );
-            format!(
-                "<li><details><summary>{}: {}</summary><code>{code}</code></details></li>",
-                esc(&who),
-                esc(w)
-            )
-        })
-        .collect();
-    let items = if items.is_empty() && pass.is_some() {
-        "<li>nothing was due</li>".into()
-    } else {
-        items
+    let act = |a: &serde_json::Value| DriveAct {
+        who: a["issue"]
+            .as_u64()
+            .map_or_else(|| a["step"].as_str().unwrap_or_default().into(), |n| format!("#{n}")),
+        words: a["words"].as_str().unwrap_or_default().into(),
+        code: a["code"].as_str().unwrap_or("ok").into(),
     };
-    let meta: String = meta.iter().map(|m| format!("<li>{}</li>", esc(m))).collect();
-    format!(
-        "<details class=\"dp {tone}\"><summary><i>●</i><span>{}</span><i class=cv></i></summary><ul>{meta}{items}</ul></details>",
-        esc(&line)
-    )
+    Drive {
+        tone: tone.into(),
+        line,
+        meta,
+        pass: pass.is_some(),
+        acts: acts.iter().map(act).collect(),
+    }
 }
 
 /// #386: a thread file's type by its extension.
@@ -548,18 +538,6 @@ fn card(lines: &[String]) -> String {
         .collect()
 }
 
-/// One narrow 3-field row (`a`, state, age) that expands to the stacked card `lines`.
-fn row(class: &str, lead: &str, a: &str, state: &str, age: &str, lines: &[String]) -> String {
-    let card = card(lines);
-    format!(
-        "<details class=\"{class}\"><summary>{lead}<span>{}</span><span class={}>{}</span><span class=m>{}</span></summary>{card}</details>",
-        esc(a),
-        tone(state),
-        esc(state),
-        esc(age)
-    )
-}
-
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
     "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "cond",
@@ -620,15 +598,6 @@ fn coat(name: &str) -> String {
         "--c:#{c};--d:#{d};--m:#{m};--b:{}",
         if blaze { "#efe7dc" } else { "transparent" }
     )
-}
-
-/// #242: a lane's coat for its 16 px row sprite, as `--rc/--rd/--rm` (the board's `--c` is a colour token).
-fn row_coat(lane: &str) -> String {
-    if lane.is_empty() {
-        String::new()
-    } else {
-        format!(" style=\"{}\"", coat(lane).replace("--", "--r"))
-    }
 }
 
 /// The Services board row: this board's uptime and version.
@@ -931,6 +900,15 @@ impl<'a> Server<'a> {
             let msg = format!("id: {}\nevent: host\ndata: {}\n\n", w.seen.unwrap_or(0), json!(h));
             lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
         }
+        // #268: the Queue tab's likewise (`queue`).
+        let mut q = self.queue_tab(at);
+        q.now = 0;
+        let j = hash(&json!(q).to_string());
+        if ![0, j].contains(&std::mem::replace(&mut w.queue, j)) {
+            q.now = now;
+            let msg = format!("id: {}\nevent: queue\ndata: {}\n\n", w.seen.unwrap_or(0), json!(q));
+            lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
+        }
         for paired in [false, true] {
             for (id, html) in self.frags(at, paired, None).unwrap_or_default() {
                 if w.frags
@@ -1027,7 +1005,7 @@ impl<'a> Server<'a> {
             ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
             ("GET", "/") => self.page(ctx, &with_tab(form(query), head), self.device(ctx, head).is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
-            ("GET", "/frag") => self.part(ctx, &form(query))
+            ("GET", "/frag") => Self::part(ctx, &form(query))
                 .map_or(("404 Not Found", "text/plain", text("no such part\n")), |h| ("200 OK", HTML, h.into_bytes())),
             ("GET", "/lane") if self.device(ctx, head).is_none() => ("401 Unauthorized", "text/plain", text("pair this device to read transcripts\n")),
             ("GET", "/lane") => self.transcript(ctx, &form(query)).map_or(
@@ -1045,6 +1023,12 @@ impl<'a> Server<'a> {
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
+            // #408: a thread's older messages, `/thread/<t>?before=<seq>&n=30`.
+            ("GET", p) if p.starts_with("/thread/") && !p[8..].contains('/') => {
+                let rw = self.device(ctx, head).is_some() && self.addr.is_some();
+                let ev = read(&ctx.state).unwrap_or_default();
+                chat::older(ctx, &ev, &p[8..], &form(query), rw).map_or(("404 Not Found", "text/plain", text("no such thread\n")), |h| ("200 OK", HTML, h.into_bytes()))
+            }
             // #386: a file a thread's message carries.
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
@@ -1504,12 +1488,11 @@ impl<'a> Server<'a> {
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let agents = || self.herdr_json(ctx.now, "agent").map(|j| j["result"]["agents"].clone());
         let agents = || agents().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-        let parts: [(&'static str, &dyn Fn() -> String); 4] = [
+        let parts: [(&'static str, &dyn Fn() -> String); 3] = [
             ("needs", &|| {
                 let n = chat::choosing(ev);
                 self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
             }),
-            ("queue", &|| self.queue_tab(ctx, cfg, ev, st)),
             ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
             ("chat", &|| {
                 chat::tab(ctx, cfg, ev, &agents(), paired && self.addr.is_some())
@@ -1532,29 +1515,13 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// #60: a part the page loads on demand: a fleet's [config] sheet (`id=config&fleet=`, #162), a Host chart's
-    /// series (`id=hist&host=&k=`, #234). #266: the Events tab is the TypeScript board's (web/src/events.ts).
-    fn part(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
+    /// #60: a part the page loads on demand: a Host chart's series (`id=hist&host=&k=`, #234). #266: the Events tab is
+    /// the TypeScript board's (web/src/events.ts); #268: the Queue tab's, its [config] sheets with it.
+    fn part(ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         // #234: an open chart's series: the small history file only (#160).
-        if q.get("id").is_some_and(|i| i == "hist") {
-            let rows = crate::hosts::history(ctx);
-            return Some(crate::hosts::chart(&rows, q.get("host")?, q.get("k")?, ctx.now));
-        }
-        let (events, cfg) = (read(&ctx.state).ok()?, Config::load(&ctx.config).ok());
-        match q.get("id")?.as_str() {
-            "config" => {
-                let (c, f) = (cfg?, q.get("fleet")?);
-                Some(config_sheet(
-                    ctx,
-                    &c,
-                    f,
-                    c.fleet.get(f)?,
-                    (self.addr.is_some(), &mtime(ctx)),
-                    &fold(&events),
-                ))
-            }
-            _ => None,
-        }
+        q.get("id").filter(|i| *i == "hist")?;
+        let rows = crate::hosts::history(ctx);
+        Some(crate::hosts::chart(&rows, q.get("host")?, q.get("k")?, ctx.now))
     }
 
     fn page(&self, ctx: &Ctx, q: &BTreeMap<String, String>, paired: bool) -> Result<String> {
@@ -1648,10 +1615,10 @@ impl<'a> Server<'a> {
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
-             <section id=queue>{}</section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
+             <section id=queue></section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
              <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
              <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("queue"), f("lanes"), f("chat"), f("events")
+            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("lanes"), f("chat"), f("events")
         ))
     }
 
@@ -1799,29 +1766,37 @@ impl<'a> Server<'a> {
         herdr::list(&self.cached(now, 10), what).ok()
     }
 
-    /// Per configured fleet a card (#162): open work (needs you, ready, working, queued), `done today`; paused = one line.
-    fn queue_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States) -> String {
-        let (now, mt, rw) = (ctx.now, mtime(ctx), self.addr.is_some());
-        let Some(cfg) = cfg else {
-            return "<p class=r>cannot read fleet.toml</p>".into();
+    /// #268: API v1's `queue`, the Queue tab's data (web/src/queue.ts draws it): per configured fleet a card (#162),
+    /// open work (needs you, ready, working, queued), `done today`; paused = one line.
+    fn queue_tab(&self, ctx: &Ctx) -> QueueTab {
+        let (now, rw) = (ctx.now, self.addr.is_some());
+        let mut d = QueueTab {
+            now,
+            rw,
+            live: rw && self.export.is_none(),
+            mtime: mtime(ctx),
+            ..QueueTab::default()
         };
+        let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), read(&ctx.state)) else {
+            d.error = Some("cannot read fleet.toml".into());
+            return d;
+        };
+        let (cfg, events, st) = (&cfg, &events, &fold(&events));
         // The state of an open lane herdr shows no pane for: `dead`, or `parked` (#83).
         let ls = self.lanes(now, cfg, events, st).unwrap_or_default();
         let gone = |s: &IssueState| {
             s.active_lane()
                 .and_then(|x| ls.iter().find(|l| l.name == x.1 && l.pane.is_none()))
         };
-        // #115: serve.js draws the rows as a graph from data-b/-q/-s; [?] (header) opens its legend, data-sp its serial line.
-        // #162: each fleet a card in its colour; fleets that need you first, then by name.
-        let mut cards: Vec<(bool, String)> = vec![];
+        // #205: a lane herdr still lists opens its Lanes sheet; #218: a gone one its stored transcript, else none.
+        let link = |a: &str| match ls.iter().any(|l| l.name == a) {
+            true => "live",
+            false if lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) => "gone",
+            false => "",
+        };
+        let asks = crate::events::open_asks(events);
         for (f, fc) in &cfg.fleet {
             let q = queue::view(events, st, f);
-            // #294: a group each, names by spaces and their paths by ` | ` (serve.js splits them).
-            let sl: Vec<_> = fc.serial.iter().map(|g| g.name.as_str()).collect();
-            let sp: Vec<_> = fc.serial.iter().map(|g| g.paths.join(", ")).collect();
-            let (sl, sp) = (esc(&sl.join(" ")), esc(&sp.join(" | ")));
-            let sa = (!sp.is_empty()).then(|| format!(" data-s=\"{sl}\" data-sp=\"{sp}\""));
-            let sa = sa.unwrap_or_default();
             let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == *f).collect();
             let queued = |n: u64| q.iter().any(|i| i.issue == n);
             let rest: Vec<u64> = mine
@@ -1835,16 +1810,14 @@ impl<'a> Server<'a> {
                 .map(|(k, i)| (i.issue, i.blocked_by, Some(k)))
                 .chain(rest.iter().map(|&n| (n, None, None)))
                 .collect();
-            let (mut rows, mut need) = (vec![], 0);
+            let mut rows = vec![];
             for &(n, blocked_by, k) in &items {
                 let s = st.get(&(f.clone(), n));
-                let waiting = crate::events::open_asks(events)
-                    .iter()
-                    .any(|e| e.fleet == *f && e.issue == Some(n));
+                let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
                 let logged = s.map_or("queued", |s| s.state.as_str());
                 let shown = if waiting { "⏸ waiting: decision" } else { logged };
                 let state = s.and_then(gone).map_or(shown, |l| l.state.as_str());
-                let is_dead = state == "dead";
+                let dead = state == "dead";
                 // #162: needs you, then ready, then working, then queued; serve.js keeps follow-ups under their parent.
                 let rank = match state.split('(').next().unwrap_or_default() {
                     "needs-human" | "⏸ waiting: decision" => 0,
@@ -1852,231 +1825,122 @@ impl<'a> Server<'a> {
                     "impl" | "fix" | "review" => 2,
                     _ => 3,
                 };
-                need += usize::from(rank == 0);
-                let a = ago(now, s.map_or(0, |s| s.last_ts));
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
-                let coat = row_coat(lane);
-                let head = gh::cached_pr(ctx, f, n)["headRefOid"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                let chips = s.map_or(String::new(), |s| stage_line(fc, s, &head));
-                // #205: a lane herdr still lists opens its Lanes sheet (serve.js `.ql`); #218: a gone one its stored
-                // transcript (`data-gone`), else it is muted text.
-                let link = |a: &str, text: String| {
-                    let gone = !ls.iter().any(|l| l.name == a);
-                    if gone && !lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) {
-                        return format!("<span class=\"ql nw el m\">{text}</span>");
-                    }
-                    let g = if gone { " data-gone" } else { "" };
-                    format!(
-                        "<a href=#lanes class=\"ql nw el\" data-agent=\"{}\"{g}>{text}</a>",
-                        esc(a)
-                    )
-                };
+                let pr = gh::cached_pr(ctx, f, n);
+                let head = pr["headRefOid"].as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
                 let spawns = events.iter().rev().filter(|e| e.is("spawn", f, n));
-                let qls: Vec<String> = spawns
+                let qls = spawns
                     .filter_map(|e| e.str("agent").filter(|a| seen.insert(*a)).map(|a| (a, e.ts)))
                     .map(|(a, ts)| {
                         let st = ls.iter().find(|l| l.name == a).map_or("gone", |l| l.state.as_str());
-                        let (dot, tn) = (
-                            if st == "working" { "●" } else { "○" },
-                            if st == "gone" { "m" } else { tone(st) },
-                        );
-                        link(
-                            a,
-                            format!(
-                                "<span class={tn}>{dot}</span> <span class=qn>{}</span> <span class=qa>{st} {}</span>",
-                                esc(a),
-                                ago(now, ts)
-                            ),
-                        )
+                        QueueLane {
+                            name: a.into(),
+                            state: st.into(),
+                            tone: if st == "gone" { "m" } else { tone(st) }.into(),
+                            ago: ago(now, ts),
+                            link: link(a).into(),
+                        }
                     })
                     .collect();
-                let more = (qls.len() > 5).then(|| {
-                    format!(
-                        "<details class=qm><summary>+{} older</summary>{}</details>",
-                        qls.len() - 5,
-                        qls[5..].concat()
-                    )
-                });
-                let qls = (!qls.is_empty()).then(|| {
-                    format!(
-                        "<div class=qls>{}{}</div>",
-                        qls[..qls.len().min(5)].concat(),
-                        more.unwrap_or_default()
-                    )
-                });
-                // The current lane name links only while herdr lists it; otherwise it stays plain text.
-                let lane = if ls.iter().any(|l| l.name == lane) {
-                    link(lane, esc(lane))
-                } else {
-                    esc(lane)
-                };
-                let mut card = vec![chips, lane, pr_line(ctx, Some(fc), f, n, s)];
-                if is_dead {
-                    card.push("<span class=r>dead: the log has this lane open, herdr has no such agent</span>".into());
-                }
-                if let Some(b) = blocked_by {
-                    card.push(format!("<span class=r>blocked by #{b}</span>"));
-                }
-                let ck = k.is_some_and(|k| q[k].check);
-                card.extend(ck.then(|| "<span class=m>needs-check: from the backlog, spec not checked</span>".into()));
-                if let Some(w) = crate::land::note(events, f, n) {
-                    card.push(format!("<span class=r>{}</span>", esc(&w)));
-                }
+                let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
                 // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
-                    let (id, why) = (esc(u.str("id").unwrap_or("?")), esc(u.str("reason").unwrap_or("?")));
-                    card.push(format!("<span class=r>answer {id} not delivered: {why}</span>"));
+                    let (id, why) = (u.str("id").unwrap_or("?"), u.str("reason").unwrap_or("?"));
+                    notes.push(format!("answer {id} not delivered: {why}"));
                 }
                 // #99: a decision taken by default, with [change]: a new decision on the same ask.
                 let last = events.iter().rev().find(|e| e.is("decision", f, n));
-                if let Some(d) = last.filter(|d| d.str("by") == Some("default")) {
-                    let asked = |e: &&Event| e.is("needs-decision", f, n) && e.str("id") == d.str("id");
-                    let ask = events.iter().find(asked).filter(|_| rw);
-                    let change = ask.map_or(String::new(), |a| answer_form(ctx, a, "change"));
-                    let choice = esc(d.str("choice").unwrap_or("?"));
-                    card.push(format!("<span>decided by default: {choice}</span>{change}"));
-                }
-                if let (true, false, Some(k)) = (rw, is_dead, k) {
-                    let mv = |label: &str, key: &str, to: u64| {
-                        format!("<form method=post>{}<input type=hidden name=issue value={n}><input type=hidden name={key} value={to}><button>{label}</button></form>", hidden("mv", f, &mt))
-                    };
-                    let up = if k > 0 {
-                        mv("▲ up", "before", q[k - 1].issue)
-                    } else {
-                        String::new()
-                    };
-                    let down = q.get(k + 1).map(|x| mv("▼ down", "after", x.issue)).unwrap_or_default();
-                    card.push(format!("<span class=btns>{up}{down}</span>"));
-                }
-                let gs: Vec<_> = queue::groups(&q, events, fc, f, n)
-                    .iter()
-                    .map(|g| esc(&g.name))
-                    .collect();
-                let s = (!gs.is_empty()).then(|| format!(" data-s=\"{}\"", gs.join(" ")));
-                let b = blocked_by.map_or(String::new(), |b| format!(" data-b={b}"));
-                let up = st.get(&(f.clone(), n)).is_some_and(|s| s.updating);
-                let data = format!(
-                    "class=\"q\"{}{}{b}{} data-act={}{}",
-                    if k.is_some() { " data-q" } else { "" },
-                    if ck { " data-ck" } else { "" },
-                    s.unwrap_or_default(),
-                    act(["", "update"][usize::from(up)], state),
-                    coat
-                );
-                let row = row("q", "", &format!("#{n}"), state, &a, &card).replacen("class=\"q\"", &data, 1);
-                // #367: the time it counts from too (fixed, so /live sends no patch a second); serve.js writes `in impl 1h 47m`.
-                let t = st.get(&(f.clone(), n)).map_or(now, |s| s.last_ts);
-                let age = format!("<span class=m>{a}</span></summary>");
-                let row = row.replacen(&age, &format!("<span class=m data-t={t}>{a}</span></summary>"), 1);
-                let row = match (qls, row.strip_suffix("</details>")) {
-                    (Some(q), Some(r)) => format!("{r}{q}</details>"),
-                    _ => row,
+                let decided = last.filter(|d| d.str("by") == Some("default"));
+                let asked = |d: &Event| {
+                    events
+                        .iter()
+                        .find(|e| e.is("needs-decision", f, n) && e.str("id") == d.str("id"))
                 };
-                let gh = format!(
-                    "<span><a href=\"https://github.com/{}/issues/{n}\">#{n}</a></span>",
-                    esc(&fc.repo)
-                );
-                let row = row.replacen(&format!("<span>#{n}</span>"), &gh, 1);
+                let ask = decided.filter(|_| rw).and_then(asked);
+                let up = s.is_some_and(|s| s.updating);
+                let mv = rw && !dead && k.is_some();
                 rows.push((
                     rank,
-                    match titles(ctx, f, n) {
-                        Some(t) => {
-                            let t = esc(&t);
-                            row.replacen(
-                                "</summary>",
-                                &format!("<span class=tl title=\"{t}\">{t}</span></summary>"),
-                                1,
-                            )
-                        }
-                        None => row,
+                    QueueRow {
+                        issue: n,
+                        state: state.into(),
+                        tone: tone(state).into(),
+                        age: ago(now, s.map_or(0, |s| s.last_ts)),
+                        // #367: the time it counts from too (fixed, so /live sends no change a second).
+                        t: s.map_or(now, |s| s.last_ts),
+                        act: act(["", "update"][usize::from(up)], state).into(),
+                        coat: if lane.is_empty() {
+                            String::new()
+                        } else {
+                            coat(lane).replace("--", "--r")
+                        },
+                        queued: k.is_some(),
+                        check: k.is_some_and(|k| q[k].check),
+                        groups: queue::groups(&q, events, fc, f, n)
+                            .iter()
+                            .map(|g| g.name.clone())
+                            .collect(),
+                        blocked_by,
+                        title: titles(ctx, f, n),
+                        stage: s.map_or(vec![], |s| stages(fc, s, head)),
+                        lane: lane.into(),
+                        live: ls.iter().any(|l| l.name == lane),
+                        pr: pr_data(ctx, fc, f, n, s),
+                        dead,
+                        notes,
+                        decided: decided.map(|d| d.str("choice").unwrap_or("?").into()),
+                        ask: ask.map(v1::ask),
+                        mv,
+                        up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
+                        down: k.filter(|_| mv).and_then(|k| q.get(k + 1)).map(|x| x.issue),
+                        lanes: qls,
                     },
                 ));
             }
             rows.sort_by_key(|r| r.0);
-            let mut body: String = rows.into_iter().map(|r| r.1).collect();
-            if items.is_empty() {
-                body += "<p class=m>no open work</p>";
-            }
+            let need = rows.iter().filter(|r| r.0 == 0).count();
             let mut done: Vec<&&IssueState> = mine
                 .iter()
                 .filter(|s| s.done() && now.saturating_sub(s.last_ts) < 86_400)
                 .collect();
             done.sort_by_key(|s| std::cmp::Reverse(s.last_ts));
-            if !done.is_empty() {
-                let rows: String = done
+            let done_row = |s: &&&IssueState| DoneRow {
+                issue: s.issue,
+                note: crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone()),
+                age: age(now.saturating_sub(s.last_ts)),
+                pr: events
                     .iter()
-                    .take(5)
-                    .map(|s| {
-                        let pr = events
-                            .iter()
-                            .rev()
-                            .find(|e| e.is("merged", f, s.issue))
-                            .and_then(|e| e.str("pr"));
-                        let link = pr.map_or(String::new(), |p| {
-                            format!(
-                                " <a href=\"https://github.com/{}/pull/{}\">PR #{}</a>",
-                                esc(&fc.repo),
-                                esc(p),
-                                esc(p)
-                            )
-                        });
-                        format!(
-                            "<p>#{} <span class=g>{}</span> {}{link}</p>",
-                            s.issue,
-                            esc(&crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone())),
-                            age(now.saturating_sub(s.last_ts))
-                        )
-                    })
-                    .collect();
-                body += &format!(
-                    "<details class=done><summary><i class=cv></i><span>done today: {}</span></summary>{rows}</details>",
-                    done.len()
-                );
-            }
+                    .rev()
+                    .find(|e| e.is("merged", f, s.issue))
+                    .and_then(|e| e.str("pr"))
+                    .map(Into::into),
+            };
             // #365: open issues not queued, with no lane, from the last read; serve.js draws, filters, ticks (`bqueue`) them.
             let bl: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "backlog", f, 0)).unwrap_or_default();
             let mut open: BTreeMap<String, BacklogIssue> =
                 serde_json::from_value(bl["issues"].clone()).unwrap_or_default();
             open.retain(|n, _| n.parse().is_ok_and(|n| !queued(n) && !st.contains_key(&(f.clone(), n))));
-            if bl["issues"].is_object() {
-                body += &format!(
-                    "<details class=bl data-bl=\"{}\"><summary><i class=cv></i><span>backlog</span><span class=m></span></summary>\
-                     <div class=bls></div><p class=m>read {} ago · [Drive now] reads it again</p><form method=post class=bbar \
-                     hidden>{}<input type=hidden name=issues><button>queue</button></form></details>",
-                    esc(&json!(open).to_string()),
-                    age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
-                    hidden("bqueue", f, &mt)
-                );
-            }
-            let button = |op: &str, label: &str| {
-                if rw {
-                    format!(
-                        "<form method=post>{}<button>{label}</button></form>",
-                        hidden(op, f, &mt)
-                    )
-                } else {
-                    String::new()
-                }
-            };
-            let (k, fe) = (fc.color(f), esc(f));
-            let need = if need > 0 {
-                format!("<span class=\"tag r\">! {need} need you</span>")
-            } else {
-                String::new()
-            };
-            // An export has no `/frag`: it carries each fleet's [config] sheet inline.
-            if self.export.is_some() {
-                body += &format!(
-                    "<template data-cfg=\"{fe}\">{}</template>",
-                    config_sheet(ctx, cfg, f, fc, (rw, &mt), st)
-                );
-            }
+            let backlog = bl["issues"].is_object().then(|| Backlog {
+                issues: open,
+                ago: age(now.saturating_sub(bl["ts"].as_u64().unwrap_or(now))),
+            });
             let lanes: Vec<&&IssueState> = mine.iter().filter(|s| s.active_lane().is_some()).collect();
             let plural = |n: usize| if n == 1 { "" } else { "s" };
+            let mut card = QueueCard {
+                name: f.clone(),
+                k: fc.color(f).into(),
+                serial: fc.serial.iter().map(|g| g.name.clone()).collect(),
+                // #294: a group's paths (serve.js splits the groups by ` | `).
+                paths: fc.serial.iter().map(|g| g.paths.join(", ")).collect(),
+                need,
+                rows: rows.into_iter().map(|r| r.1).collect(),
+                done: done.iter().take(5).map(done_row).collect(),
+                done_n: done.len(),
+                backlog,
+                config: config_sheet(ctx, cfg, f, fc, st),
+                ..QueueCard::default()
+            };
             if fc.paused {
                 let nd = lanes
                     .iter()
@@ -2093,13 +1957,10 @@ impl<'a> Server<'a> {
                     .rev()
                     .find(|e| e.kind == "pause" && e.fleet == *f && e.issue.is_none());
                 let since = since.map_or(String::new(), |e| format!(" · {}", age(now.saturating_sub(e.ts))));
-                cards.push((!need.is_empty(), format!(
-                    "<details class=\"fc off k-{k}\"{sa}><summary><i class=cv></i><span class=fn><b>{fe}</b> <i class=m>●</i> paused{since} · {what}</span>{need}{}</summary>{body}</details>",
-                    button("resume", "Resume")
-                )));
+                card.paused = Some(format!("paused{since} · {what}"));
+                d.fleets.push(card);
                 continue;
             }
-            let drive = button("drive", "Drive now");
             let stall = cfg.limits.stall_minutes * 60;
             let live = lanes.iter().filter(|s| gone(s).is_none());
             let next = live.map(|s| ((s.last_ts + stall).saturating_sub(now), s.issue)).min();
@@ -2112,41 +1973,33 @@ impl<'a> Server<'a> {
                 meta.push(format!("{} lane{}", lanes.len(), plural(lanes.len())));
             }
             meta.extend(queue::serial_use(events, st, f, Some(cfg)));
+            card.drive = drive(ctx, events, f, meta);
             // #173: a refused pipeline stops this fleet only; its card says so in red.
-            let bad = match fc.bad.len() {
-                0 => String::new(),
-                n => format!(
-                    "<p class=r>! BAD_PIPELINE · {n} error{} in fleet.toml · nothing moves until it is fixed</p>",
-                    if n == 1 { "" } else { "s" }
-                ),
-            };
+            if !fc.bad.is_empty() {
+                let n = fc.bad.len();
+                card.notes.push(format!(
+                    "! BAD_PIPELINE · {n} error{} in fleet.toml · nothing moves until it is fixed",
+                    plural(n)
+                ));
+            }
             // #350: fast-first landings wait while integration is red.
-            let bad = bad
-                + &crate::land::paused(events, f).map_or(String::new(), |p| {
-                    let at = esc(p.str("at").unwrap_or("?"));
-                    format!("<p class=r>landing paused: {} red since {at}</p>", esc(&fc.integration))
-                });
+            if let Some(p) = crate::land::paused(events, f) {
+                let at = p.str("at").unwrap_or("?");
+                card.notes
+                    .push(format!("landing paused: {} red since {at}", fc.integration));
+            }
             // #429: `check`'s measurement of integration within `warn_within` of its line cap.
             let cap: serde_json::Value = crate::usage::load(&gh::cache_path(ctx, "cap", f, 0)).unwrap_or_default();
             let left = cap["cap"].as_i64().zip(cap["lines"].as_i64()).map(|(c, n)| c - n);
-            let bad = bad
-                + &left
-                    .filter(|l| *l < cap["warn"].as_i64().unwrap_or(500))
-                    .map_or(String::new(), |l| {
-                        format!(
-                            "<p class=r>cap-near: {l} lines of headroom on {}</p>",
-                            esc(&fc.integration)
-                        )
-                    });
-            cards.push((!need.is_empty(), format!(
-                "<div class=\"fc k-{k}\"{sa}><div class=fh><span class=fn><b>{fe}</b>{need}</span>\
-                 <span class=btns>{drive}{}<button type=button class=cfg data-f=\"{fe}\">Config</button></span></div>{}{bad}{body}</div>",
-                button("pause", "Pause"),
-                drive_line(ctx, events, f, &meta),
-            )));
+            if let Some(l) = left.filter(|l| *l < cap["warn"].as_i64().unwrap_or(500)) {
+                card.notes
+                    .push(format!("cap-near: {l} lines of headroom on {}", fc.integration));
+            }
+            d.fleets.push(card);
         }
-        cards.sort_by_key(|c| !c.0);
-        cards.into_iter().map(|c| c.1).collect()
+        // #162: fleets that need you first, then by name.
+        d.fleets.sort_by_key(|c| c.need == 0);
+        d
     }
 
     /// herdr's agents joined with the log (None when herdr cannot be read).
@@ -3150,12 +3003,13 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         page
     };
     std::fs::create_dir_all(dir.join("lane"))?;
-    // #266: the API reads the TypeScript board makes (Events, #267 Host), as files: every event, whatever the query.
+    // #266: the API reads the TypeScript board makes (Events, #267 Host, #268 Queue), as files: every event, whatever the query.
     let (state, all) = (
         json!(s.state(ctx)?).to_string(),
         json!(v1::events(ctx, 0, u64::MAX, usize::MAX)),
     );
     let (all, host) = (all.to_string(), json!(s.host_tab(ctx)).to_string());
+    let queue = json!(s.queue_tab(ctx)).to_string();
     let files = [
         ("index.html", page.as_bytes()),
         ("herd.json", herd.as_bytes()),
@@ -3163,6 +3017,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         ("api/v1/state", state.as_bytes()),
         ("api/v1/events", all.as_bytes()),
         ("api/v1/host", host.as_bytes()),
+        ("api/v1/queue", queue.as_bytes()),
     ]
     .map(|(n, b)| (n.to_string(), b));
     for (name, body) in files
@@ -3278,6 +3133,24 @@ fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64
     parts.join(" · ")
 }
 
+/// #268: a Queue row's PR line as data (`pr_line`'s, from the caches only).
+fn pr_data(ctx: &Ctx, fc: &crate::config::Fleet, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
+    let pr = gh::cached_pr(ctx, fleet, issue);
+    let n = pr["number"].as_u64();
+    let v = s.and_then(|s| s.verdicts.last().map(|v| (s, v.1.as_str())));
+    PrLine {
+        pr: n,
+        run: n.is_none().then(|| gh::cached_run(ctx, fleet, issue)).flatten(),
+        ci: (!pr.is_null()).then(|| gh::ci(&gh::required(&pr["statusCheckRollup"], &fc.required_checks)).into()),
+        verdict: v.map(|v| v.1.into()),
+        vtone: v.map_or("", |v| tone(v.1)).into(),
+        rounds: s.map_or(0, |s| s.rounds),
+        form: v
+            .filter(|v| v.1.ends_with(crate::events::FORM))
+            .map(|(s, _)| format!("{}/{}", s.form, fc.form_rounds.unwrap_or_default())),
+    }
+}
+
 /// The queue row's dim line from the caches only: the issue title, then the PR's when it differs (#331: CSS ellipsises it).
 fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     let spec = gh::cached_title(ctx, fleet, issue);
@@ -3291,282 +3164,95 @@ fn titles(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
-/// #162: a fleet's [config] sheet: GENERAL, LIMITS, ROLES (the `set` pickers when `rw`), ALERTS, HOSTS / NEEDS.
-/// Only the role pickers (through `set`) and #401's Conductor choices write; the rest is read-only, edited in the
-/// config file named on top.
-fn config_sheet(
-    ctx: &Ctx,
-    cfg: &Config,
-    fleet: &str,
-    fc: &crate::config::Fleet,
-    (rw, mt): (bool, &str),
-    st: &States,
-) -> String {
-    let tag = |role: &str| {
-        let on: Vec<String> = fc
-            .flow()
-            .stage
-            .iter()
-            .filter(|s| s.role.as_deref() == Some(role))
-            .map(|s| format!("{}: {}", s.kind, s.name))
-            .collect();
-        let on = if role == "design" {
-            "owner only".into()
-        } else {
-            on.join(", ")
-        };
-        if on.is_empty() {
-            String::new()
-        } else {
-            format!("<span class=\"tag m\">{}</span> ", esc(&on))
-        }
-    };
+/// #162: a fleet's [config] sheet's data: GENERAL, LIMITS, ROLES (the `set` pickers), ALERTS, HOSTS / NEEDS
+/// (web/src/queue.ts draws it). Only the role pickers (through `set`) and #401's Conductor choices write; the rest is
+/// read-only, edited in the config file named on top.
+fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet, st: &States) -> ConfigSheet {
     let path = ctx.config.display().to_string();
     let home = crate::config::home().display().to_string();
-    let path = path.strip_prefix(&home).map_or(path.clone(), |p| format!("~{p}"));
-    let file = ctx
-        .config
-        .file_name()
-        .map_or("fleet.toml".into(), |f| f.to_string_lossy().into_owned());
-    let edit = format!("edit {}", esc(&file));
-    let (l, all) = (&cfg.limits, "<span class=\"tag m\">all fleets</span>");
-    let none = "<span class=m>none</span>";
-    let list = |v: &[String]| {
-        if v.is_empty() {
-            none.to_string()
-        } else {
-            esc(&v.join(", "))
-        }
-    };
-    let cap = |n: Option<usize>| n.map_or("<span class=m>no cap</span>".into(), |n| n.to_string());
-    let group = |g: &crate::config::Serial| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", "));
-    let groups: Vec<_> = fc.serial.iter().map(group).collect();
+    let l = &cfg.limits;
     let line_cap = std::fs::read_to_string(fc.local_path().join("ci/cap.toml"))
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| t.get("fleet")?.get(fleet)?.get("line_cap")?.as_integer());
     let notify = |n: &[crate::config::Notify]| {
-        let n: Vec<String> = n
-            .iter()
-            .map(|n| {
-                let on = if n.on.is_empty() {
-                    "default events".into()
-                } else {
-                    n.on.join(", ")
-                };
-                format!("{} ({on})", if n.webpush() { "web push" } else { "command" })
-            })
-            .collect();
-        if n.is_empty() {
-            none.to_string()
-        } else {
-            esc(&n.join("; "))
-        }
-    };
-    let group = |name: &str, hint: &str, rows: &[(&str, String)]| {
-        let rows: String = rows.iter().map(|(k, v)| format!("<dt>{k}</dt><dd>{v}</dd>")).collect();
-        format!("<section class=cg><h3>{name}<span>{hint}</span></h3><dl class=kv2>{rows}</dl></section>")
-    };
-    let k = fc.color(fleet);
-    let general = [
-        ("repo", esc(&fc.repo)),
-        ("local", esc(&fc.local)),
-        ("integration", esc(&fc.integration)),
-        ("driver", "herdsman <span class=m>(herdsman drive)</span>".into()),
-        (
-            "default effort",
-            format!(
-                "{}{all}",
-                l.effort
-                    .as_deref()
-                    .map_or("<span class=m>unset → none</span>".into(), esc)
-            ),
-        ),
-        (
-            "colour",
-            format!(
-                "<span class={k}>■</span> --{k} <span class=m>({})</span>",
-                if fc.color.is_some() { "set" } else { "auto" }
-            ),
-        ),
-        ("env", list(&fc.env.keys().cloned().collect::<Vec<_>>())),
-        (
-            "node_modules",
-            if fc.clone_node_modules {
-                "cloned".into()
+        let on = |n: &crate::config::Notify| {
+            if n.on.is_empty() {
+                "default events".into()
             } else {
-                "<span class=m>not cloned</span>".into()
-            },
-        ),
-    ];
-    let rounds = |n: u32, on: &str| {
-        if fc.flow().builtin {
-            format!("{n} <span class=m>→ {on}, see Pipeline</span>{all}")
-        } else {
-            format!("<span class=m>n/a (pipeline)</span>{all}")
-        }
-    };
-    let limits = [
-        // #173: the built-in pipeline's defaults; a fleet with its own pipeline sets them per stage.
-        ("review rounds", rounds(l.review_rounds, "rev's rounds")),
-        ("update rounds", rounds(l.update_rounds, "gates' rounds")),
-        ("stall after", format!("{} min{all}", l.stall_minutes)),
-        ("ask default", format!("{} min{all}", l.ask_default_minutes)),
-        (
-            "max lanes",
-            format!("impl {} · rev {}", cap(fc.max_impl), cap(fc.max_rev)),
-        ),
-        (
-            "line cap",
-            line_cap.map_or("<span class=m>none in ci/cap.toml</span>".into(), |n| {
-                format!("{n} <span class=m>(ci/cap.toml in the repo)</span>")
-            }),
-        ),
-        ("serial", list(&groups)),
-        (
-            "deny commands",
-            list(&fc.deny(l).iter().map(|d| d.cmd().to_string()).collect::<Vec<_>>()),
-        ),
-        (
-            "required checks",
-            if fc.required_checks.is_empty() {
-                "<span class=m>all</span>".into()
-            } else {
-                list(&fc.required_checks)
-            },
-        ),
-        ("merge label", fc.merge_label.as_deref().map_or(none.into(), esc)),
-    ];
-    let own = if fc.notify.is_empty() {
-        "<span class=m>global only</span>".into()
-    } else {
-        notify(&fc.notify)
-    };
-    let alerts = [("notify", own), ("global", notify(&cfg.notify))];
-    let roles: String = fc
-        .role
-        .iter()
-        .filter(|r| r.0 != "conductor")
-        .map(|(name, r)| role_form(cfg, fleet, name, r, rw, mt).replacen("</b> ", &format!("</b> {}", tag(name)), 1))
-        .collect();
-    format!(
-        "<p class=cp><span class=m>config</span> {}</p>{}{}{}<section class=cg><h3>Roles<span>set: harness · model · effort</span></h3>{roles}\
-         <p class=rk>profile, accounts, mcp: {edit}</p></section>{}{}<section class=cg><h3>Hosts / needs<span>after #157</span></h3>\
-         <p class=soon>Which hosts this fleet's lanes may run on, matched by host tags against the issue's needs. Shown here once #157 lands.</p></section>",
-        esc(&path),
-        group("General", &edit, &general),
-        pipeline_group(fleet, fc, st),
-        group("Limits", &edit, &limits),
-        conductor_group(fleet, fc, rw, mt),
-        group("Alerts", &edit, &alerts),
-    )
-}
-
-/// #401: the fleet's conductor, `default: impl` or `set`; a tap on a harness, model (the fleet's roles') or effort
-/// choice writes it (the `cond` op, a paired device only; disabled without `rw`).
-fn conductor_group(fleet: &str, fc: &crate::config::Fleet, rw: bool, mt: &str) -> String {
-    let Some(r) = fc.role.get("conductor") else {
-        return String::new();
-    };
-    let row = |key: &str, cur: Option<&str>, opts: &[&str]| {
-        let on = |o: &&str| {
-            format!(
-                "<button name={key} value=\"{0}\" aria-pressed={1}{2}>{0}</button>",
-                esc(o),
-                cur == Some(*o),
-                if rw { "" } else { " disabled" }
-            )
+                n.on.join(", ")
+            }
         };
-        let b: String = opts.iter().map(on).collect();
-        format!(
-            "<form method=post class=chips aria-label={key}>{}<b class=m>{key}</b>{b}</form>",
-            hidden("cond", fleet, mt)
-        )
+        let kind = |n: &crate::config::Notify| if n.webpush() { "web push" } else { "command" };
+        n.iter().map(|n| format!("{} ({})", kind(n), on(n))).collect()
     };
-    format!(
-        "<section class=cg><h3>Conductor<span>{}</span></h3><p class=rh><span class=m>{}</span></p>{}{}{}</section>",
-        if r.default { "default: impl" } else { "set" },
-        esc(&r.profile_or("conductor")),
-        row("harness", Some(&r.harness), &crate::harness::NAMES),
-        row("model", r.model.as_deref(), &crate::conductor::models(fc)),
-        row("effort", r.effort.as_deref(), crate::harness::efforts(&r.harness)),
-    )
-}
-
-/// A role's pickers (`rw`): harness, model (disabled while `models` is unset), effort, through the `set` op; else text.
-fn role_form(cfg: &Config, fleet: &str, role: &str, r: &Role, rw: bool, mt: &str) -> String {
-    let head = format!(
-        "<p class=rh><b>{}</b><span class=m>{}</span></p>",
-        esc(role),
-        esc(&r.profile_or(role))
-    );
-    let names = |v: &[String]| {
-        if v.is_empty() {
-            "none".into()
+    let strs = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let role = |(name, r): (&String, &Role)| RoleRow {
+        name: name.clone(),
+        profile: r.profile_or(name),
+        harness: r.harness.clone(),
+        model: r.model.clone(),
+        effort: r.effort.clone(),
+        efforts: strs(crate::harness::efforts(&r.harness)),
+        // Unset: what the lane actually gets (the profile's/harness's model, `[limits].effort`).
+        model_default: if r.harness == "hermes" {
+            "profile".into()
         } else {
-            esc(&v.join(", "))
-        }
+            r.harness.clone()
+        },
+        effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
+        accounts: r.account_list(),
+        mcp: r.mcp.clone(),
     };
-    let rest = format!(
-        "<p class=rk>accounts {} · mcp {}</p>",
-        names(&r.account_list()),
-        names(&r.mcp)
-    );
-    if !rw {
-        let v = join(&[
-            &r.harness,
-            r.model.as_deref().unwrap_or_default(),
-            r.effort.as_deref().unwrap_or_default(),
-        ]);
-        return format!("<div class=role>{head}<p>{}</p>{rest}</div>", esc(&v));
+    let conductor = fc.role.get("conductor").map(|r| Conductor {
+        default: r.default,
+        profile: r.profile_or("conductor"),
+        harness: r.harness.clone(),
+        model: r.model.clone(),
+        effort: r.effort.clone(),
+        efforts: strs(crate::harness::efforts(&r.harness)),
+        models: strs(&crate::conductor::models(fc)),
+    });
+    let harness = |h: &&str| Harness {
+        name: (*h).into(),
+        efforts: strs(crate::harness::efforts(h)),
+    };
+    ConfigSheet {
+        path: path.strip_prefix(&home).map_or(path.clone(), |p| format!("~{p}")),
+        file: ctx
+            .config
+            .file_name()
+            .map_or("fleet.toml".into(), |f| f.to_string_lossy().into_owned()),
+        repo: fc.repo.clone(),
+        local: fc.local.clone(),
+        integration: fc.integration.clone(),
+        effort: l.effort.clone(),
+        color_set: fc.color.is_some(),
+        env: fc.env.keys().cloned().collect(),
+        node_modules: fc.clone_node_modules,
+        // #173: the built-in pipeline's defaults; a fleet with its own pipeline sets them per stage.
+        builtin: fc.flow().builtin,
+        review_rounds: l.review_rounds,
+        update_rounds: l.update_rounds,
+        stall_minutes: l.stall_minutes,
+        ask_minutes: l.ask_default_minutes,
+        max_impl: fc.max_impl,
+        max_rev: fc.max_rev,
+        line_cap,
+        serial: (fc.serial.iter())
+            .map(|g| format!("🔒{} {} at a time: {}", g.name, g.max, g.paths.join(", ")))
+            .collect(),
+        deny: fc.deny(l).iter().map(|d| d.cmd().to_string()).collect(),
+        required: fc.required_checks.clone(),
+        merge_label: fc.merge_label.clone(),
+        notify: notify(&fc.notify),
+        global: notify(&cfg.notify),
+        pipe: pipe(fleet, fc, st),
+        models: cfg.models.clone(),
+        harnesses: crate::harness::NAMES.iter().map(harness).collect(),
+        roles: fc.role.iter().filter(|r| r.0 != "conductor").map(role).collect(),
+        conductor,
     }
-    // Unset: what the lane actually gets (the profile's/harness's model, `[limits].effort`).
-    let model = if r.harness == "hermes" {
-        "profile".to_string()
-    } else {
-        r.harness.clone()
-    };
-    let effort = cfg.limits.effort.clone().unwrap_or_else(|| "none".into());
-    let select = |name: &str, cur: &Option<String>, def: &str, opts: &[&str], attr: &str| {
-        let mut s = format!("<select name={name} aria-label={name}{attr}>");
-        if cur.as_ref().is_none_or(|c| !opts.contains(&c.as_str())) {
-            s += &format!(
-                "<option value=\"\" selected>{}</option>",
-                esc(&cur.clone().unwrap_or(format!("default ({def})")))
-            );
-        }
-        for o in opts {
-            let sel = if cur.as_deref() == Some(o) { " selected" } else { "" };
-            s += &format!("<option{sel}>{}</option>", esc(o));
-        }
-        s + "</select>"
-    };
-    let models: Vec<&str> = cfg.models.iter().map(String::as_str).collect();
-    // No `models`: the picker shows the current model, disabled (`set` refuses any other), with the fix.
-    let (off, hint) = if models.is_empty() {
-        (" disabled data-off", "<p class=rk>add models = [...] to fleet.toml</p>")
-    } else {
-        ("", "")
-    };
-    // The effort list follows the harness (serve.js swaps it from data-e).
-    let harness: String = crate::harness::NAMES
-        .iter()
-        .map(|h| {
-            let sel = if *h == r.harness { " selected" } else { "" };
-            format!(
-                "<option{sel} data-e=\"{}\">{h}</option>",
-                crate::harness::efforts(h).join(" ")
-            )
-        })
-        .collect();
-    format!(
-        "<form method=post class=role>{}<input type=hidden name=role value={}>{head}<span class=rp>\
-         <select name=harness aria-label=harness>{harness}</select>{}{}<button>Set</button></span>{hint}{rest}</form>",
-        hidden("set", fleet, mt),
-        esc(role),
-        select("model", &r.model, &model, &models, off),
-        select("effort", &r.effort, &effort, crate::harness::efforts(&r.harness), ""),
-    )
 }
 
 type Words = (&'static str, &'static str, String, bool);
@@ -3626,7 +3312,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged"
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing"
             .split(' ')
             .any(|x| x == k)
             || k.starts_with("orch-") =>
@@ -3670,14 +3356,14 @@ fn glyph(kind: &str) -> (&'static str, &'static str) {
 }
 
 /// #173: the card's "where it is now": `○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`, the current stage lit, the stages
-/// before it plain, a check with a PASS at the PR head ticked.
-fn stage_line(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> String {
+/// before it plain, a check with a PASS at the PR head ticked (web/src/queue.ts draws it); none off the graph.
+fn stages(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> Vec<Stage> {
     let Some((at, mode)) = stage_at(fc, s) else {
-        return String::new();
+        return vec![];
     };
     let p = fc.flow();
     let pos = p.stage.iter().position(|x| x.name == at).unwrap_or(0);
-    let chips = p.stage.iter().enumerate().map(|(i, x)| {
+    let chip = |(i, x): (usize, &crate::pipeline::Stage)| {
         let (k, g) = glyph(&x.kind);
         let ok = x.kind == "check"
             && s.verdicts
@@ -3685,32 +3371,24 @@ fn stage_line(fc: &crate::config::Fleet, s: &IssueState, head: &str) -> String {
                 .rev()
                 .find(|v| v.2 == x.name && v.0 == head)
                 .is_some_and(|v| v.1 == "PASS");
-        let tick = if ok && i != pos { "<b class=g>✓</b>" } else { "" };
-        let cls = match i.cmp(&pos) {
-            std::cmp::Ordering::Less => "pt dn".to_string(),
-            std::cmp::Ordering::Equal => format!("pt on k{k}"),
-            std::cmp::Ordering::Greater => "pt".into(),
-        };
-        let name = if i == pos && !mode.is_empty() {
-            format!("{} · {mode}", x.name)
-        } else {
-            x.name.clone()
-        };
-        format!(
-            "<span class=\"{cls}\"><i class=\"kd {k}\">{g}</i>{}{tick}</span>",
-            esc(&name)
-        )
-    });
-    let all: Vec<String> = std::iter::once("<span class=\"pt dn\"><i class=kd>○</i></span>".to_string())
-        .chain(chips)
-        .chain(["<span class=pt><i class=\"kd m\">✓</i>merge</span>".to_string()])
-        .collect();
-    format!("<span class=ps>{}</span>", all.join("<i class=sx>─</i>"))
+        Stage {
+            name: if i == pos && !mode.is_empty() {
+                format!("{} · {mode}", x.name)
+            } else {
+                x.name.clone()
+            },
+            k: k.into(),
+            g: g.into(),
+            at: i.cmp(&pos) as i8,
+            ok: ok && i != pos,
+        }
+    };
+    p.stage.iter().enumerate().map(chip).collect()
 }
 
-/// #173: the fleet's Pipeline group as data (`data-pipe`); serve.js draws it to docs/design/pipeline: the validity line
-/// or the broken rules, the graph with `n here` per stage, the legend, the pipeline as fleet.toml text.
-fn pipeline_group(fleet: &str, fc: &crate::config::Fleet, st: &States) -> String {
+/// #173: the fleet's Pipeline group's data; serve.js draws it to docs/design/pipeline: the validity line or the broken
+/// rules, the graph with `n here` per stage, the legend, the pipeline as fleet.toml text.
+fn pipe(fleet: &str, fc: &crate::config::Fleet, st: &States) -> serde_json::Value {
     let p = fc.flow();
     let mine: Vec<&IssueState> = st.values().filter(|s| s.fleet == fleet && !s.done()).collect();
     let count = |f: &dyn Fn(&IssueState) -> bool| mine.iter().filter(|s| f(s)).count();
@@ -3729,11 +3407,7 @@ fn pipeline_group(fleet: &str, fc: &crate::config::Fleet, st: &States) -> String
         .map(|b| json!({"rule": b.rule, "msg": b.msg, "stage": b.stage, "line": b.line}))
         .collect();
     let checks: Vec<&str> = p.checks().map(|c| c.name.as_str()).collect();
-    let d = json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
+    json!({"fleet": fleet, "into": fc.integration, "builtin": p.builtin, "stages": stages, "bad": bad,
         "checks": checks, "required": fc.required_checks, "queued": count(&|s| s.state == "queued"),
-        "parked": count(&|s| s.state == "needs-human")});
-    format!(
-        "<section class=\"cg pp\" data-pipe=\"{}\"><h3>Pipeline</h3></section>",
-        esc(&d.to_string())
-    )
+        "parked": count(&|s| s.state == "needs-human")})
 }

@@ -1,6 +1,6 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`, `host`,
-//! `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the board's. A
-//! breaking change is `/v2`.
+//! `queue`, `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the
+//! board's. A breaking change is `/v2`.
 use super::{act, board, coat, gh, moment, words, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
@@ -31,6 +31,7 @@ impl Server<'_> {
                 |s| out("200 OK", &s),
             ),
             ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
+            ("GET", Some("queue")) => out("200 OK", &self.queue_tab(ctx)),
             ("GET", Some("events")) => {
                 let n = |k: &str| f.get(k).and_then(|n| n.parse().ok());
                 out(
@@ -114,15 +115,6 @@ impl Server<'_> {
                 .map_or("queued".into(), |s| s.state.clone()),
             blocked_by: i.blocked_by,
         };
-        let ask = |a: &Event| Ask {
-            id: a.str("id").unwrap_or_default().into(),
-            fleet: a.fleet.clone(),
-            issue: a.issue,
-            question: a.str("question").unwrap_or_default().into(),
-            options: serde_json::from_value(a.data["options"].clone()).unwrap_or_default(),
-            recommend: a.data["recommend"].as_u64(),
-            ts: a.ts,
-        };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
             let n = crate::hosts::lanes_on(&cfg, &events, &name).len();
@@ -173,6 +165,19 @@ impl Server<'_> {
                 .collect(),
             alerts: vec![row(("push".into(), t, d, String::new()))],
         })
+    }
+}
+
+/// An open ask (`needs-decision`) as `state` lists it; #268: a Queue row's [change] form.
+pub(super) fn ask(a: &Event) -> Ask {
+    Ask {
+        id: a.str("id").unwrap_or_default().into(),
+        fleet: a.fleet.clone(),
+        issue: a.issue,
+        question: a.str("question").unwrap_or_default().into(),
+        options: serde_json::from_value(a.data["options"].clone()).unwrap_or_default(),
+        recommend: a.data["recommend"].as_u64(),
+        ts: a.ts,
     }
 }
 

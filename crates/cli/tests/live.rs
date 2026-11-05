@@ -67,7 +67,8 @@ fn live_pushes_one_frag_per_changed_section() {
         quiet.lines().all(|l| l.is_empty() || l == ": ping"),
         "no change: pings only: {quiet}"
     );
-    // #266: a queued issue changes the Queue tab only (the Events tab is the board's, read on the event's `ev`).
+    // #266: a queued issue changes the Queue tab only (the Events tab is the board's, read on the event's `ev`); #268:
+    // the Queue tab is the board's too: its data arrives as `queue`, once, and no frag.
     let q = json!({"op": "add", "issues": [99]});
     append(&c.state, &Event::new(T + 5, "sendmeter", None, "queue", q)).unwrap();
     let t0 = Instant::now();
@@ -77,14 +78,18 @@ fn live_pushes_one_frag_per_changed_section() {
     }
     assert!(
         t0.elapsed() < Duration::from_millis(1_500),
-        "a frag within 1.5 s: {got}"
+        "the queue data within 1.5 s: {got}"
     );
     got += &drain(&mut s, 1_200);
-    let frags: Vec<&str> = got.lines().filter(|l| l.starts_with("data: {\"html")).collect();
-    assert_eq!(got.matches("event: frag").count(), 1, "{got}");
-    let v: serde_json::Value = serde_json::from_str(&frags[0][6..]).unwrap();
-    assert_eq!(v["id"], "queue", "{v}");
-    assert!(v["html"].as_str().unwrap().contains("#99"), "{v}");
+    assert_eq!(got.matches("event: frag").count(), 0, "{got}");
+    assert_eq!(got.matches("event: queue").count(), 1, "{got}");
+    let line = got
+        .lines()
+        .find(|l| l.starts_with("data: {\"error\""))
+        .expect("the queue data");
+    let v: serde_json::Value = serde_json::from_str(&line[6..]).unwrap();
+    assert_eq!(v["fleets"][0]["rows"][0]["issue"], 99, "{v}");
+    assert_eq!(v["now"].as_u64().map(|n| n > 0), Some(true), "{v}");
     assert!(
         got.contains("event: ev\ndata: {\"f\":\"sendmeter\",\"k\":null,\"n\":null,\"seq\":2,"),
         "{got}"
@@ -128,9 +133,10 @@ fn live_caps_clients_and_checks_host() {
     });
     let all = all.unwrap();
     let j: serde_json::Value = serde_json::from_str(&all[all.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    for id in ["needs", "queue", "lanes"] {
+    for id in ["needs", "lanes"] {
         assert!(j[id].is_string(), "{id} in ?frag=all");
     }
+    assert!(j["queue"].is_null(), "#268: and Queue");
     assert!(j["events"].is_null(), "#266: the board draws Events from the API");
     assert!(j["host"].is_null(), "#267: and Host");
 }

@@ -97,7 +97,7 @@ fn a_row_carries_the_time_its_age_counts_from() {
     append(&c.state, &Event::new(T - 6420, "acme", Some(1), "spawn", spawn)).unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
+    let page = queue_tab(&s, ADDR, T); // #268: the board draws the rows from API v1's `queue`
     let row = |n: u64| {
         let at = page.find(&format!("/issues/{n}\">#{n}</a>")).unwrap();
         page[at..].split("</summary>").next().unwrap().to_string()

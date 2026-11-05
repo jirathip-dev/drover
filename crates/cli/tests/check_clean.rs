@@ -546,7 +546,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "worktree": w, "pane": "wR:p1", "workspace": "wR"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
-        std::fs::write(&f, "FAIL\n1. blocking\n").unwrap();
+        std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply(&format!("git -C {w} status"), status)
@@ -602,6 +602,29 @@ fn du_counts_blocks_used_not_apparent_size() {
     std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
     let n = herdsman::check::du(&d);
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
+}
+
+/// #388: a PASSed head with no checks raises `ci-missing` once the grace is over, once per head.
+#[test]
+fn ci_missing_fires_once_per_head_after_the_grace() {
+    let d = tmpdir("ci-missing");
+    let mut c = ctx(&d, CONFIG);
+    spawn_ev(&c, NOW - 7200, 12, LANE);
+    ev(&c, NOW - 300, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
+    let pr =
+        json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": []});
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("gh pr view issue-12", &pr.to_string());
+    assert_eq!(check(&c, &r), "", "inside the 10 min grace");
+    c.now = NOW + 600;
+    let out = check(&c, &r);
+    assert!(
+        out.contains("sendmeter #12 ci-missing: CI missing (no checks 10m after push)"),
+        "{out}"
+    );
+    assert_eq!(check(&c, &r), "", "once per head");
+    assert_eq!(kinds(&c, "ci-missing"), 1);
 }
 
 /// #425: an unheld lane idle without pushing alerts at the stall threshold and again every 2 h, not only once.

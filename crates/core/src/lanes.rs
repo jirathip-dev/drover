@@ -220,6 +220,15 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
 const HIDE: &str = "•••";
 pub const PREFIXES: &[&str] = &["sk-", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "xox", "xapp-"];
 
+/// `l` with each value `secret` finds (`SECRET_IN_WIP`'s check) as `•••`.
+pub fn redact(l: &str) -> String {
+    let mut m = l.to_owned();
+    while let Some(v) = secret(&m) {
+        m = m.replace(v, HIDE);
+    }
+    m
+}
+
 /// The push guards' check (stricter than [`mask`]): the secret on line `l`, if any — a `PREFIXES`/AWS/Google token,
 /// a JWT, a PEM private key, or a high-entropy non-code value assigned to a `*KEY|TOKEN|SECRET|PASSWORD` name.
 #[allow(clippy::cast_precision_loss)] // char counts of one line

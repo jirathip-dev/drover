@@ -53,8 +53,11 @@ fn serial_label_defaults_to_db_and_takes_an_override() {
     }
 }
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn req(s: &Server, path: &str, extra: &str) -> String {
-    String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T)).into_owned()
+    let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T))
+        .into_owned();
+    with_queue(&res, s, ADDR, T)
 }
 
 /// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.
@@ -123,7 +126,9 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let page = req(&s, "/", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
     let d = tmpdir("queue-graph-png");
     let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
+    // #268: the Queue tab drawn in (`req`), without the board (it would read this file's base server).
+    let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
+    std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
     // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
     // #367: each group draws its own trees, so the running #1 stands alone and its queued followers carry `! #1`.
     let want = [

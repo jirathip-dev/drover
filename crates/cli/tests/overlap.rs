@@ -851,7 +851,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     let page = || {
         let f = Fake::default();
         let s = herdsman::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
-        String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned()
+        queue_tab(&s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
     };
     assert!(
         page().contains("<p class=r>cap-near: 499 lines of headroom on staging</p>"),

@@ -20,8 +20,9 @@ function tab(t) {
   // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
-  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined).
-  if (!$('#' + t).childElementCount && sget('c:' + t)) queueMicrotask(() => frag(t, sget('c:' + t)));
+  // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined); #268:
+  // after the first frame, so the page paints first (the Queue tab, the TypeScript board's, is never in the page).
+  if (!$('#' + t).childElementCount && sget('c:' + t)) requestAnimationFrame(() => setTimeout(() => $('#' + t).childElementCount || frag(t, sget('c:' + t))));
   wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
 }
 // #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
@@ -42,7 +43,8 @@ const post = (path, data) => wait(send(path, data));
 // #352: a tab change reopens the stream, which names the open tab (the Host tab turns the host's process sampling on).
 $$('nav a').forEach(a => a.onclick = e => { e.preventDefault(); tab(a.hash.slice(1)); if (es) connect(); });
 // A tapped alert opens `/?issue=N#tab`: that tab (the head script picked it: the hash, else the last one), the issue's row open.
-const DBG = new URLSearchParams(location.search), want = DBG.get('issue');
+const DBG = new URLSearchParams(location.search);
+let want = DBG.get('issue');
 tab(document.documentElement.dataset.tab || 'queue');
 // #206 `?debug` (kept for the tab's session): how the page came up. A load or reload repaints it all; a pull only refresh()es.
 const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
@@ -525,6 +527,8 @@ function frag(id, html) {
   alerts();
   badge();
   if (id === 'needs') fold();
+  if (id === 'queue') sync(dot.classList[0]); // #268: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
+  if (id === 'queue' && want) wanted();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
 // (1 h / 6 h / 24 h from `frag?id=hist`; an export carries it as `data-x`). The value's line is red past the limit
@@ -738,6 +742,7 @@ function connect() {
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
   es.addEventListener('host', e => (at(e), dispatchEvent(new CustomEvent('herd-host', { detail: JSON.parse(e.data) })))); // #267: the TypeScript board draws it
+  es.addEventListener('queue', e => (at(e), dispatchEvent(new CustomEvent('herd-queue', { detail: JSON.parse(e.data) })))); // #268: and the Queue tab
   es.addEventListener('ev', e => { const j = JSON.parse(e.data); if (j.seq <= seq) return; at(e); dispatchEvent(new Event('herd-ev')); if (j.k && Date.now() / 1e3 - j.ts < 120) rmoment(j.k, j.f, j.n, j.seq); });
   es.addEventListener('refresh', e => (at(e), refresh()));
   es.addEventListener('toast', e => (at(e), toast(JSON.parse(e.data)), refresh())); // #140: a background job finished; #217: its real result
@@ -1068,11 +1073,15 @@ function tidy(root) {
 }
 tidy(document);
 nows();
-// A tapped alert's issue: its repo picked, its row open (the chain or `+ N more` around it too), in view.
-for (const d of $$('#queue details.q')) if (want && d.querySelector('summary>span').textContent === '#' + want) {
-  qpick(qname(d.closest('.fc')));
-  for (let p = d; p; p = p.parentElement.closest('details')) p.open = true;
-  d.scrollIntoView();
+// A tapped alert's issue: its repo picked, its row open (the chain or `+ N more` around it too), in view (#268: once
+// the TypeScript board first draws the Queue tab).
+function wanted() {
+  if (document.documentElement.dataset.tab === 'queue') for (const d of $$('#queue details.q')) if (want && d.querySelector('summary>span').textContent === '#' + want) {
+    qpick(qname(d.closest('.fc')));
+    for (let p = d; p; p = p.parentElement.closest('details')) p.open = true;
+    d.scrollIntoView();
+  }
+  want = null;
 }
 // [↻] is the plain glyph, spinning while busy (#337: the theme's loading sprite is the overlay's, herd.js builds #hload).
 rf.innerHTML = '<i>↻</i>';
@@ -1430,10 +1439,9 @@ function legend() {
   show('mid');
 }
 // #162: [config] shows the fleet's settings in the same sheet, the lane parts hidden and its bar in the fleet's colour.
-// The page loads it (`frag?id=config`); an export carries it inline (`template[data-cfg]`).
+// #268: the TypeScript board draws it from the Queue tab's last data.
 async function config(b) {
-  const f = b.dataset.f, t = [...$$('template[data-cfg]')].find(t => t.dataset.cfg === f);
-  const h = t ? t.innerHTML : await part('frag?id=config&fleet=' + encodeURIComponent(f));
+  const f = b.dataset.f, h = window.queueSheet?.(f) ?? null;
   if (h === null) return toast('error: cannot read the config');
   agent = null;
   sh.className = 'sh lg cs ' + [...b.closest('.fc').classList].find(c => c.startsWith('k-'));
@@ -1858,7 +1866,8 @@ addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
 const SENT = [];
 function chatPaint(root = $('#chat')) {
   if (!root || ATT === undefined) return; // before the `var` line runs
-  root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); });
+  if (root !== $('#chat')) chatKeep(root);
+  clocks(root);
   root.querySelectorAll('.ats').forEach(e => e.remove());
   const tw = ATT && root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`);
   if (tw) {
@@ -1884,6 +1893,32 @@ function chatPaint(root = $('#chat')) {
     if (p.st === '✗') b.querySelector('.md').append(Object.assign(el('button', 'rt', 'retry'), { type: 'button' }));
   }
 }
+function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); }); }
+// #408: a thread opens with its last 30 messages; near the top a scroll (or a tap on the marker) loads the 30 before
+// them (`thread/<t>?before=`) above, the reading position kept. A live copy's marker becomes the live thread's blocks
+// older than the copy's first (`data-n`), so a swap never drops the pages loaded.
+function chatKeep(root) {
+  root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
+    const tc = $(`#chat .cvp[data-t="${CSS.escape(m.closest('.cvp').dataset.t)}"] .tc`);
+    const old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b) : [];
+    if (old.length) m.replaceWith(tc.firstElementChild.cloneNode(true), ...old.map(c => c.cloneNode(true)));
+  });
+}
+var OLDQ = false;
+async function chatOlder() {
+  const m = THR && $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc>.tmo`);
+  if (!m || OLDQ) return;
+  OLDQ = true;
+  const h = await part(`thread/${encodeURIComponent(THR)}?before=${m.dataset.b}&n=30`), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
+  OLDQ = false;
+  if (!h || !m.isConnected) return;
+  const t = el('div', '');
+  t.innerHTML = h;
+  clocks(t);
+  m.replaceWith(...t.childNodes);
+  if (a) scrollBy(0, a.getBoundingClientRect().top - y);
+}
+addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
@@ -1895,6 +1930,7 @@ document.addEventListener('click', async e => {
   if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
+  else if (t.closest('#chat .tmo')) chatOlder();
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }

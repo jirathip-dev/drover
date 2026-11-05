@@ -478,6 +478,9 @@ pub fn scan(
             w.what = "reviewer exited without a verdict: reviewing again".into();
             w.next_cmd = Some(format!("herdsman spawn {} {} {c} --supersede", s.fleet, s.issue));
         }
+        let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), events, &pr);
+        let m = w.what.starts_with("PASS · CI running").then(gone).flatten();
+        w.what = m.map_or(w.what, |m| format!("PASS · {m}"));
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.
         if let Some(l) = f
             .merge_label

@@ -209,6 +209,34 @@ fn shared_cache_is_exported_into_the_lane() {
     );
 }
 
+/// #438: lanes of one repo on a host share one Cargo build folder; another repo's lanes get their own.
+#[test]
+fn lanes_share_one_cargo_target_per_repo() {
+    let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/x/other\"\nintegration = \"staging\"\n\n\
+                 [fleet.other.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n";
+    let cfg = other.to_string() + &CONFIG.replace("build_root = \"\"", "build_root = \"/c/builds/\"");
+    let c = ctx(&tmpdir("spawn-shared-target"), &cfg);
+    let target = |fleet: &str, n: &str| {
+        let (code, out) = run(
+            &c,
+            &Fake::default(),
+            &["spawn", fleet, n, "impl", "--dry-run", "--json"],
+        );
+        assert_eq!(code, 0, "{out}");
+        let p: Value = serde_json::from_str(&out).unwrap();
+        words(&p["commands"][2])
+            .into_iter()
+            .find(|w| w.starts_with("CARGO_TARGET_DIR="))
+    };
+    let one = target("sendmeter", "12");
+    assert_eq!(one.as_deref(), Some("CARGO_TARGET_DIR='/c/builds/sendmeter'"));
+    assert_eq!(target("sendmeter", "13"), one);
+    assert_eq!(
+        target("other", "12").as_deref(),
+        Some("CARGO_TARGET_DIR='/c/builds/other'")
+    );
+}
+
 /// #187: the same fleet and branch always hash to the same port, inside the range; the dry run shows it.
 #[test]
 fn lane_port_is_stable_per_fleet_and_branch() {

@@ -19,7 +19,7 @@ An issue queued `--design` first goes queued → design → design-review: its d
 - ROUND_LIMIT: review rounds exceed [limits].review_rounds (→ needs-human). UPDATE_LIMIT: spawn --update after [limits].update_rounds (default 3) PASSed update rounds (→ needs-human)
 - CI_NOT_GREEN: a check at the head sha is missing, pending or failed
 - BAD_SHA: verdict --sha is not 40 hex chars
-- STALE_SHA: verdict --sha is not the branch head
+- STALE_SHA: verdict --sha is not the branch head. NO_PROOF: verdict FAIL: a `- blocking [<category>] file:line: what` finding lacks a `Proof:` block right under it: `Proof: run` (a fenced command, then its output; or a screenshot path) or `Proof: spec` (a `>` quoted AC, amendment or rule line, plus a `file:line`). Names each finding; notes and PASS are free-form
 - HOST_BUSY: spawn: memory pressure, sustained swap-out (with pressure) or load/cpu over [limits]; --force overrides (logged). MEM_LOW: under [limits] min_free_mem_gb memory free (default 2). DISK_LOW: under [limits] min_free_gb free (default 10); `herdsman clean --yes`. DISK_BUDGET: worktrees over [limits] worktree_budget_gb (default 25) after drive freed the idlest lanes' build folders
 - LANE_LIVE: spawn: a herdr agent is live in the worktree, or the log has an unfinished lane for it; --supersede
 - WORKTREE_DIRTY: spawn: the worktree has unpushed or uncommitted work from no known lane; --supersede
@@ -34,6 +34,11 @@ An issue queued `--design` first goes queued → design → design-review: its d
 - NO_SUCH_AGENT / IS_LANE / SECRET_IN_WIP / SNAPSHOT_FAILED / UNSAFE_CLEAN: stop/kill: no such live lane; close: a logged lane (use stop/kill/clean); kill: a secret-looking value in the wip diff, or the wip snapshot failed (index restored, nothing pushed, pane stays); clean --lane: not merged/closed, dirty, unpushed or live
 - DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
 - MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`)
+
+## Lessons
+
+`herdsman lesson <fleet>` (conductors and the owner only; a conductor runs it when the owner says "correct") files `lessons: <fleet> week of <date>`, queues it on top and spawns a `lesson` lane (the impl role's harness unless `[fleet.<n>.role.lesson]` sets one). `herdsman tick` runs it every 7 days per fleet: `lessons = "weekly"` (default) or `"off"` in `[fleet.<n>]`. Any lane may read `herdsman lesson digest <fleet> [--days 7]`.
+`.herdsman/rules.md` in a repo: at most 30 "don't X" lines (CI's cap check fails over that), each naming its enforcer or `none`; every impl and rev brief carries it. Follow it.
 
 ## Exit codes
 
@@ -57,7 +62,7 @@ an `account-capped` one is skipped until the banner's reset time (else `cap_rese
 
 ## Events
 
-`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `account-capped` (limit banner), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `herdsman merge` emits
+`herdsman check` emits `stall`, `lane-dead`, `ready-unmerged`, `ci-missing` (a PR head with no checks `ci_start_minutes` (10) after its push, once per head), `account-capped` (limit banner), `ask-waiting` (an owner ask open >30 min), a `by: default` decision for each routine ask open `ask_default_minutes` (30), `orphan-lane` (a herdr agent named like a lane with no spawn event; `spawn` adopts it) and `alerts-off` (page alerts, no webpush notifier) once per state; `herdsman merge` emits
 `evidence-missing` (issue left open) if the evidence comment fails twice. Notifiers get one plain line, or raw event JSON with `format = "json"`. A fleet's own `[[fleet.<name>.notify]]` (same fields)
 replaces the global `[[notify]]` for its events; `notify_global = true` in `[fleet.<name>]` sends to both.
 Owner-only: `herdsman pause|resume <fleet>` (PAUSED), `herdsman drive`, `herdsman setup|timer|tick` (the 5-minute job), `herdsman doctor` (host check), `herdsman reclaim` (idle worktrees' build folders), `herdsman host destroy <name>` (a cloud host, after a wip save) and `herdsman serve`, the phone page (its writes log `"via":"web"`).

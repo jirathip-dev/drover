@@ -599,7 +599,7 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let get = |s: &herdsman::serve::Server| {
         let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
-        String::from_utf8_lossy(&res).into_owned()
+        with_queue(&String::from_utf8_lossy(&res), s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
     };
     let page = get(&s);
     assert!(
@@ -686,8 +686,8 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         out
     };
     let get = |path: &str, extra: &str| send(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{extra}\r\n"));
-    let page = get("/", &cookie);
-    let i = page.find("name=mtime value=").unwrap() + 17;
+    let page = get("/api/v1/state", &cookie); // #268: the Queue tab's forms send `State.mtime`
+    let i = page.find("\"mtime\":\"").unwrap() + 9;
     let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=drive&fleet=sendmeter&mtime={mtime}");
     let post = || {
@@ -1902,6 +1902,89 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     let s = &kinds(&c, "stall")[0];
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
     assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
+}
+
+/// #388: a PASSed head with no checks reads `CI running` inside `ci_start_minutes`, `CI missing` after it; a pending
+/// check is unchanged.
+#[test]
+fn no_checks_after_the_grace_is_ci_missing_not_running() {
+    let c = setup("drive-ci-missing");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    ev(
+        &c,
+        c.now - 300,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let view = |checks: serde_json::Value| {
+        json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks})
+            .to_string()
+    };
+    let card = |c: &herdsman::Ctx| {
+        let ws = herdsman::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
+    };
+    let empty = Fake::default().reply("gh pr view issue-12", &view(json!([])));
+    herdsman::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", c.now).unwrap();
+    assert_eq!(
+        card(&c).what,
+        "PASS · CI running 0/0",
+        "5 min after the PASS: still starting"
+    );
+    let mut later = c.clone();
+    later.now = c.now + 300;
+    herdsman::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
+    assert_eq!(
+        (card(&later).who, card(&later).what.as_str()),
+        ("ci", "PASS · CI missing (no checks 10m after push)")
+    );
+    let pending = json!([{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]);
+    let r = Fake::default().reply("gh pr view issue-12", &view(pending));
+    later.now += 60;
+    herdsman::gh::pr(&c, &r, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
+    assert_eq!(
+        card(&later).what,
+        "PASS · CI running 0/1",
+        "a pending check is unchanged"
+    );
+}
+
+/// #388: a failed run with no jobs at the head is `CI broken: <file>`, and drive sends the lane a fix round.
+#[test]
+fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
+    let c = setup("drive-ci-broken");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let view = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "statusCheckRollup": []});
+    let runs = format!("gh api repos/jirathip-dev/sendmeter/actions/runs?head_sha={head}");
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &view.to_string())
+        .reply(&runs, "554 lint.yml\n555 ci.yml\n")
+        .reply("gh api repos/jirathip-dev/sendmeter/actions/runs/554/jobs", "2\n")
+        .reply("gh api repos/jirathip-dev/sendmeter/actions/runs/555/jobs", "0\n")
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["ci-red"], "{out}");
+    let all = read(&c.state).unwrap();
+    let v = all.iter().rev().find(|e| e.kind == "verdict").unwrap();
+    assert_eq!(v.str("verdict"), Some("FAIL"));
+    let body = v.str("body").unwrap();
+    assert!(body.contains("CI broken: ci.yml did not start"), "{body}");
+    assert!(state(&c).starts_with("fix"), "{}", state(&c));
 }
 
 /// #425: #12's impl lane held on #11, which merged; `agents` = the herdr agent list.

@@ -284,6 +284,8 @@ pub struct Fleet {
     pub premerge: Option<Vec<Premerge>>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
+    /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
+    pub lessons: Option<String>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -386,6 +388,7 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
+    pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
     /// Pages swapped out per 2 s sample.
@@ -394,6 +397,10 @@ pub struct Limits {
     pub min_free_gb: f64,
     /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
+    /// #438: lanes share `CARGO_TARGET_DIR=<build_root>/<repo>` on their host (empty: off; a fleet's own wins); over
+    /// `build_budget_gb` drive trims its unlocked profiles.
+    pub build_root: String,
+    pub build_budget_gb: f64,
     /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
     pub min_free_mem_gb: f64,
     /// Default reasoning effort for roles that set none.
@@ -455,10 +462,13 @@ impl Default for Limits {
             review_rounds: 3,
             update_rounds: 3,
             stall_minutes: 30,
+            ci_start_minutes: 10,
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
+            build_root: "~/.cache/herdsman/target".into(),
+            build_budget_gb: 20.0,
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
@@ -519,6 +529,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "stall",
     "lane-dead",
     "ready-unmerged",
+    "ci-missing",
     "merged",
     "needs-decision",
     "needs-human",
@@ -753,8 +764,16 @@ impl Fleet {
     }
     pub fn role(&self, role: &str) -> Result<&Role> {
         self.role
-            .get(role)
+            .get(self.role_key(role))
             .ok_or_else(|| anyhow!("role '{role}' not configured"))
+    }
+    /// #419: the configured role a lane runs as: a lesson lane is impl's unless `[fleet.<n>.role.lesson]` is set.
+    pub fn role_key<'a>(&self, role: &'a str) -> &'a str {
+        if role == "lesson" && !self.role.contains_key(role) {
+            "impl"
+        } else {
+            role
+        }
     }
     pub fn local_path(&self) -> PathBuf {
         expand(&self.local)

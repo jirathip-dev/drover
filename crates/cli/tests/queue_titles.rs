@@ -1,16 +1,18 @@
-//! #36: Queue rows carry the issue + PR titles from the caches only (page and `?frag=all`);
+//! #36: Queue rows carry the issue + PR titles from the caches only (#268: API v1's `queue`);
 //! no lane display mode button (#335: the look sheet's style); sw.js never caches a non-200 page.
 mod common;
 use common::*;
 use herdsman::serve::Server;
 use serde_json::json;
 
+/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
-    String::from_utf8_lossy(&s.respond(
+    let res = String::from_utf8_lossy(&s.respond(
         &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
         1_000_000,
     ))
-    .into_owned()
+    .into_owned();
+    with_queue(&res, s, "127.0.0.1:7777", 1_000_000)
 }
 
 fn queued(name: &str) -> herdsman::Ctx {
@@ -44,13 +46,13 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     .unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    for out in [get(&s, "/"), get(&s, "/?frag=all")] {
-        assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
-        assert!(
-            out.contains("well past one phone line<") && !out.contains("past one…"),
-            "#331: whole, CSS ellipsises it: {out}"
-        );
-    }
+    // #268: the Queue tab the board draws from API v1's `queue`.
+    let out = get(&s, "/");
+    assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
+    assert!(
+        out.contains("well past one phone line<") && !out.contains("past one…"),
+        "#331: whole, CSS ellipsises it: {out}"
+    );
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
 }
 
