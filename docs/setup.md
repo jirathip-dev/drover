@@ -114,7 +114,10 @@ sha=$(git rev-parse origin/staging)
 ok=$(gh run list --branch staging --commit "$sha" --json conclusion -q '.[0].conclusion')
 [ "$ok" = "success" ] || exit 0
 git checkout -q --detach "$sha"
-cargo install --path crates/cli --locked --root ~/.local/share/herdsman
+cargo install --path crates/cli --locked --root ~/.local/share/herdsman/next
+# #539: swap only if the new binary's `doctor --config-only` loads the live fleet.toml; else keep the old one, exit 1.
+new=~/.local/share/herdsman/next/bin/herdsman
+scripts/install-gate.sh "$new" ~/.local/share/herdsman/bin/herdsman
 echo "$sha" > ~/.local/share/herdsman/sha
 ```
 

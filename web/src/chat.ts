@@ -60,7 +60,7 @@ function files(id: string, m: Msg): string {
   }).join('');
 }
 
-/** An ask: its question, then the choice rows (recommended first) and an "other" box; answered, the ✓ line. */
+/** An ask: its question, then the choice rows (recommended first; #492: a handoff card's past 5 behind `more`) and an "other" box; answered, the ✓ line. */
 function ask(now: number, m: Msg, dis: string): string {
   const a = m.ask!;
   let body = `<div class=md><p class=qid>${esc(a.id)}${or(m.routine, ' · routine', '')}</p>${prose(a.question)}</div>`;
@@ -71,7 +71,7 @@ function ask(now: number, m: Msg, dis: string): string {
   } else if (m.open) {
     const rows = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
     const btn = ([o, n]: readonly [string, number]) => `<button type=button name=choice value=${n}${dis}><span>${n}. ${esc(o)}${or(n === a.recommend, ' <small>(recommended)</small>', '')}</span></button>`;
-    body += `<form class=chq data-id="${esc(a.id)}" data-fleet="${esc(a.fleet)}">${rows.map(btn).join('')}<div class=oth><input name=text aria-label="other answer" placeholder="other: type an answer"${dis}><button${dis}>send</button></div></form>`;
+    body += `<form class=chq data-id="${esc(a.id)}" data-fleet="${esc(a.fleet)}">${rows.slice(0, 5).map(btn).join('')}${or(rows.length > 5, `<details class=more><summary>more (${rows.length - 5})</summary>${rows.slice(5).map(btn).join('')}</details>`, '')}<div class=oth><input name=text aria-label="other answer" placeholder="other: type an answer"${dis}><button${dis}>send</button></div></form>`;
   }
   return block(now, 'ai', 'conductor', a.question, body, a.ts);
 }

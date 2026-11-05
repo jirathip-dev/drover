@@ -316,7 +316,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
     let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
     writeln!(out, "{}", [tick, fast, board, tailscale, sync].join("\n"))?;
-    crate::doctor::doctor(ctx, r, out, false)
+    crate::doctor::doctor(ctx, r, out, false, false)
 }
 
 /// #345 `herdsman service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands

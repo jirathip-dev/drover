@@ -182,10 +182,10 @@ impl Plan {
 
 /// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
 /// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
     for (var, fleet, name) in p.secrets() {
-        let v = crate::secret::lookup(on, fleet, &name)?;
+        let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
         let why =
             || format!("{var}: secret {name} is not in the store (`herdsman accounts import` or a secret request)");
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
@@ -508,10 +508,14 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
 ];
 
+/// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
+pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
-    let made = ["ui-390/", "node_modules/"];
-    let own = |l: &&str| OWN_FILES.iter().chain(&made).any(|f| l.trim_end() == format!("?? {f}"));
+    let own = |l: &&str| {
+        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/"])).any(|f| l.trim_end() == format!("?? {f}"))
+    };
     st.lines().filter(|l| !own(l)).count()
 }
 
@@ -696,13 +700,30 @@ pub fn spawn(
                 names.join(", ")
             ),
         ));
-    } else if !live.is_empty() {
-        dup.push(("LANE_LIVE", format!("live agent(s) {names:?} in {wt}")));
     }
-    if let Some(s) = fold(&events)
+    let unfinished = fold(&events)
         .remove(&(fleet.to_string(), issue))
-        .filter(|s| s.unfinished(role, f.family(role) == "rev"))
-    {
+        .filter(|s| s.unfinished(role, f.family(role) == "rev"));
+    // #534: a lane of this issue done or idle, its verdict in or a later lane spawned: finished, drive supersedes it.
+    let over = |a: &&Value| {
+        let sp = (events.iter()).rposition(|e| e.is("spawn", fleet, issue) && e.str("agent") == a["name"].as_str());
+        let after = |i: usize| {
+            events[i + 1..]
+                .iter()
+                .any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
+        };
+        matches!(a["agent_status"].as_str(), Some("done" | "idle")) && sp.is_some_and(after)
+    };
+    if !stale && !live.is_empty() {
+        let st = live[0]["agent_status"].as_str().unwrap_or_default();
+        let finished = if unfinished.is_none() && live.iter().all(over) {
+            format!("finished ({st}) lane(s) ")
+        } else {
+            "live agent(s) ".into()
+        };
+        dup.push(("LANE_LIVE", format!("{finished}{names:?} in {wt}")));
+    }
+    if let Some(s) = unfinished {
         dup.push((
             "LANE_LIVE",
             format!(
@@ -878,7 +899,7 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = deliver(&on, &p)?;
+    let _secrets = deliver(&on, cfg, &p)?;
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
     let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
         Err(e) if format!("{e:#}").contains("workspace_not_found") => {

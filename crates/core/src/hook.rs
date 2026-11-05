@@ -173,7 +173,10 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                 .collect()
         };
         // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
-        let own = |f: &str| !t.contains(&"ln") && own_file(f, p);
+        // #504: the shell expands braces, globs, variables and escapes after this check sees the word.
+        let own = |f: &str| {
+            !t.contains(&"ln") && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(f, p)
+        };
         let hit = (t.iter().flat_map(|w| paths(w)))
             .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
             .map(String::as_str);

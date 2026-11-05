@@ -1,0 +1,13 @@
+# Before #441: account tokens read from an env file (the live config at the #539 outage).
+[fleet.herdsman]
+repo = "jirathip-dev/herdsman"
+local = "/tmp/herdsman"
+integration = "staging"
+
+[fleet.herdsman.role.impl]
+harness = "claude"
+account = "main"
+
+[accounts]
+accounts_env = "~/.config/claude-accounts/tokens.env"
+main = "CLAUDE_CODE_OAUTH_TOKEN_MAIN"
