@@ -14,8 +14,16 @@ trap 'kill $srv' EXIT
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null && break; sleep 0.1; done
 # #71: a Chrome run that never returns (virtual time stuck) is killed after UI_AUDIT_TIMEOUT s and fails loudly,
 # with its stderr tail, instead of hanging the job (`timeout` where the host has it: coreutils on the runner).
+# #453: a hung run is retried once: the runner's Chrome hangs a view now and then, never on two runs in a row.
 limit=${UI_AUDIT_TIMEOUT:-60} to=$(command -v timeout || command -v gtimeout || true)
 run() { # url, extra args
+  local rc=0; once "$@" || rc=$?
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    echo "$v: retrying the hung run once" >&2; rc=0; once "$@" || rc=$?
+  fi
+  return "$rc"
+}
+once() {
   local prof rc=0; prof=$(mktemp -d)
   ${to:+"$to" -k 5 "$limit"} "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$prof" --no-first-run \
     --window-size="${size:-390,844}" --force-device-scale-factor="${dpr:-3}" --virtual-time-budget=8000 "${@:2}" "$1" 2>"$prof.err" || rc=$?
@@ -102,5 +110,7 @@ EOF
   rm "$shots/$v.html"
 done
 # #166: the chat sheet opened and swipe-closed under a CDP screencast: no near-black frame, the page never moves.
-${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots" || fail=1
+# #453: one retry, for the runner's Chrome renderer crash; a real regression fails both runs.
+close() { ${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots"; }
+close || { echo "ui-close: retrying once" >&2; close; } || fail=1
 exit $fail
