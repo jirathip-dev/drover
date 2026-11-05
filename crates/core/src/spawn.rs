@@ -1304,7 +1304,10 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
         // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
-        let logged = events.iter().filter(|e| e.kind == "spawn" || young(e)).any(|e| at(&e));
+        // #500: one adoption per pane, ever: a pane adopted once is never an orphan again.
+        let logged = (events.iter())
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-adopted") || young(e))
+            .any(|e| at(&e));
         let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
             continue;
         };
