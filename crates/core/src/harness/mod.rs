@@ -106,6 +106,10 @@ pub trait Harness: Sync {
     fn resumes(&self) -> bool {
         false
     }
+    /// #404: `start_cmd` passes `Plan::model` (else its profile owns the model).
+    fn takes_model(&self) -> bool {
+        false
+    }
     /// herdr commands that settle the harness, deliver the kick and confirm it landed.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![herdr::send_text_argv(pane, &p.kick), herdr::keys_argv(pane, "enter")]
