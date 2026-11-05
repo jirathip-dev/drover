@@ -57,7 +57,7 @@ fn serial_label_defaults_to_db_and_takes_an_override() {
 fn req(s: &Server, path: &str, extra: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T))
         .into_owned();
-    with_queue(&res, s, ADDR, T)
+    with_board(&res, s, ADDR, extra, T)
 }
 
 /// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.

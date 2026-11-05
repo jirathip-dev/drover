@@ -168,12 +168,13 @@ fn live_board_chat_and_ascii_in_webkit() {
              const seen = new Set(); window.blank = 0; window.n = 0; const t = setInterval(() => {{ n++; \
                const v = [...asc.children].filter(b => getComputedStyle(b).visibility !== 'hidden').map(b => b.textContent).join('|'); if (v) seen.add(v); else blank++; }}, 40); \
              setTimeout(() => {{ clearInterval(t); const a2 = asc.getAnimations({{subtree: true}}); \
-               window.late = [seen.size, blank, n, mut, lv, row().querySelector('.asc') === asc ? 1 : 0, an.length === a2.length && an.every((x, i) => x === a2[i]) ? 1 : 0, '{theme}' === 'farm' ? 1 : 0]; }}, 3500); }})()"
+               window.late = [seen.size, blank, n, mut, lv, row().querySelector('.asc') === asc ? 1 : 0, an.length === a2.length && an.every((x, i) => x === a2[i]) ? 1 : 0, '{theme}' === 'farm' ? 1 : 0]; }}, 5000); }})()"
         );
         let js = rowed(&js);
         let c2 = c.clone();
         let later = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // #269: after the board's first draw of Lanes (the page's own read, then the probe's start).
+            std::thread::sleep(std::time::Duration::from_millis(2500));
             spawn(
                 &c2,
                 900_400 + i as u64,
@@ -189,7 +190,7 @@ fn live_board_chat_and_ascii_in_webkit() {
             "ascii",
             "",
             &js,
-            "4",
+            "5.5",
             &shots.join(format!("ascii-{theme}.png")),
         );
         later.join().unwrap();

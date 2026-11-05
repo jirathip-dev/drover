@@ -79,7 +79,7 @@ herdr argv) and `gh` (cached GitHub reads).
 ## API types
 
 Every JSON shape the page reads or posts has one definition, in Rust: `crates/server/src/api.rs` (`/herd.json`, the
-lane chat, `/live`'s `ev`, `frag` and `patch`, the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
+lane chat, `/live`'s `ev`, API v1's tabs (#269: the needs cards, Lanes, [chat]), the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
 board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `HostRow`). `ts-rs`, behind the server's
 `ts` feature (never in the release build; CI checks `cargo tree -e normal`), turns them into `assets/types/api.d.ts`:
 `just types` writes it (`cargo test -p herdsman-server --features ts export_bindings`). The types follow serde's JSON:

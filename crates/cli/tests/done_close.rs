@@ -91,7 +91,12 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         // The card says why it stays open.
         let r = fake(&wt, status, ahead).reply("herdr workspace list", "{}");
         let s = herdsman::serve::Server::new(&c, &r, None);
-        let page = String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)).into_owned();
+        let page = with_queue(
+            &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
+            &s,
+            "",
+            T,
+        );
         assert!(page.contains(&format!("kept open: {why}")), "{why}");
     }
 }
