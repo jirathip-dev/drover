@@ -163,7 +163,7 @@ fn merge_fake(files: &str) -> Fake {
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": checks});
     Fake::default()
         .reply("gh pr view issue-12", &pr.to_string())
-        .reply("gh pr diff 34 -R jirathip-dev/sendmeter --name-only", files)
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", files)
         .reply("gh pr merge 34", "")
         .reply("gh pr view 34", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "")
@@ -171,6 +171,11 @@ fn merge_fake(files: &str) -> Fake {
 }
 
 fn merge(serial: bool, files: &str) -> (i32, String, Fake) {
+    merge_on(serial, merge_fake(files)).1
+}
+
+/// Merge #12 (queued `--serial` or not) at PASS on `r`: (its ctx, (exit, output, r)).
+fn merge_on(serial: bool, r: Fake) -> (herdsman::Ctx, (i32, String, Fake)) {
     let d = tmpdir("serial-merge");
     let c = ctx(&d, &config(SERIAL));
     let mut q = vec!["queue", "sendmeter", "add", "12"];
@@ -180,9 +185,64 @@ fn merge(serial: bool, files: &str) -> (i32, String, Fake) {
     run(&c, &Fake::default(), &q);
     spawned(&c, 12, "impl");
     log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
-    let r = merge_fake(files);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    (exit, out, r)
+    (c, (exit, out, r))
+}
+
+const FILES: &str = "gh api repos/jirathip-dev/sendmeter/pulls/34/files --paginate";
+
+/// #490: `n` generated files (more than the diff's 300), then `last`, as the paginated files API lists them.
+fn many(n: usize, last: &str) -> String {
+    (0..n)
+        .map(|i| format!("supabase/schemas/t{i}.sql\n"))
+        .collect::<String>()
+        + last
+}
+
+#[test]
+fn a_2011_file_pr_is_listed_whole_and_its_last_page_serial_path_refuses() {
+    let (exit, out, r) = merge(false, &many(2010, "supabase/migrations/x.sql\n"));
+    assert_eq!(exit, 3, "{out}");
+    assert!(
+        out.contains("REFUSED SERIAL_UNMARKED") && out.contains("supabase/migrations/x.sql"),
+        "{out}"
+    );
+    assert!(r.called(FILES) && !r.called("git -C"), "{:?}", r.calls.borrow());
+}
+
+#[test]
+fn a_rename_out_of_a_serial_path_reports_both_names() {
+    let (c, (exit, out, _)) = merge_on(false, merge_fake("src/x.sql\tsupabase/migrations/x.sql\n"));
+    assert!(exit == 3 && out.contains("supabase/migrations/x.sql"), "{out}");
+    let cache = herdsman::gh::cache_path(&c, "diff", "sendmeter", 12);
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(cache).unwrap()).unwrap();
+    assert_eq!(v["files"], json!(["src/x.sql", "supabase/migrations/x.sql"]));
+}
+
+#[test]
+fn a_cached_head_is_not_listed_again() {
+    let (c, (exit, _, r)) = merge_on(false, merge_fake("supabase/migrations/x.sql\n"));
+    let (again, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert!(
+        exit == 3 && again == 3 && out.contains("supabase/migrations/x.sql"),
+        "{out}"
+    );
+    assert_eq!(r.count(FILES), 1, "{:?}", r.calls.borrow());
+}
+
+#[test]
+fn above_the_apis_3000_files_the_checkout_lists_them() {
+    let git = format!("git -C /tmp/does-not-matter/sendmeter diff --name-only --no-renames origin/staging...{HEAD}");
+    let r = merge_fake(&many(3000, ""))
+        .reply("git -C /tmp/does-not-matter/sendmeter fetch -q origin", "")
+        .reply(&git, "supabase/schemas/t0.sql\nsupabase/migrations/x.sql\n");
+    let (exit, out, r) = merge_on(false, r).1;
+    assert!(exit == 3 && out.contains("supabase/migrations/x.sql"), "{out}");
+    assert!(
+        r.index("git -C /tmp/does-not-matter/sendmeter fetch") < r.index(&git),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 #[test]
@@ -213,7 +273,10 @@ fn marked_pr_touching_serial_path_merges() {
     let (exit, out, r) = merge(true, "supabase/migrations/x.sql\n");
     assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"));
-    assert!(!r.called("gh pr diff"), "a marked issue needs no diff");
+    assert!(
+        !r.called("gh api repos/jirathip-dev/sendmeter/pulls/"),
+        "a marked issue needs no diff"
+    );
 }
 
 #[test]

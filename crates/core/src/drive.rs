@@ -649,6 +649,22 @@ fn pass(
             if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
                 continue;
             }
+            // #491: a FAIL refused NO_PROOF is never retried unchanged; its reviewer is told once, or re-run once ended.
+            if step == "verdict" && args[3] == "FAIL" {
+                if let Some(code) = no_proof(
+                    ctx,
+                    cfg,
+                    r,
+                    out,
+                    (&events, &agents),
+                    (fleet, s.issue, &w.lane),
+                    &args,
+                    fast,
+                )? {
+                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
+                    continue;
+                }
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
@@ -713,6 +729,64 @@ fn pass(
         }
     }
     Ok(go)
+}
+
+/// #491: `None` for a FAIL with its Proof blocks (recorded as usual). A proofless one is refused once per head and
+/// file content (`proof-refused`); its reviewer, still in herdr, is prompted with the refusal once; an ended one
+/// gets a fresh review of the same head, which no verdict makes a new round.
+#[allow(clippy::too_many_arguments)]
+fn no_proof(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (ev, agents): (&[Event], &[Value]),
+    (fleet, n, lane): (&str, u64, &str),
+    args: &[&str],
+    fast: bool,
+) -> Result<Option<Code>> {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let on = crate::hosts::On::of(r, sp);
+    let body = on.read(Path::new(args[7])).unwrap_or_default();
+    let Some(why) = crate::gate::no_proof(&body) else {
+        return Ok(None);
+    };
+    let hash = &crate::devices::sha256(body.as_bytes())[..16];
+    let mine: Vec<&Event> = (ev.iter())
+        .filter(|e| e.is("proof-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts))
+        .collect();
+    let seen = mine
+        .iter()
+        .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
+    // `waiting` offers a verdict only once its reviewer stopped working: one still in herdr is told once; gone, or idle
+    // again after that, it has ended.
+    let pane = sp.and_then(|e| e.str("pane"));
+    let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
+    let told = mine.iter().any(|e| e.data["prompted"] == true);
+    if !seen {
+        act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
+        let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let tell =
+            |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+        let prompted = open.filter(|_| !told).is_some_and(tell);
+        let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
+        if prompted {
+            return Ok(Some(Some("NO_PROOF")));
+        }
+    }
+    if fast {
+        return Ok(Some(Some("NO_PROOF")));
+    }
+    let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
+    let (num, why) = (n.to_string(), "verdict refused NO_PROOF: re-review");
+    let c = ["spawn", fleet, &num, role, "--supersede"];
+    let code = act(ctx, cfg, r, out, ev, (fleet, Some(n), "review"), &c)?;
+    if code.is_none() {
+        let d = json!({"role": role, "agent": lane, "why": why});
+        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-lost", d))?;
+    }
+    Ok(Some(code))
 }
 
 /// #214: the merge just tried was refused or failed on a conflict (its words say so).
