@@ -628,6 +628,7 @@ fn help_agent_doc_is_short_and_complete() {
         "herdsman set",
         "herdsman status",
         "herdsman profiles sync",
+        "herdsman timer install",
         "herdsman check",
         "herdsman clean",
         "herdsman adopt",
