@@ -1,0 +1,425 @@
+//! #412: the optional per-issue design stage: `queue add --design`, drive's design lane, the hand-off to the owner, and
+//! approve / revise / reject from the board card or the conductor thread.
+mod common;
+use common::*;
+use herdsman::events::{fold, read, Event};
+use herdsman::runner::{Out, Real, Runner};
+use herdsman::serve::Server;
+use std::path::Path;
+use std::sync::Mutex;
+
+/// `HERDSMAN_THREAD` is process-wide: the tests here run one at a time.
+static ONE: Mutex<()> = Mutex::new(());
+const ADDR: &str = "127.0.0.1:7777";
+const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
+
+fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+    let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
+    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("settings.json"), "{}").unwrap();
+    c
+}
+
+fn wt(c: &herdsman::Ctx, n: u64) -> String {
+    c.worktrees.join(format!("sendmeter/issue-{n}")).display().to_string()
+}
+
+/// Spawns succeed, the host is calm; #12's design worktree has a pushed commit at `at` touching two PNGs.
+fn fake(c: &herdsman::Ctx, at: u64) -> Fake {
+    let w = wt(c, 12);
+    Fake::default()
+        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:c1")]))
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+        .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
+        .reply(&format!("git -C {w} log -1"), &format!("{HEAD} {at}\n"))
+        .reply(&format!("git -C {w} rev-list"), "0\n")
+        .reply(
+            &format!("git -C {w} diff --name-only"),
+            "docs/design/meter/index.html\ndocs/design/meter/1440.png\ndocs/design/meter/390.png\n",
+        )
+        .reply("git -C", "")
+        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
+        .reply(
+            "herdr pane list",
+            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+        )
+        .reply(
+            "herdr workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w9:c1"}}}"#,
+        )
+        .reply("herdr pane", "{}")
+        .reply("herdr agent", "{}")
+}
+
+fn drive(c: &herdsman::Ctx, r: &dyn Runner) -> String {
+    let (code, out) = run(c, r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+fn state(c: &herdsman::Ctx, n: u64) -> String {
+    fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), n)]
+        .state
+        .clone()
+}
+
+fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+}
+
+fn spawned(c: &herdsman::Ctx, role: &str) -> usize {
+    kinds(c, "spawn").iter().filter(|e| e.str("role") == Some(role)).count()
+}
+
+#[test]
+fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_to_impl() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-flow", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
+    let r = fake(&c, c.now + 60);
+    drive(&c, &r);
+    assert!(r.called("herdr agent start sendmeter-design-12") && !r.called("herdr agent start sendmeter-impl-12"));
+    assert!(
+        r.called("herdr agent start sendmeter-impl-13"),
+        "unmarked: impl at once"
+    );
+    assert!(r.called("herdr worktree create --cwd /tmp/does-not-matter/sendmeter --branch issue-12"));
+    assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
+    // The lane's turn ended with a pushed commit: the owner gets it, with both PNGs.
+    let out = drive(&c, &r);
+    assert!(
+        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        "{out}"
+    );
+    assert_eq!(state(&c, 12), "design-review");
+    let ask = &kinds(&c, "needs-decision")[0];
+    let files: Vec<&str> = ask.data["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(files, ["docs/design/meter/1440.png", "docs/design/meter/390.png"]);
+    let (_, st) = run(&c, &r, &["status", "sendmeter"]);
+    assert!(st.contains("design-review"), "{st}");
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(w.contains("herdsman answer sendmeter q1 approve|revise|reject"), "{w}");
+    drive(&c, &r);
+    assert_eq!(spawned(&c, "impl"), 1, "never impl before the approval");
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
+    assert_eq!(kinds(&c, "design-approved").len(), 1);
+    assert!(r.called("herdr pane close w9:p1"), "the design pane goes");
+    drive(&c, &r);
+    assert!(r.called("herdr agent start sendmeter-impl-12"));
+    assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
+}
+
+/// A paired device's `POST path` with `body`.
+fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
+    let r = format!(
+        "POST {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
+}
+
+fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
+    let r = format!("GET /frags?tab=chat HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
+    let res = String::from_utf8_lossy(&s.respond(&r, now)).into_owned();
+    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    (j["needs"].as_str().unwrap().into(), j["chat"].as_str().unwrap().into())
+}
+
+#[test]
+fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup(
+        "design-surfaces",
+        "\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n",
+    );
+    let r = fake(&c, c.now + 60);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
+    assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
+    // The conductor queues both issues `--design` from its thread.
+    std::env::set_var("HERDSMAN_THREAD", "t1");
+    let q = run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "add", "12", "13", "--design"],
+    );
+    std::env::remove_var("HERDSMAN_THREAD");
+    assert_eq!(q.0, 0, "{}", q.1);
+    let png = Path::new(&wt(&c, 12)).join("docs/design/meter");
+    std::fs::create_dir_all(&png).unwrap();
+    std::fs::write(png.join("1440.png"), b"\x89PNG wide").unwrap();
+    drive(&c, &r);
+    drive(&c, &r);
+    // #12 hands off (its worktree has the commit); #13's lane is still at it.
+    let ask = &kinds(&c, "needs-decision")[0];
+    assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
+    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
+    assert!(
+        needs.contains("<div class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0\""),
+        "{needs}"
+    );
+    assert!(chat.contains("data-id=\"q1\""), "{chat}");
+    let res = String::from_utf8_lossy(&s.respond(
+        &format!("GET /design/sendmeter/12/0 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"),
+        c.now,
+    ))
+    .into_owned();
+    assert!(
+        res.starts_with("HTTP/1.1 200") && res.ends_with("\u{fffd}PNG wide"),
+        "{res}"
+    );
+    // Approve on the board: the thread's rows fold; the thread's own tap is then refused.
+    let i = needs.find("name=mtime value=").unwrap() + 17;
+    let mt: String = needs[i..].chars().take_while(char::is_ascii_digit).collect();
+    let res = post(
+        &s,
+        "/",
+        &format!("op=answer&fleet=sendmeter&id=q1&choice=1&mtime={mt}"),
+        &cookie,
+        c.now + 10,
+    );
+    assert!(res.starts_with("HTTP/1.1 303"), "{res}");
+    assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("owner"));
+    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 15);
+    assert!(
+        !needs.contains("<div class=ask>") && !chat.contains("data-id=\"q1\""),
+        "{needs}"
+    );
+    assert!(chat.contains("✓ 1. approve"), "{chat}");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "reject"]);
+    assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
+    // The reverse, on #13: answered in the thread first, the board's answer is refused.
+    std::fs::create_dir_all(wt(&c, 13)).unwrap();
+    let w = wt(&c, 13);
+    let r13 = Fake::default()
+        .reply(
+            &format!("git -C {w} log -1"),
+            &format!("{} {}\n", "e".repeat(40), c.now + 60),
+        )
+        .reply(&format!("git -C {w} rev-list"), "0\n");
+    let r13 = Both(r13, &r);
+    drive(&c, &r13);
+    assert_eq!(kinds(&c, "needs-decision")[1].issue, Some(13));
+    let res = post(
+        &s,
+        "/thread",
+        "op=answer&fleet=sendmeter&id=q2&choice=1",
+        &cookie,
+        c.now + 20,
+    );
+    assert!(res.contains("answered q2"), "{res}");
+    let res = post(
+        &s,
+        "/",
+        &format!("op=answer&fleet=sendmeter&id=q2&choice=3&mtime={mt}"),
+        &cookie,
+        c.now + 30,
+    );
+    assert!(res.contains("REFUSED%20ALREADY%5FANSWERED"), "{res}");
+    assert_eq!(kinds(&c, "design-approved").len(), 2);
+    assert!(kinds(&c, "design-rejected").is_empty());
+}
+
+/// `a` first, then `b` for whatever `a` has no script for.
+struct Both<'a>(Fake, &'a dyn Runner);
+impl Runner for Both<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let o = self.0.run(prog, args)?;
+        if o.stderr.starts_with("unscripted") {
+            return self.1.run(prog, args);
+        }
+        Ok(o)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut c = setup("design-revise", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    for k in 1..=5 {
+        // Each round's design lane pushes a commit after it spawned.
+        let r = fake(&c, c.now + 60);
+        drive(&c, &r);
+        drive(&c, &r);
+        assert_eq!(state(&c, 12), "design-review", "round {k}");
+        let note = format!("round {k}: make the meter blue");
+        let (code, out) = run(&c, &r, &["answer", "sendmeter", &format!("q{k}"), &note]);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(kinds(&c, "design-revise")[k - 1].str("note"), Some(note.as_str()));
+        c.now += 1000;
+        drive(&c, &fake(&c, c.now + 60));
+        let brief = std::fs::read_to_string(Path::new(&wt(&c, 12)).join(".brief.md")).unwrap();
+        assert!(brief.contains("# ROLE: DESIGNER") && brief.contains(&note), "{brief}");
+        assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("design", k + 1));
+    }
+    assert_eq!(spawned(&c, "impl"), 0);
+}
+
+/// `git` runs for real (in a temp repo); everything else is the fake.
+struct RealGit(Fake);
+impl Runner for RealGit {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "git" {
+            return Real.run(prog, args);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let o = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        o.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    String::from_utf8_lossy(&o.stdout).trim().to_string()
+}
+
+#[test]
+fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let d = tmpdir("design-reject");
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["config", "user.email", "t@example.com"]);
+    git(&local, &["config", "user.name", "t"]);
+    std::fs::write(local.join("app.rs"), "fn main() {}\n").unwrap();
+    git(&local, &["add", "."]);
+    git(&local, &["commit", "-qm", "base"]);
+    git(&local, &["push", "-q", "origin", "HEAD:staging"]);
+    let cfg = format!("{CONFIG}{DESIGN}").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    // The lane's worktree on the issue branch (herdr makes it in a real spawn).
+    let w = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(w.parent().unwrap()).unwrap();
+    git(
+        &local,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "issue-12",
+            w.to_str().unwrap(),
+            "origin/staging",
+        ],
+    );
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let r = RealGit(fake(&c, 0));
+    drive(&c, &r);
+    let pre = git(&w, &["rev-parse", "HEAD"]);
+    assert_eq!(kinds(&c, "spawn")[0].str("sha"), Some(pre.as_str()));
+    // The design lane's work: two commits, pushed.
+    std::fs::create_dir_all(w.join("docs/design/meter")).unwrap();
+    std::fs::write(w.join("docs/design/meter/1440.png"), "png").unwrap();
+    std::fs::write(w.join("app.rs"), "fn main() { meter() }\n").unwrap();
+    git(&w, &["add", "docs", "app.rs"]);
+    git(&w, &["commit", "-qm", "design 1"]);
+    std::fs::write(w.join("docs/design/meter/390.png"), "png").unwrap();
+    git(&w, &["add", "docs"]);
+    git(&w, &["commit", "-qm", "design 2"]);
+    git(&w, &["push", "-q", "origin", "issue-12"]);
+    let design = git(&w, &["rev-parse", "HEAD"]);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "3"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(state(&c, 12), "needs-human");
+    let head = git(&w, &["rev-parse", "HEAD"]);
+    assert_eq!(git(&w, &["diff", &pre, "HEAD"]), "", "the tree is the pre-design one");
+    assert_eq!(
+        git(&w, &["rev-parse", "HEAD^"]),
+        design,
+        "one commit on top of the design"
+    );
+    assert_eq!(git(&origin, &["rev-parse", "issue-12"]), head, "pushed");
+    let rej = &kinds(&c, "design-rejected")[0];
+    assert_eq!(
+        (rej.str("pre"), rej.str("sha")),
+        (Some(pre.as_str()), Some(head.as_str()))
+    );
+    drive(&c, &r);
+    assert_eq!(spawned(&c, "impl"), 0);
+}
+
+#[test]
+fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-off", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let bad = run(
+        &c,
+        &Fake::default(),
+        &["queue", "sendmeter", "set", "12", "design", "maybe"],
+    );
+    assert_ne!(bad.0, 0, "design is `on` or `off`");
+    assert_eq!(
+        run(
+            &c,
+            &Fake::default(),
+            &["queue", "sendmeter", "set", "12", "design", "off"]
+        )
+        .0,
+        0
+    );
+    let r = fake(&c, c.now + 60);
+    drive(&c, &r);
+    assert!(r.called("herdr agent start sendmeter-impl-12") && !r.called("herdr agent start sendmeter-design-12"));
+    assert_eq!(state(&c, 12), "impl");
+}
+
+#[test]
+fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-paused", "");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &c.config,
+        toml.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true"),
+    )
+    .unwrap();
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let r = fake(&c, c.now + 60);
+    drive(&c, &r);
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called("herdr agent start sendmeter-design-12"));
+    assert_eq!(state(&c, 12), "design");
+}

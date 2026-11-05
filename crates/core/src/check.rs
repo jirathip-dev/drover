@@ -205,7 +205,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let ci = cfg
                     .fleet(&s.fleet)
                     .map(|f| gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)));
+                let done = crate::waiting::fix_done(&events, &s.fleet, s.issue).is_some();
                 let why = match ci {
+                    Ok(_) if same && done => "fix-done recorded, waiting for drive to spawn review".into(),
                     Ok(ci) if same => format!(
                         "fix lane idle, head unchanged, CI {ci}: run herdsman done {} {} --no-change \"<why>\" or push",
                         s.fleet, s.issue
@@ -263,7 +265,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         };
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
         let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
-        let Some(at) = due.filter(|_| !asking) else { continue };
+        // #444: a spawn whose prompt never landed is no finished lane: drive retries it.
+        let landed = e.data.get("confirmed") != Some(&json!(false));
+        let Some(at) = due.filter(|_| !asking && landed) else {
+            continue;
+        };
         if let Some(why) = dirty(r, Path::new(wt)) {
             let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
             fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;

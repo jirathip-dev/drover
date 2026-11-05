@@ -1822,7 +1822,11 @@ fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
 
 /// #12 FAILed at `head` with `body` (`stage`), then its fix lane (spawned at 40) went idle without a new commit.
 fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
-    let c = setup(name);
+    no_change_in(CONFIG, name, stage, body, ci)
+}
+
+fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+    let c = ctx(&tmpdir(name), cfg);
     let head = sha("abc");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(&c, 20, "pushed", json!({"sha": head}));
@@ -1902,6 +1906,54 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     let s = &kinds(&c, "stall")[0];
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
     assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
+}
+
+/// #445: the required `quality` runs only once a PASS adds the merge label, so at a FAILed head it never reports. A
+/// `done --no-change` there is no stall asking for it again, `waiting` names the review, and drive spawns it.
+#[test]
+fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent() {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"\nrequired_checks = [\"quality\"]",
+    );
+    let body = "FAIL (form-only)\n1. blocking [form]: the PR body lacks For humans";
+    let (c, r, head) = no_change_in(&cfg, "drive-noop-label", "rev", body, "pending");
+    let earlier = herdsman::Ctx {
+        now: c.now - 3 * 3600,
+        ..c.clone()
+    };
+    let (code, out) = run(
+        &earlier,
+        &r,
+        &["done", "sendmeter", "12", "--no-change", "PR body rewritten"],
+    );
+    assert_eq!(code, 0, "{out}");
+    // `waiting` reads the PR, as the tick does before `check`.
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    let want = format!(
+        "sendmeter #12 drive: no change at {:.7}, waiting for drive (next pass ≤ 5 min) to spawn review",
+        head
+    );
+    assert!(out.contains(&want), "{out}");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let stalls: Vec<_> = kinds(&c, "stall")
+        .iter()
+        .map(|e| e.str("reason").unwrap().to_string())
+        .collect();
+    assert!(stalls.iter().all(|s| !s.contains("--no-change")), "{stalls:?}");
+    assert!(
+        stalls
+            .iter()
+            .any(|s| s.ends_with("fix-done recorded, waiting for drive to spawn review")),
+        "{stalls:?}"
+    );
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["review"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
+    let e = &kinds(&c, "fix-no-change")[0];
+    assert_eq!((e.str("sha"), e.str("ci")), (Some(head.as_str()), Some("pending")));
+    assert!(state(&c).starts_with("review"), "{}", state(&c));
 }
 
 /// #388: a PASSed head with no checks reads `CI running` inside `ci_start_minutes`, `CI missing` after it; a pending
@@ -2036,4 +2088,107 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     let rel = &kinds(&c, "released")[0];
     assert_eq!(rel.data["respawn"].as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
+}
+
+// --- #444: a fix round whose lane ended without pushing is driven again ---
+
+/// #363's log: FAIL at the head, supersede, a spawn whose prompt never landed (exit 4), its pane closed `done`.
+fn ended(name: &str) -> (herdsman::Ctx, Fake) {
+    let c = setup(name);
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "pushed", json!({"sha": head}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": head, "body": "FAIL\nform"}),
+    );
+    ev(&c, 31, "supersede", json!({"agent": "sendmeter-impl-12"}));
+    let wt = lane(&c, 32, "impl", "sendmeter-impl-12", "issue-12");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "worktree": wt,
+        "branch": "issue-12", "confirmed": false});
+    ev(&c, 32, "spawn", d);
+    ev(
+        &c,
+        40,
+        "lane-closed",
+        json!({"agent": "sendmeter-impl-12", "reason": "done", "key": "k"}),
+    );
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("git -C", "");
+    (c, r)
+}
+
+#[test]
+fn the_363_sequence_replayed_respawns_impl_once_per_30_min() {
+    let (c, r) = ended("drive-ended");
+    assert_eq!(state(&c), "fix(1)");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("#12 drive: lane gone, no push: respawning impl")
+            && out.contains("→ herdsman spawn sendmeter 12 impl --supersede"),
+        "{out}"
+    );
+    let (_, st) = run(&c, &r, &["status", "sendmeter"]);
+    assert!(
+        st.contains("lane gone, no push") && !st.contains("idle without pushing"),
+        "{st}"
+    );
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-impl-12"), "{out}");
+    let e = &kinds(&c, "respawn")[0];
+    assert_eq!((e.str("role"), e.str("why")), (Some("impl"), Some("lane gone")));
+    // The new lane is gone too: no second respawn within 30 min.
+    idle(&c, &r);
+}
+
+#[test]
+fn two_respawns_without_a_push_go_to_needs_human() {
+    let (c, r) = ended("drive-ended-twice");
+    let at = |s: u64| herdsman::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    };
+    assert_eq!(drive(&c, &r).1, ["respawn"]);
+    assert_eq!(drive(&at(1801), &r).1, ["respawn"]);
+    let (code, out) = run(&at(3602), &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("needs-human: lane keeps ending without a push"), "{out}");
+    assert_eq!(state(&c), "needs-human");
+    assert_eq!(kinds(&c, "respawn").len(), 2);
+    let nh = &kinds(&c, "needs-human")[0];
+    assert_eq!(nh.str("reason"), Some("lane keeps ending without a push"));
+    idle(&at(7200), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1, "it never loops");
+}
+
+#[test]
+fn a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass() {
+    let c = setup("drive-exit4");
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": head, "body": "FAIL"}),
+    );
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "worktree": wt,
+        "branch": "issue-12", "confirmed": false});
+    ev(&c, 30, "spawn", d);
+    // The pane is still there (the agent sits `done`, never prompted).
+    let list = agents(&[("sendmeter-impl-12", "done", &wt.to_string_lossy(), "w9:p1")]);
+    let r = fake(&list)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert_eq!(kinds(&c, "respawn")[0].str("why"), Some("prompt never landed"));
+    let done = kinds(&c, "lane-closed");
+    assert!(done.iter().all(|e| e.str("reason") != Some("done")), "{done:?}");
 }

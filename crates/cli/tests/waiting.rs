@@ -167,6 +167,7 @@ fn every_case_has_its_who_what_and_next_command() {
         &[
             json!({"name": "sendmeter-impl-11", "agent_status": "working"}),
             json!({"name": "sendmeter-rev-9-r1", "agent_status": "idle"}),
+            json!({"name": "sendmeter-impl-7", "agent_status": "idle"}),
         ],
     );
     let t = NOW - 1500;
@@ -202,7 +203,14 @@ fn every_case_has_its_who_what_and_next_command() {
         (7, "none", "idle without pushing (check the pane)", t, None),
         (8, "none", "nothing to do (merged): clean me", t + 20, None),
         (9, "none", "rev idle without a verdict (check the pane)", t + 10, None),
-        (10, "none", "idle without pushing (check the pane)", t, None),
+        // #444: #10's lane is in no herdr list: gone without a push, respawned.
+        (
+            10,
+            "drive",
+            "lane gone, no push: respawning impl",
+            t,
+            s("spawn sendmeter 10 impl --supersede"),
+        ),
         // #214: #12's reviewer exited (no herdr agent) without a verdict: a new review round.
         (
             12,
@@ -299,7 +307,7 @@ fn every_idle_lane_of_an_issue_gets_a_reason() {
 }
 
 #[test]
-fn waiting_lists_drive_and_owner_items_with_their_next_command() {
+fn waiting_lists_every_open_item_with_its_next_command() {
     let (c, r) = fixture("waiting-cmd");
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
@@ -308,13 +316,20 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
         out.contains("sendmeter #1 owner: waiting on your answer (q3) (10m)\n"),
         "{out}"
     );
+    // #445: every open issue is listed with its reason, ci and nothing-due ones too.
+    assert!(out.contains("sendmeter #5 ci: PASS · CI running 0/1 (24m)\n"), "{out}");
+    // #444: herdr lists no lane here, so the impl lanes that never pushed are gone: respawned by drive.
     assert!(
-        !out.contains("#5 ") && !out.contains("#7 "),
-        "ci and none items are not listed: {out}"
+        out.contains("sendmeter #10 drive: lane gone, no push: respawning impl (25m) → herdsman spawn sendmeter 10 impl --supersede\n"),
+        "{out}"
     );
     let (_, j) = run(&c, &r, &["waiting", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&j).unwrap();
-    assert_eq!(v.as_array().unwrap().len(), 9, "#9 and #12's reviewers exited: {out}");
+    assert_eq!(
+        v.as_array().unwrap().len(),
+        14,
+        "#9 and #12's reviewers exited, #7, #10 and #11 gone, #5 and #13 listed too: {out}"
+    );
     assert!(
         out.contains("sendmeter #12 drive: reviewer exited without a verdict: reviewing again"),
         "{out}"
@@ -328,7 +343,9 @@ fn waiting_lists_drive_and_owner_items_with_their_next_command() {
     let (_, st) = run(&c, &r, &["status", "sendmeter"]);
     assert!(
         st.contains("WAITING")
-            && st.contains("pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review"),
+            && st.contains("pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review")
+            && st.contains("lane gone, no push: respawning impl")
+            && !st.contains("idle without pushing"),
         "{st}"
     );
     assert!(
@@ -533,7 +550,8 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
     for n in [20, 21, 22] {
         r = r.reply(&format!("gh pr view issue-{n} "), &pr(&sha(&n.to_string()), "green"));
     }
-    let all = waits(&c, &r, &[]);
+    // #444: "still there" is a pane herdr lists; one it does not is gone, and respawned too.
+    let all = waits(&c, &r, &[json!({"name": "sendmeter-impl-22", "agent_status": "idle"})]);
     let of = |n: u64| all.iter().find(|w| w.issue == n).map(|w| w.next_cmd.clone());
     let fix = |n: u64| Some(Some(format!("herdsman spawn sendmeter {n} impl --supersede")));
     assert_eq!(of(20), fix(20), "lane-dead with the fix still due");
