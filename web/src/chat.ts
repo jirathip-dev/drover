@@ -1,6 +1,6 @@
 // #269: the [chat] tab (#386, docs/design/conductor-chat/), drawn from API v1's `chat` (pure: tests run it under
 // node): per repo its conductor threads, then each thread as #138's chat blocks with choice rows, images and files.
-import type { ChatTab, Link, Msg, ThreadPage, ThreadRow, ThreadView } from '../../assets/types/api';
+import type { ChatTab, Chip, Link, Msg, ThreadPage, ThreadRow, ThreadView } from '../../assets/types/api';
 import { age, esc } from './events.ts'; // node runs this file as is: the extension
 
 const or = (c: boolean, a: string, b: string) => (c ? a : b);
@@ -125,8 +125,15 @@ export function page(now: number, id: string, p: ThreadPage, rw: boolean): strin
   return top + p.msgs.map(m => msg(now, id, m, rw)).join('');
 }
 
-/** The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above. */
-const composer = (id: string, repo: string, qd: string, dis: string) => `<form class=tw data-t="${id}"${repo}>${qd}<input type=file multiple hidden${dis}><button type=button class=add aria-label="attach images or files"${dis}>+</button><textarea name=text rows=1 aria-label=message placeholder="message the conductor"${dis}></textarea><button class=snd${dis}>send</button></form>`;
+/** #404: a chip, a select of its choices (serve.js shows it as `[opus ▾]`); unset, `<name>: default` first. */
+function chip1(c: Chip, dis: string): string {
+  const opt = (v: string, l: string) => `<option value="${esc(v)}"${or((c.cur ?? '') === v, ' selected', '')}>${esc(l)}</option>`;
+  return `<select class=cp name=${c.name} aria-label=${c.name}${dis}>${c.cur == null ? opt('', `${c.name}: default`) : ''}${c.all.map(v => opt(v, v)).join('')}</select>`;
+}
+
+/** The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above;
+ * #404: its chips below. */
+const composer = (id: string, repo: string, qd: string, dis: string, chips: Chip[] = []) => `<form class=tw data-t="${id}"${repo}>${qd}<input type=file multiple hidden${dis}><button type=button class=add aria-label="attach images or files"${dis}>+</button><textarea name=text rows=1 aria-label=message placeholder="message the conductor"${dis}></textarea><button class=snd${dis}>send</button>${chips.length ? `<div class=cbar>${chips.map(c => chip1(c, dis)).join('')}</div>` : ''}</form>`;
 
 /** #407: the queued messages above the box, each with [send now] (steer it in), edit and [remove]. */
 function queue(t: ThreadView, dis: string): string {
@@ -149,14 +156,14 @@ function thread(d: ChatTab, t: ThreadView): string {
   const dis = or(d.rw, '', ' disabled'), dot = or(['asleep', 'new'].includes(t.state), '', '<i class=dt></i>');
   const guest = or(d.rw, '', '<p class="ns m">pair this phone to answer or write</p>');
   return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>${esc(t.title)}</b><span class=ds>${dot}${esc(t.ds)}</span>${cw(t.waiting)}</div></div>`
-    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', queue(t, dis), dis)}</div>`; // #407: working, serve.js floats the line as a pill
+    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', queue(t, dis), dis, t.chips)}</div>`; // #407: working, serve.js floats the line as a pill
 }
 
 /** #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it. */
-function draft(repo: string, dis: string): string {
+function draft(repo: string, dis: string, h: Chip): string {
   const r = esc(repo);
   return `<div class=cvp data-t="new-${r}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>new thread</b><span class=ds>${or(repo === 'all', 'all repos', r)}</span></div></div>`
-    + `<div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>${composer(`new-${r}`, ` data-repo="${r}"`, '', dis)}</div>`;
+    + `<div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>${composer(`new-${r}`, ` data-repo="${r}"`, '', dis, [h])}</div>`;
 }
 
 const ST: Record<string, string> = { choose: '<b class=r>! choose</b>', working: '<b class=a>✻ working</b>', asleep: '<b class=m>☾ asleep</b>' };
@@ -182,7 +189,7 @@ export function tab(d: ChatTab): string {
     const arch = c.archived.length ? `<details class="done arc"><summary><span>${c.archived.length} archived</span><i class=cv></i></summary>${c.archived.map(x => row(x, 'restore', dis)).join('')}</details>` : '';
     const add = d.rw ? `<span class=btns><button type=button class=ntb data-repo="${r}">+ thread</button></span>` : '';
     list += `<div class="fc k-${c.k}"><div class=fh><span class=fn><b>${esc(or(c.repo === 'all', 'all repos', c.repo))}</b><span class=ds>${count}</span></span>${add}</div>${rows.slice(0, 3).join('')}${older}${arch}</div>`;
-    views += draft(c.repo, dis);
+    views += draft(c.repo, dis, c.harness);
   }
   return `<div class=clp>${list}</div>${views}${d.threads.map(t => thread(d, t)).join('')}`;
 }
