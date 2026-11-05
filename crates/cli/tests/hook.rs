@@ -763,6 +763,43 @@ fn deny_commands_override_per_fleet_and_log_denials() {
     assert_eq!(run(add, "terraform plan").0, None);
 }
 
+const NO_BROAD_KILL: &str = "herdsman: REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with '& \
+                             echo $! > f', stop with kill \"$(cat f)\"";
+
+/// #502: pattern kills are refused in every lane, even when its fleet empties `deny_commands`; pid kills pass,
+/// and outside a lane the hook stays inert.
+#[test]
+fn broad_kills_are_denied_and_pid_kills_allowed() {
+    for cmd in [
+        "pkill -f x -n",
+        "/usr/bin/pkill x",
+        "env pkill x",
+        "killall node",
+        "pgrep x | xargs kill",
+        "kill $(pgrep -f node)",
+        "node a.mjs; pkill -f \"release/topcoat-chat\" -n",
+    ] {
+        assert_eq!(bash(cmd).as_deref(), Some(NO_BROAD_KILL), "{cmd}");
+    }
+    for cmd in ["kill 123", "kill \"$(cat /tmp/p)\"", "kill %1", "pgrep -lf node"] {
+        assert_eq!(bash(cmd), None, "{cmd} allowed");
+    }
+    let cfg = format!(
+        "{CONFIG}\n[fleet.other]\nrepo = \"o/r\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\ndeny_commands = []\n\
+         [hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\nallow_commands = [\"pkill\"]"
+    );
+    let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": "pkill node"}});
+    let vars = [
+        ("HERDSMAN_LANE", Some("other:7:impl")),
+        ("HERDSMAN_HOST", Some("cloud1")),
+    ];
+    assert!(
+        hook_cfg(&cfg, &vars, "impl", input.clone()).0.contains("NO_BROAD_KILL"),
+        "no fleet or host drops it"
+    );
+    assert_eq!(hook_in(None, "impl", input), "", "the owner's shell");
+}
+
 /// #256: per-host rules from `HERDSMAN_HOST`: a cloud host allows docker and `supabase start` by default, a Mac keeps
 /// the ban; a host's `allow_commands` and `deny_commands_add` override that.
 #[test]

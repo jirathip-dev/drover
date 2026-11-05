@@ -163,7 +163,15 @@ fn closing_a_sheet_never_repaints_the_page() {
     }
     let (html, _) = fixture();
     // #244: `judge` reads the backdrop as the page times k, a black scrim: github-dark's (farm's is tinted).
-    let html = html.replace("\"farm\":\"farm\"", "\"farm\":\"github-dark\"");
+    let mut html = html.replace("\"farm\":\"farm\"", "\"farm\":\"github-dark\"");
+    // #450: the page's clock is now, as a live page's is: the fixture's 1970 one shows the strip's `as of …d ago`
+    // until the first paint, and its going would move the page mid-close.
+    let i = html.find("<body data-ts=").unwrap() + 14;
+    let j = i + html[i..].find(' ').unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    html.replace_range(i..j, &now.as_secs().to_string());
     let file = tmpdir("ui-close").join("page.html");
     std::fs::write(&file, html).unwrap();
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
