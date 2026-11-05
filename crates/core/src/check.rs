@@ -693,10 +693,85 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             }
         }
     }
+    trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
+    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if let Err(e) = trim_on(&On::new(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
+            writeln!(out, "builds: {name}: {e:#}")?;
+        }
+    }
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+/// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
+/// `.cargo-lock` no cargo holds go, until it is under; a building one stays. Bytes freed.
+pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    let root = crate::config::expand(&cfg.limits.build_root);
+    if cfg.limits.build_root.is_empty() || !root.is_dir() {
+        return Ok(0);
+    }
+    let (mut total, mut freed) = (du(&root), 0);
+    let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
+    let profiles: Vec<_> = ls(&root)
+        .flat_map(|r| ls(&r))
+        .filter(|p| p.join(".cargo-lock").is_file())
+        .collect();
+    for dir in profiles {
+        if gb(total) <= budget {
+            break;
+        }
+        // Cargo flocks the profile's `.cargo-lock` while it builds there.
+        let lock = std::fs::File::open(dir.join(".cargo-lock"))?;
+        if lock.try_lock().is_err() {
+            writeln!(out, "keep {}: cargo is building", dir.display())?;
+            continue;
+        }
+        let size = du(&dir);
+        let verb = if dry { "would trim" } else { "trimmed" };
+        if dry || std::fs::remove_dir_all(&dir).is_ok() {
+            writeln!(out, "builds: {verb} {} ({:.2} GB)", dir.display(), gb(size))?;
+            (total, freed) = (total.saturating_sub(size), freed + size);
+        }
+    }
+    Ok(freed)
+}
+
+/// #438: `trim_builds` on a remote host, in its shell: `lsof` stands in for cargo's flock (no `lsof`: nothing goes).
+const TRIM: &str = r#"r=$1; case $r in "~/"*) r=$HOME/${r#"~/"};; esac
+cd "$r" 2>/dev/null && command -v lsof >/dev/null || { echo "freed 0"; exit 0; }
+t=$(du -sk . | cut -f1); f=0
+for d in */*/; do
+  [ "$t" -le "$2" ] && break
+  [ -f "$d.cargo-lock" ] || continue
+  if lsof "$d.cargo-lock" >/dev/null 2>&1; then echo "keep $r/$d: cargo is building"; continue; fi
+  s=$(du -sk "$d" | cut -f1)
+  rm -rf "./${d:?}" && t=$((t - s)) && f=$((f + s)) && echo "builds: trimmed $r/$d ($s KB)"
+done
+echo "freed $f""#;
+
+/// The shared build folder on `on`'s host trimmed to `budget` GB; bytes freed.
+pub fn trim_on(on: &On, cfg: &Config, budget: f64, out: &mut dyn Write) -> Result<u64> {
+    if on.machine.is_none() || cfg.limits.build_root.is_empty() {
+        return trim_builds(cfg, budget, out, false);
+    }
+    let kb = format!("{:.0}", budget * 1_048_576.0);
+    let o = on.run(
+        "sh",
+        &crate::runner::argv(&["-c", TRIM, "sh", &cfg.limits.build_root, &kb]),
+    )?;
+    anyhow::ensure!(o.code == 0, "trim failed ({}): {}", o.code, o.stderr.trim());
+    let s = o.stdout;
+    let (log, last) = s.trim_end().rsplit_once('\n').unwrap_or(("", s.trim()));
+    if !log.is_empty() {
+        writeln!(out, "{log}")?;
+    }
+    Ok(last
+        .strip_prefix("freed ")
+        .and_then(|k| k.parse::<u64>().ok())
+        .unwrap_or(0)
+        * 1024)
 }
 
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
@@ -723,6 +798,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
+    total += trim_builds(cfg, cfg.limits.build_budget_gb, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
@@ -1051,10 +1127,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
             file = l.strip_prefix("+++ b/").unwrap_or(file);
         } else if let Some(a) = l.strip_prefix('+').filter(|_| hit.is_none()) {
             // Mask every secret on the line, not only the first.
-            let mut m = a.trim().to_owned();
-            while let Some(v) = crate::lanes::secret(&m) {
-                m = m.replace(v, "•••");
-            }
+            let m = crate::lanes::redact(a.trim());
             if m != a.trim() {
                 hit = Some(format!("{file}:{n}: {m}"));
             }

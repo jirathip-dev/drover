@@ -282,7 +282,12 @@ pub fn tags(h: &HostCfg, s: Option<&Seen>) -> Vec<String> {
 /// The tags a lane of `role` on `fleet#issue` needs: the fleet's, the role's and its queue item's.
 pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64)) -> Vec<String> {
     let mut n = f.needs.clone();
-    n.extend(f.role.get(role).map(|r| r.needs.clone()).unwrap_or_default());
+    n.extend(
+        f.role
+            .get(f.role_key(role))
+            .map(|r| r.needs.clone())
+            .unwrap_or_default(),
+    );
     n.extend(crate::queue::needs_of(events, fleet, issue));
     n.sort();
     n.dedup();
@@ -327,7 +332,12 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let (min, events) = (cfg.limits.min_free_gb, read(&ctx.state).unwrap_or_default());
-    let gb = host::free_gb(on).filter(|g| *g < min)?;
+    let low = || host::free_gb(on).filter(|g| *g < min);
+    let mut gb = low()?;
+    // #438: short of disk, the shared build folder's idle profiles go first; then the disk is read again.
+    if crate::check::trim_on(on, cfg, 0.0, &mut std::io::sink()).unwrap_or(0) > 0 {
+        gb = low()?;
+    }
     let st = fold(&events);
     let lane = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.str("machine") == on.machine;
     let done = |e: &&Event| {
@@ -506,7 +516,7 @@ pub fn place(
     let f = cfg.fleet(fleet)?;
     // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
     let design = f.family(role) == "design";
-    let pin = f.role.get(role).and_then(|r| r.host.as_deref());
+    let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
     if let Some(h) = force.or(pin).or(design.then_some("main")) {
         let main = cfg
             .hosts
