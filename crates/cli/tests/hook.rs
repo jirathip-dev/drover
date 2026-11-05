@@ -506,34 +506,17 @@ fn quoted_text_is_not_a_command() {
 /// #410: a conductor writes in its own thread folder, but not herdsman's files there, another thread's or the log.
 #[test]
 fn a_conductor_writes_its_own_thread_folder() {
-    let write = |file: &std::path::Path, d: &std::path::Path| {
-        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Write",
-            "tool_input": {"file_path": file, "content": "x"}});
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
-        let mut child = cmd
-            .args(["hook", "--role", "conductor"])
-            .env_remove("FLEET_LANE")
-            .env("HERDSMAN_LANE", "synergy:-:conductor")
-            .env("HERDSMAN_THREAD", "t6")
-            .env("FLEET_CONFIG", d.join("fleet.toml"))
-            .env("FLEET_STATE", d.join("state/events.jsonl"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.to_string().as_bytes())
-            .unwrap();
-        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
-    };
     let d = tmpdir("hook-own");
     std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
     let c = d.join("state/conductor");
-    assert_eq!(write(&c.join("t6/mock.png"), &d), "", "its own folder");
-    assert_eq!(write(&c.join("t6/ui/a.html"), &d), "", "a subfolder");
+    let write = |file: &std::path::Path| {
+        conductor_hook(
+            &d,
+            json!({"tool_name": "Write", "tool_input": {"file_path": file, "content": "x"}}),
+        )
+    };
+    assert_eq!(write(&c.join("t6/mock.png")), "", "its own folder");
+    assert_eq!(write(&c.join("t6/ui/a.html")), "", "a subfolder");
     for f in [
         c.join("t6/.thread.md"),
         c.join("t6/.brief.md"),
@@ -541,8 +524,59 @@ fn a_conductor_writes_its_own_thread_folder() {
         c.join("t5/x"),
         d.join("state/events.jsonl"),
     ] {
-        assert!(write(&f, &d).contains("is protected"), "{}", f.display());
+        assert!(write(&f).contains("is protected"), "{}", f.display());
     }
+}
+
+/// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
+#[test]
+fn a_conductors_shell_writes_its_own_thread_folder() {
+    let d = tmpdir("hook-own-sh");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let (c, s) = (d.join("state/conductor"), d.join("state"));
+    let (c, s) = (c.display(), s.display());
+    let sh = |cmd: &str| conductor_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
+    for cmd in [
+        format!("cp x {c}/t6/a.png"),
+        format!("mkdir -p {c}/t6/d && cp /w/a.png /w/b.png \"{c}/t6/d/\""),
+        format!("echo hi > {c}/t6/n.txt"),
+    ] {
+        assert_eq!(sh(&cmd), "", "{cmd}");
+    }
+    for cmd in [
+        format!("cp x {c}/t5/a.png"),
+        format!("echo hi > {c}/t6/.thread.md"),
+        format!("echo hi >{c}/t6/.brief.md"),
+        format!("cp x {c}/t6/../t5/a.png"),
+        format!("cp {c}/t6/a.png {s}/fleet.toml"),
+        format!("rm {s}/events.jsonl"),
+    ] {
+        assert!(sh(&cmd).contains("is blocked"), "{cmd}");
+    }
+}
+
+/// The hook's stdout for `call` (a pre-tool event) run as the conductor of thread t6, state under `d`.
+fn conductor_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
+    call["hook_event_name"] = json!("PreToolUse");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
+    let mut child = cmd
+        .args(["hook", "--role", "conductor"])
+        .env_remove("FLEET_LANE")
+        .env("HERDSMAN_LANE", "synergy:-:conductor")
+        .env("HERDSMAN_THREAD", "t6")
+        .env("FLEET_CONFIG", d.join("fleet.toml"))
+        .env("FLEET_STATE", d.join("state/events.jsonl"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(call.to_string().as_bytes())
+        .unwrap();
+    String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
 }
 
 /// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
