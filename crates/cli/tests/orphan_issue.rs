@@ -206,3 +206,19 @@ fn waiting_names_an_issue_nothing_drives() {
         "{out}"
     );
 }
+
+#[test]
+fn a_lane_live_loop_on_a_finished_lane_is_an_orphan() {
+    // #534's shape: every pass refused LANE_LIVE on a reviewer done hours ago; that drives nothing.
+    let d = tmpdir("orphan-534");
+    let mut c = ctx(&d, CONFIG);
+    spawn(&c, T0, 7, "impl");
+    ev(&c, T0 + 10, Some(7), "pushed", json!({"sha": SHA}));
+    for t in [100, 700, 1300] {
+        let a = json!({"issue": 7, "step": "review", "code": "LANE_LIVE",
+            "words": "an old reviewer (done) is in the way: replacing it"});
+        ev(&c, T0 + t, None, "drive-pass", json!({"actions": [a]}));
+    }
+    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    fires_once(&mut c, &r, T0 + 10, 7);
+}
