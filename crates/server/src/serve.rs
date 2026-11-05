@@ -1536,8 +1536,8 @@ impl<'a> Server<'a> {
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
-             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
-             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs></div><main>\
+             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<i id=dot class=a></i>\
+             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=strip><span id=ld class=tld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></span><span class=ldw>loading</span><span id=stale hidden></span></div>{msg}<div id=needs></div><main>\
              <section id=queue></section><section id=lanes></section><section id=chat></section></main>\
              <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
             ctx.now, if paired { "" } else { self.pairb() }
@@ -1574,8 +1574,6 @@ impl<'a> Server<'a> {
                         .collect(),
                 }
             });
-        // #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
-        let t = self.snapshot().1.ts;
         NeedsTab {
             now: ctx.now,
             rw: self.addr.is_some(),
@@ -1583,7 +1581,7 @@ impl<'a> Server<'a> {
             paired,
             pair: !self.pairb().is_empty(),
             mtime: mtime(ctx),
-            age: (t > 0 && ctx.now > t + 120).then(|| age(ctx.now - t)),
+            snap: self.snapshot().1.ts,
             choosing: chat::choosing(ev),
             asks: asks.collect(),
             blocked: (all.iter().filter(|l| l.state == "blocked"))
