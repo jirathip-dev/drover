@@ -672,7 +672,7 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 @media (max-width:999px){
   html[data-tab=chat] .cvp{position:fixed;top:calc(var(--hit) + var(--s1));left:0;right:0;bottom:max(var(--kb),calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom)));display:flex;flex-direction:column;padding:0 var(--s3)}
   html[data-tab=chat] .cvp .tc{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
-  html[data-tab=chat] .cvp .tw{position:static;margin-bottom:0}
+  html[data-tab=chat] .cvp .tw{position:relative;margin-bottom:0}
   html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp{bottom:var(--kb)}
 }
 .snt .md p{white-space:pre-line}.blk>summary .sk{flex:none;font-weight:400;color:var(--g)}
