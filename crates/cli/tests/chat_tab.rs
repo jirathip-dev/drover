@@ -724,7 +724,8 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
 }
 
 /// #408 in WebKit on a real server: the thread opens with 30 messages; scrolled to the top it loads 30 more each time
-/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header;
+/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header
+/// (#443: on a phone only the messages scroll, never the page);
 /// a message sent (the live update) keeps every page loaded.
 #[test]
 fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
@@ -743,12 +744,12 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
         const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
         (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
-          for (const k of [60, 90, 100]) { scrollTo(0, 1e6); await new Promise(r => setTimeout(r, 100)); scrollTo(0, 0); const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
+          for (const k of [60, 90, 100]) { tc().scrollTop = 1e6; await new Promise(r => setTimeout(r, 100)); tc().scrollTop = 0; const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
             await until(() => n() >= k); at.push(n(), +(Math.abs(a.getBoundingClientRect().top - y) > 1)); await new Promise(r => setTimeout(r, 200)); } \
           at.push(+!!tc().querySelector('.tmo'), +tc().firstElementChild.textContent.startsWith('thread started')); \
-          scrollTo(0, document.documentElement.scrollHeight / 2); await new Promise(r => setTimeout(r, 200)); \
+          tc().scrollTop = tc().scrollHeight / 2; await new Promise(r => setTimeout(r, 200)); \
           const th = $('#chat .cvp[data-t=\"t1\"] .th'), r = th.getBoundingClientRect(); \
-          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(scrollY > innerHeight)); \
+          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(tc().scrollTop > innerHeight && !document.scrollingElement.scrollTop)); \
           const f = $('#chat .tw[data-t=\"t1\"]'); f.elements.text.value = 'a new one'; f.requestSubmit(); \
           await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
@@ -771,7 +772,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
     // 30 open; 60, 90, 100 loaded, each with no jump; no marker, the start line; the header right under the page's,
-    // on top, the page scrolled; after the send: m1 still first under the start line, the new message in, no errors.
+    // on top, the messages scrolled (the page not); after the send: m1 still first under the start line, the new message in, no errors.
     assert_eq!(
         m,
         [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
@@ -1147,43 +1148,21 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
         eprintln!("skipping: no swift/WebKit here");
         return;
     }
-    let c = setup("chat-kb");
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
-        "t1\n"
-    );
-    for i in 0..30 {
-        let (code, out) = run(
-            &c,
-            &Fake::default(),
-            &["thread", "reply", "t1", &format!("Reply {i}: a line or two of prose.")],
-        );
-        assert_eq!(code, 0, "{out}");
-    }
-    let cookie = pair(
-        &Server::new(&c, &Fake::default(), Some(ADDR.into())),
-        &c,
-        "Mozilla/5.0 (iPhone)",
-        T,
-    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let (c, cookie) = long("chat-kb", 30, now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let (c2, at) = (c.clone(), addr.clone());
-    std::thread::spawn(move || {
-        let r = Fake::default();
-        let s = Server::new(&c2, &r, Some(at));
-        for mut st in l.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
-        }
-    });
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames.)
     // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
     // (1/0) and how far its top moved against the box's top.
     let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
           while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
           chatOpen('t1'); \
-          const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); await frame(); \
+          const frame = () => new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); st(r, 300); }); await frame(); \
           const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
           const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
           const kb = h => { Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - h }); vv.dispatchEvent(new Event('resize')); }; \

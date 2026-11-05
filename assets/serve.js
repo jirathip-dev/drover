@@ -1942,9 +1942,14 @@ async function chatOlder() {
   t.innerHTML = h;
   clocks(t);
   m.replaceWith(...t.childNodes);
-  if (a) scrollBy(0, a.getBoundingClientRect().top - y);
+  // (#443: on a phone the messages scroll by themselves, the page never)
+  const c = innerWidth < 1000 ? a && a.parentElement : null;
+  if (a) c ? c.scrollTop += a.getBoundingClientRect().top - y : scrollBy(0, a.getBoundingClientRect().top - y);
 }
-addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
+document.addEventListener('scroll', e => {
+  const c = e.target;
+  if (document.documentElement.dataset.tab === 'chat' && (c === document ? scrollY < innerHeight : c.matches('#chat .tc') && c.scrollTop < c.clientHeight)) chatOlder();
+}, { passive: true, capture: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
