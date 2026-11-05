@@ -15,6 +15,8 @@ pub struct Policy {
     pub conductor: bool,
     /// #410: the conductor's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
     pub own: Option<String>,
+    /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
+    pub scratch: Option<String>,
 }
 
 /// git subcommands that make commits or move refs; denied to reviewers.
@@ -125,7 +127,8 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
         let found = gh(&t)
             .or_else(|| git_push(&t, cwd, p, cur_branch))
-            .or_else(|| reviewer_git(&t, p));
+            .or_else(|| reviewer_git(&t, p))
+            .or_else(|| target_dir(&t, p));
         if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
@@ -141,6 +144,33 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// #536: a `CARGO_TARGET_DIR=` or `--target-dir` outside the lane's `build_root` (a `/tmp` one escapes every budget).
+fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
+    let s = p.scratch.as_deref()?;
+    let root = std::path::Path::new(s).ancestors().nth(2)?.to_string_lossy();
+    let dirs = t.iter().enumerate().filter_map(|(i, w)| {
+        let v = w
+            .strip_prefix("CARGO_TARGET_DIR=")
+            .or_else(|| w.strip_prefix("--target-dir="));
+        v.or_else(|| (*w == "--target-dir").then(|| t.get(i + 1).copied()).flatten())
+    });
+    let vars = [
+        "$HERDSMAN_SCRATCH_TARGET",
+        "${HERDSMAN_SCRATCH_TARGET}",
+        "$CARGO_TARGET_DIR",
+        "${CARGO_TARGET_DIR}",
+    ];
+    let ok = |d: &str| {
+        let d = vars.iter().fold(expand_home(d), |d, v| d.replace(v, &root));
+        !d.contains("..") && (d == root || d.starts_with(&format!("{root}/")))
+    };
+    let bad = dirs.filter(|d| !d.is_empty()).find(|d| !ok(d))?;
+    Some(format!(
+        "REFUSED SCRATCH_TARGET: {bad} is outside {root}; build in your scratch dir: \
+         CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR"
+    ))
 }
 
 /// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc

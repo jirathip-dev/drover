@@ -20,7 +20,9 @@ fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) 
     let d = tmpdir("hook");
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
-    cmd.env_remove("HERDSMAN_LANE").env_remove("FLEET_LANE");
+    cmd.env_remove("HERDSMAN_LANE")
+        .env_remove("FLEET_LANE")
+        .env_remove("HERDSMAN_SCRATCH_TARGET");
     for (k, v) in vars {
         if let Some(v) = v {
             cmd.env(k, v);
@@ -867,4 +869,48 @@ fn a_lane_may_queue_block_only_its_own_issue() {
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
         assert_eq!(hook_in(None, "impl", input(cmd)), "", "the owner (no lane) may: {cmd}");
     }
+}
+
+/// #536: with a scratch dir, a Cargo build folder outside `build_root` (a `/tmp` one) is refused, naming the scratch.
+#[test]
+fn a_cargo_target_dir_outside_build_root_is_refused() {
+    let scratch = "/c/builds/.scratch/sendmeter-rev-24-r1";
+    let bash_in = |s: Option<&str>, cmd: &str| {
+        let vars = [
+            ("HERDSMAN_LANE", Some("sendmeter:24:rev")),
+            ("HERDSMAN_SCRATCH_TARGET", s),
+        ];
+        let out = hook_env(&vars, "rev", shapes("Bash", json!({"command": cmd}))[0].clone());
+        let v: Value = serde_json::from_str(&out).unwrap_or_default();
+        v["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .map(String::from)
+    };
+    for cmd in [
+        "CARGO_TARGET_DIR=/tmp/t344-target cargo test",
+        "export CARGO_TARGET_DIR=\"$TMPDIR/rev447t\"; cargo build",
+        "cargo test --target-dir /tmp/h370-base-target",
+        "cargo build --target-dir=~/.cache/rev361base/target",
+        "CARGO_TARGET_DIR=/c/builds/../x cargo test",
+    ] {
+        let why = bash_in(Some(scratch), cmd).unwrap_or_else(|| panic!("{cmd} allowed"));
+        assert!(why.contains("REFUSED SCRATCH_TARGET: "), "{cmd}: {why}");
+        assert!(
+            why.contains(&format!("({scratch}/target)")),
+            "names the scratch dir: {why}"
+        );
+    }
+    for cmd in [
+        "CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target cargo test",
+        "cargo build --target-dir \"${HERDSMAN_SCRATCH_TARGET}/base\"",
+        "CARGO_TARGET_DIR=/c/builds/sendmeter cargo test",
+        "cargo test",
+    ] {
+        assert_eq!(bash_in(Some(scratch), cmd), None, "{cmd}");
+    }
+    assert_eq!(
+        bash_in(None, "CARGO_TARGET_DIR=/tmp/x cargo test"),
+        None,
+        "no scratch (build_root off): no rule"
+    );
 }

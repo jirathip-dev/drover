@@ -1234,6 +1234,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
+                        check::strays(ctx, &cfg, out, yes)?;
                         check::remote_orphans(&cfg, r, out, orphans && yes)?;
                     }
                 }
@@ -1494,6 +1495,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         deny: deny_list(ctx),
         conductor,
         own,
+        scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])

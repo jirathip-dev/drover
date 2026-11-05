@@ -101,3 +101,6 @@ FAIL
 - Work on branch `issue-12` only. Commit, push it, open a PR to `staging` whose body says `Closes #12`.
 - Never merge, never push to `staging` or main — merging happens only via `herdsman merge`.
 - Report: what changed, exact test commands + exit codes, head sha.
+- A second build or checkout (base, staging, head) goes under `$HERDSMAN_SCRATCH_TARGET` only (builds with
+  `CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target`, checkouts in `$HERDSMAN_SCRATCH_TARGET/<name>`), never `/tmp`
+  or `$TMPDIR`; it is deleted when your lane ends.

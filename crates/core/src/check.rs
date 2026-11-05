@@ -571,6 +571,9 @@ pub fn clean(
         if !pane.is_empty() {
             let _ = herdr::close(&on, pane);
         }
+        if on.machine.is_none() {
+            claude_tmp(cfg, wt);
+        }
         drop_log(ctx, e.str("agent"));
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(
@@ -600,6 +603,20 @@ pub fn clean(
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
     Ok(())
+}
+
+/// #536: Claude Code's temp dir for worktree `wt`, `<stray root>/claude-<uid>/<wt, each non-alphanumeric as ->`.
+fn claude_tmp(cfg: &Config, wt: &str) {
+    let key: String = wt
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    for root in stray_roots(cfg) {
+        let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
+        for d in ls.filter(|e| e.file_name().to_string_lossy().starts_with("claude-")) {
+            let _ = std::fs::remove_dir_all(d.path().join(&key));
+        }
+    }
 }
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
@@ -756,6 +773,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             }
         }
     }
+    sweep_scratch(ctx, cfg, r, out)?;
     trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
@@ -779,8 +797,50 @@ pub fn trim_hosts(cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<(
     Ok(())
 }
 
+/// #536: an ended lane's scratch (`<build_root>/.scratch/<agent>`: no herdr agent of that name, not an open issue's
+/// active lane) goes, unless cargo is building there.
+fn sweep_scratch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let root = crate::config::expand(&cfg.limits.build_root).join(crate::spawn::SCRATCH);
+    if cfg.limits.build_root.is_empty() || !root.is_dir() {
+        return Ok(());
+    }
+    let (agents, states) = (host::agents(r)?, fold(&read(&ctx.state)?));
+    let active: std::collections::BTreeSet<&str> = (states.values().filter(|s| !s.done()))
+        .filter_map(|s| Some(s.active_lane()?.1))
+        .collect();
+    for d in std::fs::read_dir(&root)?.flatten().map(|e| e.path()) {
+        let name = d.file_name().unwrap_or_default().to_string_lossy();
+        if active.contains(&*name) || agents.iter().any(|a| a["name"] == *name) || building(&d, 3) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&d).is_ok() {
+            writeln!(out, "builds: removed {} (lane ended)", d.display())?;
+        }
+    }
+    Ok(())
+}
+
+/// #536: cargo holds (flocks) a `.cargo-lock` in `d` or up to `depth` folders below it.
+fn building(d: &Path, depth: u8) -> bool {
+    let held = std::fs::File::open(d.join(".cargo-lock")).is_ok_and(|f| f.try_lock().is_err());
+    held || depth > 0
+        && (std::fs::read_dir(d).into_iter().flatten().flatten())
+            .any(|e| e.file_type().is_ok_and(|t| t.is_dir()) && building(&e.path(), depth - 1))
+}
+
+/// #536: the newest mtime of `d` and its entries.
+fn mtime(d: &Path) -> u64 {
+    let m = |p: &Path| {
+        p.metadata()
+            .map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs())
+    };
+    let ls = std::fs::read_dir(d).into_iter().flatten().flatten();
+    ls.map(|e| m(&e.path())).fold(m(d), u64::max)
+}
+
 /// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
-/// `.cargo-lock` no cargo holds go, until it is under; a building one stays. Bytes freed.
+/// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
+/// too, oldest first. Bytes freed.
 pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
     let root = crate::config::expand(&cfg.limits.build_root);
     if cfg.limits.build_root.is_empty() || !root.is_dir() {
@@ -788,17 +848,21 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
     }
     let (mut total, mut freed) = (du(&root), 0);
     let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
-    let profiles: Vec<_> = ls(&root)
+    let profiles = ls(&root)
         .flat_map(|r| ls(&r))
         .filter(|p| p.join(".cargo-lock").is_file())
-        .collect();
-    for dir in profiles {
+        .map(|p| (p, 0));
+    let scratch = ls(&root.join(crate::spawn::SCRATCH))
+        .filter(|p| p.is_dir())
+        .map(|p| (p, 3));
+    let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
+    dirs.sort();
+    for (_, dir, depth) in dirs {
         if gb(total) <= budget {
             break;
         }
         // Cargo flocks the profile's `.cargo-lock` while it builds there.
-        let lock = std::fs::File::open(dir.join(".cargo-lock"))?;
-        if lock.try_lock().is_err() {
+        if building(&dir, depth) {
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
@@ -810,6 +874,45 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
         }
     }
     Ok(freed)
+}
+
+/// #536: `[limits] stray_roots`, `$TMPDIR` resolved, each once.
+fn stray_roots(cfg: &Config) -> Vec<std::path::PathBuf> {
+    let mut v: Vec<_> = (cfg.limits.stray_roots.iter())
+        .map(|r| match r.as_str() {
+            "$TMPDIR" => std::env::temp_dir(),
+            r => crate::config::expand(r),
+        })
+        .filter_map(|p| p.canonicalize().ok())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// #536: Cargo build folders (holding `CACHEDIR.TAG` or `.rustc_info.json`) lanes left in `/tmp` and `$TMPDIR`,
+/// untouched a day and not building; listed, removed with `yes`.
+pub fn strays(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, yes: bool) -> Result<()> {
+    for root in stray_roots(cfg) {
+        for d in std::fs::read_dir(&root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+        {
+            let cargo = ["CACHEDIR.TAG", ".rustc_info.json"].iter().any(|f| d.join(f).is_file());
+            if !cargo || ctx.now.saturating_sub(mtime(&d)) < 86_400 || building(&d, 1) {
+                continue;
+            }
+            let size = gb(du(&d));
+            if !yes {
+                writeln!(out, "would remove stray build folder {} ({size:.2} GB)", d.display())?;
+            } else if std::fs::remove_dir_all(&d).is_ok() {
+                writeln!(out, "removed stray build folder {} ({size:.2} GB)", d.display())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// #438: `trim_builds` on a remote host, in its shell: `lsof` stands in for cargo's flock (no `lsof`: nothing goes).
