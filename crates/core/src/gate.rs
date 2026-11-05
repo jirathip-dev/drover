@@ -98,6 +98,14 @@ pub fn verdict(
         _ => p.gate(),
     };
     let lp = p.loop_of(stage);
+    // #420: a `--repro` issue's PASS (rev's, not verify's) proves its test fails on the base and passes at the head.
+    let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
+        let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
+        let section = || ok(r, "gh", &view).ok().and_then(|b| repro_section(&b));
+        Some(reproduced(&body, section).or_else(|why| refused("NO_REPRO", why))?)
+    } else {
+        None
+    };
     // #417: a FAIL of a check that shares another's rounds (verify: rev's) is in that check's round at this head.
     let cnt = p.counts(lp);
     // #228: `FAIL (form-only)` with every blocker tagged a form category doesn't count, `form_rounds` times per issue.
@@ -125,7 +133,7 @@ pub fn verdict(
     });
     let shots = crate::verify::shots(&body, Path::new(file));
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
-        "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots});
+        "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
     emit(
         &ctx.state,
         cfg,
@@ -343,6 +351,69 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
         }
         _ => Some("Proof is neither `run` nor `spec`"),
     }
+}
+
+/// #420: a `--repro` PASS's `Repro:` block (to the next heading), `run` or `verify`, or what it lacks: a `run` block
+/// two runs (base plus commit 1, then head), each a fenced command and its fenced output; a `verify` block a `>`
+/// quoted reason found in the PR body's `## Repro` section (`section`).
+fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
+    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
+    let ls: Vec<&str> = body.lines().collect();
+    let at =
+        (ls.iter().position(|l| key(l).starts_with("repro:"))).ok_or("no `Repro: run` or `Repro: verify` block")?;
+    let kind = key(ls[at]).split_off(6);
+    let mut fence = false;
+    let block: Vec<&str> = (ls[at + 1..].iter().copied())
+        .take_while(|l| {
+            let t = l.trim_start();
+            let end = !fence && t.starts_with('#');
+            fence ^= t.starts_with("```");
+            !end
+        })
+        .collect();
+    let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    match kind.trim_start_matches(['*', '_', '`', ' ']) {
+        k if k.starts_with("run") => {
+            let text = block.join("\n");
+            let fenced = text.split("```").skip(1).step_by(2);
+            let n = fenced
+                .filter(|p| !p.split_once('\n').map_or("", |x| x.1).trim().is_empty())
+                .count();
+            (n >= 4).then_some("run").ok_or(format!(
+                "`Repro: run` needs both runs (base plus commit 1, then head), each a fenced command and its fenced \
+                 output; it has {n} of 4 fenced blocks"
+            ))
+        }
+        k if k.starts_with("verify") => {
+            let quote = block.iter().filter_map(|l| l.trim_start().strip_prefix('>'));
+            let quote = flat(&quote.collect::<Vec<_>>().join(" "));
+            if quote.is_empty() {
+                return Err("`Repro: verify` has no `>` quoted reason".into());
+            }
+            let sec = section().ok_or("`Repro: verify` but the PR body has no `## Repro` section")?;
+            (flat(&sec).contains(&quote))
+                .then_some("verify")
+                .ok_or("the `Repro: verify` quote is not in the PR body's `## Repro` section".into())
+        }
+        _ => Err("`Repro:` is neither `run` nor `verify`".into()),
+    }
+}
+
+/// #420: the PR body's `## Repro` section, to the next heading.
+fn repro_section(pr_body: &str) -> Option<String> {
+    let mut ls = pr_body
+        .lines()
+        .skip_while(|l| !l.trim().eq_ignore_ascii_case("## Repro"));
+    ls.next()?;
+    Some(ls.take_while(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n"))
+}
+
+/// #420: a `Repro: verify` PASS at `head` with no verify PASS there.
+fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
+    let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
+    let mut here = events.iter().filter(at);
+    here.clone().any(|e| e.str("repro") == Some("verify"))
+        && !here.any(|e| e.str("stage") == Some("verify") && e.str("verdict") == Some("PASS"))
 }
 
 /// #309: a check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.
@@ -633,6 +704,10 @@ pub fn merge(
             Some((g, p)) => Err(refuse(
                 "SERIAL_UNMARKED",
                 format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+            )),
+            None if unverified(&events, (fleet, issue), &head) => Err(refuse(
+                "NO_REPRO",
+                format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}"),
             )),
             None => Ok(head),
         },
