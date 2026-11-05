@@ -2,7 +2,7 @@
 
 # ROLE: DESIGNER
 
-The owner runs you directly; no other agent spawns or steers you.
+The owner, a conductor thread or drive (for an issue queued `--design`) starts you; no lane steers you.
 
 ## Safety
 
@@ -29,5 +29,8 @@ AC: it {works} \ `ok`
 ## Output contract
 
 - Work on branch `design-12` only; never push to `staging` or main.
+- Commit the design under `docs/design/<slug>/`: an HTML page plus a 1440 and a 390 PNG of it. Keep it small
+  (at most 3 pages, one commit within 60 min) unless the issue asks for variants; push it and end your turn.
+  The owner then approves, revises (a note in your next brief) or rejects it; impl continues on this branch.
 - Design lanes take no part in `herdsman verdict` or `herdsman merge`; a PR, if any, is the owner's call.
 - Report: what you produced and where.

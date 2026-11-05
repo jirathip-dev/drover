@@ -210,7 +210,8 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     let (r, resting) = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?;
     let r = &r;
     let (agent, branch, base, worktree, brief, head) = {
-        let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), issue));
+        let ev = read(&ctx.state)?;
+        let st = fold(&ev).remove(&(fleet.to_string(), issue));
         if st.as_ref().is_some_and(|s| s.state == "merged") {
             return refused(
                 "MERGED",
@@ -230,9 +231,17 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
             )
         } else if role == "design" {
             let head = format!("{fleet} · design #{issue}");
+            // #412: a `--design` issue's design, before impl, commits to the issue branch, where impl goes on.
+            let pre = st
+                .as_ref()
+                .is_none_or(|s| crate::events::DESIGN.contains(&s.state.as_str()));
+            let pre = pre
+                && crate::queue::replay(&ev, fleet)
+                    .iter()
+                    .any(|i| i.issue == issue && i.design);
             (
                 format!("{fleet}-design-{issue}"),
-                format!("design-{issue}"),
+                if pre { impl_branch } else { format!("design-{issue}") },
                 format!("origin/{}", f.integration),
                 head,
             )
@@ -730,6 +739,9 @@ pub fn spawn(
                 ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
                 let _ = on.remove(&p.worktree.join("verdict.md"));
             }
+        }
+        // #412: a design lane's start head is the tree a rejected design goes back to.
+        if p.family == "rev" || p.family == "design" {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
