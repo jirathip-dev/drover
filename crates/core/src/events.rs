@@ -506,7 +506,15 @@ pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
             .filter(|e| e.fleet == a.fleet)
     };
     let on = |k: &str| a.issue.is_some() && later().any(|e| e.kind == k && e.issue == a.issue);
-    let gone = later().any(|e| matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent"));
+    // #446: a `spawn` logged after the ask whose `spawn-started` came before it is the asking lane itself.
+    let own = |sp: &Event| {
+        let started = |e: &Event| {
+            e.kind == "spawn-started" && e.str("agent") == sp.str("agent") && e.str("pane") == sp.str("pane")
+        };
+        sp.kind == "spawn" && events.iter().take_while(|e| !std::ptr::eq(*e, a)).any(started)
+    };
+    let mine = |e: &Event| matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
+    let gone = later().any(|e| mine(e) && !own(e));
     let answered = later()
         .any(|e| e.kind == "decision" && e.str("id") == a.str("id"))
         .then_some("answered");
