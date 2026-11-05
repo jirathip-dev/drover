@@ -653,7 +653,7 @@ fn deny_commands_override_per_fleet_and_log_denials() {
         });
         (
             reason,
-            std::fs::read_to_string(d.join("state/events.jsonl")).unwrap_or_default(),
+            herdsman::events::jsonl(&d.join("state/events.jsonl")).unwrap_or_default(),
         )
     };
     let (r, log) = run("", "docker ps");
@@ -773,7 +773,7 @@ fn a_conductor_command_is_logged_for_its_thread() {
     let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         let (out, d) = hook_cfg(CONFIG, vars, "conductor", input);
-        let log = std::fs::read_to_string(d.join("state/events.jsonl")).unwrap_or_default();
+        let log = herdsman::events::jsonl(&d.join("state/events.jsonl")).unwrap_or_default();
         let rows: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         (
             out,

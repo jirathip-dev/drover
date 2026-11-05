@@ -1,5 +1,6 @@
-//! #122: state writes are atomic (a failed rewrite keeps the old file and logs `state-write-failed` once an
-//! hour), `vapid.key` is never rewritten, and a device's last-seen is written at most hourly.
+//! #122: state writes are atomic (a failed rewrite keeps the old rows and logs `state-write-failed` once an
+//! hour), `vapid.key` is never rewritten, and a device's last-seen is written at most hourly. #344: devices live in
+//! `state.db`, each store one transaction.
 mod common;
 use common::*;
 use herdsman::devices;
@@ -11,21 +12,31 @@ fn chmod(p: &Path, mode: u32) {
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+/// #344: every device write fails (as a full disk would) until `fix`.
+fn break_writes(c: &herdsman::Ctx) -> impl Fn() {
+    let file = herdsman::db::file(&c.state);
+    let db = move || rusqlite::Connection::open(&file).unwrap();
+    let t = "CREATE TRIGGER full BEFORE DELETE ON devices BEGIN SELECT RAISE(ABORT, 'disk full'); END";
+    db().execute(t, []).unwrap();
+    move || assert_eq!(db().execute("DROP TRIGGER full", []).unwrap(), 0)
+}
+
 #[test]
-fn a_failed_write_keeps_the_old_devices_json_and_logs_once_an_hour() {
+fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
     let mut c = ctx(&tmpdir("state-write-fail"), CONFIG);
     devices::request(&c, "iPhone", "10.0.0.2").unwrap().unwrap();
-    let file = c.state.parent().unwrap().join("serve/devices.json");
-    let before = std::fs::read(&file).unwrap();
-    chmod(file.parent().unwrap(), 0o500);
+    let file = herdsman::db::file(&c.state);
+    let before = devices::load(&c);
+    let fix = break_writes(&c);
     assert!(devices::store(&c, &[]).is_err());
     c.now += 60;
     assert!(devices::store(&c, &[]).is_err());
-    let after = std::fs::read(&file).unwrap();
-    let dir: Vec<_> = std::fs::read_dir(file.parent().unwrap()).unwrap().collect();
-    chmod(file.parent().unwrap(), 0o700);
-    assert_eq!(after, before, "the previous devices.json survives byte-for-byte");
-    assert_eq!(dir.len(), 1, "no temp file left");
+    fix();
+    assert_eq!(
+        devices::load(&c),
+        before,
+        "the previous devices survive: the store rolled back"
+    );
     let failed: Vec<_> = read(&c.state)
         .unwrap()
         .into_iter()
@@ -33,18 +44,18 @@ fn a_failed_write_keeps_the_old_devices_json_and_logs_once_an_hour() {
         .collect();
     assert_eq!(failed.len(), 1, "one event an hour");
     assert_eq!(failed[0].str("path"), Some(file.to_str().unwrap()));
-    assert_eq!(failed[0].str("error"), Some("permission denied"), "the error kind only");
+    assert_eq!(failed[0].str("error"), Some("other error"), "the error kind only");
     let hash = &devices::load(&c)[0].hash;
     assert!(
-        !std::fs::read_to_string(&c.state).unwrap().contains(hash.as_str()),
+        !herdsman::events::jsonl(&c.state).unwrap().contains(hash.as_str()),
         "no token hash in the log"
     );
     assert!(
         herdsman::events::plain(&failed[0]).starts_with(&format!("herdsman state-write-failed: {}: ", file.display()))
     );
-    // A write that succeeds replaces the file, still 0600.
+    // A write that succeeds replaces them, the file still 0600.
     devices::store(&c, &[]).unwrap();
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "[]");
+    assert!(devices::load(&c).is_empty());
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
@@ -76,11 +87,10 @@ fn last_seen_is_written_at_most_hourly() {
     assert!(devices::find(&c, &cookie).is_some());
     assert_eq!(used(&c), t0 + 3600);
     // A failed last-seen write still lets the paired device in.
-    let dir = c.state.parent().unwrap().join("serve");
-    chmod(&dir, 0o500);
+    let fix = break_writes(&c);
     c.now = t0 + 7200;
     let found = devices::find(&c, &cookie);
-    chmod(&dir, 0o700);
+    fix();
     assert!(found.is_some());
     assert_eq!(used(&c), t0 + 3600);
 }
@@ -88,7 +98,7 @@ fn last_seen_is_written_at_most_hourly() {
 #[test]
 fn concurrent_device_updates_all_land_without_a_write_failure() {
     let c = ctx(&tmpdir("state-write-race"), CONFIG);
-    // Unlocked plain stores race on the temp file alone: each gets its own name.
+    // Unlocked plain stores race: each is its own transaction.
     std::thread::scope(|s| {
         for _ in 0..16 {
             s.spawn(|| (0..20).for_each(|_| devices::store(&c, &[]).unwrap()));

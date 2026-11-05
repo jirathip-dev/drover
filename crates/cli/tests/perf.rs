@@ -417,8 +417,7 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     for w in &mut snap.waits {
         w.what = format!("snaphit {}", w.what);
     }
-    let file = herdsman::snapshot::file(&c);
-    std::fs::write(&file, serde_json::to_string(&snap).unwrap()).unwrap();
+    herdsman::db::put(&c.state, "board", snap.ts, &snap).unwrap();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
     let mut lanes = 0;
     for path in ["/api/v1/lanes", "/herd.json"] {

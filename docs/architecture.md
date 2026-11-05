@@ -1,12 +1,45 @@
 # Architecture and state
 
-herdsman has no daemon and no database. Every command reads the config, folds the event
-log into the current state, acts, and appends what it did.
+herdsman has no daemon. Every command reads the config, folds the event log into the current state, acts, and
+appends what it did.
+
+## State database (#344)
+
+The state lives in one SQLite file, `state.db` beside the `FLEET_STATE` path, in WAL mode with a busy timeout, mode
+0600 (`crates/core/src/db.rs`). This lifts the old "no database" rule for one dependency, `rusqlite` (bundled), for
+two reasons: **transactions** (an append is one insert, so concurrent writers never tear or lose a row, and an
+import or a device change is all or nothing) and **leases** (a lock can no longer go stale).
+
+| Table | What |
+|---|---|
+| `events` | the log: `seq`, `ts`, `fleet`, `issue`, `type`, the event's JSON, `archived`; indexed by (fleet, issue) and type |
+| `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
+| `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
+| `snapshot` | `board`: #337's reads; `states`: #343's fold checkpoint |
+
+**Leases:** a row names its holder (pid and host), when it was taken and when it expires. Taking one is an atomic
+insert-if-free in one transaction: free means no row, an expired row, or a holder pid on this host that no longer
+runs. A dropped guard deletes its own row; a holder that died leaves a row that the next taker replaces, so
+nothing has to sweep it first.
+
+**Migration:** the first open of the database (any command) and `herdsman migrate` import whatever is left beside it
+from before #344: `events.jsonl`, its archives `events-YYYYMM.jsonl.gz` (their rows `archived`), `serve/devices.json`
+and `webpush/subs.json`. The import runs in one transaction and is checked: the fold of the database's events plus
+the files' must equal the fold after the import, or nothing is imported. Each file is then renamed to
+`<name>.migrated`, which is the backup. A second run finds nothing to import. Rows keep their seq unless the database
+already has a later one (an old build that wrote `events.jsonl` again: its rows are added after).
+The owner's own state dir (`~/.local/state/herdsman`, or the pre-rename `fleet`) is the exception: no command imports
+there on its own, and `herdsman migrate` refuses it without `--live`. A test build run without `FLEET_STATE` would
+otherwise take the log away from the installed build, which still reads `events.jsonl`.
+
+**Export:** `herdsman events --jsonl` prints the whole log in its old format, one event per line with its seq, for
+readers outside herdsman (scripts, a cron watchdog). Remote hosts each keep their own database; a lane there
+forwards its writes to the main host (#275), and `check` reads a host's asks through its export (or its old log
+file, on an older build).
 
 ## Event log
 
-`~/.local/state/herdsman/events.jsonl` (`FLEET_STATE`) is append-only, one JSON object per
-line, fsynced on every write. A `spawn` event, shortened:
+Events are append-only. A `spawn` event, shortened:
 
 ```json
 {"ts":1761800000,"fleet":"app","issue":12,"type":"spawn","role":"impl","agent":"app-impl-12","pane":"w1:p2"}
@@ -14,16 +47,15 @@ line, fsynced on every write. A `spawn` event, shortened:
 
 `ts` is seconds since the epoch, `type` is the event kind, and the other fields are the
 event's data. Issue state (`queued → impl → review(n) → fix(n) → ready → merged`, plus
-`blocked` and `needs-human`) and the queue are folds over this log. A writer that died
-mid-line leaves a torn tail; the next append terminates it first so the two records never
-merge. A merged issue stays `merged`; `spawn` and `adopt` on it are refused with `MERGED`.
+`blocked` and `needs-human`) and the queue are folds over this log. An old JSONL log whose
+writer died mid-line has a torn tail; its import skips it. A merged issue stays `merged`; `spawn` and `adopt` on it are refused with `MERGED`.
 
 ## Paths
 
 | Path | What |
 |---|---|
 | `~/.config/herdsman/fleet.toml` (`FLEET_CONFIG`) | config: fleets, roles, limits, notifiers |
-| `~/.local/state/herdsman/events.jsonl` (`FLEET_STATE`) | the event log |
+| `~/.local/state/herdsman/events.jsonl` (`FLEET_STATE`) | names the state dir; `state.db` beside it holds the log (#344), the file itself only before its import |
 | `~/.local/state/herdsman/cache/` | cached issue specs and PR/CI reads |
 | `~/.herdr/worktrees/` (`FLEET_WORKTREES`) | lane worktrees, `<repo>/issue-<n>` |
 | `~/.config/herdsman/claude/<profile>/` | `settings.json` (PreToolUse hook), `role.md`, `fleet.md` |
@@ -61,6 +93,7 @@ herdr argv) and `gh` (cached GitHub reads).
 | `lib` | `Ctx` (paths, clock); `ask`, `answer`, `asks` |
 | `config` | fleet.toml: load, validate, in-place edits that keep every other byte |
 | `events` | the append-only log, the state fold, notifiers |
+| `db` | the state database: events, leases, devices, push, snapshots; the import of the old files (#344) |
 | `pipeline` | a fleet's stages and where each outcome goes ([pipeline.md](pipeline.md)) |
 | `queue` | `queue`, `next`, `board` |
 | `drive`, `timer` | one pass of the loop; the jobs that run it (`setup`, `timer`, `tick`) and the Services rows |

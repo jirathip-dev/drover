@@ -1,4 +1,4 @@
-//! #337: the board's one snapshot (`<state dir>/snapshot.json`): every read the board, `status` and `hosts` make, taken
+//! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
 //! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, States};
@@ -10,7 +10,6 @@ use crate::{herdr, Ctx};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Each read's stdout by command line (None: it failed), and when the step took them.
@@ -36,12 +35,9 @@ pub fn remote(prog: &str, args: &[String]) -> bool {
     prog == "ssh" || prog == herdr::BIN && args.first().is_some_and(|a| a == "--machine")
 }
 
-pub fn file(ctx: &Ctx) -> PathBuf {
-    ctx.state.with_file_name("snapshot.json")
-}
-
+/// #344: the `board` row of the database's snapshots.
 pub fn load(ctx: &Ctx) -> Option<Snapshot> {
-    serde_json::from_str(&std::fs::read_to_string(file(ctx)).ok()?).ok()
+    crate::db::get(&ctx.state, "board").map(|s| s.1)
 }
 
 pub fn out(v: Option<String>) -> Out {
@@ -243,8 +239,6 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
         waits: ws,
         key,
     };
-    let text = serde_json::to_string(&snap).unwrap_or_default();
-    let tmp = crate::devices::tmp_name(&file(ctx));
-    let _ = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, file(ctx)));
+    let _ = crate::db::put(&ctx.state, "board", ctx.now, &snap);
     s
 }

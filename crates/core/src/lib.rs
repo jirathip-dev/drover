@@ -6,6 +6,7 @@ mod cli;
 pub mod cloud;
 pub mod conductor;
 pub mod config;
+pub mod db;
 pub mod design;
 pub mod devices;
 pub mod doctor;

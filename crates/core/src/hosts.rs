@@ -238,7 +238,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
 /// #275: the asks a lane on host `name` logged in that host's own log (before lanes forwarded them), each imported once
 /// under a new id with `from`, agent its newest lane there; #283: only unanswered, recent, open, unmarked ones, no push.
 fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
-    let Some(text) = on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl")) else {
+    // #344: the host's own database through its export; a host on an older build: its log file.
+    let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+    let text = ok(on, &exe, &["events", "--jsonl"]).ok();
+    let Some(text) = text.or_else(|| on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl"))) else {
         return;
     };
     let events = read(&ctx.state).unwrap_or_default();

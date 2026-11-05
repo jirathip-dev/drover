@@ -328,7 +328,7 @@ pub struct Server<'a> {
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
-    snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
+    snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
 }
@@ -762,14 +762,12 @@ impl<'a> Server<'a> {
         let now = crate::now();
         let known: Vec<String> = devices::load(self.ctx).into_iter().map(|d| d.hash).collect();
         lock(&self.clients).retain(|c| c.1.as_ref().is_none_or(|h| known.contains(h)));
-        let log = std::fs::metadata(&self.ctx.state)
-            .ok()
-            .map(|m| (m.len(), m.modified().ok()));
+        let log = Some((crate::db::last_seq(&self.ctx.state), None));
         let kicked = self.kick.swap(false, Relaxed);
         if kicked {
             self.purge();
         }
-        let driving = self.ctx.state.with_file_name("drive.lock").exists();
+        let driving = crate::drive::running(self.ctx, "");
         if log != w.log {
             let ev = read(&self.ctx.state).unwrap_or_default();
             let top = ev.last().map_or(0, |e| e.seq);
@@ -866,11 +864,9 @@ impl<'a> Server<'a> {
         )
     }
 
-    /// #337: the step's snapshot (reloaded when its file changes) and the file's mtime; none: empty.
-    fn snapshot(&self) -> (Option<std::time::SystemTime>, Arc<Snapshot>) {
-        let at = std::fs::metadata(crate::snapshot::file(self.ctx))
-            .and_then(|m| m.modified())
-            .ok();
+    /// #337: the step's snapshot (reloaded when a new one is saved) and its version (#344); none: empty.
+    fn snapshot(&self) -> (Option<u64>, Arc<Snapshot>) {
+        let at = crate::db::stamp(&self.ctx.state, "board");
         let mut s = lock(&self.snap);
         if s.0 != at {
             *s = (at, Arc::new(crate::snapshot::load(self.ctx).unwrap_or_default()));
@@ -2879,6 +2875,8 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         Canned::default()
     };
+    // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
+    let _scratch = demo.then(crate::db::Scratch::start);
     let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, read(&ctx.state)?);
     let ctx = &Ctx {
         now: if demo {
