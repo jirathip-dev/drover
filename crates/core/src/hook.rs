@@ -133,7 +133,15 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))
                 || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
-            if writes {
+            // #504: a conductor's shell writes its own thread folder too, when every protected word is a file there.
+            let own = || {
+                t.iter()
+                    .map(|w| w.rsplit('>').next().unwrap_or(w))
+                    .filter(|w| protected_path(w, p).is_some())
+                    // The shell expands braces, globs, variables and escapes after this check sees the word.
+                    .all(|w| !expand_home(w).contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(w, p))
+            };
+            if writes && !own() {
                 return Some(format!(
                     "writing under {pp} is blocked; use `herdsman set` / `herdsman profiles sync`"
                 ));
