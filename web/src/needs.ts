@@ -3,7 +3,7 @@
 import type { Blocked, NeedIssue, NeedsTab } from '../../assets/types/api';
 import { enc } from './chat.ts';
 import { esc } from './events.ts'; // node runs this file as is: the extension
-import { answer, form, hidden, prLine } from './queue.ts';
+import { answer, asked, form, hidden, prLine } from './queue.ts';
 
 /** What a card's forms read: the board takes forms (`rw`), posts them (`live`), the device is paired, offers Pair. */
 export type Flags = Pick<NeedsTab, 'now' | 'rw' | 'live' | 'paired' | 'pair'>;
@@ -46,7 +46,7 @@ export function tab(d: NeedsTab): string {
     const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, a.ask, 'Send') : '';
     // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
     const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
-    return `<div class=ask><p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${esc(a.ask.question)}</p>${pngs.join('')}${f}</div>`;
+    return `<div class=ask><p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${asked(a)}</p>${pngs.join('')}${f}</div>`;
   });
   return age + asks.join('') + d.blocked.map(b => blocked(d, b)).join('') + d.issues.map(s => issue(d, s)).join('') + `<i id=chn hidden data-n=${d.choosing}></i>`;
 }

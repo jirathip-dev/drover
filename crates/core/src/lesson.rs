@@ -117,6 +117,29 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             continue;
         }
         std::fs::write(&at, ctx.now.to_string())?;
+        // #517: a fleet under a week old, or with under 2 FAIL verdicts this week, has no repeated class to find.
+        let (week, events) = (ctx.now.saturating_sub(7 * 86400), read(&ctx.state)?);
+        let young = events.iter().find(|e| e.fleet == *name).is_none_or(|e| e.ts > week);
+        let fails = (events.iter())
+            .filter(|e| e.fleet == *name && e.ts >= week && e.kind == "verdict" && e.str("verdict") == Some("FAIL"))
+            .count();
+        if young || fails < 2 {
+            let why = if young {
+                "fleet under a week old"
+            } else {
+                "under 2 FAIL verdicts this week"
+            };
+            writeln!(out, "{name} lesson skipped: {why}")?;
+            let e = Event::new(
+                ctx.now,
+                name,
+                None,
+                "lesson-skipped",
+                json!({"why": why, "fails": fails}),
+            );
+            crate::events::append(&ctx.state, &e)?;
+            continue;
+        }
         if let Err(e) = run(ctx, cfg, r, out, name) {
             writeln!(out, "{name} lesson: {e:#}")?;
         }
@@ -150,4 +173,9 @@ pub fn done(
         Event::new(ctx.now, fleet, Some(n), "closed", json!({"why": why})),
     )?;
     Ok(writeln!(out, "closed {fleet}#{n}: {why}")?)
+}
+
+/// #517: the one prompt a lesson lane gets when its turn ends with no push and no `done`.
+pub fn prompt(fleet: &str, n: u64) -> String {
+    format!("no repeated class? end with `herdsman done --no-change \"no repeated class\" {fleet} {n}`")
 }

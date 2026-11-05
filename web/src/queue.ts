@@ -1,7 +1,7 @@
 // #268: the Queue tab (#162), drawn from API v1's `queue` (pure: tests/queue_board.rs runs it under node). A card per
 // fleet, needing you first: its drive line, rows (stage chips, lane, PR line, notes, [change], ▲/▼, the lanes list),
 // done today, the backlog; and each fleet's [config] sheet. serve.js then groups, graphs and folds the rows.
-import type { Ask, ConfigSheet, Drive, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow } from '../../assets/types/api';
+import type { Ask, ConfigSheet, Drive, NeedAsk, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow } from '../../assets/types/api';
 import { esc } from './events.ts'; // node runs this file as is (tests/queue_board.rs): the extension
 
 /** A form: a live board's posts; an export's are inert. */
@@ -15,6 +15,12 @@ export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string
   const opts = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
   const btns = opts.map(([o, n]) => `<button name=choice value=${n}>${n}. ${esc(o)}${n === a.recommend ? ' <small>(recommended)</small>' : ''}</button>`).join('');
   return `${form(d)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
+}
+
+/** #517: an open ask's question and, asked in a thread, `asked in <title> · <id>` (a tap opens it, serve.js). */
+export function asked(a: NeedAsk): string {
+  const t = a.thread == null ? '' : ` <span class=m>· asked in <a href=#chat class=ath data-go="${esc(a.thread)}">${esc(a.title || a.thread)} · ${esc(a.thread)}</a></span>`;
+  return `${esc(a.ask.question)}${t}`;
 }
 
 /** #166: the drive line; a tap lists the meta lines, then each action in words, a tap on one its raw code. */
@@ -59,6 +65,7 @@ function row(d: QueueTab, c: QueueCard, r: QueueRow): string {
   if (r.blocked_by != null) lines.push(`<span class=r>blocked by #${r.blocked_by}</span>`);
   if (r.check) lines.push('<span class=m>needs-check: from the backlog, spec not checked</span>');
   lines.push(...r.notes.map(x => `<span class=r>${esc(x)}</span>`));
+  if (r.open != null) lines.push(`<span><b>asks:</b> ${asked(r.open)}</span>${d.rw ? answer(d, r.open.ask, 'Send') : ''}`);
   if (r.decided != null) lines.push(`<span>decided by default: ${esc(r.decided)}</span>${r.ask ? answer(d, r.ask, 'change') : ''}`);
   if (r.mv) {
     const mv = (label: string, key: string, to: number) => `${form(d)}${hidden('mv', c.name, d.mtime)}<input type=hidden name=issue value=${n}><input type=hidden name=${key} value=${to}><button>${label}</button></form>`;

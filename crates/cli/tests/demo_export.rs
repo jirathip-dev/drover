@@ -151,8 +151,9 @@ fn demo_page_is_inert_and_relative() {
     );
     assert!(page.contains("Demo with fake data. Install herdsman to run your own."));
     assert_eq!(page.matches("<span class=g>merged</span>").count(), 4, "4 merges today");
-    // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down.
-    assert_eq!(cards.matches("<div class=ask>").count(), 2, "two needs-you cards");
+    // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down;
+    // #517: #21's thread ask (t4's q33) is tied to an issue, so it is here too.
+    assert_eq!(cards.matches("<div class=ask>").count(), 3, "three needs-you cards");
     let card = &cards[cards.find("<div class=ask>").unwrap()..];
     assert!(
         card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-api · #21 · 18m</span>"),
