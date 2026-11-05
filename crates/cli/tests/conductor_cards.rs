@@ -50,6 +50,8 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
 /// herdr with `agents` live, ready to start a conductor or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", "a")
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_B", "b")
         .reply("herdr agent list", agents)
         .reply(
             "herdr workspace create",
@@ -167,14 +169,8 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 
 #[test]
 fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session() {
-    let d = tmpdir("cards-switch-env");
-    let env = d.join("tokens.env");
-    std::fs::write(&env, "CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\n").unwrap();
-    let accounts = format!(
-        "[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n",
-        env.display()
-    );
-    let c = setup("cards-switch", "fallback = [\"claude:A\", \"claude:B\"]", &accounts);
+    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
+    let c = setup("cards-switch", "fallback = [\"claude:A\", \"claude:B\"]", accounts);
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
     let first = kinds(&c, "conductor-start")[0].clone();
@@ -183,12 +179,13 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
 
     let banner = "You've hit your limit · resets 6:40pm";
     let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
+    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
     let (code, out) = run(
         &herdsman::Ctx {
             now: T + 60,
             ..c.clone()
         },
-        &r,
+        &sh,
         &["check"],
     );
     assert_eq!(code, 0, "{out}");
@@ -209,10 +206,7 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
         start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
         "{start}"
     );
-    assert!(
-        calls.iter().any(|c| c.contains("CLAUDE_CODE_OAUTH_TOKEN_B")),
-        "on B: {calls:?}"
-    );
+    assert_eq!(*sh.2.borrow(), ["b"], "on B: {calls:?}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(
@@ -264,17 +258,11 @@ fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
     );
 
     // On account A with a `claude A` login configured: the card opens that login, and B carries on.
-    let d = tmpdir("cards-signin-env");
-    let env = d.join("tokens.env");
-    std::fs::write(&env, "CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\n").unwrap();
-    let extra = format!(
-        "[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {{CLAUDE_CONFIG_DIR = \"~/accounts/A\"}}\n",
-        env.display()
-    );
+    let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
     let c = setup(
         "cards-signin-account",
         "fallback = [\"claude:A\", \"claude:B\"]",
-        &extra,
+        extra,
     );
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
@@ -292,23 +280,9 @@ fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
     assert_eq!(kinds(&c, "conductor-start")[1].str("account"), Some("B"));
 }
 
-/// `Fake` that also records each `run_in` stdin.
-struct Stdin(Fake, Shared<Vec<String>>);
-
-impl Runner for Stdin {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        self.1.borrow_mut().push(input.into());
-        self.0.run(prog, args)
-    }
-}
-
 #[test]
 fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_reference_injects_at_spawn() {
     let value = "hunter2-SECRET-value";
-    let hex: String = value.bytes().map(|b| format!("{b:02x}")).collect();
     let c = setup(
         "cards-secret",
         "",
@@ -325,13 +299,8 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         &["secret", "request", "t1", "API_KEY", "--why", "the search API"],
     );
     assert_eq!(code, 0, "{out}");
-    let r = Stdin(
-        herdr(NO_AGENTS).reply("security -i", "").reply(
-            "security find-generic-password -a herdsman -s herdsman/sendmeter/API_KEY",
-            "",
-        ),
-        Shared::default(),
-    );
+    let f = herdr(NO_AGENTS);
+    let r = Shell(&f, "API_KEY", Shared::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let form = format!("op=secret&t=t1&name=API_KEY&act=save&value={value}");
     // Not a paired device: no card input, and the POST is refused before the keychain.
@@ -341,33 +310,28 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         "{guest}"
     );
     assert!(req(&s, "/thread", &form, "", T).starts_with("HTTP/1.1 401"));
-    assert!(!r.0.called("security"));
+    assert!(!f.store.borrow().contains_key("herdsman/sendmeter/API_KEY"));
 
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert!(chat(&s, &cookie, T).contains("<form class=chs data-t=\"t1\" data-name=\"API_KEY\"><input type=password"));
     let res = req(&s, "/thread", &form, &cookie, T + 10);
     assert_eq!(body(&res), "secret API_KEY set ✓ (by owner)\n", "{res}");
-    // The value went to `security -i` on stdin, hex-encoded, and nowhere else.
-    assert_eq!(
-        *r.1.borrow(),
-        vec![format!(
-            "add-generic-password -U -a herdsman -s herdsman/sendmeter/API_KEY -X {hex}\n"
-        )]
-    );
-    let calls = r.0.calls.borrow().join("\n");
+    // #441: the value went to the OS store and nowhere else.
+    assert_eq!(f.store.borrow()["herdsman/sendmeter/API_KEY"], value);
+    let calls = f.calls.borrow().join("\n");
     let log = herdsman::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
     for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {
         assert!(
-            !text.contains(value) && !text.contains(&hex),
+            !text.contains(value),
             "the secret is in {what}: {text}"
         );
     }
     assert!(show.contains("secret API_KEY set ✓ (by owner)") && !page.contains("class=chs"));
-    // `secret:API_KEY` reaches the lane's own shell as a keychain read: the conductor's start exported it.
-    let want = "API_KEY=\"$(security find-generic-password -a herdsman -s 'herdsman/sendmeter/API_KEY' -w 2>/dev/null || security find-generic-password -a herdsman -s 'herdsman/all/API_KEY' -w)\"";
-    assert!(calls.contains(want), "{calls}");
+    // `secret:API_KEY` reaches the lane's own shell from the file spawn delivered: the conductor's start sourced it.
+    assert_eq!(*r.2.borrow(), [value], "{calls}");
+    assert!(calls.contains("&& . '") && !f.inputs.borrow().iter().any(|i| i.1.contains(value)));
     assert!(
         body(&req(&s, "/thread", &form, &cookie, T + 30)).contains("NO_SUCH_REQUEST"),
         "one value per request"
@@ -388,14 +352,10 @@ struct Bot {
 
 impl Runner for Bot {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        if prog == "security" {
-            return Ok(Out {
-                code: 0,
-                stdout: "TOKEN123:abc\n".into(),
-                stderr: String::new(),
-            });
-        }
         self.herdr.run(prog, args)
+    }
+    fn secret(&self, _: &str) -> anyhow::Result<Option<String>> {
+        Ok(Some("TOKEN123:abc".into()))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         self.herdr.run(prog, args)?; // the argv, for the token check

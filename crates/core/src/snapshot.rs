@@ -164,6 +164,12 @@ impl Runner for Snap<'_> {
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
     }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.r.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
+        self.r.set_secret(svc, value)
+    }
 }
 
 /// The board's lanes: herdr's agents (`list`, every remote host's added) joined with the log.

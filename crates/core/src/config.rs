@@ -147,7 +147,7 @@ pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
-/// The key is read from `env_file` (else `[accounts].accounts_env`, else the environment), never from fleet.toml.
+/// The key is read from `env_file` (else the store's `all` secret `key_env`, else the environment), never from fleet.toml.
 #[derive(Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
@@ -185,12 +185,11 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> env var holding its token, plus the settings below.
+/// `[accounts]`: account name -> its token's secret name (#441: in the store, `herdsman accounts import`), plus the
+/// settings below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
-    /// Env file (`VAR=value` lines) the tokens are read from.
-    pub accounts_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -205,7 +204,6 @@ pub struct Accounts {
 impl Default for Accounts {
     fn default() -> Self {
         Accounts {
-            accounts_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
@@ -584,6 +582,11 @@ impl Config {
             .find(|v| !crate::secret::name_ok(v.1))
         {
             bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
+        }
+        if c.accounts.names.contains_key("accounts_env") {
+            bail!(
+                "[accounts].accounts_env is retired (#441): run `herdsman accounts import <file>`, then drop the line"
+            );
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");

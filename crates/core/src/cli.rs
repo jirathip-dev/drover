@@ -548,6 +548,11 @@ enum StatsCmd {
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
+    /// Owner only: copy each account's token from the old tokens.env into the secret store, checked by hash
+    Import {
+        #[arg(default_value = "~/.config/herdsman/accounts/tokens.env")]
+        file: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -911,7 +916,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             demo,
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
-        Cmd::Serve { addr, read_only, .. } => (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?,
+        Cmd::Serve { addr, read_only, .. } => {
+            crate::secret::probe(r)?; // #441: no usable store, no board
+            (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
+        }
         Cmd::Push { cmd: PushCmd::Test } => {
             let cfg = Config::load(&ctx.config)?;
             let Some(sub) = cfg.webpush_sub() else {
@@ -1131,6 +1139,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Accounts {
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
+                Cmd::Accounts {
+                    cmd: Some(AccountsCmd::Import { file }),
+                } => crate::secret::import(ctx, &cfg, r, out, &file)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },

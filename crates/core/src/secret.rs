@@ -1,12 +1,13 @@
-//! #387: secrets in the host's keychain as `herdsman/<fleet>/<NAME>`. The owner saves one from a thread's masked card
-//! (paired devices only); a lane gets it from `secret:<NAME>` in its fleet's `env`, read by its own shell at spawn. The
-//! value never reaches the event log, the chat, a command line or a lane's output.
+//! #387: secrets as `herdsman/<fleet>/<NAME>`; #441: only in the main host's OS store (`Runner::secret`, the keyring crate).
+//! The owner saves one from a thread's masked card (paired devices only) or imports `tokens.env`; spawn delivers a
+//! lane's `secret:<NAME>` env and account token to its host (`spawn::deliver`). The value never reaches the event
+//! log, the chat, a command line or a lane's output.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
-use crate::runner::{argv, Runner};
+use crate::runner::Runner;
 use crate::{conductor, Ctx};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::io::Write;
 
@@ -23,28 +24,31 @@ pub fn name_ok(name: &str) -> bool {
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
 }
 
-/// The shell expression a lane's pane evaluates for `secret:<name>`: the fleet's, else the `all` one.
-pub fn shell(fleet: &str, name: &str) -> String {
-    let get = |f: &str| {
-        format!(
-            "security find-generic-password -a herdsman -s '{}' -w",
-            service(f, name)
-        )
-    };
-    format!("\"$({} 2>/dev/null || {})\"", get(fleet), get("all"))
+/// `fleet`'s secret `name`, else the `all` one; None when neither is set.
+pub fn lookup(r: &dyn Runner, fleet: &str, name: &str) -> Result<Option<String>> {
+    match r.secret(&service(fleet, name))? {
+        None if fleet != "all" => r.secret(&service("all", name)),
+        v => Ok(v),
+    }
+}
+
+/// #441: a main host with no usable OS store refuses at startup; there is no plain-file fallback.
+pub fn probe(r: &dyn Runner) -> Result<()> {
+    match r.secret(&service("all", "HERDSMAN_PROBE")) {
+        Ok(_) => Ok(()),
+        Err(e) => refused(
+            "NO_STORE",
+            format!("this host has no usable secret store ({e:#}); herdsman keeps secrets nowhere else"),
+        ),
+    }
 }
 
 /// The keychain item's password (`all`'s `TELEGRAM_BOT_TOKEN`, …), for herdsman's own use.
 pub fn get(r: &dyn Runner, fleet: &str, name: &str) -> Result<String> {
     let svc = service(fleet, name);
-    let o = r.run(
-        "security",
-        &argv(&["find-generic-password", "-a", "herdsman", "-s", &svc, "-w"]),
-    )?;
-    if o.code != 0 {
-        bail!("no keychain item {svc}: `herdsman secret request <thread> {name}` asks the owner for it");
-    }
-    Ok(o.stdout.trim_end_matches('\n').into())
+    r.secret(&svc)?.with_context(|| {
+        format!("no keychain item {svc}: `herdsman secret request <thread> {name}` asks the owner for it")
+    })
 }
 
 /// `herdsman secret request <thread> <NAME> --why`: a masked-input card in the thread.
@@ -90,15 +94,8 @@ pub fn settle(
         if v.is_empty() || v.len() > 8192 {
             return refused("BAD_VALUE", "a secret is 1 to 8,192 bytes");
         }
-        // `-X` takes it hex-encoded, on stdin: never argv, so never `ps`.
-        let hex: String = v.bytes().map(|b| format!("{b:02x}")).collect();
-        let add = format!("add-generic-password -U -a herdsman -s {svc} -X {hex}\n");
-        let o = r.run_in("security", &argv(&["-i"]), &add)?;
-        let has = r.run(
-            "security",
-            &argv(&["find-generic-password", "-a", "herdsman", "-s", &svc]),
-        )?;
-        if o.code != 0 || has.code != 0 {
+        r.set_secret(&svc, Some(v))?;
+        if r.secret(&svc)?.as_deref() != Some(v) {
             bail!("the keychain did not take {svc}");
         }
         "secret-set"
@@ -135,15 +132,42 @@ pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
 
 /// `herdsman secret rm <fleet|all> <NAME>` (owner only): delete the keychain item; logs `secret-rm`.
 pub fn rm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, name: &str) -> Result<()> {
-    let svc = service(fleet, name);
-    crate::runner::ok(
-        r,
-        "security",
-        &["delete-generic-password", "-a", "herdsman", "-s", &svc],
-    )?;
+    r.set_secret(&service(fleet, name), None)?;
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, fleet, None, "secret-rm", json!({"name": name})),
     )
+}
+
+/// #441 `herdsman accounts import [FILE]` (owner only): each `[accounts]` token in the old `tokens.env` copied into the
+/// store as `all`'s secret of its variable name, read back and checked by sha256; the file is left for the owner.
+pub fn import(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, file: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let path = crate::config::expand(file);
+    let text = std::fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
+    let hash = |v: &str| Sha256::digest(v.as_bytes());
+    for (account, var) in &cfg.accounts.names {
+        let Some(v) = crate::usage::env_value(&text, var).filter(|v| !v.is_empty()) else {
+            writeln!(out, "{account:<8} ✗ {var} not in {}", path.display())?;
+            continue;
+        };
+        let svc = service("all", var);
+        r.set_secret(&svc, Some(&v))?;
+        let back = r.secret(&svc)?.unwrap_or_default();
+        anyhow::ensure!(
+            hash(&back) == hash(&v),
+            "{svc}: the store's copy does not match {}",
+            path.display()
+        );
+        let d = json!({"name": var, "account": account, "by": "owner"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "secret-set", d))?;
+        writeln!(out, "{account:<8} ✓ {svc} (sha256 matches)")?;
+    }
+    writeln!(
+        out,
+        "lanes now read the store, never {}; delete it when you are ready",
+        path.display()
+    )?;
+    Ok(())
 }
