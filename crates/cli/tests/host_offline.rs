@@ -225,3 +225,35 @@ fn kill_and_close_take_a_host_when_names_collide() {
     assert_eq!(code, 3, "killed once: {out}");
     assert!(out.contains("NO_SUCH_AGENT"), "{out}");
 }
+
+#[test]
+fn another_hosts_agent_list_is_cut_off_at_its_limit() {
+    use herdsman::runner::{argv, limit, Real};
+    use std::time::{Duration, Instant};
+    let list = argv(&["--machine", "air", "agent", "list"]);
+    assert_eq!(limit("herdr", &list), Some(Duration::from_secs(20)));
+    assert_eq!(
+        limit("herdr", &argv(&["agent", "list"])),
+        None,
+        "this host's own herdr waits"
+    );
+    assert_eq!(
+        limit("herdr", &argv(&["--machine", "air", "agent", "start"])),
+        None,
+        "only a read is cut off"
+    );
+    let t = Instant::now();
+    let o = Real
+        .within("sh", &argv(&["-c", "sleep 30"]), "", Some(Duration::from_millis(300)))
+        .unwrap();
+    assert_eq!(o.code, 124, "{o:?}");
+    assert!(o.stderr.contains("no answer"), "{}", o.stderr);
+    assert!(
+        t.elapsed() < Duration::from_secs(5),
+        "killed at its limit, not after the sleep"
+    );
+    let o = Real
+        .within("sh", &argv(&["-c", "echo up"]), "", Some(Duration::from_secs(5)))
+        .unwrap();
+    assert_eq!((o.code, o.stdout.trim()), (0, "up"), "an answer in time is kept");
+}
