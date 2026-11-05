@@ -5,6 +5,8 @@
   const V = DBG.get('audit'); // serve.js read the query before it tidied the URL
   if (!V) return;
   const hp = n => H.querySelectorAll('.hp')[n];
+  // #440: Host and Events are System's Hosts & health and Activity, opened over the Queue tab.
+  const sys = s => { tab('queue'); sysopen(s); };
   // #68: each inline control's failure path with a canned long reply (the old 401 pair text, a 140-char refusal,
   // a send error); measured after each step (`mid`), then with the rest at the end.
   const F = window.fetch, early = [], wait = () => new Promise(r => setTimeout(r, 300));
@@ -21,7 +23,7 @@
   // one tab is active, its label on the accent fill.
   const ranked = () => {
     const t = [...$$('#host>.grp .gn')].map(g => g.textContent).join(' ');
-    if (!/^HOSTS FLEET DISK SERVICES (FLEETS )?ALERTS$/.test(t)) early.push(`Host groups not in order: ${t}`);
+    if (!/^HOSTS FLEET DISK SERVICES( FLEETS)?$/.test(t)) early.push(`Host groups not in order: ${t}`);
     if (!$('#host .hcd .tag')?.closest('.hcd').matches(':first-child')) early.push('the main host is not the first card');
     const on = $$('nav a.on'), probe = B.appendChild(Object.assign(document.createElement('i'), { style: 'color:var(--l)' }));
     const accent = getComputedStyle(probe).color;
@@ -44,13 +46,13 @@
     if (new Set(xs.values()).size > 1) early.push(`Host values start at different x: ${[...xs].map(([k, x]) => `${k} ${x}`).join(', ')}`);
     gs.forEach((g, i) => { g.open = was[i]; });
   };
-  // #173: a fleet's [config] sheet, scrolled to its Pipeline group.
+  // #173: a fleet's [config] (#440: its row in System's Fleets), scrolled to its Pipeline group.
   const pipe = async fleet => {
     tab('queue');
     const b = [...$$('#queue .cfg')].find(b => b.dataset.f === fleet);
     if (!b) return early.push(`no [config] button for ${fleet} in the demo`);
-    await config(b);
-    const g = $('#sheet .pp');
+    b.click();
+    const g = [...$$('.sfl')].find(d => d.dataset.f === fleet && d.open)?.querySelector('.pp');
     if (!g?.querySelector(`.pg[aria-label^="${fleet} "]`)) return early.push(`no pipeline graph for ${fleet} in the demo`);
     g.scrollIntoView();
   };
@@ -87,10 +89,10 @@
     queue: () => tab('queue'),
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
     'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
-    'events-rows': () => { tab('events'); $('#needs').hidden = true; },
+    'events-rows': () => { sys('activity'); $('#needs').hidden = true; },
     // #266 gate 2: the first [important] row open (links, time, the raw event), and the [all] view.
-    'events-open': () => { tab('events'); $('#needs').hidden = true; $('#events [data-v=imp] .er').open = true; },
-    'events-all': () => { tab('events'); $('#needs').hidden = true; $('#events .chips [data-k=all]').click(); },
+    'events-open': () => { sys('activity'); $('#needs').hidden = true; $('#events [data-v=imp] .er').open = true; },
+    'events-all': () => { sys('activity'); $('#needs').hidden = true; $('#events .chips [data-k=all]').click(); },
     'queue-open': () => { tab('queue'); const d = $('#queue details.q'); d.open = true; d.scrollIntoView(); },
     // #205: acme-web #38's open card lists its 3 lanes newest first: one line each (ellipsis), a 44 px row; gone ones are no link.
     // #218: renamed to real-length names (≥ 30 chars), moved to the top: the name ellipsises inside the card, the age stays
@@ -140,7 +142,7 @@
       $('#queue').prepend([...$$('#queue .fc')].find(c => c.querySelector('.dp li details'))); // the fleet with a pass, not `drive · no pass yet`
     },
     // #162: the [config] sheet of the fleet that needs you (acme-api): every group, the role pickers.
-    config: () => { tab('queue'); config($('#queue .cfg')); },
+    config: () => { tab('queue'); $('#queue .cfg').click(); },
     // #166: the driven fleet's result line in its 3 colours: the demo's amber pass (open, an action's code open), then
     // green and red copies under it, its card moved to the top; each must read in its colour.
     'queue-result': () => {
@@ -620,14 +622,13 @@
       if (shown()) dragged.push('300 ms after close the sheet is still shown');
       if (!DBG.get('check')) { open($('.lane')); S.classList.add('drag'); snap('half'); } // the screenshot: the sheet at half, unanimated
     },
-    host: async () => { // the live Host tab's [enable alerts] (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
-      tab('host');
+    host: async () => { // Hosts & health; #440: then Notifications' live [enable alerts] (the export leaves it out) as the Home Screen app shows it: an error, then unpaired
+      sys('hosts');
       ranked();
       const push = Object.assign(document.createElement('button'), { id: 'push', type: 'button', textContent: 'Enable alerts' });
       push.dataset.key = 'AA';
-      const al = [...$$('#host>.grp')].find(g => g.querySelector('.gn').textContent === 'ALERTS');
-      al.open = true;
-      al.append(push);
+      const al = [...$$('#sy-notifications dt')].find(t => t.textContent === 'this phone').nextElementSibling;
+      al.prepend(push);
       tidy(al);
       Object.defineProperty(window, 'Notification', { value: { requestPermission: async () => 'granted' } });
       const sub = { toJSON: () => ({ endpoint: 'e', keys: { p256dh: 'p', auth: 'a' } }) };
@@ -639,25 +640,23 @@
       await canned(401, LONG.pair, () => $('#push').click());
       if (!$('#push').disabled || st() !== 'pair this phone first') early.push(`unpaired: [enable alerts] disabled ${$('#push').disabled}, p.st "${st()}"`);
       $('#push').hidden = false;
-      // `--screenshot` captures the document's top: the shot drops the needs cards so Alerts is in it (the check keeps them).
-      if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
+      sysopen('hosts'); // drawn() checks Hosts & health; the measure takes all of System, Notifications' [enable alerts] too
     },
     // #234 gate 2: the hosts fixture with mini's load/cpu chart open (24 h), read from the export's inline series.
     'host-chart': async () => {
-      tab('host');
+      sys('hosts');
       const r = $('#host .hcd .rw[data-k=load]');
       r.closest('.grp').open = true;
       r.open = true;
       await chart(r, '24h', null, true);
       if (!r.querySelector('.hpl polyline.ln') || !$$('#host .spk polyline').length) early.push('host chart: no sparkline or chart line drawn');
-      if (!DBG.get('check')) { $('#needs').hidden = true; r.closest('.hcd').scrollIntoView(); }
+      if (!DBG.get('check')) r.closest('.hcd').scrollIntoView();
     },
     // #141 gate 2: the busy and healthy fixtures (scripts/host-fixtures.sh), as the tab first shows them.
     'host-ranked': () => {
-      tab('host');
+      sys('hosts');
       ranked();
       if (location.pathname.includes('/healthy/') && $$('#host>.grp:is([open],:not([data-t=g]))').length) early.push('healthy: a group is open or not green');
-      if (!DBG.get('check')) { $('#needs').hidden = true; scrollTo(0, 0); }
     },
     // #154: three needs-you cards through the live path (frag): [later] on one → `1 need you ▸` and 2 cards; [later all]
     // → the line alone; a tap on it → all 3; a changed card (its question) comes back by itself. Measured as it ends.
@@ -694,7 +693,7 @@
     },
     // #170 gate 2: [important] in all 5 time groups, a red glyph, its first row open; no fold holds clean and a failure.
     events: () => {
-      tab('events');
+      sys('activity');
       const imp = $('#events [data-v=imp]'), gs = [...imp.querySelectorAll('.eg>h3>span:first-child')].map(s => s.textContent);
       if (gs.join() !== 'now,5m,1h,earlier today,yesterday') early.push(`[important] groups: ${gs.join()}`);
       if (!imp.querySelector('.er .kg.t-r')) early.push('no red glyph under [important]');
@@ -705,7 +704,7 @@
     'theme-switch': async () => {
       tab('queue');
       window.kept = 1;
-      $('#look').click(); // #290: the look sheet's rows, not a select
+      sys('appearance'); // #290: the look sheet's rows, not a select; #440: System's Appearance
       const pick = n => { $(`.look .lko[data-t="${n}"]`).click(); return new Promise(r => setTimeout(r, 800)); };
       await pick('terminal');
       if (window.kept !== 1 || document.documentElement.dataset.theme !== 'terminal' || get('theme') !== 'terminal') early.push('the switch to terminal reloaded the page or was not kept');
@@ -713,30 +712,31 @@
       if ($$('.rsp, .lsc').length || B.dataset.mode !== 'glyph') early.push('terminal kept sprites or a scene mode');
       await pick('kitchen');
       if (!$$('#queue .rsp').length || !$('#hr-impl .chef, #hr-impl [shape-rendering]')) early.push("kitchen: no row sprites, or not the chef's");
-      close(); // the board is measured, not the look sheet over it
-      await new Promise(r => setTimeout(r, 400));
+      sysshut(); // the board is measured, not System over it
     },
-    // #290 gate 2: `[◐]` on all 4 tabs, no native select; its sheet holds THEME and COLOURS listboxes, one row ticked
-    // each; a tap applies in place (no reload) and the sheet stays open.
+    // #290 gate 2, #440: [⚙] on all 3 tabs (no [◐], no native select) opens System at Agent providers; its Appearance
+    // holds THEME and COLOURS listboxes, one row ticked each; a tap applies in place (no reload) and the sheet stays open.
     look: async () => {
-      for (const t of ['lanes', 'host', 'events', 'queue']) { tab(t); if (!seen($('#look'))) early.push(`no [◐] on ${t}`); }
+      for (const t of ['lanes', 'chat', 'queue']) { tab(t); if (!seen($('#sysb')) || $('#look')) early.push(`no [⚙], or a [◐], on ${t}`); }
       if ($$('select#theme, select#scheme').length) early.push('a native theme/colours select remains');
-      $('#look').click();
-      const ls = [...$$('#sheet [role=listbox]')].map(l => `${l.getAttribute('aria-label')}:${l.querySelectorAll('[role=option]').length}/${l.querySelectorAll('[aria-selected=true]').length}`);
+      $('#sysb').click();
+      if (!sysOn() || location.hash !== '#system/providers' || ytop.scrollTop !== 0 || !$('.sxi a.on[data-s=providers]')) early.push(`[⚙] opened ${location.hash}, not System at providers`);
+      sysopen('appearance');
+      const ls = [...$$('#sy-appearance [role=listbox]')].map(l => `${l.getAttribute('aria-label')}:${l.querySelectorAll('[role=option]').length}/${l.querySelectorAll('[aria-selected=true]').length}`);
       if (ls.length !== 3 || !/^theme:3\/1,colours:\d+\/1,style:2\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
       // #335: STYLE ascii applies in place (rows take the figures, the sheet stays open), pixel puts the sprites back.
       $('.look .lko[data-y=ascii]').click();
-      if (B.dataset.mode !== 'ascii' || get('mode') !== 'ascii' || !$$('#queue .rsa').length || $$('#queue .rsg>svg').length || !shown()) early.push('style ascii: not applied in place');
+      if (B.dataset.mode !== 'ascii' || get('mode') !== 'ascii' || !$$('#queue .rsa').length || $$('#queue .rsg>svg').length || !sysOn()) early.push('style ascii: not applied in place');
       $('.look .lko[data-y=pixel]').click();
       if (B.dataset.mode !== 'scene' || $$('.rsa, .lsa').length) early.push('style pixel: ascii figures remain');
       window.kept = 1;
       const s = [...$$('.look .lko[data-s]')].find(o => o.getAttribute('aria-selected') !== 'true');
       s.click();
-      if (window.kept !== 1 || document.documentElement.dataset.scheme !== s.dataset.s || !$('.sh.look') || !shown()) early.push('a colours tap reloaded, missed or closed the sheet');
-      close(); // closed, `[◐]` opens it again (the closed sheet keeps its class)
-      await new Promise(r => setTimeout(r, 400));
-      $('#look').click();
-      if (!shown()) early.push('[◐] did not reopen the look sheet after a close');
+      if (window.kept !== 1 || document.documentElement.dataset.scheme !== s.dataset.s || !sysOn()) early.push('a colours tap reloaded, missed or closed the sheet');
+      sysshut(); // closed, [⚙] opens it again
+      $('#sysb').click();
+      if (!sysOn()) early.push('[⚙] did not reopen System after a close');
+      sysopen('appearance');
     },
     // #370 gate 2: a row sprite loops its two frames (--o1 flips within 0.7 s) and is the same node across a /live
     // patch between the two reads; `row-loop-still` (reduced motion forced): frame 1, no animation, still the same node.
@@ -1045,7 +1045,7 @@
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { look: () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], config: () => [$('#sheet')], pipeline: () => [$('#sheet')], 'pipeline-custom': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -1056,7 +1056,7 @@
     // #281: the row sprites' boxes (css px, viewport) as the screenshot shows them, above the fixed tab bar (one under it
     // would take in the bar's text); ui-audit.sh checks their pixels are crisp.
     const nav = $('nav').getBoundingClientRect().top;
-    const sprites = [...$$('.rsg:not(.k)>.rsp:not(.rsa)')].filter(seen).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
+    const sprites = [...$$('.rsg:not(.k)>.rsp:not(.rsa)')].filter(e => seen(e) && (!sysOn() || SY.contains(e))).map(e => e.getBoundingClientRect()).filter(r => r.top >= 0 && r.bottom <= nav).map(r => [r.left, r.top, r.width, r.height]);
     try { res = (SCROLL[V] || measure)(); } catch (e) { res = { view: V, controls: 0, outliers: ['audit error: ' + e.message] }; }
     const W = +(DBG.get('w') || 390); // #337: `&w=1440`, a desktop shot
     if (innerWidth !== W) res.outliers.push(`viewport ${innerWidth} px wide, not ${W}`); // #68: new-headless Chrome keeps windows ≥ 500 px
@@ -1096,7 +1096,9 @@
   // glyph avatars. Others draw a 16 px action sprite for each Queue/Events glyph (its title and label the plain word), a
   // load scene on each Host group header, and offer [scene] [ascii].
   function drawn() {
-    const t = document.documentElement.dataset.theme, tb = document.documentElement.dataset.tab, bad = [];
+    // #440: System's Hosts & health and Activity are the old Host and Events tabs; their theme line is the section head.
+    const sec = sysOn() && $('.sxi a.on')?.dataset.s, t = document.documentElement.dataset.theme, bad = [];
+    const tb = sec ? { hosts: 'host', activity: 'events' }[sec] || sec : document.documentElement.dataset.tab;
     const on = s => [...$$(s)].filter(seen);
     if (!TT) return [`theme ${t} never loaded`];
     if (t === 'terminal') {
@@ -1108,7 +1110,7 @@
     if (tb === 'queue' && !on('#queue .gt>b.rsg>.rsp').length) bad.push('no Queue row sprite');
     // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
     // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
-    if (!on(`#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
+    if (!on(sec ? `#sy-${sec}>.syh .thw` : `#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
     const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
     for (const e of on(LBL)) if (!e.querySelector('.thw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
     const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
@@ -1137,7 +1139,7 @@
   }
   function measure() {
     $$('[inert]').forEach(e => { e.inert = false; });
-    const roots = (ROOTS[V] || (() => [B]))(), bad = [];
+    const roots = (ROOTS[V] || (() => [sysOn() ? SY : B]))(), bad = []; // #440: System open, it alone is on screen
     const all = sel => roots.flatMap(r => [...(r.matches(sel) ? [r] : []), ...r.querySelectorAll(sel)]).filter(seen);
     const ctl = all(CTL), rows = all(ROW);
     for (const e of ctl) {
@@ -1187,7 +1189,7 @@
       const ring = Object.assign(document.createElement('style'), { textContent: 'button::after,.pk::after,.hqh::before{display:none!important}.pk select{inset:0!important;width:100%!important}' });
       B.append(ring);
       for (const e of [r, ...r.querySelectorAll('*')]) {
-        if (e.closest('svg, .hr') || !seen(e)) continue;
+        if (e.closest('svg, .hr') || e.parentElement?.closest('.sxi') || !seen(e)) continue; // #440: System's index scrolls sideways
         const cs = getComputedStyle(e), what = `${e.localName}${typeof e.className === 'string' && e.className ? '.' + e.className.split(' ')[0] : ''} "${label(e)}"`;
         if (cs.display === 'inline' || /auto|scroll/.test(cs.overflowX)) continue;
         if (e.scrollWidth > e.clientWidth + 1 && !(cs.textOverflow === 'ellipsis' && cs.overflowX === 'hidden')) bad.push(`${what}: ${e.scrollWidth}px of content in ${e.clientWidth}px`);

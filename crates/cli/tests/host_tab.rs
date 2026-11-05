@@ -1,5 +1,6 @@
 //! #267: the Host tab is the TypeScript board's (web/src/host.ts, run under node), drawn from API v1's `host`: the page
-//! carries none of it, an export ships the data as `api/v1/host` with its forms inert, a live board's forms post.
+//! carries none of it, an export ships the data as `api/v1/host` with its forms inert, a live board's forms post. #440:
+//! it is System's Hosts & health (serve.js makes its section); ALERTS moved to Notifications & devices (system.ts).
 mod common;
 use common::*;
 use herdsman::serve::Server;
@@ -33,15 +34,11 @@ fn an_export_ships_the_host_data_and_its_forms_are_inert() {
     herdsman::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
     let page = std::fs::read_to_string(d.join("site/index.html")).unwrap();
     assert!(
-        page.contains("<section id=host></section>"),
+        !page.contains("id=host") && !page.contains("class=hcd"),
         "the page has no Host HTML"
     );
     let h = host_html(&std::fs::read_to_string(d.join("site/api/v1/host")).unwrap());
-    assert_eq!(
-        groups(&h),
-        ["HOSTS", "FLEET DISK", "SERVICES", "FLEETS", "ALERTS"],
-        "{h}"
-    );
+    assert_eq!(groups(&h), ["HOSTS", "FLEET DISK", "SERVICES", "FLEETS"], "{h}");
     // The demo's chart series ride inline (no `frag?id=hist` to read); its forms never post.
     assert!(h.contains("data-k=load data-s=\"") && h.contains(" data-x=\""), "{h}");
     assert!(

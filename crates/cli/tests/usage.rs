@@ -218,14 +218,11 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
     let page = host_tab(&Server::new(&c, &r, None), "", c.now);
     assert_eq!(r.0.count("curl"), n);
     assert!(
-        page.contains("<meter min=0 max=100 low=75 high=89.9 optimum=0 value=50>")
-            && page.contains("herdsman lane-hours"),
+        // #440: System's Agent providers, the account's gauges and lane-hours.
+        page.contains("▏</span> <b class=g>50%</b></span>") && page.contains("herdsman lane-hours"),
         "{page}"
     );
-    assert!(
-        page.contains("<span class=w>USD 2.28 · <b class=a>low</b></span>"),
-        "{page}"
-    );
+    assert!(page.contains("<span class=\"pvs a\">✓ USD 2.28 · low</span>"), "{page}");
     assert_no_leaks(&c, &r, &[&out], &page);
 
     // `check` alerts once per crossing below warn_below.
@@ -416,7 +413,7 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
     let page = host_tab(&Server::new(&c, &Fake::default(), None), "", c.now);
     assert!(
         page.contains(&format!(
-            "<span class=k>deepseek</span><span class=w>key not found in {}</span>",
+            "<article class=pvc data-p=deepseek><div class=pvch><b>DeepSeek</b><span class=m>API keys</span></div><div class=pvr data-t=a><p class=pvh><b class=pvn>balance</b><span class=\"pvs a\">key not found in {}</span>",
             missing.display()
         )),
         "{page}"

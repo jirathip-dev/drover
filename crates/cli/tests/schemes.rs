@@ -184,8 +184,8 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     );
     assert!(p.contains("<style id=sch>:root{--a:#f29b4b;"), "farm's block first");
     assert!(
-        p.contains("<button id=look type=button"),
-        "#290: one [◐] for theme and colours"
+        p.contains("<button id=sysb type=button") && !p.contains("id=look"),
+        "#440: one [⚙], theme and colours in its Appearance"
     );
     // The phone's last block wins before the first paint (serve.js keeps it).
     assert!(p.contains("try{sb=localStorage.sb}catch(e){}if(sb)document.getElementById('sch').textContent=sb"));
