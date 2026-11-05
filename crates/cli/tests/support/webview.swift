@@ -117,7 +117,8 @@ final class Nav: NSObject, WKNavigationDelegate {
         """
         // #269: on a real server the TypeScript board draws every tab from the API: the tab's first draw lands before
         // `js` runs (a file's page comes drawn, `common::drawn`).
-        let drawn = tab == "-" || url == nil ? "" : "tab('\(tab)'); await window.boardReady; await window.boardTab?.('\(tab)');"
+        // #440: a file's page waits for herd.js's theme (its words and sprites), else they land mid-`js` on some runs.
+        let drawn = tab == "-" ? "" : url == nil ? "typeof themed === 'object' && await themed;" : "tab('\(tab)'); await window.boardReady; await window.boardTab?.('\(tab)');"
         w.callAsyncJavaScript(drawn + " return 1", arguments: [:], in: nil, in: .page) { _ in w.evaluateJavaScript(js) { r, e in
             guard let v = r as? [Double] else { print("js error: \(String(describing: e))"); exit(2) }
             let wide = [Int(v[0]), Int(v[1])].map { "\($0)" }
