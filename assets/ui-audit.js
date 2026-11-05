@@ -723,7 +723,7 @@
       if (!sysOn() || location.hash !== '#system/providers' || ytop.scrollTop !== 0 || !$('.sxi a.on[data-s=providers]')) early.push(`[⚙] opened ${location.hash}, not System at providers`);
       sysopen('appearance');
       const ls = [...$$('#sy-appearance [role=listbox]')].map(l => `${l.getAttribute('aria-label')}:${l.querySelectorAll('[role=option]').length}/${l.querySelectorAll('[aria-selected=true]').length}`);
-      if (ls.length !== 3 || !/^theme:3\/1,colours:\d+\/1,style:2\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
+      if (ls.length !== 3 || !/^theme:4\/1,colours:\d+\/1,style:2\/1$/.test(ls.join())) early.push(`look sheet lists: ${ls.join()}`);
       // #335: STYLE ascii applies in place (rows take the figures, the sheet stays open), pixel puts the sprites back.
       $('.look .lko[data-y=ascii]').click();
       if (B.dataset.mode !== 'ascii' || get('mode') !== 'ascii' || !$$('#queue .rsa').length || $$('#queue .rsg>svg').length || !sysOn()) early.push('style ascii: not applied in place');
@@ -918,6 +918,12 @@
     'herd-kitchen-busy': () => kitchen('gusty'),
     'herd-kitchen-held': () => kitchen('storm'),
     'herd-kitchen-still': () => kitchen('storm'),
+    // #423: the garden (`?theme=garden`): the shop window's sun, cloud and rain by load, each lane the keeper over its
+    // issue's plant; `herd-garden-still` holds one frame under reduced motion.
+    'herd-garden': () => garden('calm'),
+    'herd-garden-busy': () => garden('gusty'),
+    'herd-garden-held': () => garden('storm'),
+    'herd-garden-still': () => garden('storm'),
     'herd-nodone': () => { herd(true); light = 'day'; ranch(); setTimeout(() => { if (!$('#hp3 .horse-done') || $('#hp1 .horse')) early.push("nodone: done is not farm's horse, or the rest not chefs"); }, 500); },
     // #71: Auto is night before 07:00 and from 19:00; [A] cycles auto → day → night, each stored; a fresh load of the
     // page on this phone (an iframe: virtual time runs no reload) comes back at the last tap, night: the night shot.
@@ -1087,10 +1093,24 @@
     const t = $('.hqh.n span');
     if (t && t.scrollWidth > t.clientWidth) early.push('"! needs you" overflows its ticket');
   }
+  async function garden(wx) {
+    herd(true);
+    await wait();
+    await wait();
+    $(`.hwx button[value=${wx}]`).click();
+    const lv = { calm: 'calm', gusty: 'busy', storm: 'held' }[wx], l = { calm: 'l-sun', busy: 'l-overcast', held: 'l-rain' }[lv], s = getComputedStyle(H);
+    if ($('#hp1 .horse') || !H.classList.contains('light-' + lv) || H.matches('.heat, .night') || !lb.hidden) early.push(`garden: not ${lv} light (#herd "${H.className}"), or night / [A]`);
+    const shown = [...$$('.hr .rs svg.t0 :is(.l-sun,.l-overcast,.l-rain)')].filter(e => getComputedStyle(e).display !== 'none').map(e => e.classList[0]);
+    if (!shown.length || shown.some(c => c !== l)) early.push(`garden ${lv}: the window shows ${[...new Set(shown)]}, not ${l}`);
+    const lanes = [...hp(0).querySelectorAll('.hh')];
+    if (!lanes.length || lanes.some(h => !h.querySelector('use[href^="#hs-plant-"]') || !h.querySelector('use[href^="#ha-"], use[href="#hm-fail"]'))) early.push('garden: a lane without the keeper over its plant');
+    if (!$$('.hqh use[href^="#hs-plant-queued-"]').length) early.push('garden: no cutting in a jar on the counter');
+    if (V === 'herd-garden-still' && (!matchMedia('(prefers-reduced-motion: reduce)').matches || s.animationName !== 'none')) early.push(`still: #herd animates (${s.animationName})`);
+  }
   let toasted = null, drove = null, href = null;
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
-  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
+  const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-garden': 0, 'herd-garden-busy': 0, 'herd-garden-held': 0, 'herd-garden-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
   const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
@@ -1169,6 +1189,9 @@
     const asc = B.dataset.mode === 'ascii';
     if (asc ? on('.rsg>svg, svg.lsc, .av .px').length : on('.rsa, .lsa').length) bad.push(`${B.dataset.mode}: a ${asc ? 'sprite' : 'figure'} of the other style`);
     if (asc && tb === 'lanes' && !on('.av .asc').length) bad.push('ascii: no ascii Lanes avatar');
+    // #423: a theme with `stages` draws each Queue row's plant, and each Lanes avatar's keeper over its issue's plant.
+    if (TT.stages && !asc && tb === 'queue' && !$$('#queue .rsg>.rsp use[href^="#hq-plant-"]').length) bad.push('no Queue row plant');
+    if (TT.stages && !asc && tb === 'lanes' && !$$('#lanes .av .px use[href^="#hs-plant-"] + use[href^="#ha-"]').length) bad.push('no Lanes keeper over a plant');
     for (const g of on('.rsg')) if (!g.title || g.getAttribute('aria-label') !== g.title) bad.push(`a row sprite without its word: ${g.outerHTML.slice(0, 60)}`);
     // #281: a row sprite is 24×24 in a fixed 28 px slot, and the row with it is at most 4 px taller than with its glyph (no wrap).
     for (const g of on('.rsg')) {
