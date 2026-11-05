@@ -100,6 +100,7 @@ fn undelivered_answer_alerts_once_after_the_ask_closes() {
     let d = tmpdir("orphan-424");
     let mut c = ctx(&d, CONFIG);
     let lane = spawn(&c, T0, 9, "impl");
+    pass(&c, T0, &[]); // drive runs, but nothing about #9
     let ask = json!({"id": "a1", "agent": lane, "question": "which?", "options": ["x", "y"]});
     ev(&c, T0 + 10, Some(9), "needs-decision", ask);
     let r = Fake::default().reply("herdr agent list", &agents(&[(&lane, "idle", "/x", "w1:p1")]));
@@ -180,6 +181,7 @@ fn a_paused_fleet_raises_none() {
         &CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true"),
     );
     spawn(&c, T0, 7, "impl");
+    pass(&c, T0, &[]); // drive runs, but nothing about #7
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     assert!(check_at(&mut c, &r, T0 + 7200).is_empty());
 }
@@ -190,16 +192,17 @@ fn waiting_names_an_issue_nothing_drives() {
     let mut c = ctx(&d, CONFIG);
     spawn(&c, T0, 7, "impl");
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
+    pass(&c, T0, &[]); // drive runs, but acts on neither
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     c.now = T0 + 2400;
     let (code, out) = run(&c, &r, &["waiting"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("sendmeter #7 none: nothing drives this (since 40m) · "),
+        out.contains("sendmeter #7 drive: lane gone, no push: respawning impl · nothing drives this (since 40m)"),
         "{out}"
     );
     assert!(
-        out.contains("sendmeter #12 none: nothing drives this (since 40m) · next in the queue"),
+        out.contains("sendmeter #12 drive: next in the queue: drive starts it · nothing drives this (since 40m)"),
         "{out}"
     );
 }
