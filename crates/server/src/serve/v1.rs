@@ -1,6 +1,6 @@
-//! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), beside the HTML board: `state`, `events?since=N`, `host`,
-//! `queue`, `lane/<agent>` (`crate::api::Chat`) and a POST per form op. Its types are in `crate::api`, beside the
-//! board's. A breaking change is `/v2`.
+//! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), the board's data: `state`, `events?since=N`, `host`,
+//! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
+//! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`.
 use super::{act, board, coat, gh, moment, words, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
@@ -32,6 +32,17 @@ impl Server<'_> {
             ),
             ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
             ("GET", Some("queue")) => out("200 OK", &self.queue_tab(ctx)),
+            // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
+            ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
+            ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
+            ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
+            ("GET", Some(t)) if t.starts_with("thread/") => {
+                let ev = read(&ctx.state).unwrap_or_default();
+                super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
+                    || reply("404 Not Found", "NOT_FOUND", "no such thread"),
+                    |p| out("200 OK", &p),
+                )
+            }
             ("GET", Some("events")) => {
                 let n = |k: &str| f.get(k).and_then(|n| n.parse().ok());
                 out(

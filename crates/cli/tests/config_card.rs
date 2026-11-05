@@ -48,18 +48,17 @@ fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     }
 }
 
-fn get(s: &Server, path: &str, cookie: &str) -> String {
-    let r = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    let res = String::from_utf8_lossy(&s.respond(&r, T + 500)).into_owned();
-    res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
-}
-
-/// The chat part's t1 view and its list.
+/// The [chat] tab as the board draws it (#269) from API v1's `chat`: the t1 view and the list.
 fn chat(s: &Server, cookie: &str) -> (String, String) {
-    let j: Value = serde_json::from_str(&get(s, "/frags?tab=chat", cookie)).unwrap();
-    let h = j["chat"].as_str().unwrap();
+    let h = board_js(&[(&api(s, ADDR, cookie, T + 500, "chat"), "chat.tab(d)")]).remove(0);
     let at = h.find("<div class=cvp data-t=\"t1\">").unwrap();
     (h[at..].into(), h[..at].into())
+}
+
+/// API v1's page of t1 (`q`: `before=`'s value and more), as the board draws it.
+fn page(s: &Server, cookie: &str, q: &str) -> String {
+    let j = api(s, ADDR, cookie, T + 500, &format!("thread/t1?before={q}"));
+    board_js(&[(&j, "chat.page(0, 't1', d, true)")]).remove(0)
 }
 
 #[test]
@@ -92,11 +91,7 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
     );
     // The older page leaves it out (the first page has it).
     let b = &view[view.find("data-b=").unwrap() + 7..];
-    let older = get(
-        &s,
-        &format!("/thread/t1?before={}&n=30", &b[..b.find('>').unwrap()]),
-        &cookie,
-    );
+    let older = page(&s, &cookie, &format!("{}&n=30", &b[..b.find('>').unwrap()]));
     assert!(older.contains(">m9</span>") && !older.contains("class=chc"), "{older}");
 
     // fleet.toml moves (another proposal applied, a hand edit): stale, no [apply], not pinned, not waiting.
@@ -107,7 +102,7 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
         !view.contains("class=chc") && !view.contains("waiting") && !list.contains("waiting"),
         "{view}"
     );
-    let older = get(&s, "/thread/t1?before=999999&n=60", &cookie);
+    let older = page(&s, &cookie, "999999&n=60");
     assert!(
         older.contains("<p class=qid>config c1</p>")
             && older.contains("</pre></div><p class=m>stale: fleet.toml changed since</p></details>")
@@ -144,7 +139,7 @@ fn serve(c: &herdsman::Ctx) -> std::net::SocketAddr {
 }
 
 /// The `/live` stream of a phone with t1 open: a proposal (with a burst of 40 messages after it, in the same second)
-/// arrives as the chat part carrying the card and the waiting marker.
+/// arrives as the [chat] data (#269) carrying the card and the waiting marker.
 #[test]
 fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     let c = setup("cfg-live");
@@ -157,22 +152,38 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     propose(&c);
     msgs(&c, T + 100, 0..40);
     let chat = |got: &str| {
-        let frags = got.split("event: frag\ndata: ").skip(1);
-        let mut js = frags.filter_map(|l| serde_json::from_str::<Value>(l.lines().next()?).ok());
-        js.find(|j| j["id"] == "chat")
+        let parts = got.split("event: chat\ndata: ").skip(1);
+        parts
+            .filter_map(|l| serde_json::from_str::<Value>(l.lines().next()?).ok())
+            .last()
     };
     let (t0, mut got) = (Instant::now(), String::new());
     while chat(&got).is_none() && t0.elapsed() < Duration::from_secs(3) {
         got += &drain(&mut s, 100);
     }
-    let j = chat(&got).unwrap_or_else(|| panic!("no chat part within 3 s: {got}"));
-    let h = j["html"].as_str().unwrap();
-    let view = &h[h.find("<div class=cvp data-t=\"t1\">").unwrap()..];
-    assert!(
-        view.contains("<form class=chc data-id=\"c1\">") && view.contains(">m39</span>"),
-        "{view}"
+    let j = chat(&got).unwrap_or_else(|| panic!("no chat data within 3 s: {got}"));
+    let t = j["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap();
+    let msgs = t["page"]["msgs"].as_array().unwrap();
+    let card = (msgs[0]["kind"].as_str(), msgs[0]["from"].as_str(), &msgs[0]["stale"]);
+    assert_eq!(
+        card,
+        (Some("config"), Some("c1"), &json!(false)),
+        "first, past the window: {t}"
     );
-    assert!(view.contains("config c1 waiting"), "{view}");
+    assert_eq!(msgs.last().unwrap()["text"], "m39", "{t}");
+    assert_eq!(t["waiting"], json!(["c1"]), "{t}");
+    let repo = j["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["repo"] == "sendmeter")
+        .unwrap();
+    assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "{repo}");
 }
 
 /// The page at a phone's width in WebKit on a real `serve`, `js` run on the chat tab; `window.late` after `wait` s.

@@ -1,6 +1,7 @@
 //! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
-use super::{ago, enc, esc};
+use super::ago;
+use crate::api::{Answered, ChatRepo, ChatTab, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
 use crate::conductor;
 use crate::config::Config;
 use crate::events::{closed, Event};
@@ -78,347 +79,188 @@ pub fn choosing(events: &[Event]) -> usize {
         .count()
 }
 
-/// #409: prose; between fence lines (to the end if unclosed) a box with [copy] of the block's exact text.
-fn prose(text: &str) -> String {
-    let mut seg = vec![String::new()];
-    for l in text.split('\n') {
-        if l.trim_start().starts_with("```") {
-            seg.push(String::new());
-        } else if let Some(s) = seg.last_mut() {
-            *s += &format!("{l}\n");
-        }
-    }
-    let cb = |c: &str| format!("<div class=cb><pre>{c}</pre><button type=button class=cpy>copy</button></div>");
-    let html = |(i, s): (usize, &String)| match i % 2 {
-        0 => paras(s),
-        _ => cb(&esc(s.strip_suffix('\n').unwrap_or(s))),
-    };
-    seg.iter().enumerate().map(html).collect()
+/// #413: a linked event's chip (`from t5`, `continued in t6`); a tap opens that thread (serve.js).
+fn link(e: &Event) -> Option<Link> {
+    conductor::link(e).map(|(w, t)| Link {
+        w: w.into(),
+        t: t.into(),
+    })
 }
 
-/// Escaped prose: paragraphs at blank lines, `code`, and plain links.
-fn paras(text: &str) -> String {
-    let link = |w: &str| {
-        let url = w.trim_end_matches(['.', ',', ')', ';', ':']);
-        if url.starts_with("https://") || url.starts_with("http://") {
-            format!("<a href=\"{url}\">{url}</a>{}", &w[url.len()..])
-        } else {
-            w.into()
-        }
-    };
-    let para = |p: &str| {
-        let p = esc(p.trim());
-        let code = |(i, s): (usize, &str)| or(i % 2 == 1, &format!("<code>{s}</code>"), s).to_string();
-        let p: String = p.split('`').enumerate().map(code).collect();
-        let p: Vec<String> = p.split(' ').map(link).collect();
-        let p = p.join(" ");
-        format!("<p>{}</p>", p.replace('\n', "<br>"))
-    };
-    text.split("\n\n").filter(|p| !p.trim().is_empty()).map(para).collect()
-}
-
-fn size(n: u64) -> String {
-    match n {
-        n if n < 1024 => format!("{n} B"),
-        n if n < 1 << 20 => format!("{} KB", n >> 10),
-        n => format!("{}.{} MB", n >> 20, ((n % (1 << 20)) * 10) >> 20),
-    }
-}
-
-/// A message's files: an image inline at the bubble's width (#406: a tap opens serve.js's viewer, never a page),
-/// any other file a row that opens `thread/<t>/<name>`.
-fn files(id: &str, e: &Event) -> String {
-    let each = |f: &Value| {
-        let name = f["name"].as_str().unwrap_or_default();
-        let (url, n) = (
-            format!("thread/{id}/{}", enc(name)),
-            size(f["size"].as_u64().unwrap_or(0)),
-        );
-        let cap = format!("{} · {n}", esc(name));
-        if ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext(name).as_str()) {
-            format!(
-                "<figure class=im><img src=\"{url}\" alt=\"{}\" loading=lazy><figcaption>{cap}</figcaption></figure>",
-                esc(name)
-            )
-        } else {
-            format!(
-                "<a class=tf href=\"{url}\"><span>▤ {}</span><span class=m>{n}</span></a>",
-                esc(name)
-            )
-        }
-    };
-    files_of(e).map(each).collect()
-}
-
-/// A block's time: the age, which serve.js turns into the local clock time.
-fn tm(now: u64, ts: u64) -> String {
-    format!("<span class=ct data-ts={ts}>{}</span>", ago(now, ts))
-}
-
-/// A message block (#138's: `you` in the accent colour, the conductor purple), open.
-fn block(now: u64, k: &str, who: &str, pv: &str, body: &str, ts: u64) -> String {
-    let pv = esc(pv.lines().next().unwrap_or_default());
-    format!("<details class=\"blk {k}\" open><summary><span class=k>{who}</span><span class=pv>{pv}</span>{}<i class=cv></i></summary>{body}</details>", tm(now, ts))
-}
-
-/// An ask: its question, then the choice rows (recommended first) and an "other" box; answered, the ✓ line.
-fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
-    let s = |k| a.str(k).unwrap_or_default();
-    let (kind, q) = (or(s("kind") == "routine", " · routine", ""), prose(s("question")));
-    let mut body = format!("<div class=md><p class=qid>{}{kind}</p>{q}</div>", esc(s("id")));
-    let opts = a.data["options"].as_array().into_iter().flatten();
-    let opts: Vec<&str> = opts.filter_map(Value::as_str).collect();
+/// An ask as its thread shows it: decided, the answer; else open (no `closed` event) for the choice rows.
+fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     let is = |e: &&Event| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id");
-    let d = events.iter().rfind(is);
-    if let Some(d) = d {
+    let answer = events.iter().rfind(is).map(|d| {
         let c = d.str("choice").unwrap_or_default();
-        let n = opts.iter().position(|o| *o == c);
-        let other = || format!("other: \"{}\"", esc(c));
-        let what = n.map_or_else(other, |n| format!("{}. {}", n + 1, esc(c)));
-        let who = match d.str("by") {
-            Some("default") => "by: default".to_string(),
-            Some("owner") | None => "you".into(),
-            Some(b) => esc(b),
-        };
-        let at = tm(ctx.now, d.ts);
-        body += &format!("<p class=ans>✓ {what} <span class=m>· {who} · {at}</span></p>");
-    } else if closed(events, a).is_none() {
-        let rec = a.data["recommend"].as_u64();
-        let mut rows: Vec<_> = opts.iter().zip(1u64..).collect();
-        rows.sort_by_key(|o| Some(o.1) != rec);
-        let btn = |(o, n): (&&str, u64)| {
-            let (r, o) = (or(Some(n) == rec, " <small>(recommended)</small>", ""), esc(o));
-            format!("<button type=button name=choice value={n}{dis}><span>{n}. {o}{r}</span></button>")
-        };
-        let rows: String = rows.into_iter().map(btn).collect();
-        let (q, f) = (esc(s("id")), esc(&a.fleet));
-        body += &format!(
-            "<form class=chq data-id=\"{q}\" data-fleet=\"{f}\">{rows}<div class=oth><input name=text aria-label=\"other answer\" placeholder=\"other: type an answer\"{dis}><button{dis}>send</button></div></form>"
-        );
+        let opts = a.data["options"].as_array().into_iter().flatten();
+        Answered {
+            n: (opts.filter_map(Value::as_str).zip(1..))
+                .find(|o| o.0 == c)
+                .map(|o| o.1),
+            choice: c.into(),
+            by: d.str("by").map(Into::into),
+            ts: d.ts,
+        }
+    });
+    Msg {
+        open: answer.is_none() && closed(events, a).is_none(),
+        routine: a.str("kind") == Some("routine"),
+        ask: Some(super::v1::ask(a)),
+        answer,
+        ..m
     }
-    block(ctx.now, "ai", "conductor", s("question"), &body, a.ts)
 }
 
-/// #408: the thread's last `n` messages before seq `before`, each block tagged `data-n` (its event's seq), under
-/// `thread started …` or, older ones left, the marker serve.js loads them from (`thread/<t>?before=`).
-fn page(
-    ctx: &Ctx,
-    cfg: &Config,
-    events: &[Event],
-    t: &Event,
-    rw: bool,
-    (before, n): (u64, usize),
-    open: u64,
-) -> String {
+/// #408: the thread's last `n` messages before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
+/// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`). #407: a
+/// finished turn's commands fold, each run of them one `fold` (tagged as its first command); a run after `open` (the
+/// live turn's start) stays rows.
+fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64, usize), open: u64) -> ThreadPage {
     let id = t.str("thread").unwrap_or_default();
-    let dis = or(rw, "", " disabled");
-    let mut h = vec![];
-    // #407: a finished turn's commands fold, each run of them one `▸ N commands` row (tagged as its first command); a
-    // run after `open` (the live turn's start) stays rows.
-    let tag = |n: u64, b: &str| b.find(' ').map(|i| format!("{} data-n={n}{}", &b[..i], &b[i..]));
-    let fold = |h: &mut Vec<(u64, String)>, run: &mut Vec<(u64, String)>| {
-        let Some(&(f, _)) = run.first() else { return };
-        if f > open {
-            h.extend(run.drain(..).filter_map(|(n, b)| Some((n, tag(n, &b)?))));
+    let (mut msgs, mut run) = (vec![], vec![]);
+    let fold = |msgs: &mut Vec<Msg>, run: &mut Vec<Msg>| {
+        let Some((seq, ts)) = run.first().map(|f| (f.seq, f.ts)) else {
             return;
-        }
-        let (n, rows) = (run.len(), run.drain(..).map(|r| r.1).collect::<String>());
-        let s = or(n == 1, "", "s");
-        let sum = format!(
-            "<details class=\"blk fold\"><summary><span class=pv>{n} command{s}</span></summary>{rows}</details>"
-        );
-        h.extend(tag(f, &sum).map(|b| (f, b)));
-    };
-    let mut run = vec![];
-    for e in of(events, id).filter(|e| e.seq < before) {
-        let s = |k| e.str(k).unwrap_or_default();
-        let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
-        let b = match (e.kind.as_str(), s("from")) {
-            ("thread-msg", "system") => {
-                let rt = format!(" <button type=button class=rty data-n={}{dis}>retry</button>", e.seq);
-                let (r, rt) = if e.str("line").is_some() { (" r", rt) } else { ("", String::new()) };
-                format!("<p class=\"qs note{r}\">{lk}{}{}{rt}</p>", esc(s("text")), signin(cfg, e, dis))
-            }
-            ("thread-msg", _) if s("text").starts_with("DECISION ") => String::new(),
-            ("thread-handoff", _) => format!("<p class=qs>{lk}· {}</p>", esc(s("title"))),
-            ("thread-msg", f) => {
-                let (k, who) = match f {
-                    "conductor" => ("ai", "conductor"),
-                    _ if !lk.is_empty() => ("ai", lk.trim_end()),
-                    _ => ("me", "you"),
-                };
-                let (md, p) = (esc(s("text")), prose(s("text"))); // #407: the message menu's [copy as markdown]
-                let body = format!("<div class=md data-md=\"{md}\">{p}</div>{}", files(id, e));
-                block(ctx.now, k, who, s("text"), &body, e.ts)
-            }
-            ("thread-cmd", _) => format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>{}</span><i class=cv></i></summary></details>", esc(s("cmd"))),
-            ("needs-decision", _) => ask(ctx, events, e, dis),
-            ("config-propose", _) if crate::propose::settled(events, s("id")).is_none() => {
-                let (q, d) = (esc(s("id")), esc(s("diff")));
-                let b = |v: &str| format!("<button name=act value={v}{dis}>{v}</button>");
-                let act = if crate::propose::stale(ctx, e) {
-                    "<p class=m>stale: fleet.toml changed since</p>".into() // #460: it can no longer apply
-                } else {
-                    format!("<form class=chc data-id=\"{q}\">{}{}</form>", b("apply"), b("discard"))
-                };
-                let body = format!("<div class=md><p class=qid>config {q}</p><pre class=df>{d}</pre></div>{act}");
-                block(ctx.now, "ai", "conductor", &format!("proposes config {}", s("id")), &body, e.ts)
-            }
-            ("secret-request", _) if crate::secret::open(events, id, s("name")).is_some_and(|o| std::ptr::eq(o, e)) => {
-                let (n, why) = (esc(s("name")), prose(s("why")));
-                let form = format!("<form class=chs data-t=\"{id}\" data-name=\"{n}\"><input type=password name=value autocomplete=off aria-label=\"value of {n}\" placeholder=\"paste the value\"><button name=act value=save>save</button><button name=act value=dismiss>dismiss</button></form>");
-                let form = if rw { form } else { "<p class=m>only a paired owner device can enter it</p>".into() };
-                let body = format!("<div class=md><p class=qid>secret {n} · stored in the keychain, never in the chat</p>{why}</div>{form}");
-                block(ctx.now, "ai", "conductor", &format!("asks for secret {}", s("name")), &body, e.ts)
-            }
-            ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => {
-                format!("<p class=qs>↻ resumed · same session ({:.4}…)</p>", esc(s("session")))
-            }
-            ("conductor-sleep", _) => "<p class=qs>☾ asleep after 30 min idle · writes wake it</p>".into(),
-            _ => String::new(),
         };
-        if e.kind == "thread-cmd" {
-            run.push((e.seq, b));
-        } else if let Some(b) = tag(e.seq, &b) {
-            fold(&mut h, &mut run);
-            h.push((e.seq, b));
+        if seq > open {
+            return msgs.append(run);
+        }
+        let cmds = run.drain(..).map(|c| c.text).collect();
+        msgs.push(Msg {
+            seq,
+            ts,
+            kind: "fold".into(),
+            cmds,
+            ..Msg::default()
+        });
+    };
+    for e in of(events, id).filter(|e| e.seq < before) {
+        let s = |k| e.str(k).unwrap_or_default().to_string();
+        let m = |kind: &str, text: String| Msg {
+            seq: e.seq,
+            ts: e.ts,
+            kind: kind.into(),
+            text,
+            link: link(e),
+            ..Msg::default()
+        };
+        let main = cfg.hosts.iter().find(|h| h.1.machine.is_none());
+        let m = match (e.kind.as_str(), e.str("from").unwrap_or_default()) {
+            // #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
+            ("thread-msg", "system") => Msg {
+                retry: e.str("line").is_some(),
+                signin: e.str("signin").map(Into::into),
+                host: main.map_or("local", |h| h.0.as_str()).into(),
+                ..m("note", s("text"))
+            },
+            ("thread-msg", _) if s("text").starts_with("DECISION ") => continue,
+            ("thread-handoff", _) => m("handoff", s("title")),
+            ("thread-msg", f) => {
+                let file = |f: &Value| FileRef {
+                    name: f["name"].as_str().unwrap_or_default().into(),
+                    size: f["size"].as_u64().unwrap_or(0),
+                };
+                Msg {
+                    from: f.into(),
+                    files: files_of(e).map(file).collect(),
+                    ..m("msg", s("text"))
+                }
+            }
+            ("thread-cmd", _) => m("cmd", s("cmd")),
+            ("needs-decision", _) => ask(events, e, m("ask", s("question"))),
+            ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
+                from: s("id"),
+                stale: crate::propose::stale(ctx, e), // #460: it can no longer apply
+                ..m("config", s("diff"))
+            },
+            ("secret-request", _)
+                if crate::secret::open(events, id, &s("name")).is_some_and(|o| std::ptr::eq(o, e)) =>
+            {
+                Msg {
+                    from: s("name"),
+                    ..m("secret", s("why"))
+                }
+            }
+            ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
+            ("conductor-sleep", _) => m("sleep", String::new()),
+            _ => continue,
+        };
+        if m.kind == "cmd" {
+            run.push(m);
+        } else {
+            fold(&mut msgs, &mut run);
+            msgs.push(m);
         }
     }
-    fold(&mut h, &mut run);
+    fold(&mut msgs, &mut run);
     // #460: a waiting config card is never cut from the first page: past its window it stays right under the marker
     // (so older pages leave it out).
     let pins: Vec<u64> = crate::propose::waiting(ctx, events, id).map(|e| e.seq).collect();
     if before != u64::MAX {
-        h.retain(|b| !pins.contains(&b.0));
+        msgs.retain(|m| !pins.contains(&m.seq));
     }
-    let k = h.len().saturating_sub(n);
-    let top = match h.get(k) {
-        Some((s, _)) if k > 0 => format!("<p class=\"qs tmo\" data-b={s}>↑ older messages</p>"),
-        _ => {
-            let dir = conductor::dir(ctx, cfg, id).display().to_string();
-            let home = crate::config::home().display().to_string();
-            let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
-            let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
-            format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>")
-        }
-    };
-    let cut = h[..k].iter().filter(|b| pins.contains(&b.0));
-    cut.chain(&h[k..]).fold(top, |a, b| a + &b.1)
+    let k = msgs.len().saturating_sub(n);
+    let dir = conductor::dir(ctx, cfg, id).display().to_string();
+    let home = crate::config::home().display().to_string();
+    ThreadPage {
+        older: (k > 0).then(|| msgs[k].seq),
+        started: t.ts,
+        dir: dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}")),
+        msgs: {
+            let w = msgs.split_off(k);
+            msgs.retain(|m| pins.contains(&m.seq));
+            msgs.into_iter().chain(w).collect()
+        },
+    }
 }
 
-/// #460: `config c1 c2 waiting` while proposals wait for the owner's tap.
-fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> String {
-    let ids: Vec<&str> = crate::propose::waiting(ctx, events, id)
-        .filter_map(|e| e.str("id"))
-        .collect();
-    if ids.is_empty() {
-        return String::new();
-    }
-    format!("<b class=\"a cw\">config {} waiting</b>", esc(&ids.join(" ")))
-}
-
-/// #408: `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
-pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>, rw: bool) -> Option<String> {
+/// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
+pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
     let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
-    Some(page(ctx, &cfg, events, t, rw, (before, n), u64::MAX))
+    Some(page(ctx, &cfg, events, t, (before, n), u64::MAX))
 }
 
-/// One thread: the bar, its last 30 messages, the live line and the composer (inert off a paired owner device).
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
+/// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
+/// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
-    let dis = or(rw, "", " disabled");
     let st = state(events, id, agents);
     let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
     let turn = of(events, id).rfind(me).map_or((0, t.ts), |e| (e.seq, e.ts));
     let open = if st == "working" { turn.0 } else { u64::MAX };
-    let h = page(ctx, cfg, events, t, rw, (u64::MAX, 30), open);
-    let live = match st {
-        "choose" => "<b>●</b> waiting for your answer · sleeps after 30 min idle",
-        "working" => "<i class=tld aria-hidden=true></i> working", // #403: serve.js puts the theme's loading art in
-        "asleep" => "☾ asleep · a message wakes it with this conversation",
-        "new" => "a message starts the conductor",
-        _ => "<b class=g>●</b> awake · sleeps after 30 min idle",
+    let q = |(q, e): (&u64, &&Event)| QueuedMsg {
+        q: *q,
+        text: e.str("text").unwrap_or_default().into(),
     };
     let role = conductor::role(cfg, &t.fleet).ok().map(|r| r.1);
-    let (h2, model) = (
+    let (h, model) = (
         role.map_or("", |r| r.harness.as_str()),
         role.and_then(|r| r.model.as_deref()),
     );
     let shown = or(st == "choose", "awake", or(st == "new", "", st));
-    let ds = esc(&super::join(&[t.fleet.as_str(), h2, model.unwrap_or_default(), shown]));
-    let title = esc(conductor::title(events, id));
-    let dot = or(matches!(st, "asleep" | "new"), "", "<i class=dt></i>");
-    let guest = or(rw, "", "<p class=\"ns m\">pair this phone to answer or write</p>");
-    // #407: working, serve.js floats the line as a pill above the box, timed from the turn's start.
-    let tl = if st == "working" {
-        format!("\"tlv wk\" data-since={}", turn.1)
-    } else {
-        "tlv".into()
-    };
-    format!(
-        "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span>{}</div></div>\
-         <div class=tc>{h}</div><p class={tl}>{live}</p>{guest}{}</div>",
-        waiting(ctx, events, id),
-        composer(id, "", &queue(events, id, dis), dis)
-    )
+    ThreadView {
+        id: id.into(),
+        title: conductor::title(events, id).into(),
+        ds: super::join(&[t.fleet.as_str(), h, model.unwrap_or_default(), shown]),
+        state: st.into(),
+        waiting: waiting(ctx, events, id),
+        since: (st == "working").then_some(turn.1),
+        queued: queued(events, id).iter().map(q).collect(),
+        page: page(ctx, cfg, events, t, (u64::MAX, 30), open),
+    }
 }
 
-/// #407: the queued messages above the box, each with [send now] (steer it in), edit and [remove].
-fn queue(events: &[Event], id: &str, dis: &str) -> String {
-    let b = |n: &str, l: &str| format!("<button type=button name={n}{dis}>{l}</button>");
-    let (now, ed, rm) = (b("qn", "send now"), b("qe", "edit"), b("qx", "remove"));
-    let row = |(q, e): (&u64, &&Event)| {
-        let t = esc(e.str("text").unwrap_or_default());
-        format!("<div class=tq data-q={q}><p title=\"{t}\">{t}</p><span class=btns>{now}{ed}{rm}</span></div>")
-    };
-    queued(events, id).iter().map(row).collect()
+/// #460: the ids of the thread's config proposals that wait for the owner's tap.
+fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> Vec<String> {
+    let w = crate::propose::waiting(ctx, events, id);
+    w.filter_map(|e| e.str("id").map(Into::into)).collect()
 }
 
-/// The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above.
-fn composer(id: &str, repo: &str, qd: &str, dis: &str) -> String {
-    format!(
-        "<form class=tw data-t=\"{id}\"{repo}>{qd}<input type=file multiple hidden{dis}><button type=button class=add aria-label=\"attach images or files\"{dis}>+</button>\
-         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button class=snd{dis}>send</button></form>"
-    )
-}
-
-/// #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it (`op=new`).
-fn draft(repo: &str, dis: &str) -> String {
-    let r = esc(repo);
-    format!(
-        "<div class=cvp data-t=\"new-{r}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>new thread</b><span class=ds>{}</span></div></div>\
-         <div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>{}</div>",
-        or(repo == "all", "all repos", &r),
-        composer(&format!("new-{r}"), &format!(" data-repo=\"{r}\""), "", dis)
-    )
-}
-
-/// #413: a linked row's chip (`from t5`, `continued in t6`); a tap opens that thread (serve.js).
-fn chip((w, t): (&str, &str)) -> String {
-    format!("<span class=lc data-go=\"{}\">{w} {}</span>", esc(t), esc(t))
-}
-
-/// #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
-fn signin(cfg: &Config, e: &Event, dis: &str) -> String {
-    let Some(name) = e.str("signin") else {
-        return String::new();
-    };
-    let main = cfg
-        .hosts
-        .iter()
-        .find(|h| h.1.machine.is_none())
-        .map_or("local", |h| h.0.as_str());
-    format!(
-        " <button type=button data-su=\"{}\" data-host=\"{}\"{dis}>sign in</button>",
-        esc(name),
-        esc(main)
-    )
-}
-
-/// A thread's row: unread dot, title, age; then its state (unless plain awake) and the last message.
-fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String) {
+/// A thread's row: unread, title, age; its state and the last message; the threads it links to (not its flow-back
+/// lines), once each.
+fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, ThreadRow) {
     let id = t.str("thread").unwrap_or_default();
     let mut msgs = of(events, id).filter(|e| matches!(e.kind.as_str(), "thread-msg" | "needs-decision"));
     let last = msgs.rfind(|e| e.str("from") != Some("system"));
@@ -427,88 +269,71 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, String
         let who = or(e.str("from") == Some("owner"), "you", "conductor");
         format!("{who}: {}", e.str("text").or(e.str("question")).unwrap_or_default())
     });
-    let st = match state(events, id, agents) {
-        "choose" => "<b class=r>! choose</b>",
-        "working" => "<b class=a>✻ working</b>",
-        "asleep" => "<b class=m>☾ asleep</b>",
-        _ => "",
-    };
-    let un = conductor::unread(events, id);
-    let (rd, dot) = (or(un, "", " rd"), or(un, "●", ""));
-    let (title, age, line) = (
-        esc(conductor::title(events, id)),
-        ago(ctx.now, at),
-        esc(line.lines().next().unwrap_or_default()),
-    );
-    // #413: the threads it is linked to (not its flow-back lines), once each.
     let lk: std::collections::BTreeSet<_> = of(events, id)
         .filter_map(|e| conductor::link(e).filter(|_| e.str("from") != Some("system")))
         .collect();
-    let lk: String = lk.into_iter().map(|l| chip(l) + " ").collect();
-    let cw = waiting(ctx, events, id);
-    let html = format!(
-        "<a class=\"tr{rd}\" href=#chat data-t=\"{id}\"><i class=ud>{dot}</i><span class=tt>{title}</span><span class=ta>{age}</span><span class=tp>{lk}{cw}{st}{line}</span></a>"
-    );
-    (at, html)
+    let row = ThreadRow {
+        id: id.into(),
+        title: conductor::title(events, id).into(),
+        age: ago(ctx.now, at),
+        unread: conductor::unread(events, id),
+        state: state(events, id, agents).into(),
+        waiting: waiting(ctx, events, id),
+        links: lk
+            .into_iter()
+            .map(|(w, t)| Link {
+                w: w.into(),
+                t: t.into(),
+            })
+            .collect(),
+        line: line.lines().next().unwrap_or_default().into(),
+    };
+    (at, row)
 }
 
-/// The tab: "all repos", then each fleet by name, a card each with its 3 newest threads (the rest fold) and
-/// [+ thread]; then every thread's view (serve.js shows the open one).
-pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], rw: bool) -> String {
+/// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
+/// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
+pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
+    let mut tab = ChatTab {
+        now: ctx.now,
+        rw,
+        ..ChatTab::default()
+    };
     let Some(cfg) = cfg else {
-        return "<p class=r>cannot read fleet.toml</p>".into();
+        tab.error = Some("cannot read fleet.toml".into());
+        return tab;
     };
     let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
-    let (mut list, mut views) = (String::new(), String::new());
     for (repo, k) in repos {
-        let mine = threads.iter().filter(|t| t.fleet == repo);
-        // #405: a row swiped left shows [archive]; the archived fold's rows each have [restore].
-        let (dis, mut arch) = (or(rw, "", " disabled"), vec![]);
-        let mut rows = vec![];
-        for t in mine {
-            let (at, a) = row(ctx, events, t, agents);
-            let id = t.str("thread").unwrap_or_default();
-            let (on, b) = (conductor::archived(events, id), ["archive", "restore"]);
-            let b = b[usize::from(on)];
-            let html = format!(
-                "<div class=sw>{a}<button type=button class=sb name={b} data-t=\"{id}\"{dis}>{b}</button></div>"
-            );
-            [&mut rows, &mut arch][usize::from(on)].push((at, html));
+        let (mut rows, mut arch) = (vec![], vec![]);
+        for t in threads.iter().filter(|t| t.fleet == repo) {
+            let on = conductor::archived(events, t.str("thread").unwrap_or_default());
+            [&mut rows, &mut arch][usize::from(on)].push(row(ctx, events, t, agents));
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         arch.sort_by_key(|r| std::cmp::Reverse(r.0));
-        let n = rows.len();
-        let count = or(n == 0, "no threads", &format!("{n} thread{}", or(n == 1, "", "s"))).to_string();
-        let name = or(repo == "all", "all repos", repo);
-        let older: String = rows.iter().skip(3).map(|r| r.1.as_str()).collect();
-        let older = if n > 3 {
-            format!("<details class=done><summary><span>{} older thread{}</span><i class=cv></i></summary>{older}</details>", n - 3, or(n == 4, "", "s"))
-        } else {
-            String::new()
-        };
-        let a = arch.len();
-        let arch: String = arch.iter().map(|r| r.1.as_str()).collect();
-        let arch = if a > 0 {
-            format!("<details class=\"done arc\"><summary><span>{a} archived</span><i class=cv></i></summary>{arch}</details>")
-        } else {
-            String::new()
-        };
-        let (r, nm) = (esc(repo), esc(name));
-        let add = if rw {
-            format!("<span class=btns><button type=button class=ntb data-repo=\"{r}\">+ thread</button></span>")
-        } else {
-            String::new()
-        };
-        let top: String = rows.iter().take(3).map(|r| r.1.as_str()).collect();
-        list += &format!(
-            "<div class=\"fc k-{k}\"><div class=fh><span class=fn><b>{nm}</b><span class=ds>{count}</span></span>{add}</div>{top}{older}{arch}</div>"
-        );
-        views += &draft(repo, dis);
+        tab.repos.push(ChatRepo {
+            repo: repo.into(),
+            k: k.into(),
+            rows: rows.into_iter().map(|r| r.1).collect(),
+            archived: arch.into_iter().map(|r| r.1).collect(),
+        });
     }
-    let view = |t: &&Event| thread(ctx, cfg, events, t, (agents, rw));
-    views += &threads.iter().map(view).collect::<String>();
-    format!("<div class=clp>{list}</div>{views}")
+    tab.threads = threads.iter().map(|t| thread(ctx, cfg, events, t, agents)).collect();
+    tab
+}
+
+impl super::Server<'_> {
+    /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads.
+    pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> ChatTab {
+        let events = crate::events::read(&ctx.state).unwrap_or_default();
+        let agents = self.herdr_json(ctx.now, "agent");
+        let agents = agents
+            .and_then(|j| j["result"]["agents"].as_array().cloned())
+            .unwrap_or_default();
+        tab(ctx, Config::load(&ctx.config).ok().as_ref(), &events, &agents, rw)
+    }
 }
 
 /// #405: a new thread's title: its first message's first line, cut to one row.
