@@ -30,6 +30,7 @@ pub mod queue;
 pub mod report;
 pub mod runner;
 pub mod secret;
+pub mod service;
 pub mod setup;
 pub mod shed;
 pub mod snapshot;
@@ -42,7 +43,7 @@ pub mod waiting;
 pub mod webpush;
 
 use anyhow::{bail, Result};
-pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE};
+pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, read, Event};
 use runner::Runner;

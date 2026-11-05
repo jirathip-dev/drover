@@ -920,6 +920,34 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 12 --why answer --now"));
 }
 
+/// #345: with `[service] url` a remote lane reports over HTTP: it gets the url and its own token, never the main host's
+/// ssh name; the token is in no plan output or event, and it is scoped to its issue.
+#[test]
+fn a_remote_lane_gets_the_service_url_and_its_own_token() {
+    let c = setup("hosts-service", "\n[service]\nurl = \"http://mini.tail:7778\"\n", true, 0);
+    let r = remote_fake();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 0, "{out}");
+    let calls = r.calls.borrow().clone();
+    let lane = calls
+        .iter()
+        .find(|c| c.starts_with("herdr --machine bazzite pane run w9:p1 export"))
+        .unwrap();
+    assert!(
+        lane.contains(" HERDSMAN_SERVICE='http://mini.tail:7778'") && !lane.contains("HERDSMAN_MAIN"),
+        "{lane}"
+    );
+    let token = lane.split(" HERDSMAN_TOKEN='").nth(1).unwrap().split('\'').next().unwrap();
+    assert_eq!(token.len(), 64, "{lane}");
+    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(token) && !out.contains(token));
+    let cfg = Config::load(&c.config).unwrap();
+    let ask = |n: &str| herdsman::runner::argv(&["ask", "sendmeter", n, "Which?"]);
+    let ok = herdsman::service::authorize(&c, &cfg, token, &ask("12"));
+    assert_eq!(ok.unwrap(), "sendmeter:12:impl");
+    let other = herdsman::service::authorize(&c, &cfg, token, &ask("13"));
+    assert!(other.unwrap_err().to_string().starts_with("REFUSED TOKEN"));
+}
+
 /// #275: `agent_name_not_found` on another host: one more start (#359: on a fresh pane, the unconfirmed one closed)
 /// when no harness came up, none when one did (it is named instead); every call on that host, and no workspace closed.
 #[test]

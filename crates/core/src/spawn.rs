@@ -579,8 +579,11 @@ pub fn spawn(
         if pl.machine.is_some() {
             p.account = None; // Q3: never ship a token to another host; the lane uses that host's own login
 
-            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh).
-            if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
+            // #275: its asks, answers, verdicts and events go to the main host (by its `[hosts]` name over ssh);
+            // #345: to its service over HTTP when `[service] url` is set (its token is added below the dry run).
+            if let Some(url) = &cfg.service.url {
+                p.env.insert("HERDSMAN_SERVICE".into(), url.clone());
+            } else if let Some(main) = cfg.hosts.iter().find(|h| h.1.machine.is_none()) {
                 p.env.insert("HERDSMAN_MAIN".into(), format!("{}:{}", main.0, ctx.exe));
             }
         }
@@ -596,6 +599,17 @@ pub fn spawn(
         pj["dry_run"] = json!(true);
         print_plan(out, &pj, o.json)?;
         return Ok(true);
+    }
+    if p.env.contains_key("HERDSMAN_SERVICE") {
+        let g = crate::service::Grant {
+            fleet: fleet.into(),
+            issue,
+            role: role.into(),
+            agent: p.agent.clone(),
+            lane: p.lane.clone(),
+            at: ctx.now,
+        };
+        p.env.insert("HERDSMAN_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
     let h = harness::get(&p.harness);
     h.ready(ctx, r, &p)?;

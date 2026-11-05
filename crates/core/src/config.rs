@@ -31,6 +31,13 @@ pub struct Config {
     pub conductor: ConductorCfg,
     /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
     pub telegram: Telegram,
+    /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
+    pub service: ServiceCfg,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ServiceCfg {
+    pub url: Option<String>,
 }
 
 /// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
@@ -550,12 +557,13 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
-    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says;
+    /// #350: every landing pause and revert (or failed revert), and #345's stalled service, goes to each notifier,
+    /// whatever its `on` says;
     /// #363: so does a board report, to each notifier but the phones'.
     pub fn wants(&self, kind: &str) -> bool {
         self.on.iter().any(|k| k == kind)
             || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
-            || matches!(kind, "land-paused" | "reverted" | "revert-failed")
+            || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
 }

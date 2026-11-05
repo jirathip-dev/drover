@@ -16,6 +16,8 @@ use std::path::PathBuf;
 pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
+/// #345: `herdsman service` (api addr, board addr), set by the binary from the service crate.
+pub static SERVICE: std::sync::OnceLock<fn(&Ctx, &str, Option<&str>) -> Result<()>> = std::sync::OnceLock::new();
 
 #[derive(Parser)]
 #[command(
@@ -282,6 +284,18 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
+    /// One supervised process: the board, kicks driven at once, the GitHub poll, API v1 for remote lanes (docs/service.md)
+    Service {
+        /// API v1 listen address (remote lanes reach it over the tailnet)
+        #[arg(long, default_value = "127.0.0.1:7778")]
+        api: String,
+        /// Also serve the board here (the `serve` job's address)
+        #[arg(long)]
+        board: Option<String>,
+        /// Write its launchd/systemd unit and print the commands that load it; loads nothing
+        #[arg(long)]
+        install: bool,
+    },
     /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
@@ -600,8 +614,8 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "setup", "stats",
-        "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "service", "setup",
+        "stats", "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -693,6 +707,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
 /// main host over ssh, so the main log is the only one written and only the main host pushes.
 pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
     let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
+    // #345: over HTTP to the main host's service with the lane's own token, never ssh.
+    if let (Ok(url), Ok(token)) = (std::env::var("HERDSMAN_SERVICE"), std::env::var("HERDSMAN_TOKEN")) {
+        return Some(crate::service::post(r, &url, &token, args));
+    }
     let main = std::env::var("HERDSMAN_MAIN").ok()?;
     let (host, exe) = main.split_once(':')?;
     if crate::db::file(&ctx.state).exists() {
@@ -702,6 +720,23 @@ pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Resu
     }
     let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
     Some(crate::hosts::On::new(r, Some(host)).run("env", &a))
+}
+
+/// #345: a lane command's scope for the service's token check: (fleet, issue, is a verdict); an answer's issue is
+/// its ask's. `None`: no lane command.
+pub(crate) fn lane_scope(ctx: &Ctx, args: &[String]) -> Option<(String, u64, bool)> {
+    let cli = Cli::try_parse_from(std::iter::once("herdsman".to_string()).chain(args.iter().cloned())).ok()?;
+    match cli.cmd {
+        Cmd::Ask { fleet, issue, .. } => Some((fleet, issue.parse().ok()?, false)),
+        Cmd::Verdict { fleet, issue, .. } => Some((fleet, issue, true)),
+        Cmd::Done { fleet, issue, .. } | Cmd::Kick { fleet, issue, now: false, .. } => Some((fleet, issue, false)),
+        Cmd::Answer { fleet, id, .. } => {
+            let events = read(&ctx.state).ok()?;
+            let ask = events.iter().find(|e| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(&id));
+            Some((fleet, ask?.issue?, false))
+        }
+        _ => None,
+    }
 }
 
 /// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
@@ -969,6 +1004,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Service { api, board, install: true } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
+        Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;
             let kick = |f: &str, n, why| {

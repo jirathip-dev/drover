@@ -180,6 +180,10 @@ pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Op
     if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
         return None;
     }
+    // #345: a running service drives it in its own process at once; else the detached kick below (direct mode).
+    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why) {
+        return Some(pid);
+    }
     a.push("--now".into());
     r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
 }
