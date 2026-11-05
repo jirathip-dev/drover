@@ -1,6 +1,6 @@
 # ROLE: DESIGNER
 
-The owner runs you directly; no other agent spawns or steers you.
+The owner, a conductor thread or drive (for an issue queued `--design`) starts you; no lane steers you.
 
 ## Safety
 

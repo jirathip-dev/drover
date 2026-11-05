@@ -112,3 +112,23 @@ fn a_lane_without_a_logged_handoff_stays_open() {
     assert_eq!(code, 0, "{out}");
     assert!(!r.called("herdr pane close") && kinds(&c, "lane-closed").is_empty());
 }
+
+#[test]
+fn a_spawn_whose_prompt_never_landed_is_not_closed_as_done() {
+    // #444 (#363): the spawn exited 4, logged in the same second as the handoff it then seemed to follow.
+    let c = ctx(&tmpdir("close-unconfirmed"), CONFIG);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.to_string_lossy().into_owned();
+    let ev = |kind: &str, d| append(&c.state, &Event::new(T - 3600, "sendmeter", Some(12), kind, d)).unwrap();
+    ev("pushed", json!({"sha": "abc", "via": "pr"}));
+    let sp = json!({"role": "impl", "agent": LANE, "pane": "w1:p2", "worktree": wt, "confirmed": false});
+    ev("spawn", sp);
+    let r = fake(&wt, "", "0\n");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !r.called("herdr pane close") && kinds(&c, "lane-closed").is_empty(),
+        "{out}"
+    );
+}

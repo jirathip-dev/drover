@@ -34,9 +34,10 @@ export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?
 export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, age?: string | null, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
 
 /**
- * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`.
+ * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
+ * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
  */
-export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, };
+export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, };
 
 /**
  * A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;

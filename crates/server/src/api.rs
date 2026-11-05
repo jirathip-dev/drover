@@ -113,12 +113,14 @@ pub struct NeedsTab {
     pub issues: Vec<NeedIssue>,
 }
 
-/// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`.
+/// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
+/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
 pub struct NeedAsk {
     pub ask: Ask,
     pub who: String,
     pub kind: String,
     pub from: Option<String>,
+    pub pngs: Vec<String>,
 }
 
 /// A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;

@@ -1,6 +1,7 @@
 // #269: the needs cards above every tab, drawn from API v1's `needs` (pure: tests run it under node): each open ask
 // (options recommended first, a free-text box), each blocked lane's card, then the `needs-human` issues (#130).
 import type { Blocked, NeedIssue, NeedsTab } from '../../assets/types/api';
+import { enc } from './chat.ts';
 import { esc } from './events.ts'; // node runs this file as is: the extension
 import { answer, form, hidden, prLine } from './queue.ts';
 
@@ -41,7 +42,9 @@ export function tab(d: NeedsTab): string {
   const age = d.age == null ? '' : `<p class="msg a">as of the step's look ${d.age} ago</p>`;
   const asks = d.asks.map(a => {
     const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, a.ask, 'Send') : '';
-    return `<div class=ask><p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${esc(a.ask.question)}</p>${f}</div>`;
+    // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
+    const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
+    return `<div class=ask><p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${esc(a.ask.question)}</p>${pngs.join('')}${f}</div>`;
   });
   return age + asks.join('') + d.blocked.map(b => blocked(d, b)).join('') + d.issues.map(s => issue(d, s)).join('') + `<i id=chn hidden data-n=${d.choosing}></i>`;
 }

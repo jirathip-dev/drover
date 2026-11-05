@@ -565,6 +565,10 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    // #412: a design lane done with its pushed design hands it to the owner.
+    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design" && !fast) {
+        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
+    }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
@@ -623,10 +627,26 @@ fn pass(
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" {
+            // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
+            let gone = w.what.split_once(waiting::NO_PUSH);
+            if gone.is_some() && w.next_cmd.is_none() && !fast {
+                let why = "lane keeps ending without a push";
+                writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+                )?;
+            }
+            if gone.is_some_and(|g| !g.1.starts_with("respawning")) {
+                continue;
+            }
             // `waiting` names the exact next command; drive runs it.
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
+                _ if gone.is_some() => "respawn",
                 ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
                 ("spawn", _) if cmd.ends_with("--supersede") => "fix",
@@ -641,6 +661,10 @@ fn pass(
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            if let Some((why, _)) = gone.filter(|_| code.is_none()) {
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
+            }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
@@ -855,7 +879,7 @@ fn handoff(
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
-        let idle = w.who == "none" && ctx.now >= w.since + 120;
+        let idle = (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
         if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
@@ -964,7 +988,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         .take_while(|_| start)
     {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
+        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
+        let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        let c = if design {
+            ["spawn", fleet, &n, "design", "--supersede"]
+        } else {
+            ["spawn", fleet, &n, f.flow().start(), ""]
+        };
+        let code = act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)])?;
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")

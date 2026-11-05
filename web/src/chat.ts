@@ -5,7 +5,7 @@ import { age, esc } from './events.ts'; // node runs this file as is: the extens
 
 const or = (c: boolean, a: string, b: string) => (c ? a : b);
 /** `serve::enc`: every byte but an ASCII letter or digit as `%XX`. */
-const enc = (s: string) => [...new TextEncoder().encode(s)].map(b => (/[A-Za-z0-9]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`)).join('');
+export const enc = (s: string) => [...new TextEncoder().encode(s)].map(b => (/[A-Za-z0-9]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`)).join('');
 
 /** Escaped prose: paragraphs at blank lines, `code`, and plain links. */
 function paras(text: string): string {

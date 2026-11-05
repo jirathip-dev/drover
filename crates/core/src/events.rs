@@ -467,6 +467,7 @@ pub const PASSIVE: &[&str] = &[
     "fallback",
     "ask-waiting",
     "driven",
+    "respawn",
     "drive-pass",
     "kick",
     "amended",
@@ -545,16 +546,21 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         {
             continue;
         }
-        // Design lanes are the owner's: they never move the issue through review or merge.
+        // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
+        // branch (a `--design` issue's, before impl) is the issue's design stage.
         if e.kind == "spawn" && e.str("role") == Some("design") {
             if let Some(a) = e.str("agent") {
                 s.lanes.insert("design".into(), a.into());
             }
-            continue;
+            if !DESIGN.contains(&s.state.as_str()) || e.str("branch").is_none_or(|b| b.starts_with("design-")) {
+                continue;
+            }
+            (s.state, s.lane) = ("design".into(), e.str("agent").map(String::from));
         }
         s.last_ts = e.ts;
         s.last_event.clone_from(&e.kind);
         match e.kind.as_str() {
+            "spawn" if e.str("role") == Some("design") => {}
             "spawn" => {
                 s.lane = e.str("agent").map(String::from);
                 s.effort = e.str("effort").map(String::from);
@@ -612,6 +618,10 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                 };
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
+            "design-review" => s.state = "design-review".into(),
+            "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
+            "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {
@@ -644,6 +654,9 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
     }
     m
 }
+
+/// #412: the states a design spawn moves into `design` (before impl).
+pub const DESIGN: &[&str] = &["queued", "design", "design-review"];
 
 /// #228: a form-only FAIL's suffix in `IssueState::verdicts` (`FAIL (form-only)`).
 pub const FORM: &str = " (form-only)";

@@ -2037,3 +2037,106 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     assert_eq!(rel.data["respawn"].as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
 }
+
+// --- #444: a fix round whose lane ended without pushing is driven again ---
+
+/// #363's log: FAIL at the head, supersede, a spawn whose prompt never landed (exit 4), its pane closed `done`.
+fn ended(name: &str) -> (herdsman::Ctx, Fake) {
+    let c = setup(name);
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "pushed", json!({"sha": head}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": head, "body": "FAIL\nform"}),
+    );
+    ev(&c, 31, "supersede", json!({"agent": "sendmeter-impl-12"}));
+    let wt = lane(&c, 32, "impl", "sendmeter-impl-12", "issue-12");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "worktree": wt,
+        "branch": "issue-12", "confirmed": false});
+    ev(&c, 32, "spawn", d);
+    ev(
+        &c,
+        40,
+        "lane-closed",
+        json!({"agent": "sendmeter-impl-12", "reason": "done", "key": "k"}),
+    );
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("git -C", "");
+    (c, r)
+}
+
+#[test]
+fn the_363_sequence_replayed_respawns_impl_once_per_30_min() {
+    let (c, r) = ended("drive-ended");
+    assert_eq!(state(&c), "fix(1)");
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("#12 drive: lane gone, no push: respawning impl")
+            && out.contains("→ herdsman spawn sendmeter 12 impl --supersede"),
+        "{out}"
+    );
+    let (_, st) = run(&c, &r, &["status", "sendmeter"]);
+    assert!(
+        st.contains("lane gone, no push") && !st.contains("idle without pushing"),
+        "{st}"
+    );
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-impl-12"), "{out}");
+    let e = &kinds(&c, "respawn")[0];
+    assert_eq!((e.str("role"), e.str("why")), (Some("impl"), Some("lane gone")));
+    // The new lane is gone too: no second respawn within 30 min.
+    idle(&c, &r);
+}
+
+#[test]
+fn two_respawns_without_a_push_go_to_needs_human() {
+    let (c, r) = ended("drive-ended-twice");
+    let at = |s: u64| herdsman::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    };
+    assert_eq!(drive(&c, &r).1, ["respawn"]);
+    assert_eq!(drive(&at(1801), &r).1, ["respawn"]);
+    let (code, out) = run(&at(3602), &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("needs-human: lane keeps ending without a push"), "{out}");
+    assert_eq!(state(&c), "needs-human");
+    assert_eq!(kinds(&c, "respawn").len(), 2);
+    let nh = &kinds(&c, "needs-human")[0];
+    assert_eq!(nh.str("reason"), Some("lane keeps ending without a push"));
+    idle(&at(7200), &r);
+    assert_eq!(kinds(&c, "needs-human").len(), 1, "it never loops");
+}
+
+#[test]
+fn a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass() {
+    let c = setup("drive-exit4");
+    let head = sha("abc");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": head, "body": "FAIL"}),
+    );
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "worktree": wt,
+        "branch": "issue-12", "confirmed": false});
+    ev(&c, 30, "spawn", d);
+    // The pane is still there (the agent sits `done`, never prompted).
+    let list = agents(&[("sendmeter-impl-12", "done", &wt.to_string_lossy(), "w9:p1")]);
+    let r = fake(&list)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert_eq!(kinds(&c, "respawn")[0].str("why"), Some("prompt never landed"));
+    let done = kinds(&c, "lane-closed");
+    assert!(done.iter().all(|e| e.str("reason") != Some("done")), "{done:?}");
+}
