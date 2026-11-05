@@ -146,11 +146,11 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let page = host_tab(&s, ADDR, 1_000_000);
     assert!(
         page.contains("Enable alerts") && page.contains(&subs[0].id()),
-        "Host tab lists the device"
+        "Notifications lists the device"
     );
     assert!(
-        page.contains("<span class=k>push</span><span class=w><b class=a>off: no webpush notifier</b>"),
-        "Host row: off"
+        page.contains("<dt>push</dt><dd><b class=a>off: no webpush notifier</b>"),
+        "Notifications' push row: off"
     );
     assert!(
         !page.contains("secret-endpoint") && !page.contains(AUTH),

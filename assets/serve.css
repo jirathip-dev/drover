@@ -756,7 +756,7 @@ html.sysopen{overflow:hidden}
 #sys .hhd>.su>summary{white-space:nowrap}
 /* At 900 px and over: the index is a rail on the left, the sections a column on the right. */
 @media (min-width:900px){
-  .sh.sys{display:grid;grid-template-columns:26ch minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:calc(2 * var(--s4))}
+  .sh.sys{display:grid;grid-template-columns:calc(var(--s4) * 13) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:calc(2 * var(--s4))}
   .sh.sys>.hd{grid-column:1/-1}
   .sxi{flex-direction:column;align-items:stretch;gap:var(--s1);margin:0;padding:var(--s2) 0;border:0;border-right:1px solid var(--line);overflow:visible;mask-image:none}
   .sxi a>span{padding:0 .5ch}
