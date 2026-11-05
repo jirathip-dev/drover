@@ -116,13 +116,15 @@ pub struct NeedsTab {
 }
 
 /// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
-/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
+/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
 pub struct NeedAsk {
     pub ask: Ask,
     pub who: String,
     pub kind: String,
     pub from: Option<String>,
     pub pngs: Vec<String>,
+    pub thread: Option<String>,
+    pub title: Option<String>,
 }
 
 /// A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
@@ -637,7 +639,7 @@ pub struct DriveAct {
 /// (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
 /// pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
 /// answer not delivered), the decision taken by default
-/// (and its ask to change it), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+/// (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
 #[allow(clippy::struct_excessive_bools)] // flags the row's markup reads, one each
 pub struct QueueRow {
     pub issue: u64,
@@ -661,6 +663,7 @@ pub struct QueueRow {
     pub notes: Vec<String>,
     pub decided: Option<String>,
     pub ask: Option<Ask>,
+    pub open: Option<NeedAsk>,
     pub mv: bool,
     pub up: Option<u64>,
     pub down: Option<u64>,

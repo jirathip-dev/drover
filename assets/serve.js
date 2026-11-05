@@ -2138,7 +2138,9 @@ chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
   const lk = t.closest('#chat .lc'); // #413: a linked row's chip opens the other thread
-  if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
+  const at = t.closest('.ath'); // #517: an ask's `asked in <thread>` opens that thread in [chat]
+  if (at) { e.preventDefault(); tab('chat'); chatOpen(at.dataset.go); history.pushState({ thr: at.dataset.go }, ''); }
+  else if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .tmo')) chatOlder();

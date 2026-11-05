@@ -521,6 +521,28 @@ fn join(parts: &[&str]) -> String {
         .join(" · ")
 }
 
+/// An open ask's card (the needs strip's, #517 its issue's queue row's): `who`, its `kind` line, the thread it was
+/// asked in.
+fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
+    let s = |k| a.str(k).unwrap_or_default();
+    let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
+    let left = age((a.ts + 60 * mins).saturating_sub(now));
+    let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
+    NeedAsk {
+        ask: v1::ask(a),
+        who: join(&[&a.fleet, &issue, s("agent"), &age(now.saturating_sub(a.ts))]),
+        kind: rec.map_or("owner · waits for you".into(), |n| {
+            format!("routine · defaults to {n} in {left}")
+        }),
+        from: a.str("from").and_then(|f| f.split(':').next()).map(Into::into),
+        pngs: chat::files_of(a)
+            .map(|f| f["name"].as_str().unwrap_or_default().into())
+            .collect(),
+        thread: a.str("thread").map(Into::into),
+        title: a.str("thread").map(|t| crate::conductor::title(ev, t).into()),
+    }
+}
+
 /// Corral's 8 coats (HerdArt.swift): body, shade, mane; chestnut, palomino, dun and buckskin carry a blaze.
 const COATS: &[(&str, &str, &str, bool)] = &[
     ("8a5a33", "6f4527", "2e2019", false),
@@ -1553,26 +1575,11 @@ impl<'a> Server<'a> {
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
         let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
         // #386: a conductor's asks wait in its thread (amber), not in this stack; #412: a design's here too.
+        // #517: but one tied to an issue: its card is answerable here too.
         let asks = crate::events::open_asks(ev)
             .into_iter()
-            .filter(|a| a.str("thread").is_none() || crate::design::is_ask(a))
-            .map(|a| {
-                let s = |k| a.str(k).unwrap_or_default();
-                let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
-                let left = age((a.ts + 60 * mins).saturating_sub(ctx.now));
-                let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
-                NeedAsk {
-                    ask: v1::ask(a),
-                    who: join(&[&a.fleet, &issue, s("agent"), &age(ctx.now.saturating_sub(a.ts))]),
-                    kind: rec.map_or("owner · waits for you".into(), |n| {
-                        format!("routine · defaults to {n} in {left}")
-                    }),
-                    from: a.str("from").and_then(|f| f.split(':').next()).map(Into::into),
-                    pngs: chat::files_of(a)
-                        .map(|f| f["name"].as_str().unwrap_or_default().into())
-                        .collect(),
-                }
-            });
+            .filter(|a| a.str("thread").is_none() || a.issue.is_some() || crate::design::is_ask(a))
+            .map(|a| need_ask(ctx.now, mins, ev, a));
         // #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
         let t = self.snapshot().1.ts;
         NeedsTab {
@@ -1782,6 +1789,8 @@ impl<'a> Server<'a> {
                         .find(|e| e.is("needs-decision", f, n) && e.str("id") == d.str("id"))
                 };
                 let ask = decided.filter(|_| rw).and_then(asked);
+                let open = (asks.iter().rfind(|e| e.fleet == *f && e.issue == Some(n)))
+                    .map(|a| need_ask(now, cfg.limits.ask_default_minutes, events, a));
                 let up = s.is_some_and(|s| s.updating);
                 let mv = rw && !dead && k.is_some();
                 rows.push((
@@ -1816,6 +1825,7 @@ impl<'a> Server<'a> {
                         notes,
                         decided: decided.map(|d| d.str("choice").unwrap_or("?").into()),
                         ask: ask.map(v1::ask),
+                        open,
                         mv,
                         up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
                         down: k.filter(|_| mv).and_then(|k| q.get(k + 1)).map(|x| x.issue),

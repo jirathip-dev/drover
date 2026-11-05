@@ -38,9 +38,9 @@ export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolea
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
- * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
+ * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
  */
-export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, };
+export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, thread?: string | null, title?: string | null, };
 
 /**
  * A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
@@ -293,9 +293,9 @@ export type DriveAct = { who: string, words: string, code: string, };
  * (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
  * pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
  * answer not delivered), the decision taken by default
- * (and its ask to change it), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+ * (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
  */
-export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
+export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, open?: NeedAsk | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
 
 /**
  * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the

@@ -79,6 +79,9 @@ pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
 
 /// #444: a gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
 pub const NO_PUSH: &str = ", no push: ";
+/// #517: a lesson lane ended without a push or `done`: drive prompts it once, then closes the issue.
+pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
+pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
 const RESPAWN_SECS: u64 = 1800;
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
@@ -554,7 +557,25 @@ pub fn scan(
                     .iter()
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
         };
-        if w.what.starts_with("idle without pushing") && (gone || unconfirmed) && settled() {
+        // #517: a lesson lane idle with no push and no `done` is prompted once (live), then closed as "no repeated
+        // class" once that goes unanswered 30 min (or its lane is gone): never #444's respawn or needs-human.
+        let idle = w.what.starts_with("idle without pushing");
+        if idle && s.build.as_deref() == Some("lesson") && settled() {
+            let asked = mine
+                .iter()
+                .rfind(|e| e.kind == "lesson-prompted" && e.str("agent") == Some(built.as_str()));
+            (w.who, w.lane, w.next_cmd) = ("drive", built, None);
+            w.what = match asked {
+                None if !gone && !unconfirmed => LESSON_PROMPT.into(),
+                Some(e) if !gone && ctx.now < e.ts + RESPAWN_SECS => {
+                    format!(
+                        "lesson lane prompted {} ago, closing it after 30 min",
+                        age(ctx.now - e.ts)
+                    )
+                }
+                _ => LESSON_CLOSE.into(),
+            };
+        } else if idle && (gone || unconfirmed) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
             let why = if gone { "lane gone" } else { "prompt never landed" };
