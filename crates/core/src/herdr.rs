@@ -441,6 +441,15 @@ pub fn failed_with(o: &Out, code: &str) -> bool {
         .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v["error"]["code"] == code))
 }
 
+/// #477: a failed call's `error.message` (herdr's JSON envelope), else its stderr.
+pub fn message(o: &Out) -> String {
+    let m = [&o.stderr, &o.stdout].iter().find_map(|s| {
+        let v: Value = serde_json::from_str(s.trim()).ok()?;
+        Some(v["error"]["message"].as_str()?.to_string())
+    });
+    m.unwrap_or_else(|| o.stderr.trim().into())
+}
+
 pub fn rename_argv(pane: &str, agent: &str) -> Vec<String> {
     argv(&["agent", "rename", pane, agent])
 }
