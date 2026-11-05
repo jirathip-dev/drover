@@ -172,12 +172,12 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
 }
 
-/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (a lane on another host: on the
-/// main host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
+/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
+/// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    if IN_ACT.get() || crate::cli::forward(ctx, r, &a).is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() {
         return None;
     }
     a.push("--now".into());
@@ -459,6 +459,10 @@ pub fn drive(
         }
     }
     let grew = log();
+    // #389: remote lanes' commands that found no route here, as the look read them.
+    if fast {
+        crate::outbox::drain(ctx, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
+    }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
     for name in &fleets {
@@ -507,6 +511,7 @@ pub fn drive(
         for n in &fleets {
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
         }
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: stale panes: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
@@ -582,7 +587,8 @@ fn pass(
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
-        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live {
+        let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
+        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live || away {
             continue;
         }
         let text = format!("#{on} merged; rebase on {} and continue", f.integration);

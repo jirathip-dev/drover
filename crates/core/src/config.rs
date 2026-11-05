@@ -548,6 +548,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "lane-dead",
     "ready-unmerged",
     "ci-missing",
+    "outbox-stale",
     "merged",
     "needs-decision",
     "needs-human",
