@@ -203,3 +203,30 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
     run(&c, &r, &["drive"]);
     assert_eq!(kinds(&c, "repaired").len(), 1);
 }
+
+/// One adoption per pane, ever: a pane a `spawn-adopted` names is no orphan, even with its `spawn` missing.
+#[test]
+fn a_pane_adopted_once_is_never_adopted_again() {
+    let c = ctx(&tmpdir("design-once"), &format!("{CONFIG}{DESIGN}"));
+    failed(&c, 12);
+    ev(
+        &c,
+        12,
+        500,
+        "spawn-adopted",
+        json!({"agent": "sendmeter-design-12", "pane": "w115:p1", "why": "orphan"}),
+    );
+    let wt = c.worktrees.join("sendmeter/design-12");
+    let list = agents(&[("sendmeter-design-12", "done", &wt.to_string_lossy(), "w115:p1")]);
+    let pane = json!({"result": {"pane": {"pane_id": "w115:p1", "agent": "hermes", "workspace_id": "w115"}}});
+    let r = fake(&list, "4\n")
+        .reply("herdr pane get w115:p1", &pane.to_string())
+        .reply("herdr", "{}")
+        .reply("git -C", "");
+    for args in [&["drive", "--fast"][..], &["check"]] {
+        let (code, out) = run(&c, &r, args);
+        assert_eq!(code, 0, "{args:?}: {out}");
+    }
+    assert!(!r.called("herdr agent rename"), "{:?}", r.calls.borrow());
+    assert_eq!((kinds(&c, "spawn").len(), kinds(&c, "orphan-lane").len()), (2, 0));
+}
