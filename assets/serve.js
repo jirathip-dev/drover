@@ -1919,7 +1919,7 @@ function pgraph(d) {
 // `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
 // #405: ATS, the files picked for each thread's next message: { <t>: [{ name, file, src }] } (src: an image's object URL);
 // #407: kept on the device (IndexedDB), as each thread's draft text is (localStorage `draft:<t>`).
-var THR = DBG.get('thread') || sget('thread') || '', ATS = {};
+var THR = DBG.get('thread') || sget('thread') || '', ATS = {}, HP = {}; // #404 HP: an empty thread's harness pick
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
 function chatOpen(t) {
   THR = t;
@@ -1995,6 +1995,7 @@ function chatPaint(root = $('#chat')) {
     if (EDIT && EDIT.t === t) tw.insertBefore(el('p', 'qe', 'editing queued message · '), tw.querySelector('input[type=file]')).append(Object.assign(el('button', 'ecl', 'cancel'), { type: 'button' }));
     else if (wk) tw.append(el('p', 'qh', 'delivered when this turn ends · hold [queue] to steer'));
     if (!a.value && !(EDIT && EDIT.t === t)) a.value = get('draft:' + t) || '';
+    if (HP[t] && tw.elements.harness) tw.elements.harness.value = HP[t]; // #404: the harness picked for a new thread
     if (!ATS[t]) continue;
     const row = tw.insertBefore(el('div', 'ats'), tw.querySelector('input[type=file]'));
     ATS[t].forEach((f, i) => {
@@ -2050,6 +2051,14 @@ addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 // #407: each thread's draft is kept as you type (not a queued message being edited).
+// #404: an empty thread's harness pick (HP, kept across live updates until its first message); a thread's model/effort
+// chip applies from its next turn.
+document.addEventListener('change', e => {
+  const s = e.target, f = s.closest?.('#chat .tw');
+  if (!f || !s.matches('select')) return;
+  if (s.name === 'harness') HP[f.dataset.t] = s.value;
+  else chatPost({ op: 'model', t: f.dataset.t, [s.name]: s.value });
+});
 const draft = (t, v) => { try { if (v) localStorage.setItem('draft:' + t, v); else localStorage.removeItem('draft:' + t); } catch (e) {} };
 document.addEventListener('input', e => {
   const a = e.target;
@@ -2289,7 +2298,7 @@ async function chatSay(f, how) {
   const t = f.dataset.t, a = ATS[t] || null, box = f.elements.text, text = box.value, repo = f.dataset.repo, ed = EDIT && EDIT.t === t ? EDIT : null;
   if (!text.trim() && !a) return;
   const op = repo ? 'new' : ed ? 'queue' : how || (f.closest('.cvp').querySelector('.tlv.wk') ? 'queue' : 'say');
-  const names = a ? a.map(x => x.name).join(', ') : '';
+  const names = a ? a.map(x => x.name).join(', ') : '', harness = repo && f.elements.harness ? { harness: f.elements.harness.value } : {};
   const p = { t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
   if (op !== 'queue') SENT.push(p);
   f.reset();
@@ -2302,7 +2311,8 @@ async function chatSay(f, how) {
   chatPaint();
   chatFollow();
   const files = a ? { name: a.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.map(x => b64(x.file)))).join(',') } : {};
-  const ok = await chatPost({ op, ...(repo ? { repo } : { t }), ...(ed ? { q: ed.q } : {}), text, ...files });
+  const ok = await chatPost({ op, ...(repo ? { repo, ...harness } : { t }), ...(ed ? { q: ed.q } : {}), text, ...files });
+  if (ok && repo) delete HP[t];
   if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }
   p.st = ok ? '✓' : '✗';
   if (!ok && ed) EDIT = { ...ed, draft: box.value };

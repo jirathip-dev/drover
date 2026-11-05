@@ -269,7 +269,8 @@ fn page(
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => {
                 format!("<p class=qs>↻ resumed · same session ({:.4}…)</p>", esc(s("session")))
             }
-            ("conductor-sleep", _) => "<p class=qs>☾ asleep after 30 min idle · writes wake it</p>".into(),
+            ("thread-model", _) => format!("<p class=qs>{}</p>", esc(&conductor::picked(e))),
+            ("conductor-sleep", _) if s("why") != "model" => "<p class=qs>☾ asleep after 30 min idle · writes wake it</p>".into(),
             _ => String::new(),
         };
         if e.kind == "thread-cmd" {
@@ -318,7 +319,8 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
         "new" => "a message starts the conductor",
         _ => "<b class=g>●</b> awake · sleeps after 30 min idle",
     };
-    let role = conductor::role(cfg, &t.fleet).ok().map(|r| r.1);
+    let role = conductor::thread_role(cfg, events, t).ok().map(|r| r.1);
+    let role = role.as_ref();
     let (h2, model) = (
         role.map_or("", |r| r.harness.as_str()),
         role.and_then(|r| r.model.as_deref()),
@@ -337,8 +339,38 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     format!(
         "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span></div></div>\
          <div class=tc>{h}</div><p class={tl}>{live}</p>{guest}{}</div>",
-        composer(id, "", &queue(events, id, dis), dis)
+        composer(id, "", (&queue(events, id, dis), &model_chip(cfg, role, dis)), dis)
     )
+}
+
+/// #404: a chip of choices: `name`'s current value `cur` (an unset one first, as `label`) and the others.
+fn pick(name: &str, label: &str, cur: Option<&str>, all: &[&str], dis: &str) -> String {
+    let opt = |v: &str, l: &str| {
+        let s = or(cur.unwrap_or_default() == v, " selected", "");
+        format!("<option value=\"{}\"{s}>{}</option>", esc(v), esc(l))
+    };
+    let unset = cur.map_or_else(|| opt("", label), |_| String::new());
+    let opts: String = all.iter().map(|v| opt(v, v)).collect();
+    format!("<select class=cp name={name} aria-label={name}{dis}>{unset}{opts}</select>")
+}
+
+/// #404: the thread's model and effort chips, its harness's choices; a pick applies from the next turn.
+fn model_chip(cfg: &Config, role: Option<&crate::config::Role>, dis: &str) -> String {
+    let Some(r) = role else { return String::new() };
+    let mut models = conductor::harness_models(cfg, &r.harness);
+    if !models.is_empty() {
+        models.extend(r.model.as_deref().filter(|m| !models.contains(m)));
+    }
+    let efforts = crate::harness::efforts(&r.harness);
+    let (m, e) = (r.model.as_deref(), r.effort_or(&cfg.limits));
+    let chips = [("model", m, &models[..]), ("effort", e.as_deref(), efforts)];
+    let chips = chips
+        .iter()
+        .filter(|c| c.2.len() > 1 || c.1.is_none() && !c.2.is_empty());
+    let chips: String = chips
+        .map(|(k, v, all)| pick(k, &format!("default {k}"), *v, all, dis))
+        .collect();
+    or(chips.is_empty(), "", &format!("<div class=cbar>{chips}</div>")).to_string()
 }
 
 /// #407: the queued messages above the box, each with [send now] (steer it in), edit and [remove].
@@ -352,22 +384,29 @@ fn queue(events: &[Event], id: &str, dis: &str) -> String {
     queued(events, id).iter().map(row).collect()
 }
 
-/// The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above.
-fn composer(id: &str, repo: &str, qd: &str, dis: &str) -> String {
+/// The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above;
+/// #404: its chips below.
+fn composer(id: &str, repo: &str, (qd, chips): (&str, &str), dis: &str) -> String {
     format!(
         "<form class=tw data-t=\"{id}\"{repo}>{qd}<input type=file multiple hidden{dis}><button type=button class=add aria-label=\"attach images or files\"{dis}>+</button>\
-         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button class=snd{dis}>send</button></form>"
+         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button class=snd{dis}>send</button>{chips}</form>"
     )
 }
 
-/// #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it (`op=new`).
-fn draft(repo: &str, dis: &str) -> String {
+/// #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it (`op=new`);
+/// #404: on the harness its chip picks (preset to the default), for good.
+fn draft(cfg: &Config, repo: &str, dis: &str) -> String {
     let r = esc(repo);
+    let h = conductor::defaults(cfg, repo).map(|d| d.1.harness).ok();
+    let chip = format!(
+        "<div class=cbar>{}</div>",
+        pick("harness", "harness", h.as_deref(), &crate::harness::NAMES, dis)
+    );
     format!(
         "<div class=cvp data-t=\"new-{r}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>new thread</b><span class=ds>{}</span></div></div>\
          <div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>{}</div>",
         or(repo == "all", "all repos", &r),
-        composer(&format!("new-{r}"), &format!(" data-repo=\"{r}\""), "", dis)
+        composer(&format!("new-{r}"), &format!(" data-repo=\"{r}\""), ("", &chip), dis)
     )
 }
 
@@ -479,7 +518,7 @@ pub fn tab(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], agents: &[Value], 
         list += &format!(
             "<div class=\"fc k-{k}\"><div class=fh><span class=fn><b>{nm}</b><span class=ds>{count}</span></span>{add}</div>{top}{older}{arch}</div>"
         );
-        views += &draft(repo, dis);
+        views += &draft(cfg, repo, dis);
     }
     let view = |t: &&Event| thread(ctx, cfg, events, t, (agents, rw));
     views += &threads.iter().map(view).collect::<String>();
@@ -542,7 +581,13 @@ pub fn post(
                 conductor::role(&cfg, g("repo"))?;
                 conductor::text_ok(text)?;
                 conductor::files_ok(&files)?;
-                conductor::new(ctx, &cfg, g("repo"), &first(text))?
+                conductor::new(
+                    ctx,
+                    &cfg,
+                    g("repo"),
+                    &first(text),
+                    Some(g("harness")).filter(|h| !h.is_empty()),
+                )?
             } else {
                 conductor::find(&events, id)?;
                 id.to_string()
@@ -584,6 +629,10 @@ pub fn post(
                 "removed",
             )?;
             Ok("removed".into())
+        }
+        "model" => {
+            conductor::pick(ctx, &cfg, id, g("model"), g("effort"))?;
+            Ok("picked".into())
         }
         "stop" => {
             conductor::find(&events, id)?;
