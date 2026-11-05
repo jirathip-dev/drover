@@ -507,7 +507,7 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
-/// #298: the state a hook call reports to berth: `done` at a turn's end, `blocked` while the harness waits on a person,
+/// #298: the state a hook call reports to shed: `done` at a turn's end, `blocked` while the harness waits on a person,
 /// else `working`.
 pub fn reported(input: &Value) -> Option<&'static str> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;

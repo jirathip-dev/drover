@@ -154,15 +154,15 @@ impl Runner for Snap<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: a call with stdin (`berth connect`, a file write) is never a cached read.
+    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         self.r.run_in(prog, args, input)
     }
-    fn berth(&self) -> Option<crate::berth::Berth> {
-        self.r.berth()
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        self.r.shed()
     }
 }
 

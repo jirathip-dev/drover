@@ -116,15 +116,15 @@ impl Runner for On<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: berth on another host is its own server there, through `berth connect` over ssh.
-    fn berth(&self) -> Option<crate::berth::Berth> {
-        let b = self.r.berth()?;
+    /// #298: shed on another host is its own server there, through `shed connect` over ssh.
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        let b = self.r.shed()?;
         let wire = if self.machine.is_some() {
-            crate::berth::Wire::Connect
+            crate::shed::Wire::Connect
         } else {
             b.wire
         };
-        Some(crate::berth::Berth { wire, ..b })
+        Some(crate::shed::Shed { wire, ..b })
     }
 }
 

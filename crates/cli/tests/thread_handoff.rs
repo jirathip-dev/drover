@@ -58,6 +58,7 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
         "FLEET_LANE",
         "HERDSMAN_THREAD",
         "HERDSMAN_MAIN",
+        "SHED",
         "BERTH",
     ] {
         cmd.env_remove(k);

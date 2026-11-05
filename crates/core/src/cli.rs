@@ -661,11 +661,11 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "berth"`: lanes start, and are reached, on berth.
+    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed.
     let with = Config::load(&ctx.config)
         .ok()
-        .and_then(|c| c.runtime.berth())
-        .map(|b| crate::berth::With(r, b));
+        .and_then(|c| c.runtime.shed())
+        .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
         Some(o) => o.map(|o| {
@@ -1343,23 +1343,24 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         eprintln!("herdsman hook: input is not JSON; allowing");
         return Ok(());
     };
-    // #298: in a berth terminal (`$BERTH`) the hook reports the turn's state, so nothing reads it off the screen.
-    if let (Ok(name), Some(state)) = (std::env::var("BERTH"), hook::reported(&input)) {
-        let w = r.berth().map_or_else(
-            || crate::berth::Wire::Socket(crate::berth::default_socket()),
-            |b| b.wire,
-        );
-        let report = berth_proto::Reported {
+    // #298: in a shed terminal (`$SHED`; #455: or berth's `$BERTH`) the hook reports the turn's state, so nothing
+    // reads it off the screen.
+    let term = std::env::var("SHED").or_else(|_| std::env::var("BERTH"));
+    if let (Ok(name), Some(state)) = (term, hook::reported(&input)) {
+        let w = r
+            .shed()
+            .map_or_else(|| crate::shed::Wire::Socket(crate::shed::default_socket()), |b| b.wire);
+        let report = shed_proto::Reported {
             state: state.into(),
             note: None,
         };
-        if let Err(e) = crate::berth::call(
+        if let Err(e) = crate::shed::call(
             r,
             &w,
-            berth_proto::Method::State,
-            json!(berth_proto::StateParams { name, report }),
+            shed_proto::Method::State,
+            json!(shed_proto::StateParams { name, report }),
         ) {
-            eprintln!("herdsman hook: berth state: {e:#}");
+            eprintln!("herdsman hook: shed state: {e:#}");
         }
     }
     // #304: a turn's end or a push that went through kicks the lane's issue at once.
