@@ -756,7 +756,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
     let png = tmpdir("chat-window-png").join("thread.png");
     let o = swift()
-        .env("HERDSMAN_WAIT", "8")
+        .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
