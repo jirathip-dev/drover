@@ -50,7 +50,7 @@ fn pr(head: &str, checks: Value, files: &str) -> Fake {
         "statusCheckRollup": checks});
     Fake::default()
         .reply("gh pr view issue-12", &pr.to_string())
-        .reply("gh pr diff 34", files)
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", files)
         .reply("gh pr merge 34", "")
         .reply("gh pr view 34", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "")
@@ -121,7 +121,11 @@ fn default_config_still_needs_the_full_suite() {
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN"), "{out}");
-    assert!(!r.called("gh pr diff") && !r.called("git -C"), "{:?}", r.calls.borrow());
+    assert!(
+        !r.called("gh api repos/jirathip-dev/sendmeter/pulls/") && !r.called("git -C"),
+        "{:?}",
+        r.calls.borrow()
+    );
     assert!(!kinds(&c).contains(&"landed".to_string()));
 }
 
@@ -142,7 +146,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     let r = Fake::default()
         .once(&format!("git -C {DIR} rev-parse origin/issue-12"), 0, HEAD)
         .once(&format!("git -C {} rev-parse HEAD", wt.display()), 0, NEW)
-        .reply("gh pr diff 34", "src/a.rs\n")
+        .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", "src/a.rs\n")
         .reply("git", "");
     let cfg = Config::load(&c.config).unwrap();
     herdsman::drive::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
