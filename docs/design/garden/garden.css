@@ -1,0 +1,14 @@
+/* #423 mockup only: the garden's frame loop, window light layers and moment animations for index.html and sheet.html.
+   Phase 2 maps these onto herd.css / serve.css's existing kf1/kf2 and mo-* rules (the build renames f1/f2 → kf1/kf2). */
+@property --o1{syntax:"<number>";inherits:true;initial-value:1}@property --o2{syntax:"<number>";inherits:true;initial-value:0}
+.f1{opacity:var(--o1,1)}.f2{opacity:var(--o2,0)}
+.loop{animation:gfr 1.2s infinite}
+@keyframes gfr{0%,49.9%{--o1:1;--o2:0}50%,100%{--o1:0;--o2:1}}
+.l-sun,.l-overcast,.l-rain{display:none}
+.light-sun .l-sun,.light-overcast .l-overcast,.light-rain .l-rain{display:inline}
+.f2v{--o1:0;--o2:1}
+.mo-hop{animation:ghop .8s ease-in-out infinite}.mo-shake{animation:gshake .4s ease-in-out infinite}.mo-pulse{animation:gpulse .8s ease-in-out infinite}
+@keyframes ghop{50%{translate:0 calc(-1 * var(--s1))}}@keyframes gshake{25%{translate:calc(-1 * var(--s1) / 2) 0}75%{translate:calc(var(--s1) / 2) 0}}@keyframes gpulse{50%{scale:1.2}}
+.still .loop,.still .mo-hop,.still .mo-shake,.still .mo-pulse{animation:none}
+@media (prefers-reduced-motion:reduce){.loop,.mo-hop,.mo-shake,.mo-pulse{animation:none}}
+svg.px24{width:24px;height:24px;image-rendering:pixelated;shape-rendering:crispEdges;vertical-align:middle}
