@@ -154,16 +154,21 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 ..m("note", s("text"))
             },
             ("thread-msg", _) if s("text").starts_with("DECISION ") => continue,
-            ("thread-handoff", _) => m("handoff", s("title")),
+            ("thread-handoff", _) => m("handoff", conductor::handoff_text(e)),
             ("thread-msg", f) => {
                 let file = |f: &Value| FileRef {
                     name: f["name"].as_str().unwrap_or_default().into(),
                     size: f["size"].as_u64().unwrap_or(0),
                 };
+                let fwd = if conductor::forwarded(events, e) {
+                    " (forwarded)"
+                } else {
+                    ""
+                };
                 Msg {
                     from: f.into(),
                     files: files_of(e).map(file).collect(),
-                    ..m("msg", s("text"))
+                    ..m("msg", s("text") + fwd)
                 }
             }
             ("thread-cmd", _) => m("cmd", s("cmd")),
