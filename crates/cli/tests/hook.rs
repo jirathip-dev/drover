@@ -545,6 +545,62 @@ fn a_conductor_writes_its_own_thread_folder() {
     }
 }
 
+/// #499: from the shell too, a conductor copies into its own thread folder, but not herdsman's files there, another
+/// thread's or the log; relative targets resolve against the cwd (and its `cd`s) for every lane.
+#[test]
+fn a_conductor_copies_into_its_own_thread_folder() {
+    let d = tmpdir("hook-own-sh");
+    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    let (st, c) = (d.join("state"), d.join("state/conductor"));
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/tmp",
+            "tool_input": {"command": cmd}});
+        let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+            .args(["hook", "--role", lane.rsplit(':').next().unwrap()])
+            .env_remove("FLEET_LANE")
+            .env("HERDSMAN_LANE", lane)
+            .env("HERDSMAN_THREAD", "t6")
+            .env("FLEET_CONFIG", d.join("fleet.toml"))
+            .env("FLEET_STATE", st.join("events.jsonl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
+    let cond = "synergy:-:conductor";
+    for cmd in [
+        format!("cp a.png {own}/a.png"),
+        format!("mv /tmp/b.png {own}/ui/b.png"),
+        format!("sips -s format png a.jpg -o {own}/a.png"),
+        format!("cat a.svg > {own}/a.svg"),
+        format!("cd {own} && cp /tmp/a.png ./a.png"),
+    ] {
+        assert_eq!(run(cond, &cmd), "", "{cmd}");
+    }
+    let st = st.display();
+    for (lane, cmd) in [
+        (cond, format!("cp a.png {own}/.thread.md")),
+        (cond, format!("cp a.png {own}/.brief.md")),
+        (cond, format!("cp a.png {other}/")),
+        (cond, format!("cp a.png {own}/../t5/a.png")),
+        (cond, format!("cd {own} && cp a.png ../t5/a.png")),
+        (cond, format!("cd {own} && cp /tmp/a.png ./.thread.md")),
+        (cond, format!("cd {st} && cp a.png ./events.jsonl")),
+        ("synergy:7:impl", format!("cd {st} && cp a.png ./events.jsonl")),
+        ("synergy:7:impl", format!("cp a.png {own}/a.png")),
+    ] {
+        assert!(run(lane, &cmd).contains("is blocked"), "{lane}: {cmd}");
+    }
+}
+
 /// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
 #[test]
 fn ai_coauthor_trailer_is_spotted() {

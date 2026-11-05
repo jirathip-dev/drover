@@ -28,7 +28,9 @@ const GIT_WRITES: &[&str] = &[
     "am",
     "reset",
 ];
-const WRITERS: &[&str] = &["rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd"];
+const WRITERS: &[&str] = &[
+    "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
+];
 
 /// The call's tool input: the first of any dialect's input keys holding an object.
 fn tool_input(input: &Value) -> &Value {
@@ -91,8 +93,24 @@ fn own_file(file: &str, p: &Policy) -> bool {
     normal && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
 }
 
+/// #499: `w` as an absolute path, resolved against `cwd` (`..` and `.` folded), past a redirection's `2>>`.
+fn resolve(w: &str, cwd: &str) -> String {
+    use std::path::{Component, PathBuf};
+    let w = expand_home(w.trim_start_matches(|c: char| c.is_ascii_digit() || c == '>'));
+    let mut out = PathBuf::new();
+    for c in std::path::Path::new(cwd).join(w).components() {
+        match c {
+            Component::ParentDir => drop(out.pop()),
+            Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out.to_string_lossy().into_owned()
+}
+
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let cmd = &unquote(cmd);
+    let mut cwd = cwd.to_string();
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
     }
@@ -104,13 +122,22 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .filter(|t| !t.is_empty())
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
+        // #499: a `cd` moves the later segments' cwd, so their relative paths resolve where they run.
+        if let ["cd", dir, ..] = t[..] {
+            cwd = resolve(dir, &cwd);
+        }
         let found = gh(&t)
-            .or_else(|| git_push(&t, cwd, p, cur_branch))
+            .or_else(|| git_push(&t, &cwd, p, cur_branch))
             .or_else(|| reviewer_git(&t, p));
         if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
-        if let Some(pp) = protected_path(seg, p) {
+        // #499: each word resolved against the cwd; a conductor's write lands only in its own folder.
+        let paths = t.iter().filter(|w| !w.starts_with('-')).map(|w| resolve(w, &cwd));
+        if let Some(pp) = paths
+            .into_iter()
+            .find_map(|f| protected_path(&f, p).filter(|_| !own_file(&f, p)))
+        {
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))
                 || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
