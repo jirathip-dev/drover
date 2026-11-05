@@ -139,6 +139,8 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
+    Report { id: Option<String> },
     /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
     Thread {
         #[command(subcommand)]
@@ -581,7 +583,8 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "resume", "serve", "setup", "stats", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "setup", "stats",
+        "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -834,6 +837,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 .collect();
             write!(out, "{}", boards.join("\n"))?;
         }
+        Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
             all,
