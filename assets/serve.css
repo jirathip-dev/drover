@@ -83,7 +83,7 @@ nav a.on .n{color:inherit}
 /* #450: one thin strip under the header on every tab: a wait over 300 ms is the chat's inline mark (.tld: the theme's
    sprite, ascii frames or a spinning glyph) + `loading`; data over 2 min old adds `as of 3m ago`, small and dim, on the
    same row. Nothing to say: no height. The page under it stays visible and tappable. */
-#strip{position:sticky;top:calc(var(--hit) + var(--s1) + 1px);z-index:1;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s2);background:var(--bg);color:var(--mute);font-size:var(--fs-meta)}
+#strip{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s2);background:var(--bg);color:var(--mute);font-size:var(--fs-meta)}
 #strip:has(#ld:not([hidden]),#stale:not([hidden])){padding-block:var(--s1)}#ld[hidden],#ld[hidden]+.ldw{display:none}
 #stale{margin-left:auto;white-space:nowrap}
 /* #450 first load: a tab with nothing yet is two empty outlines of its cards (no text) until its data paints. */

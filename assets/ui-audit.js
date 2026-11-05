@@ -697,7 +697,9 @@
       tab('lanes');
       window.wait(new Promise(() => {}));
       await new Promise(r => setTimeout(r, 400));
-      const l = $('#lanes .lane:not([data-thread]) .lr'), r = l.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const l = $('#lanes .lane:not([data-thread]) .lr');
+      l.scrollIntoView({ block: 'center' });
+      const r = l.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       if (!seen($('#ld'))) early.push('no strip while loading');
       if (!l.contains(hit)) early.push(`the lane is covered by ${hit && hit.outerHTML.slice(0, 60)}`);
       else hit.click();
