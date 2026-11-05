@@ -507,6 +507,7 @@ pub fn drive(
         for n in &fleets {
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
         }
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: stale panes: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
@@ -582,7 +583,8 @@ fn pass(
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
-        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live {
+        let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
+        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live || away {
             continue;
         }
         let text = format!("#{on} merged; rebase on {} and continue", f.integration);

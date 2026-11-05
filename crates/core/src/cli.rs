@@ -317,13 +317,21 @@ enum Cmd {
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
-    Close { agent: String },
+    Close {
+        agent: String,
+        /// The agent on this `[hosts.<name>]` (when another host has one of the same name)
+        #[arg(long)]
+        host: Option<String>,
+    },
     /// Close an agent's pane, pushing unpushed or dirty work to `wip/<agent>-<stamp>` first; the worktree stays. Dry run unless --yes
     Kill {
         agent: String,
         /// Actually kill
         #[arg(long)]
         yes: bool,
+        /// Its lane on this `[hosts.<name>]` (a pane a supersede left there under the same name)
+        #[arg(long)]
+        host: Option<String>,
     },
     /// Manage per-role Claude Code config folders
     Profiles {
@@ -590,8 +598,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`).
-pub const HELP_AGENT_MAX: usize = 290;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`).
+pub const HELP_AGENT_MAX: usize = 292;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -866,7 +874,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let cfg = Config::load(&ctx.config).ok();
             let boards: Vec<_> = all
                 .iter()
-                .map(|f| queue::board(&events, f, ctx.now, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
+                .map(|f| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
                 .collect();
             write!(out, "{}", boards.join("\n"))?;
         }
@@ -1149,8 +1157,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
-                Cmd::Close { agent } => check::close(ctx, &cfg, r, out, &agent)?,
-                Cmd::Kill { agent, yes } => check::kill(ctx, &cfg, r, out, &agent, yes)?,
+                Cmd::Close { agent, host } => check::close(ctx, &cfg, r, out, &agent, host.as_deref())?,
+                Cmd::Kill { agent, yes, host } => check::kill(ctx, &cfg, r, out, (&agent, host.as_deref()), yes)?,
                 Cmd::Verdict {
                     fleet,
                     issue,
