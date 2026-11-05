@@ -109,7 +109,7 @@ body{padding:0 var(--s3) var(--s4)}
 <h2>1 · the mob, 390 px: moderate · high · catastrophic</h2>
 <p>One page per fleet, as today: that repo's clearing of ghost gums on red earth, the station gate over the track in its #162 colour, a billabong at the front.
 Under it, the hollow log: one joey waiting in it per queued issue, a cockatoo screeching on it when one needs you. Then the bands: on the move (working, the
-animal by role), having a kip (idle), home and hosed (done) and stuck (blocked). The roadside Fire Danger Rating sign is the load.</p>
+animal by role), having a kip (idle), home and hosed (done) and stuck (blocked). The small roadside Fire Danger Rating sign at the clearing's edge, about a kangaroo's height, is the load (revision 1: 2 px a pixel, a small sign).</p>
 <div class=row3 id=phones></div>
 
 <h2>2 · 1440 px: the clearings along the track, one per repo</h2>
@@ -119,7 +119,7 @@ animal by role), having a kip (idle), home and hosed (done) and stuck (blocked).
 <h2>3 · the Fire Danger Rating sign, the Host miniature and Reduce Motion</h2>
 <p>Drawn only from what the farm's weather already reads: <code>load/limit</code> and the spawn gate. Moderate (under 0.5): the needle in the green, a still
 afternoon. High (from 0.5): the needle in the yellow, heat shimmer over the track, a few cicadas. Catastrophic (spawns held): the needle hard in the red, a heat
-haze over the sky, the shimmer and a cloud of cicadas. No flames anywhere. The needle wobbles 5° on two frames (0.6 s); Reduce Motion: a static sign.</p>
+haze over the sky, the shimmer and a cloud of cicadas. No flames anywhere. The needle wobbles 6° on two frames (0.6 s); Reduce Motion: a static sign. The sign is a board on two posts, about a kangaroo's height; its level word is in the footer line.</p>
 <div class=signs id=signs></div>
 
 <h2>4 · moments</h2>
@@ -148,11 +148,11 @@ serve.js's gate (<code>node check.mjs</code>). The rows below are serve.js's che
 
 <script type=module>
 import { mode, scheme } from './scheme.mjs';
-import { symbols, style, clearing, mini, ASCII, ASCII_ROWS, ASCII_LOAD, ACT_OF } from './art.mjs';
+import { symbols, sceneDefs, style, clearing, mini, ASCII, ASCII_ROWS, ASCII_LOAD, ACT_OF } from './art.mjs';
 import { gate } from './gate.mjs';
 const $ = s => document.querySelector(s);
 if (new URLSearchParams(location.search).has('still')) document.body.classList.add('still');
-$('#defs').innerHTML = symbols();
+$('#defs').innerHTML = symbols() + sceneDefs();
 $('#sch-name').textContent = `colours: bush-${mode()} (follows the phone) · the clearing by ${mode() === 'dark' ? 'night' : 'day'}`;
 const SCENE = clearing();
 

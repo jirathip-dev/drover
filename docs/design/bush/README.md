@@ -4,8 +4,23 @@ The bush theme is the Australian outback. Each role is a native animal: impl is 
 digging, rev a koala peering down from a gum, update an emu running. Idle is a koala asleep in the fork of a gum, done a
 kookaburra laughing, blocked a wombat stuck in its burrow. It is built to the theme contract (#241, #370) and #423's
 light/dark `scheme` pair, plus one optional key (`load_scene.kind = "sign"`, below). Farm, kitchen and garden are
-untouched. As in the kitchen and garden, every pixel comes from one source, `art.mjs` (pixel maps, one character = one
-pixel).
+untouched. As in the kitchen and garden, every pixel comes from one source, `art.mjs` (one character = one pixel).
+
+**Revision 1** (this commit; the first design was ff58da7 on `design-462`):
+
+- **Finer pixel art: 2 screen px per art pixel (was 4).** The lane sprites keep the farm's 132 × 100 box on a 66 × 50
+  grid (was 33 × 25), and the clearing is 196 × 94 (was 98 × 47). Every animal is redrawn at double the detail: fur
+  with a lit rim, a shaded underside and short strokes, faces with eye glints, noses and inner ears, feathers (the emu's
+  shag, the kookaburra's wing patch and barred tail), gum bark and clumped leaves, red earth with pebbles and cracks, a
+  dithered sky. Still crisp pixels, no smoothing. Row sprites keep their 16 × 16 grid at 24 px (1.5 px a pixel, already
+  finer than 2). Farm and kitchen are untouched; garden (#423) moves to the same density in its own lane.
+- **A small sign.** The Fire Danger Rating sign is a small roadside board on two posts at the clearing's right edge,
+  about a kangaroo's height (56 × 76 of the 392 × 188 scene, was a 124 × 104 board across it). At that size the words
+  are a header strip; the level word moves to the Herd's footer line (`fire danger high`). The Host card mini is
+  unchanged.
+- Kept: the 8 coat looks (neckerchief = repo colour), the band names, the words, the icon, the ASCII, the schemes.
+- The clearing's static layers are `<symbol>`s (`sceneDefs()`, once per page); each clearing `<use>`s them inside its
+  `.sky-day` / `.sky-night` / `.fdr` / `.s-<level>` groups, so the CSS is unchanged and a page of many clearings stays light.
 
 Open `index.html` over http from the repo root (`python3 -m http.server`; it uses ES modules). It follows the phone's
 light/dark setting, and the clearing is day or night with it. `?s=light` or `?s=dark` pins one. `?still=1` or Reduce
@@ -17,9 +32,9 @@ Motion stops every loop.
 |---|---|
 | `index.html` | the mockup: the mob at the three sign levels, the 1440 line of clearings, the sign and its Host mini, the moments, Queue and Lanes at 390, Events, Host, ASCII, the icon, the look sheet, the schemes |
 | `bush-{light,dark}-390.png` (DPR 2), `bush-{light,dark}-1440.png` | full-page shots of `index.html`, frame 1 (Reduce Motion) |
-| `sheet.html`, `sprite-sheet-{light,dark}.png` | the 7 actions × 6 looks + frame 2; the 3 moments and their frame 2; the rail items (joey, egg, cockatoo); the sign mini at each level; every 16 px row sprite at 24 px and 4× |
+| `sheet.html`, `sprite-sheet-{light,dark}.png` | the 7 actions × 6 looks + frame 2, at 1 pixel = 2; the 3 moments and their frame 2; the rail items (joey, egg, cockatoo); the sign mini at each level; every 16 px row sprite at 24 px and 4× |
 | `icon/icon-{180,192,512}.png`, `icon/favicon-{32,16}.png` (+ `.svg`) | the roo-crossing sign icon |
-| `art.mjs` | pixel maps: the animals, moments, the rail log, row sprites, the clearing scene, the sign and its mini, the icon, ASCII |
+| `art.mjs` | the pixel canvas and its shading; the animals, moments, the rail log, row sprites, the clearing scene, the sign and its mini, the icon, ASCII |
 | `schemes/bush-{light,dark}.json` | the two proposed schemes (phase 2 copies them to `assets/schemes/`) |
 | `gate.mjs`, `check.mjs` | serve.js's scheme gate, ported line for line (#423's copy, unchanged); `node check.mjs` exits 1 on a fail |
 | `scheme.mjs`, `bush.css` | mockup only: applies a scheme as serve.js's head script does; the frame loop, day/night and sign layers |
@@ -34,13 +49,14 @@ Motion stops every loop.
    *having a kip* (idle), *home and hosed* (done) and *stuck* (blocked).
 2. **1440: the clearings along the track.** One clearing per repo side by side (the existing `scene.line`), the current
    one lit. The sign is the host's load, not a repo's, so only the lit clearing carries it.
-3. **The Fire Danger Rating sign = load.** A roadside sign: a half dial in the four AFDRS bands (Moderate green, High
-   yellow, Extreme orange, Catastrophic red), a needle and the level word.
+3. **The Fire Danger Rating sign = load.** A small roadside sign at the clearing's edge, about a kangaroo's height: a
+   half dial in the four AFDRS bands (Moderate green, High yellow, Extreme orange, Catastrophic red) and a needle; the
+   level word is in the Herd's footer.
    - **Moderate** (load/limit < 0.5): the needle in the green.
    - **High** (≥ 0.5): the needle in the yellow, heat shimmer over the track, a few cicadas.
    - **Catastrophic** (spawns held): the needle in the red, a warm haze over the sky, a cloud of cicadas.
 
-   No flames anywhere. The needle wobbles 5° on two frames. Reduce Motion shows a static sign; the shimmer and cicadas
+   No flames anywhere. The needle wobbles 6° on two frames (the mini 5°). Reduce Motion shows a static sign; the shimmer and cicadas
    stay drawn but don't move. The Host card's 48 × 16 mini is the dial alone.
 4. **Day and night.** bush-light draws the clearing by day (a pale sky and a white sun). bush-dark draws it at night: a
    deep indigo sky with the Southern Cross and its two pointers, and the earth dimmed.
