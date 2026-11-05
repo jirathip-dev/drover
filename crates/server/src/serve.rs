@@ -1227,9 +1227,9 @@ impl<'a> Server<'a> {
         };
         match op {
             "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
-            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, agent, yes)?,
+            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
             "clean" => crate::check::clean(ctx, &cfg, self.r, &mut out, Some(&fleet), (None, Some(agent)), yes)?,
-            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent)?,
+            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
         if yes || op == "stop" {
@@ -1689,9 +1689,13 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..QueueTab::default()
         };
-        let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), read(&ctx.state)) else {
-            d.error = Some("cannot read fleet.toml".into());
-            return d;
+        // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
+        let (cfg, events) = match (Config::load(&ctx.config), read(&ctx.state)) {
+            (Ok(c), Ok(e)) => (c, e),
+            (Err(e), _) | (_, Err(e)) => {
+                d.error = Some(format!("{e:#}"));
+                return d;
+            }
         };
         let (cfg, events, st) = (&cfg, &events, &fold(&events));
         // The state of an open lane herdr shows no pane for: `dead`, or `parked` (#83).
@@ -2631,7 +2635,7 @@ const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again wh
 DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
 ALL_CAPPED|a|waiting|{why} · {then}
 CAP|a|waiting|{why} · starts when a lane finishes
-NO_HOST|a|waiting|{why}
+NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
 ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
 WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`
