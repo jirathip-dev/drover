@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub use claude::root as profiles_root;
+pub use claude::{remove_tmp, root as profiles_root};
 pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;

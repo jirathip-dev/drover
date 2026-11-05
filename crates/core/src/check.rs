@@ -572,7 +572,7 @@ pub fn clean(
             let _ = herdr::close(&on, pane);
         }
         if on.machine.is_none() {
-            claude_tmp(cfg, wt);
+            crate::harness::remove_tmp(&stray_roots(cfg), wt);
         }
         drop_log(ctx, e.str("agent"));
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
@@ -603,20 +603,6 @@ pub fn clean(
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
     Ok(())
-}
-
-/// #536: Claude Code's temp dir for worktree `wt`, `<stray root>/claude-<uid>/<wt, each non-alphanumeric as ->`.
-fn claude_tmp(cfg: &Config, wt: &str) {
-    let key: String = wt
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    for root in stray_roots(cfg) {
-        let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
-        for d in ls.filter(|e| e.file_name().to_string_lossy().starts_with("claude-")) {
-            let _ = std::fs::remove_dir_all(d.path().join(&key));
-        }
-    }
 }
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
