@@ -90,13 +90,13 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     assert!(!t4.contains("DECISION q31"), "a DECISION line shows as the ✓ line only");
     assert!(!t4.contains("disabled"), "a paired owner device writes");
     // The needs-you stack keeps lane asks, and (#517) a thread's ask tied to an issue with where it was asked;
-    // `[chat·N]` counts the threads that wait on a choice.
+    // `[chat·N]` counts the threads that wait on a choice (t4, t5).
     assert!(needs.contains("Rate-limit the public search endpoint") && needs.contains("X-RateLimit"));
     assert!(
         needs.contains("asked in <a href=#chat class=ath data-go=\"t4\">Rate limits for /v1/search · t4</a>"),
         "{needs}"
     );
-    assert!(needs.contains("<i id=chn hidden data-n=1></i>"), "{needs}");
+    assert!(needs.contains("<i id=chn hidden data-n=2></i>"), "{needs}");
 }
 
 /// The conductor's tool rows come from the lane hook; a conductor's thread with `fleet` and conductor role.
