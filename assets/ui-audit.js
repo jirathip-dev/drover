@@ -404,8 +404,7 @@
         if (cp.includes('```') || cp.includes('`') || !cp.includes('curl -s localhost:8080/v1/openapi.json')) early.push(`copy: "${cp.slice(0, 40)}"`);
         press(b); $('#mm button[value=quote]').click();
         if (!box.value.startsWith('> ') || seen($('#mm'))) early.push(`quote: box "${box.value.slice(0, 30)}"`);
-        window.setTimeout = st;
-        press(b);
+        window.setTimeout = st; // (the menu closed: it would cover the rows the tap check measures)
       }
     },
     // #407 gate 2: [archive] after a swipe: `archived · [undo]` for 5 s (held for the shot); [undo] posts restore.
