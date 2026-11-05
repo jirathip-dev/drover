@@ -1006,7 +1006,8 @@ impl<'a> Server<'a> {
         let guarded = method == "GET"
             && (["/live", "/lane", "/herd.json"].contains(&path)
                 || path.starts_with("/thread/")
-                || path.starts_with("/design/"))
+                || path.starts_with("/design/")
+                || path.starts_with("/shot/"))
             || method == "POST" && self.addr.is_some();
         let paired_op = form(body.trim())
             .get("op")
@@ -1068,6 +1069,19 @@ impl<'a> Server<'a> {
                 match at.and_then(|p| std::fs::read(p).ok()) {
                     Some(b) => ("200 OK", PNG, b),
                     None => ("404 Not Found", "text/plain", text("no such design file\n")),
+                }
+            }
+            // #417: a screenshot the issue's last verdict lists.
+            ("GET", p) if p.starts_with("/shot/") => {
+                let mut it = p[6..].splitn(3, '/');
+                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
+                let v = |e: &&Event| e.kind == "verdict" && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let ev = read(&ctx.state).unwrap_or_default();
+                let at = ev.iter().rfind(v).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                match at.and_then(|p| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", PNG, b),
+                    None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
@@ -1707,7 +1721,14 @@ impl<'a> Server<'a> {
             let a = age(ctx.now.saturating_sub(s.last_ts));
             let title = esc(&gh::cached_title(ctx, f, n).unwrap_or_default());
             let (who, form) = (esc(&format!("{f} · #{n} · {a}")), if rw { form } else { String::new() });
-            format!("<div class=ask data-n={n}><p><b>needs you</b> <span class=m>{who}</span></p><p>#{n} {title} · {why}</p><p class=m>{v}</p>{form}</div>")
+            // #417: the last verdict's screenshots (a verify FAIL's), inline as `/shot/<fleet>/<n>/<i>` serves them.
+            let last = events.iter().rfind(|e| e.is("verdict", f, n));
+            let png = |(i, x): (usize, &serde_json::Value)| {
+                let name = esc(x["name"].as_str().unwrap_or_default());
+                format!("<figure class=im><img src=\"shot/{}/{n}/{i}\" alt=\"{name}\" loading=lazy><figcaption>{name}</figcaption></figure>", enc(f))
+            };
+            let shots: String = last.into_iter().flat_map(chat::files_of).enumerate().map(png).collect();
+            format!("<div class=ask data-n={n}><p><b>needs you</b> <span class=m>{who}</span></p><p>#{n} {title} · {why}</p><p class=m>{v}</p>{shots}{form}</div>")
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
         let pend = |s: &IssueState| match s.last_event.as_str() {
@@ -1864,6 +1885,14 @@ impl<'a> Server<'a> {
                     })
                     .collect();
                 let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
+                // #417: a verify stage passed on at this head for want of the repo's recipe.
+                let bare = |e: &&Event| e.is("verify-no-recipe", f, n) && e.str("sha") == Some(head);
+                notes.extend(
+                    events
+                        .iter()
+                        .rfind(bare)
+                        .map(|_| format!("verify skipped: no {}", crate::verify::RECIPE)),
+                );
                 // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (u.str("id").unwrap_or("?"), u.str("reason").unwrap_or("?"));
@@ -3288,8 +3317,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
     let round = round.map_or(String::new(), |n| format!(" · round {n}"));
     match e.kind.as_str() {
         "merged" => ("✓", "g", format!("merged into {} · PR #{}", s("into"), s("pr")), true),
-        "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("review PASS{round}"), true),
-        "verdict" => ("✗", "r", format!("review FAIL{round}"), true),
+        // #417: the verify stage's verdicts say so.
+        "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("{} PASS{round}", check(s("stage"))), true),
+        "verdict" => ("✗", "r", format!("{} FAIL{round}", check(s("stage"))), true),
         "needs-human" => ("!", "r", format!("needs you{r}"), true),
         "needs-decision" => ("!", "r", format!("asks you ({}) · {}", s("id"), s("question")), true),
         "ask-waiting" => ("!", "r", format!("still waiting on you{r}"), true),
@@ -3332,7 +3362,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing"
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing verify-no-recipe"
             .split(' ')
             .any(|x| x == k)
             || k.starts_with("orch-") =>
@@ -3340,6 +3370,15 @@ pub fn words(e: &Event, serial: &str) -> Words {
             ("!", "a", format!("{k}{r}"), false)
         }
         k => ("·", "m", format!("{k}{r}"), false),
+    }
+}
+
+/// #417: a verdict's word for its stage: `verify`, else `review`.
+fn check(stage: &str) -> &'static str {
+    if stage == "verify" {
+        "verify"
+    } else {
+        "review"
     }
 }
 

@@ -19,6 +19,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "design" => include_str!("../roles/design.md"),
         "conductor" => include_str!("../roles/conductor.md"),
         "lesson" => include_str!("../roles/lesson.md"),
+        "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -29,7 +30,8 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
         f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
             std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
         });
-    let base = role_prompt(if role == "lesson" { role } else { f.family(role) });
+    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    let base = role_prompt(if own { role } else { f.family(role) });
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
 }
 

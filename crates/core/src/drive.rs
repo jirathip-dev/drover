@@ -656,6 +656,10 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
+            // #417: a verify stage the issue doesn't need (or has no recipe for) is logged passed instead.
+            if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
+                continue;
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
