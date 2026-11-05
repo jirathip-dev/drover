@@ -96,7 +96,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -529,13 +529,10 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}
 /* The header never wraps its title (offline, `last update hh:mm` squeezed it to a letter a line); the note, now `as of
-   hh:mm`, fits beside [?] [↻] [🐎] [◐] at 390 and ellipsises first; the title only as a last resort (+ [Pair]). */
+   hh:mm`, fits beside [?] [↻] [🐎] [⚙] at 390 and ellipsises first; the title only as a last resort (+ [Pair]). */
 body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#stale{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* #290: `[◐]` sits on every tab (no select behind it); the look sheet (docs/design/pickers) is the lane sheet's box with
-   two listboxes, THEME and COLOURS (`.cg` groups as in [config]). Its backdrop is light, so the board behind it shows
-   each pick at once; ≥ 720 px the two lists sit side by side and the sheet opens at half. */
-#sheet:has(>.look)>.bd{background:color-mix(in srgb,var(--scrim) 35%,transparent)}
-.sh.look .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
+/* #290: the look sheet (docs/design/pickers), #440: System's Appearance: two listboxes, THEME and COLOURS (`.cg` groups
+   as in [config]), then STYLE; ≥ 900 px side by side. */
 /* A row: 44 px, the art, the name, `(theme default)`; the current one is in the accent with a ✓. Pressed inverts like a
    control; the keyboard's row has a 2 px accent ring. */
 .lko{display:flex;align-items:center;gap:var(--s3);min-height:var(--hit);padding:0 var(--s1);border-top:1px solid var(--line);cursor:pointer;outline:0;-webkit-tap-highlight-color:transparent}
@@ -556,7 +553,6 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .lsw>b{flex:1;border-radius:3px}
 .lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
 .lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
-@media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}
 /* #367: the Queue tab one repo at a time (serve.js qchips): repo chips in #170's look, a red dot when it needs you; the
    repo's groups under 13 px headers; a blocked chain one row ([▾] opens its steps in place), `+ N more` likewise; [all]
    shows only the needs-you groups. A sideways swipe is the page's (no pan), a vertical one scrolls. */
@@ -689,3 +685,85 @@ html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :
 #mm{position:fixed;z-index:3;left:var(--s3);right:var(--s3);display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);padding:var(--s2) var(--s3);border:1px solid var(--edge);border-radius:6px;background:var(--card);font-size:var(--fs-meta)}
 #mm[hidden]{display:none}
 @media (pointer:coarse){.cvp :is(.snd,.tc .blk:is(.me,.ai)){-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
+/* #440: the System sheet (docs/design/system-sheet). [⚙] in [◐]'s place, its dot red, 8 px, on the top right corner. */
+#sysb{position:relative}
+#sysb .sd,.sxi .sd{position:absolute;top:0;right:0;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--r);box-shadow:0 0 0 2px var(--bg)}
+:is(#sysb,.sxi) .sd[hidden]{display:none}
+nav a{flex:1 1 0}
+/* Its own layer under #sheet (z 3), at the full detent; the index between its head and its scroller. */
+#sys{position:fixed;inset:0;z-index:2;overscroll-behavior:contain}
+#sys[hidden]{display:none}
+#sys>.sbd{position:absolute;inset:0;background:var(--scrim)}
+#sys>.sh{transform:none;transition:none}
+html.sysopen{overflow:hidden}
+.sh.sys .hd p{display:flex;align-items:center;gap:var(--s2)}
+.sh.sys .hd b{flex:1}
+/* The index: one line of bracket chips that scrolls sideways at 390, the current one filled like the tab bar's. */
+.sxi{flex:none;display:flex;gap:var(--s3);overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--s3));padding:0 var(--s3) var(--s2);border-bottom:1px solid var(--line);mask-image:linear-gradient(90deg,black calc(100% - 3ch),transparent)}
+.sxi::-webkit-scrollbar{display:none}
+.sxi a{position:relative;flex:none;display:flex;align-items:center;min-height:var(--ctl);color:var(--mute);text-decoration:none;white-space:nowrap}
+.sxi a>span::before{content:"["}.sxi a>span::after{content:"]"}
+.sxi a>span{display:inline-flex;align-items:center;height:var(--ctl);padding:0 .3ch}
+.sxi a.on>span{background:var(--l);color:var(--bg)}
+/* The scroller: every section in one column; a head is the tab line's style (bold, its theme word first). */
+/* It spans the sheet's width, its content inset as the sheet's, so a right-aligned control's tap ring is never clipped. */
+.sh.sys .top{position:relative;flex:1 1 auto;min-height:0;max-height:none;border:0;margin:0 calc(-1 * var(--s3));padding:0 var(--s3) calc(var(--s4) * 4)}
+.sy{padding:var(--s2) 0 var(--s3);border-bottom:1px solid var(--line)}
+.syh{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2);margin:var(--s2) 0 var(--s1);padding:var(--s1);font-size:var(--fs);font-weight:700}
+.syh .syt{flex:none}
+.syh .sym{flex:1 1 14ch;min-width:0;font-size:var(--fs-meta);font-weight:400;color:var(--mute);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.syh .sym.a{color:var(--a)}
+.sy[data-t=r]>.syh{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent);border-radius:4px}
+.sy[data-t=r]>.syh .sym{color:inherit}
+/* The moved tabs drop their own first line (the head says it), their padding and sticky offsets. */
+#sys :is(#host,#events){display:block;padding:0;margin:0}
+#sys :is(#host,#events)>.tsub{display:none}
+#sys .eg>h3{top:0}
+/* Agent providers: a card per provider (the host card's box), an account or key per row. */
+.pvg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:var(--s3);align-items:start}
+.pvc{box-shadow:inset 0 0 0 1px var(--line);border-radius:6px;padding:0 var(--s2) var(--s2);min-width:0}
+.pvch{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-bottom:1px solid var(--line)}
+.pvr{padding:var(--s2) 0;border-bottom:1px solid var(--line)}.pvr:last-child{border-bottom:0}
+.pvr p{margin:0}
+.pvh{display:flex;align-items:center;gap:var(--s2);min-height:var(--ctl)}
+.pvs{margin-left:auto;font-weight:700;text-align:right}
+.pvs.g{color:var(--g)}.pvs.a{color:var(--a)}.pvs.r{color:var(--r)}
+.pvr[data-t=r]{box-shadow:inset 3px 0 var(--r);padding-left:var(--s2)}
+.pvm,.pvf{font-size:var(--fs-meta);color:var(--mute)}
+.pvu{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3);margin-top:var(--s1)!important}
+.pm{display:inline-flex;align-items:center;gap:var(--s1);white-space:nowrap}
+.pm .k{color:var(--mute);font-size:var(--fs-meta);min-width:2.5ch}
+.pvc .bar{font-size:var(--fs-meta)}.pvc .bar.g{color:var(--g)}.pvc .bar.a{color:var(--a)}.pvc .bar.r{color:var(--r)}.pvc .bar i{font-style:normal;opacity:.45}
+.pvf{margin:var(--s2) 0 0}
+/* Fleets: a row per fleet in its colour; it opens to the [config] content (.cs keeps its rules). */
+.sfl{border-top:1px solid var(--line)}.sfl:first-of-type{border-top:0}
+.sfl>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:0 var(--s1);list-style:none;white-space:nowrap}
+.sfl>summary::-webkit-details-marker{display:none}
+.sfl>summary :is(.fq,b){flex:none;font-style:normal;color:var(--fk)}
+.sfl>summary .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta)}
+.sfl[open]{box-shadow:inset 3px 0 var(--fk);padding-left:var(--s2)}
+.sfl>.cs{padding:0 0 var(--s2)}
+/* Notifications and Conductor reuse the config groups. */
+.sy .cs .cg:first-child{border-top:0}
+.role2{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-top:1px solid var(--line)}
+.role2:first-of-type{border-top:0}
+.role2>span{flex:1;min-width:0}
+.sy .mt{font-size:var(--fs-meta);color:var(--mute)}
+.role2>span>:is(.m,.mt){display:block}
+.sy code{color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit}
+.sy a.go{margin-left:var(--s1)}
+/* A host card's [sign in ▾] keeps one line beside the name (Claude's sign-in is Agent providers'). */
+#sys .hhd>.su>summary{white-space:nowrap}
+/* At 900 px and over: the index is a rail on the left, the sections a column on the right. */
+@media (min-width:900px){
+  .sh.sys{display:grid;grid-template-columns:26ch minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:calc(2 * var(--s4))}
+  .sh.sys>.hd{grid-column:1/-1}
+  .sxi{flex-direction:column;align-items:stretch;gap:var(--s1);margin:0;padding:var(--s2) 0;border:0;border-right:1px solid var(--line);overflow:visible;mask-image:none}
+  .sxi a>span{padding:0 .5ch}
+  .sxi a .sd{position:static;margin-left:var(--s2)}
+  .sh.sys .top{margin-left:0}
+  .sy .look{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}
+  .sy .look .lkn{grid-column:1/-1}
+  .sy>.cs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 calc(2 * var(--s4))}
+  .sy>.cs>.cg:nth-child(2){border-top:0}
+}

@@ -392,14 +392,16 @@ pub fn host_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
     host_html(&r[r.find("\r\n\r\n").unwrap() + 4..])
 }
 
-/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node.
+/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node; #440: then what System draws from the same
+/// data (web/src/system.ts): Agent providers and Notifications & devices.
 pub fn host_html(json: &str) -> String {
     let d = tmpdir("host-ts");
     std::fs::write(d.join("host.json"), json).unwrap();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts");
+    let sys = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/system.ts");
     let js = format!(
-        "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
-         process.stdout.write(tab(JSON.parse(fs.readFileSync({:?}))));",
+        "import {{ tab }} from {src:?}; import {{ providers, notifications }} from {sys:?}; import fs from 'node:fs';\n\
+         const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(tab(d) + providers(d) + notifications(d));",
         d.join("host.json")
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
@@ -442,6 +444,42 @@ pub fn queue_html(json: &str, expr: &str) -> String {
         .expect("node (24+) runs web/src/queue.ts");
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8(o.stdout).unwrap()
+}
+
+/// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before
+/// board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and
+/// Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
+pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &str) -> String {
+    let get = |p: &str| {
+        let r =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now)).into_owned();
+        assert!(r.starts_with("HTTP/1.1 200"), "{p}: {r}");
+        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
+    let d = tmpdir("system-ts");
+    std::fs::write(d.join("host.json"), get("/api/v1/host")).unwrap();
+    std::fs::write(d.join("queue.json"), get("/api/v1/queue")).unwrap();
+    std::fs::write(d.join("events.html"), events).unwrap();
+    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src").join(f);
+    let js = format!(
+        "import {{ tab }} from {:?}; import * as y from {:?}; import fs from 'node:fs';\n\
+         const h = JSON.parse(fs.readFileSync({:?})), q = JSON.parse(fs.readFileSync({:?}));\n\
+         process.stdout.write(JSON.stringify({{ host: tab(h), 'sy-providers': y.providers(h), 'sy-notifications': y.notifications(h), \
+         'sy-fleets': y.fleets(q), 'sy-conductor': y.conductor(q), events: fs.readFileSync({:?}, 'utf8') }}));",
+        src("host.ts"),
+        src("system.ts"),
+        d.join("host.json"),
+        d.join("queue.json"),
+        d.join("events.html")
+    );
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/system.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let parts = String::from_utf8(o.stdout).unwrap().replace("</", "<\\/");
+    format!("<script>{{ const p = {parts}; for (const id in p) frag(id, p[id]); }}</script>")
 }
 
 /// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`

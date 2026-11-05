@@ -148,7 +148,7 @@ function colours() {
   $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
   put('sb', b);
   hostrow(document);
-  if (lopen()) lsheet(); // #290: an open look sheet moves its ticks
+  if (sysOn()) lsheet(); // #290: Appearance (#440: in System) moves its ticks
 }
 // #244: the Host tab's `theme` row names this phone's theme and colours; under it, each refused scheme with why.
 function hostrow(root) {
@@ -167,10 +167,10 @@ function hostrow(root) {
     return p;
   }));
 }
-// #290: `[◐]` (every tab) opens the look sheet in the board's own sheet, not the system picker: THEME (each theme's 24 px
-// impl row sprite, else its favicon) and COLOURS (each passing scheme's bg, fg, green, amber, red), each a listbox. A tap,
-// or Enter on the focused row, applies it in place (#206: no reload) and the sheet stays open over a light backdrop, so
-// the board behind it shows the change. Picking the theme's default colours forgets the pick: they follow the theme again.
+// #290: the look sheet's content, #440: System's Appearance: THEME (each theme's 24 px impl row sprite, else its
+// favicon) and COLOURS (each passing scheme's bg, fg, green, amber, red), each a listbox. A tap, or Enter on the focused
+// row, applies it in place (#206: no reload) and the sheet stays open, so the board behind it shows the change. Picking
+// the theme's default colours forgets the pick: they follow the theme again.
 const LS = {};
 const lsprite = n => LS[n] || (LS[n] = Promise.all(['theme.json', 'sprites.svg'].map(f => fetch(`${R}themes/${n}/${f}`).then(r => r.ok ? r.text() : '').catch(() => ''))).then(([j, s]) => {
   let t = {};
@@ -191,14 +191,10 @@ function lrow(k, n, on, art, def) {
   if (def) o.append(el('small', '', '(theme default)'));
   return o;
 }
-// Open is shown, not closing, and still the look sheet: a closed sheet keeps its class until another sheet replaces it.
-const lopen = () => !!$('.sh.look') && shown() && !shut;
-function lsheet(kb) {
-  const h = document.documentElement, re = lopen(), f = re && document.activeElement.closest('.lko');
+function lsheet() {
+  const h = document.documentElement, top = $('#sy-appearance>.look'), f = top && top.contains(document.activeElement) && document.activeElement.closest('.lko');
+  if (!top) return;
   const key = f && Object.entries(f.dataset)[0];
-  agent = null;
-  sh.className = 'sh lg look';
-  $('.hd b').textContent = 'look';
   const grp = (k, title, hint, rows) => {
     const g = el('section', 'cg lkg'), t = el('h3', '', title), l = el('div', 'lkl');
     t.append(el('span', '', hint));
@@ -222,13 +218,10 @@ function lsheet(kb) {
   lsprite(h.dataset.theme).then(x => { px.innerHTML = x; });
   as.append(el('b', 'asc', TT && TT.ascii_rows && TT.ascii_rows.impl));
   const st = TM.includes('ascii') ? [grp('style', 'style', 'rows, lanes, host, loading', [lrow('y', 'pixel', B.dataset.mode !== 'ascii', px), lrow('y', 'ascii', B.dataset.mode === 'ascii', as)])] : [];
-  $('.top').replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
+  top.replaceChildren(grp('theme', 'theme', 'sprites, scene, icon', th), grp('colours', 'colours', `${ok.length} pass the gate${no ? ` · ${no} refused: host` : ''}`, sc), ...st,
     el('p', 'lkn', 'this phone only · the home-screen icon keeps its install-time look'));
-  if (key) $(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
-  else if (!re) {
-    show(innerWidth >= 720 ? 'half' : 'mid');
-    if (kb) $('.lko[aria-selected=true]').focus({ preventScroll: true }); // opened from the keyboard: on the current theme
-  }
+  if (key) top.querySelector(`.lko[data-${key[0]}="${CSS.escape(key[1])}"]`).focus();
+  $('#sy-appearance .sym').textContent = `${h.dataset.theme} · ${h.dataset.scheme}${B.dataset.mode === 'ascii' ? ' · ascii' : ''}`;
 }
 // #335: STYLE applies in place: pixel is the scene mode, ascii the ascii mode, on every tab.
 function style(y) {
@@ -249,7 +242,6 @@ function lpick(o) {
   colours();
 }
 document.addEventListener('click', e => {
-  if (e.target.closest('#look')) return lsheet(e.detail === 0);
   const o = e.target.closest('.look .lko');
   if (o) lpick(o);
 });
@@ -365,6 +357,7 @@ function words(root) {
     if (!p) s.prepend(p = el('p', 'tsub'));
     p.innerHTML = tw('tab-' + t, t);
   }
+  if (root === document) syswords();
   root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
   root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
   root.querySelectorAll('details.q').forEach(d => {
@@ -520,7 +513,9 @@ function frag(id, html) {
   again();
   bshow(el);
   nows();
-  if (id === 'host') groups();
+  if (id === 'host') { groups(); alarm(); }
+  if (id === 'sy-fleets') sysfleets(el);
+  if (sysPin && sysOn()) sysgo(sysPin); // the board's first draws move the sections: the one asked for stays on top
   if (scrollY !== y) scrollTo(0, y);
   if (id === 'chat') chatFollow();
   if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
@@ -725,7 +720,7 @@ function connect() {
   if (es) es.close();
   P = {};
   const t = watching(); // #407: the open thread: no push for it while this stream lives
-  try { es = new EventSource('live?tab=' + document.documentElement.dataset.tab + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
+  try { es = new EventSource('live?tab=' + (sysOn() ? 'host' : document.documentElement.dataset.tab) + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
@@ -1443,22 +1438,8 @@ function legend() {
   $('.top').replaceChildren(...Object.entries(HINT).map(([w, h]) => el('p', '', `${w} = ${h}`)), ...[...dots, ...serial].map(t => el('p', '', t)));
   show('mid');
 }
-// #162: [config] shows the fleet's settings in the same sheet, the lane parts hidden and its bar in the fleet's colour.
-// #268: the TypeScript board draws it from the Queue tab's last data.
-async function config(b) {
-  const f = b.dataset.f, h = window.queueSheet?.(f) ?? null;
-  if (h === null) return toast('error: cannot read the config');
-  agent = null;
-  sh.className = 'sh lg cs ' + [...b.closest('.fc').classList].find(c => c.startsWith('k-'));
-  $('.hd b').textContent = f + ' · config';
-  const top = $('.top');
-  top.innerHTML = h;
-  top.querySelectorAll('[data-pipe]').forEach(pipeline); // #173
-  top.scrollTop = 0;
-  tidy(top);
-  top.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
-  show('full');
-}
+// #162: [config] on a Queue card, #440: System opened at that fleet's row (the button stays, a shortcut).
+function config(b) { sysopen('fleets', b.dataset.f); }
 // A role's effort list follows its harness (each harness option's data-e).
 document.addEventListener('change', e => {
   const s = e.target, ef = s.name === 'harness' && s.form.elements.effort;
@@ -1484,7 +1465,6 @@ function show(d) {
 // (or 250 ms on) it turns invisible.
 function close() {
   if (!shown() || shut) return;
-  if (sh.classList.contains('look')) $('#look').focus({ preventScroll: true });
   clearInterval(timer);
   agent = null;
   d0 = null;
@@ -1806,7 +1786,7 @@ let p0 = null, py = 0, axis = '';
 addEventListener('touchstart', e => {
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
   const hp = herdPage();
-  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !typing ? e.touches[0] : null;
+  p0 = (hp ? hp.scrollTop : scrollY) <= 0 && !shown() && !sysOn() && !typing ? e.touches[0] : null;
   py = 0;
   axis = '';
 }, { passive: true });
@@ -2350,3 +2330,97 @@ for (const k of ['touchend', 'touchcancel']) addEventListener(k, e => {
   v.style.transform = '';
   if (back) chatBack();
 });
+// #440: [⚙] (every tab, in [◐]'s place) opens the System sheet: one scroller, a section index on top (a rail at ≥ 900
+// px), the sections in the owner's order. Hosts & health and Activity are the old Host and Events tabs' sections (same
+// ids: the TypeScript board, `/live` and frag() paint them here); Agent providers, Fleets, Notifications and Conductor
+// are the board's (web/src/system.ts), Appearance the look sheet's. Its own layer: a lane or setup sheet opens over it.
+const SECS = [['providers', 'agent providers', 'providers'], ['fleets', 'fleets'], ['hosts', 'hosts & health', 'hosts', 'tab-host'],
+  ['activity', 'activity', 'activity', 'tab-events'], ['notifications', 'notifications & devices', 'alerts'], ['conductor', 'conductor'], ['appearance', 'appearance', 'look']];
+const syh = (n, w) => `<h2 class=syh><span class=syt data-p="${n}"${w ? ` data-w=${w}` : ''}>${n}</span><small class=sym></small></h2>`;
+B.insertAdjacentHTML('beforeend', `<div id=sys hidden><div class=sbd></div><div class="sh lg sys full" role=dialog aria-modal=true aria-labelledby=syst>
+<div class=hd><p><b id=syst>system</b><button type=button class=sxc aria-label="close system">close</button></p></div>
+<div class=sxi role=navigation aria-label="system sections">${SECS.map(([id, , c]) => `<a href=#system/${id} data-s=${id}><span>${c || id}</span><i class=sd hidden></i></a>`).join('')}</div>
+<div class=top>${SECS.map(([id, n, , w]) => `<section class=sy id=sy-${id} data-s=${id}>${id === 'hosts' ? syh(n, w) + '<section id=host></section>' : id === 'activity' ? syh(n, w) + '<section id=events></section>' : id === 'appearance' ? syh(n) + '<div class=look></div>' : ''}</section>`).join('')}</div></div></div>`);
+// `var`: connect() and frag() may ask before this line runs.
+var SY = $('#sys'), ytop = SY.querySelector('.top'), sysb = $('#sysb');
+function sysOn() { return !!SY && !SY.hidden; }
+var sysBack = 'queue', sysWant = '', sysPin = '';
+// Open at a section (Fleets: and that fleet's row, open); the hash says `#system/<section>[/<fleet>]`.
+function sysopen(sec = 'providers', sub = '', smooth = false) {
+  if (!SECS.some(s => s[0] === sec)) sec = 'providers';
+  if (!sysOn()) {
+    sysBack = document.documentElement.dataset.tab;
+    SY.hidden = false;
+    document.documentElement.classList.add('sysopen');
+    if (es) connect(); // the stream names `host` while System is open (#352: process sampling on)
+  }
+  lsheet();
+  sysWant = sec === 'fleets' ? sub || '' : '';
+  sysPin = smooth ? '' : sec;
+  sysgo(sec, smooth);
+  history.replaceState(null, '', `#system/${sec}${sysWant ? '/' + sysWant : ''}`);
+}
+function sysgo(sec, smooth) {
+  const d = sysWant && [...$$('.sfl')].find(x => x.dataset.f === sysWant);
+  if (d) d.open = true;
+  const t = d || $('#sy-' + sec);
+  ytop.scrollTo({ top: sec === 'providers' && !d ? 0 : t.offsetTop, behavior: smooth ? 'smooth' : 'instant' });
+  spy();
+}
+function sysshut() {
+  if (!sysOn()) return;
+  SY.hidden = true;
+  document.documentElement.classList.remove('sysopen');
+  history.replaceState(null, '', '#' + sysBack);
+  sysb.focus({ preventScroll: true });
+  if (es) connect();
+}
+// The index follows the scroll: the section at the top is filled (the last one at the end) and kept in view.
+function spy() {
+  const y = ytop.scrollTop + 8, all = [...$$('.sy')], end = ytop.scrollTop + ytop.clientHeight >= ytop.scrollHeight - 2;
+  const cur = end ? all[all.length - 1] : all.filter(s => s.offsetTop <= y).pop() || all[0];
+  $$('.sxi a').forEach(a => {
+    const on = a.dataset.s === cur.dataset.s, n = a.parentNode, l = a.offsetLeft - n.offsetLeft;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+    if (on && (l < n.scrollLeft || l + a.offsetWidth > n.scrollLeft + n.clientWidth)) n.scrollLeft = l - 16;
+  });
+}
+ytop.addEventListener('scroll', () => requestAnimationFrame(spy), { passive: true });
+for (const k of ['pointerdown', 'wheel', 'keydown']) ytop.addEventListener(k, () => { sysPin = sysWant = ''; }, { passive: true });
+// Fleets as the board drew it: each pipeline graph, the pickers off in a demo or offline, the row a link named opened.
+function sysfleets(root) {
+  root.querySelectorAll('[data-pipe]').forEach(pipeline);
+  root.querySelectorAll('form button, form select:not([data-off])').forEach(c => c.disabled = DEMO || dot.className === 'r');
+  if (sysWant && sysOn()) sysgo('fleets');
+}
+// [⚙]'s dot and the [hosts] chip's: a host card is red (past a limit, under a floor, or down); the Hosts head says why.
+function alarm() {
+  const r = [...$$('#host .hcd')].filter(c => c.dataset.c === 'r');
+  const why = r.length ? `${r.map(c => c.dataset.h).join(', ')}: ${(r[0].querySelector('.hw')?.textContent || 'alert').split(' · ').pop()}` : '';
+  $$('#sysb .sd, .sxi a[data-s=hosts] .sd').forEach(d => { d.hidden = !r.length; });
+  sysb.setAttribute('aria-label', r.length ? `system (host alert: ${why})` : 'system');
+  sysb.title = r.length ? `host alert · ${why}` : 'system';
+  $('#sy-hosts').dataset.t = r.length ? 'r' : '';
+  $('#sy-hosts .sym').textContent = r.length ? `alert · ${why}` : `${$$('#host .hcd').length} hosts · all clear`;
+}
+// The old tabs' theme words name their sections now: `barn · hosts & health`, `logbook · activity`.
+function syswords() { $$('#sys .syt[data-w]').forEach(p => { const h = tw(p.dataset.w, p.dataset.p); if (p.innerHTML !== h) p.innerHTML = h; }); }
+// Routes: `#system/<section>[/<fleet>]` opens there; the old `#host`, `#events`, `#config[/<fleet>]` land on the Queue
+// tab with the sheet at Hosts & health, Activity, Fleets (the head script already took a stored `host`/`events` to Queue).
+const OLD = { host: 'hosts', events: 'activity', config: 'fleets' };
+function sysroute() {
+  const [h, sec, sub] = decodeURIComponent(location.hash.slice(1)).split('/');
+  if (h === 'system') return sysopen(sec, sub);
+  if (OLD[h]) { tab('queue'); sysopen(OLD[h], sec); }
+}
+addEventListener('hashchange', sysroute);
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.closest('#sysb')) return sysopen();
+  if (t.closest('.sxc, .sbd')) return sysshut();
+  const a = t.closest('.sxi a, #sys a.go');
+  if (a) { e.preventDefault(); const [, s, f] = a.getAttribute('href').slice(1).split('/'); sysopen(s, f && decodeURIComponent(f), true); }
+});
+addEventListener('keydown', e => { if (e.key === 'Escape' && sysOn() && !shown()) sysshut(); });
+sysroute();

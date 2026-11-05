@@ -360,7 +360,8 @@ pub struct Server<'a> {
 const JSON: &str = "application/json; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
 
-const TABS: [&str; 5] = ["queue", "lanes", "chat", "host", "events"];
+/// #440: Host and Events live in the System sheet ([⚙], serve.js); a stored `host`/`events` tab opens Queue.
+const TABS: [&str; 3] = ["queue", "lanes", "chat"];
 
 /// #337: the query, with the `tab` cookie (serve.js keeps the open tab there) when it names none.
 fn with_tab(mut q: BTreeMap<String, String>, head: &str) -> BTreeMap<String, String> {
@@ -1580,11 +1581,13 @@ impl<'a> Server<'a> {
         } else {
             msg
         };
-        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; `[◐]` picks it.
+        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; #440: System's
+        // Appearance picks it. [⚙] opens the System sheet (serve.js), its dot red while a host card is.
         let name = active(ctx);
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
-        let pick = "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>";
+        let pick =
+            "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>";
         // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
         // scheme (serve.js keeps its block), else the board theme's built-in default.
         let def: BTreeMap<_, serde_json::Value> = names
@@ -1631,14 +1634,13 @@ impl<'a> Server<'a> {
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
+             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
-             <section id=queue></section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
-             <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
-             <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("lanes"), f("chat"), f("events")
+             <section id=queue></section><section id=lanes>{}</section><section id=chat>{}</section></main>\
+             <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
+            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("lanes"), f("chat")
         ))
     }
 
@@ -2411,6 +2413,37 @@ impl<'a> Server<'a> {
             detail,
             ..Row::default()
         };
+        // #440: the global notifiers in words and the Telegram bridge, for System's Notifications.
+        if let Some(c) = cfg {
+            let notifier = |n: &crate::config::Notify| crate::api::Notifier {
+                kind: if n.kind.as_deref() == Some("webpush") {
+                    "web push"
+                } else {
+                    "command"
+                }
+                .into(),
+                on: if n.on.is_empty() {
+                    "default events".into()
+                } else {
+                    n.on.join(", ")
+                },
+            };
+            d.notify = c.notify.iter().map(notifier).collect();
+            let polled = std::fs::metadata(ctx.state.with_file_name("telegram.json")).and_then(|m| m.modified());
+            let polled = polled.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            d.telegram = crate::api::Telegram {
+                on: c.telegram.chat.is_some() && c.telegram.owner.is_some(),
+                chat: c.telegram.chat.is_some(),
+                owner: c.telegram.owner.is_some(),
+                topics: events
+                    .iter()
+                    .filter(|e| e.kind == "telegram-topic")
+                    .filter_map(|e| e.str("thread"))
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                polled: polled.map_or(String::new(), |t| ago(ctx.now, t.as_secs())),
+            };
+        }
         if live {
             // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
             let key = crate::webpush::vapid(&ctx.state)

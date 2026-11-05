@@ -4,6 +4,7 @@ import type { Chat, Ev, Events, HostTab, QueueTab, Reply, State } from '../../as
 import { rows, tab, type Filter } from './events';
 import { tab as hostTab } from './host';
 import { sheet, tab as queueTab } from './queue';
+import { conductor, fleets, notifications, providers } from './system';
 
 /** serve.js's: paint a section's new HTML (rows keep their open state, changed ones flash, row sprites drawn). */
 declare function frag(id: string, html: string): void;
@@ -76,14 +77,15 @@ addEventListener('herd-refresh', () => run(load));
 setInterval(draw, 60_000); // the ages and time groups move on
 
 // #267: the Host tab, read with the rest (`herd-refresh`) and drawn again from each `host` on `/live` (`herd-host`).
-const host = (d: HostTab) => frag('host', hostTab(d));
+// #440: and System's Agent providers and Notifications from the same data, its Fleets and Conductor from the Queue's.
+const host = (d: HostTab) => (frag('host', hostTab(d)), frag('sy-providers', providers(d)), frag('sy-notifications', notifications(d)));
 const hostLoad = () => api.host().then(host).catch(() => {});
 addEventListener('herd-host', e => host((e as CustomEvent<HostTab>).detail));
 addEventListener('herd-refresh', hostLoad);
 
 // #268: the Queue tab likewise (`herd-queue`); serve.js's [config] reads a fleet's sheet from the last data.
 let qd: QueueTab | null = null;
-const queue = (d: QueueTab) => frag('queue', queueTab((qd = d)));
+const queue = (d: QueueTab) => (frag('queue', queueTab((qd = d))), frag('sy-fleets', fleets(d)), frag('sy-conductor', conductor(d)));
 const queueLoad = () => api.queue().then(queue).catch(() => {});
 addEventListener('herd-queue', e => queue((e as CustomEvent<QueueTab>).detail));
 addEventListener('herd-refresh', queueLoad);
