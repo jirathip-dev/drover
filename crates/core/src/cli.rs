@@ -1501,17 +1501,21 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     }
 }
 
-/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top.
+/// #216: the lane's fleet's `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top;
+/// #502: `pkill` and `killall` always.
 fn deny_list(ctx: &Ctx) -> Vec<crate::config::Deny> {
     let cfg = Config::load(&ctx.config).unwrap_or_default();
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let f = cfg.fleet.get(lane.split(':').next().unwrap_or_default());
     let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
     let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
-    match cfg.hosts.get(&host) {
+    let mut d = match cfg.hosts.get(&host) {
         Some(h) => h.deny(d),
         None => d,
-    }
+    };
+    // #502: no fleet or host drops the broad-kill ban.
+    d.extend(hook::broad_kill());
+    d
 }
 
 /// main, master, staging and every fleet's integration branch.
