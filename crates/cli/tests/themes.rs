@@ -322,7 +322,7 @@ fn schema_validation_names_the_problem() {
         ),
         (
             r#"{"load_scene": {"kind": "rain"}}"#,
-            "`load_scene` must be {\"kind\": weather|heat|none",
+            "`load_scene` must be {\"kind\": weather|heat|light|none",
         ),
         (
             r#"{"load_scene": {"kind": "heat", "levels": {"hot": "x"}}}"#,
@@ -539,4 +539,185 @@ fn theme_words_are_the_themes_own_and_fall_back_to_plain() {
         validate(br#"{"row_sprites": {"merged": "a", "bogus": "b"}}"#).unwrap_err(),
         "`row_sprites.bogus` must be a sprite id (keys: impl, fix, rev, update, idle, done, blocked, queued, needs, merged, fail)"
     );
+}
+
+const GARDEN: &str = include_str!("../../../assets/themes/garden/theme.json");
+const GARDEN_SPRITES: &str = include_str!("../../../assets/themes/garden/sprites.svg");
+const GARDEN_SCENE: &str = include_str!("../../../assets/themes/garden/scene.svg");
+
+/// serve.js's pure plants part (#423) plus `js`, run under node: its stdout as JSON. None where node is missing.
+fn plants(js: &str) -> Option<Value> {
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping: no node here");
+        return None;
+    }
+    let src = include_str!("../../../assets/serve.js");
+    let part = &src[src.find("// #423 plants").unwrap()..src.find("// plants:end").unwrap()];
+    let d = tmpdir("plants-js");
+    std::fs::write(d.join("t.js"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
+    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    Some(serde_json::from_slice(&o.stdout).unwrap())
+}
+
+/// #423: the garden fills the contract with its own sprites: the keeper's action per role (water, prune, inspect,
+/// repot), a plant per growth stage in each of the six species (lane and Queue row size), the window light, the counter's
+/// cuttings and the moments, all in its sprites.svg; it is served as a built-in, scene and icon too.
+#[test]
+fn garden_draws_every_stage_and_species_itself() {
+    let g = resolve(&validate(GARDEN.as_bytes()).unwrap(), &farm());
+    let has = |id: &str| GARDEN_SPRITES.contains(&format!("<g id=\"{id}\""));
+    let acts = ACTS.map(|a| g["actions"][a].as_str().unwrap().to_string());
+    assert_eq!(
+        acts[..4],
+        ["keeper-water", "keeper-prune", "keeper-inspect", "keeper-repot"]
+    );
+    let mut ids: Vec<Value> = ACTS
+        .iter()
+        .flat_map(|a| [g["actions"][a].clone(), g["row_sprites"][a].clone()])
+        .collect();
+    ids.extend(["queued", "needs", "merged", "fail"].map(|k| g["row_sprites"][k].clone()));
+    ids.extend(["calm", "busy", "held"].map(|l| g["load_scene"]["minis"][l].clone()));
+    ids.extend([&g["rail"]["item"], &g["rail"]["needs"], &g["loading"]].map(Value::clone));
+    ids.extend(["merged", "fail", "needs-you"].map(|m| g["moments"][m]["sprite"].clone()));
+    for id in ids {
+        assert!(has(id.as_str().unwrap()), "{id}");
+    }
+    let species: Vec<&str> = g["species"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        species,
+        [
+            "monstera",
+            "philodendron",
+            "peperomia",
+            "alocasia",
+            "pothos",
+            "calathea"
+        ]
+    );
+    for st in ["queued", "impl", "review", "fix", "ready", "merged", "blocked"] {
+        let id = g["stages"][st].as_str().unwrap();
+        for s in &species {
+            assert!(has(&format!("{id}-{s}")) && has(&format!("{id}-{s}-row")), "{id}-{s}");
+        }
+    }
+    assert_eq!(g["load_scene"]["kind"], "light");
+    assert_eq!(g["scheme"], json!({"light": "garden-light", "dark": "garden-dark"}));
+    for l in ["l-sun", "l-overcast", "l-rain"] {
+        assert!(GARDEN_SCENE.contains(&format!("class=\"{l}")), "{l}");
+    }
+    let (c, r) = server(Some("garden"), &[]);
+    assert_eq!(json(&c, &r, "/themes/garden/theme.json"), g);
+    assert_eq!(body(&get(&c, &r, "/themes/garden/scene.svg")), GARDEN_SCENE);
+    assert_eq!(
+        bytes(&c, &r, "/themes/garden/icon-180.png"),
+        include_bytes!("../../../assets/themes/garden/icon-180.png")
+    );
+    assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"garden\";"));
+}
+
+/// #423 AC: a lane's sprite is its role's action over its issue's plant at its stage; a theme without `stages` keeps
+/// the action alone (the role pose), so farm and kitchen draw as before. The species is the issue number's, every time.
+#[test]
+fn a_lane_draws_its_plant_only_with_stages_and_the_species_is_stable() {
+    let farm = resolve(&farm(), &farm());
+    let kitchen = resolve(&validate(KITCHEN.as_bytes()).unwrap(), &farm);
+    let garden = resolve(&validate(GARDEN.as_bytes()).unwrap(), &farm);
+    let js = format!(
+        "(() => {{ const F = {farm}, K = {kitchen}, G = {garden}, all = () => true, none = () => false; return [\
+         duo(F, all, 'ha-impl', 'impl', 48), duo(K, all, 'ha-fix', 'fix', 7), plant(F, 'ready', 3),\
+         duo(G, all, 'ha-impl', 'review', 48), duo(G, i => i === 'hs-plant-fix', 'ha-fix', 'fix', 49),\
+         duo(G, none, 'ha-rev', 'review', 50), plant(G, 'queued', 51, 1).ids,\
+         [48, 49, 50, 51, 52, 53, 54, 48].map(n => species(G, n).id), species(G, -1), species(F, 4)] }})()"
+    );
+    let Some(got) = plants(&js) else { return };
+    assert_eq!(got[0], "<use href=\"#ha-impl\"></use>", "farm: the role pose alone");
+    assert_eq!(got[1], "<use href=\"#ha-fix\"></use>", "kitchen: the role pose alone");
+    assert_eq!(got[2], Value::Null);
+    assert_eq!(
+        got[3],
+        "<use href=\"#hs-plant-review-monstera\" style=\"--ld:#2a6a34;--lf:#3f8f45;--lv:#7cc46a\"></use><use href=\"#ha-impl\"></use>"
+    );
+    assert_eq!(
+        got[4],
+        "<use href=\"#hs-plant-fix\" style=\"--ld:#356f2a;--lf:#4f9a3a;--lv:#b4dc5a\"></use><use href=\"#ha-fix\"></use>",
+        "a sheet without the species' sprite: the stage's own"
+    );
+    assert_eq!(
+        got[5], "<use href=\"#ha-rev\"></use>",
+        "no such sprite: the action alone"
+    );
+    assert_eq!(got[6], json!(["plant-queued-alocasia-row", "plant-queued-row"]));
+    assert_eq!(
+        got[7],
+        json!([
+            "monstera",
+            "philodendron",
+            "peperomia",
+            "alocasia",
+            "pothos",
+            "calathea",
+            "monstera",
+            "monstera"
+        ])
+    );
+    assert_eq!((&got[8], &got[9]), (&Value::Null, &Value::Null));
+}
+
+/// #423: an issue's growth stage from its state, and from its lane's action where the state says nothing.
+#[test]
+fn the_growth_stage_follows_the_issue() {
+    use herdsman::serve::stage;
+    for (state, act, want) in [
+        ("queued", "idle", "queued"),
+        ("impl", "impl", "impl"),
+        ("review(1)", "rev", "review"),
+        ("verify(1)", "idle", "review"),
+        ("fix(2)", "update", "fix"),
+        ("ready", "done", "ready"),
+        ("merged", "done", "merged"),
+        ("needs-human", "blocked", "blocked"),
+        ("review(2)", "blocked", "blocked"),
+        ("", "rev", "review"),
+        ("", "done", "ready"),
+        ("", "idle", "impl"),
+    ] {
+        assert_eq!(stage(state, act), want, "{state} {act}");
+    }
+}
+
+/// #423: the new keys' shapes; a wrong one names itself and the theme is farm.
+#[test]
+fn stages_species_and_a_light_dark_scheme_are_checked() {
+    for (bad, err) in [
+        (
+            r#"{"stages": {"sprout": "x"}}"#,
+            "`stages.sprout` must be a sprite id (keys: queued, impl, review",
+        ),
+        (r#"{"stages": {"impl": 1}}"#, "`stages.impl` must be a sprite id"),
+        (
+            r##"{"species": [{"--lf": "#fff"}]}"##,
+            "`species` must be a list of {\"id\": suffix",
+        ),
+        (r#"{"species": []}"#, "`species`"),
+        (r##"{"species": [{"id": "a", "lf": "#fff"}]}"##, "`species`"),
+        (
+            r#"{"scheme": {"light": "paper"}}"#,
+            "`scheme` must be a colour scheme's name, or {\"light\"",
+        ),
+        (r#"{"scheme": {"light": "paper", "dark": 2}}"#, "`scheme`"),
+        (r#"{"scheme": 3}"#, "`scheme`"),
+    ] {
+        let e = validate(bad.as_bytes()).unwrap_err();
+        assert!(e.contains(err), "{bad}: {e}");
+    }
+    let ok = r##"{"stages": {"ready": "p"}, "species": [{"id": "fern", "--lf": "#0f0"}], "scheme": "paper",
+        "load_scene": {"kind": "light", "levels": {"calm": "sun"}}}"##;
+    validate(ok.as_bytes()).unwrap();
+    validate(br#"{"scheme": {"light": "paper", "dark": "nord"}}"#).unwrap();
 }

@@ -8,7 +8,7 @@ use herdsman::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-const BUILT: [&str; 8] = [
+const BUILT: [&str; 10] = [
     "github-dark",
     "solarized-dark",
     "gruvbox",
@@ -17,6 +17,8 @@ const BUILT: [&str; 8] = [
     "paper",
     "farm",
     "kitchen",
+    "garden-light",
+    "garden-dark",
 ];
 
 fn built(n: &str) -> Value {
@@ -180,7 +182,8 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     let p = page(None, &[]);
     assert_eq!(
         sd(&p)["t"],
-        json!({"farm": "farm", "kitchen": "kitchen", "terminal": "github-dark"})
+        json!({"farm": "farm", "kitchen": "kitchen", "garden": {"light": "garden-light", "dark": "garden-dark"},
+            "terminal": "github-dark"})
     );
     assert!(p.contains("<style id=sch>:root{--a:#f29b4b;"), "farm's block first");
     assert!(
@@ -241,4 +244,41 @@ fn github_dark_is_todays_board() {
         assert_eq!(t[k], json!(v), "{k}");
     }
     assert_eq!(built("github-dark")["color-scheme"], json!("dark"));
+}
+
+/// #423 AC: a theme's `{light, dark}` scheme follows the phone's `prefers-color-scheme` (serve.js's `choose`, and the
+/// first paint's media query); a single name still works, and the phone's own pick still wins.
+#[test]
+fn a_light_dark_scheme_follows_the_phone_and_a_pick_still_wins() {
+    let p = page(Some("garden"), &[]);
+    let (s, d) = (&sd(&p)["s"], &sd(&p)["t"]["garden"]);
+    assert_eq!(*d, json!({"light": "garden-light", "dark": "garden-dark"}));
+    let tok = |n: &str| built(n)["tokens"]["--bg"].as_str().unwrap().to_string();
+    let first = &p[p.find("<style id=sch>").unwrap()..p.find("</style>").unwrap()];
+    let (light, dark) = (
+        first.find(&format!("--bg:{};", tok("garden-light"))),
+        first.find("@media(prefers-color-scheme:dark){:root{"),
+    );
+    assert!(light.is_some() && dark.is_some() && light < dark, "{first}");
+    assert!(
+        first[dark.unwrap()..].contains(&format!("--bg:{};", tok("garden-dark"))),
+        "{first}"
+    );
+    let Some(got) = node(&format!(
+        "[choose({s}, null, {d}, false), choose({s}, null, {d}, true), choose({s}, 'nord', {d}, true), \
+         choose({s}, null, 'kitchen', true), choose({s}, null, 'kitchen', false), choose({s}, null, undefined, true)]"
+    )) else {
+        return;
+    };
+    assert_eq!(
+        got,
+        json!([
+            "garden-light",
+            "garden-dark",
+            "nord",
+            "kitchen",
+            "kitchen",
+            "github-dark"
+        ])
+    );
 }

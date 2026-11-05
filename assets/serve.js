@@ -133,15 +133,33 @@ function gate(s) {
 const fails = s => gate(s).filter(r => r[1] < r[2]).map(([w, v, m]) => v ? `${w} ${v.toFixed(2)} < ${m}` : w);
 // A passing scheme's token block, as the head script applies it.
 const block = s => `:root{${TOKENS.map(k => `${k}:${s.tokens[k]}`).join(';')};color-scheme:${s['color-scheme']}}`;
-// The scheme a phone shows: its pick, else its theme's default, else github-dark; each only if it passes.
-const choose = (all, pick, def) => [pick, def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
+// The scheme a phone shows: its pick, else its theme's default (#423: a `{light, dark}` one by the phone's setting,
+// `dark`), else github-dark; each only if it passes.
+const choose = (all, pick, def, dark) => [pick, (def && def[dark ? 'dark' : 'light']) || def, 'github-dark'].find(n => all[n] && !fails(all[n]).length) || 'github-dark';
 // schemes:end
+// #423 plants: pure from here to `plants:end` (tests/themes.rs runs it under node). An issue's plant: theme `t`'s
+// `stages` sprite for its growth stage, in its species (`species`, picked by issue number `n`, so it never changes);
+// `row`: the Queue row's 24 × 24 one. None for a theme without `stages`.
+const species = (t, n) => { const L = (t && t.species) || []; return L.length && n >= 0 ? L[n % L.length] : null; };
+function plant(t, stage, n, row) {
+  const id = t && t.stages && t.stages[stage], s = species(t, n), x = row ? '-row' : '';
+  if (!id) return null;
+  return { ids: [s && `${id}-${s.id}${x}`, id + x].filter(Boolean), style: s ? Object.entries(s).filter(e => e[0] !== 'id').map(e => e.join(':')).join(';') : '' };
+}
+// A lane's sprite: symbol `top` (the role's action) over its issue's plant (`hs-<sprite id>`, the first that `has`);
+// `top` alone without one, as before #423.
+function duo(t, has, top, stage, n) {
+  const p = plant(t, stage, n), id = p && p.ids.find(i => has('hs-' + i));
+  return (id ? `<use href="#hs-${id}" style="${p.style}"></use>` : '') + `<use href="#${top}"></use>`;
+}
+// plants:end
+const DARK = matchMedia('(prefers-color-scheme: dark)');
 // #244: the colours: every scheme that passes the gate (built-in and `<config dir>/schemes/`; SD from the head script),
 // this phone's pick (localStorage) else its theme's default. Applied in place; the block is kept so the head script
 // paints it first next time (no flash), and the status bar takes its --bg.
 const SQ = new URLSearchParams(location.search).get('scheme');
 function colours() {
-  const h = document.documentElement, n = choose(SD.s, SQ || get('scheme'), SD.t[h.dataset.theme]), b = block(SD.s[n]);
+  const h = document.documentElement, n = choose(SD.s, SQ || get('scheme'), SD.t[h.dataset.theme], DARK.matches), b = block(SD.s[n]);
   h.dataset.scheme = n;
   $('#sch').textContent = b;
   $('meta[name=theme-color]').content = SD.s[n].tokens['--bg'];
@@ -211,7 +229,7 @@ function lsheet() {
   // A scheme's art: its text on its background (`Aa`), then its green, amber and red chips.
   const sw = s => { const i = el('i', 'lsw'); i.append(Object.assign(el('b', 'aa', 'Aa'), { style: `background:${s.tokens['--bg']};color:${s.tokens['--fg']}` }), ...['--g', '--a', '--r'].map(t => Object.assign(el('b'), { style: `background:${s.tokens[t]}` }))); return i; };
   const ok = Object.keys(SD.s).filter(n => !fails(SD.s[n]).length), no = Object.keys(SD.s).length - ok.length;
-  const sc = ok.map(n => lrow('s', n, n === h.dataset.scheme, sw(SD.s[n]), n === choose(SD.s, null, SD.t[h.dataset.theme])));
+  const sc = ok.map(n => lrow('s', n, n === h.dataset.scheme, sw(SD.s[n]), n === choose(SD.s, null, SD.t[h.dataset.theme], DARK.matches)));
   // #335: STYLE, pixel (sprites) or ascii (the theme's ASCII figures); a theme without ascii (terminal) has none.
   const px = el('i', 'lka'), as = el('i', 'lka');
   lsprite(h.dataset.theme).then(x => { px.innerHTML = x; });
@@ -235,7 +253,7 @@ function lpick(o) {
     h.dataset.theme = o.dataset.t;
     put('theme', o.dataset.t);
     theme(o.dataset.t);
-  } else if (o.dataset.s === choose(SD.s, null, SD.t[h.dataset.theme])) {
+  } else if (o.dataset.s === choose(SD.s, null, SD.t[h.dataset.theme], DARK.matches)) {
     try { localStorage.removeItem('scheme'); } catch (e) {}
   } else put('scheme', o.dataset.s);
   colours();
@@ -258,13 +276,16 @@ document.addEventListener('keydown', e => {
   all[to].focus();
 });
 colours();
+DARK.addEventListener('change', colours); // #423: a `{light, dark}` default follows the phone live
 // #241: the theme on the tabs. A Queue or Events row's state glyph becomes its action's 24 px sprite (#281; its title and label
 // the plain state word); a Lanes avatar takes the theme's ASCII words and look. Terminal (`row_sprites: false`): none.
 const AW = { impl: 'building', fix: 'fixing', rev: 'reviewing', update: 'updating', idle: 'idle', done: 'done', blocked: 'needs you' };
 const hash = t => [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 function rows(root) {
   root.querySelectorAll('.rsg').forEach(g => { g.textContent = g.dataset.g; g.classList.remove('rsg'); ['title', 'role', 'aria-label', 'data-g'].forEach(a => g.removeAttribute(a)); });
-  const rs = TT && TT.row_sprites, sp = (g, act, word) => {
+  // #423: a sprite drawn in its own box (`data-box`, herd.js) keeps it, so its pixels stay whole.
+  const box = id => document.getElementById(id)?.getAttribute('viewBox') || '0 0 132 100';
+  const rs = TT && TT.row_sprites, sp = (g, act, word, grow, n) => {
     if (!g || !rs || !rs[act]) return;
     Object.assign(g.dataset, { g: g.textContent });
     g.classList.add('rsg');
@@ -273,11 +294,14 @@ function rows(root) {
     g.setAttribute('aria-label', word);
     // #335: ascii style: the theme's 3-character figure in the sprite's 24 px box (the same 28 px slot).
     const f = B.dataset.mode === 'ascii' && TT.ascii_rows && TT.ascii_rows[act];
-    if (!f) return void (g.innerHTML = `<svg class=rsp viewBox="0 0 132 100" aria-hidden=true><use href="#hr-${act}"/></svg>`);
+    // #423: a Queue row draws its issue's plant at its stage (a theme's `stages`), else the action's sprite.
+    const p = grow && plant(TT, grow, +n, 1), id = p && p.ids.map(i => 'hq-' + i).find(i => document.getElementById(i));
+    const u = id ? `<use href="#${id}" style="${p.style}"/>` : `<use href="#hr-${act}"/>`;
+    if (!f) return void (g.innerHTML = `<svg class=rsp viewBox="${box(id || 'hr-' + act)}" aria-hidden=true>${u}</svg>`);
     g.replaceChildren(el('i', 'rsp rsa', f));
     g.firstChild.setAttribute('aria-hidden', true);
   };
-  root.querySelectorAll('details.q, .qc').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act]));
+  root.querySelectorAll('details.q, .qc').forEach(d => sp(d.querySelector('summary .gt>b'), d.dataset.act, d.querySelector('summary>span:nth-of-type(2)>span')?.textContent || AW[d.dataset.act], d.dataset.grow, d.dataset.i));
   root.querySelectorAll('.kg[data-act]').forEach(g => sp(g, g.dataset.act, AW[g.dataset.act]));
   const L = (TT && TT.looks) || [];
   root.querySelectorAll('.av[data-act]').forEach(v => {
@@ -290,6 +314,9 @@ function rows(root) {
     if (t) a.replaceChildren(...fs.map(f => Object.assign(document.createElement('b'), { textContent: f })));
     else a.innerHTML = a.dataset.o;
     px.setAttribute('style', L.length && n ? Object.entries(L[hash(n.dataset.agent) % L.length]).map(e => e.join(':')).join(';') : a.dataset.c);
+    // #423: the keeper over the issue's plant; the action alone for a theme without `stages`.
+    const d = duo(TT, i => document.getElementById(i), 'ha-' + v.dataset.act, v.dataset.grow, v.dataset.i == null ? -1 : +v.dataset.i);
+    if (px.innerHTML !== d) px.innerHTML = d;
   });
   words(root);
 }
@@ -299,6 +326,7 @@ const MINI = {
     '<path d="M3 9h10a3 3 0 0 0-2-6 4 4 0 0 0-7 1 3 3 0 0 0-1 5z" fill="var(--mute)"/><path d="M5 11l-1 4M8 11l-1 4M11 11l-1 4" stroke="var(--l)"/>'],
   heat: [5, 9, 13].map((h, i) => `<path d="M8 ${15 - h}C12 ${15 - h / 2} 12 15 8 15C4 15 4 ${15 - h / 2} 8 ${15 - h}Z" fill="var(--${i > 1 ? 'r' : 'a'})"/>`),
 };
+MINI.light = MINI.weather; // #423: sun, cloud, rain
 function mini(g) {
   const s = g.querySelector(':scope>summary'), ls = TT && TT.load_scene, k = { a: 1, r: 2 }[g.dataset.t] || 0, l = ['calm', 'busy', 'held'][k];
   s.querySelector('.lsc')?.remove();
@@ -338,7 +366,8 @@ function use(g, k) {
   const u = g && g.querySelector('use');
   if (!u) return;
   if (u.dataset.a == null) u.dataset.a = u.getAttribute('href');
-  const h = k && document.getElementById('hr-' + k) ? '#hr-' + k : u.dataset.a;
+  // #423: a queued row keeps its own plant (a theme's `stages`): a cutting already.
+  const h = k && document.getElementById('hr-' + k) && !(k === 'queued' && u.dataset.a.startsWith('#hq-')) ? '#hr-' + k : u.dataset.a;
   if (u.getAttribute('href') !== h) u.setAttribute('href', h);
 }
 const QK = { need: 'needs', prog: 'working', queue: 'queued' }, ROLE = { impl: 'impl', review: 'rev', fix: 'fix', update: 'update' };
@@ -401,7 +430,8 @@ function words(root) {
     const l = x >= 1 ? 'held' : x >= 0.5 ? 'busy' : 'calm', w = (ls.levels || {})[l] || l;
     if (had && had.dataset.l === l + w) return;
     had?.remove();
-    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 48 16" aria-hidden=true><use href="#hl-${l}"/></svg><b class=thw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
+    const [, , bw, bh] = document.getElementById('hl-' + l)?.getAttribute('viewBox').split(' ') || [], size = bw == 48 ? '' : ` style="width:${bw}px;height:${bh}px"`; // #423: its own box
+    h.insertAdjacentHTML('beforeend', `<span class=lsm data-l="${esc(l + w)}" role=img aria-label="load: ${esc(w)} (${l})"><svg viewBox="0 0 ${bw || 48} ${bh || 16}"${size} aria-hidden=true><use href="#hl-${l}"/></svg><b class=thw>${esc(w)}</b><small class=pw> · ${l}</small></span>`);
   });
   pushwords();
 }
@@ -979,6 +1009,7 @@ function qfold(root) {
       s.querySelector(':scope>.m').textContent = '#' + (i + 1);
       s.append(el('span', 'cst', qsum(st, nx ? nx.querySelector('summary>span:nth-of-type(2)>span').textContent : '')));
       c.dataset.act = d.dataset.act;
+      if (d.dataset.grow) Object.assign(c.dataset, { grow: d.dataset.grow, i: d.dataset.i }); // #423: its plant
       c.append(s);
       d.before(c);
       c.append(d, ...rest);
@@ -1891,7 +1922,7 @@ function pgraph(d) {
 // `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
 // #405: ATS, the files picked for each thread's next message: { <t>: [{ name, file, src }] } (src: an image's object URL);
 // #407: kept on the device (IndexedDB), as each thread's draft text is (localStorage `draft:<t>`).
-var THR = DBG.get('thread') || sget('thread') || '', ATS = {};
+var THR = DBG.get('thread') || sget('thread') || '', ATS = {}, HP = {}; // #404 HP: an empty thread's harness pick
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
 // #443: `--kb`, the keyboard's height: the part of the layout viewport under the visual one (iOS never shrinks the
 // first); a phone's open thread ends there (serve.css). iOS scrolls the page to show a focused box: put back. A change
@@ -2000,6 +2031,7 @@ function chatPaint(root = $('#chat')) {
     if (EDIT && EDIT.t === t) tw.insertBefore(el('p', 'qe', 'editing queued message · '), tw.querySelector('input[type=file]')).append(Object.assign(el('button', 'ecl', 'cancel'), { type: 'button' }));
     else if (wk) tw.append(el('p', 'qh', 'delivered when this turn ends · hold [queue] to steer'));
     if (!a.value && !(EDIT && EDIT.t === t)) a.value = get('draft:' + t) || '';
+    if (HP[t] && tw.elements.harness) tw.elements.harness.value = HP[t]; // #404: the harness picked for a new thread
     if (!ATS[t]) continue;
     const row = tw.insertBefore(el('div', 'ats'), tw.querySelector('input[type=file]'));
     ATS[t].forEach((f, i) => {
@@ -2061,6 +2093,14 @@ addEventListener('scroll', e => {
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
 // #407: each thread's draft is kept as you type (not a queued message being edited).
+// #404: an empty thread's harness pick (HP, kept across live updates until its first message); a thread's model/effort
+// chip applies from its next turn.
+document.addEventListener('change', e => {
+  const s = e.target, f = s.closest?.('#chat .tw');
+  if (!f || !s.matches('select')) return;
+  if (s.name === 'harness') HP[f.dataset.t] = s.value;
+  else chatPost({ op: 'model', t: f.dataset.t, [s.name]: s.value });
+});
 const draft = (t, v) => { try { if (v) localStorage.setItem('draft:' + t, v); else localStorage.removeItem('draft:' + t); } catch (e) {} };
 document.addEventListener('input', e => {
   const a = e.target;
@@ -2301,7 +2341,7 @@ async function chatSay(f, how) {
   const t = f.dataset.t, a = ATS[t] || null, box = f.elements.text, text = box.value, repo = f.dataset.repo, ed = EDIT && EDIT.t === t ? EDIT : null;
   if (!text.trim() && !a) return;
   const op = repo ? 'new' : ed ? 'queue' : how || (f.closest('.cvp').querySelector('.tlv.wk') ? 'queue' : 'say');
-  const names = a ? a.map(x => x.name).join(', ') : '';
+  const names = a ? a.map(x => x.name).join(', ') : '', harness = repo && f.elements.harness ? { harness: f.elements.harness.value } : {};
   const p = { t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
   if (op !== 'queue') SENT.push(p);
   f.reset();
@@ -2314,7 +2354,8 @@ async function chatSay(f, how) {
   chatPaint();
   chatFollow();
   const files = a ? { name: a.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.map(x => b64(x.file)))).join(',') } : {};
-  const ok = await chatPost({ op, ...(repo ? { repo } : { t }), ...(ed ? { q: ed.q } : {}), text, ...files });
+  const ok = await chatPost({ op, ...(repo ? { repo, ...harness } : { t }), ...(ed ? { q: ed.q } : {}), text, ...files });
+  if (ok && repo) delete HP[t];
   if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }
   p.st = ok ? '✓' : '✗';
   if (!ok && ed) EDIT = { ...ed, draft: box.value };

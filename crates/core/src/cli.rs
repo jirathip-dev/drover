@@ -392,7 +392,13 @@ struct Scope {
 #[derive(Subcommand)]
 enum ThreadCmd {
     /// Start a thread for a fleet's repo (or `all`); prints its id. A conductor uses `thread handoff`
-    New { repo: String, title: String },
+    New {
+        repo: String,
+        title: String,
+        /// Its conductor's harness for good: claude | hermes | dsh (default `[chat]`'s, else the conductor role's)
+        #[arg(long)]
+        harness: Option<String>,
+    },
     /// A conductor hands off: a new thread in <to> (a repo or `all`) or thread <to>, linked both ways; <text> wakes its conductor as from <from>
     Handoff {
         from: String,
@@ -603,8 +609,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`).
-pub const HELP_AGENT_MAX: usize = 292;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`).
+pub const HELP_AGENT_MAX: usize = 293;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1063,8 +1069,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "a conductor starts threads with `thread handoff`")?;
                     }
-                    ThreadCmd::New { repo, title } => {
-                        writeln!(out, "{}", crate::conductor::new(ctx, &cfg, &repo, &title)?)?;
+                    ThreadCmd::New { repo, title, harness } => {
+                        let id = crate::conductor::new(ctx, &cfg, &repo, &title, harness.as_deref())?;
+                        writeln!(out, "{id}")?;
                     }
                     ThreadCmd::Handoff { from, to, title, text } => {
                         let to = crate::conductor::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
@@ -1124,21 +1131,43 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let all = crate::waiting::scan(
-                        ctx,
-                        &cfg,
-                        r,
-                        &read(&ctx.state)?,
-                        &all_agents(&cfg, r).unwrap_or_default(),
-                        true,
-                    );
-                    let rows: Vec<_> = all
+                    let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let mut rows: Vec<_> = all
                         .into_iter()
                         // #445: every open issue, with the reason, nothing-due ones too.
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")
                         .map(|x| x.1)
-                        .filter(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet))
                         .collect();
+                    // #493: a working or next-to-start issue too; one nothing drives says so.
+                    let log = crate::waiting::Log::new(&events);
+                    for s in crate::waiting::guarded(&events, &cfg) {
+                        let (f, pr) = (&cfg.fleet[&s.fleet], crate::gh::cached_pr(ctx, &s.fleet, s.issue));
+                        let un = crate::waiting::undriven(&log, &s, f, &pr, &agents, ctx.now);
+                        let note = un.map_or(String::new(), |t| {
+                            format!(" · nothing drives this (since {})", crate::events::age(ctx.now - t))
+                        });
+                        if let Some(w) = rows.iter_mut().find(|w| w.fleet == s.fleet && w.issue == s.issue) {
+                            w.what += &note;
+                            continue;
+                        }
+                        let (who, what) = match &s.lane {
+                            Some(l) => ("none", format!("waiting on {l} (working){note}")),
+                            None => ("drive", format!("next in the queue: drive starts it{note}")),
+                        };
+                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, None);
+                        let lane = s.lane.unwrap_or_default();
+                        rows.push(crate::waiting::Waiting {
+                            fleet,
+                            issue,
+                            lane,
+                            who,
+                            what,
+                            since,
+                            next_cmd,
+                        });
+                    }
+                    rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     }

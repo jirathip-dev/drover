@@ -261,6 +261,34 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }
     }
+    // #493: an open issue nothing drives for 30 min alerts once per episode; it only reports, never acts.
+    if let Some(a) = &agents {
+        let all: Vec<Value> = a.iter().chain(remote.values().flatten().flatten()).cloned().collect();
+        let log = crate::waiting::Log::new(&events);
+        for s in crate::waiting::guarded(&events, cfg) {
+            let (f, pr) = (&cfg.fleet[&s.fleet], gh::cached_pr(ctx, &s.fleet, s.issue));
+            let Some(since) = crate::waiting::undriven(&log, &s, f, &pr, &all, ctx.now) else {
+                continue;
+            };
+            let lane = s.lane.as_deref().unwrap_or("none");
+            let st = all
+                .iter()
+                .find(|a| a["name"] == lane)
+                .map_or(["none", "gone"][usize::from(s.lane.is_some())], |a| {
+                    a["agent_status"].as_str().unwrap_or("?")
+                });
+            let why = format!(
+                "#{} {}: nothing drives it for {}; last event {} {} ago; last lane {lane} ({st})",
+                s.issue,
+                s.shown(),
+                age(ctx.now - since),
+                s.last_event,
+                age(ctx.now.saturating_sub(s.last_ts))
+            );
+            let d = json!({"key": since, "reason": why});
+            fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), "orphan-issue", d)?;
+        }
+    }
     // #107: a herdr agent named like a lane (`<fleet>-<role>-<n>…`) that no `spawn` event logged; once per agent.
     // #376: only one of no tracked issue: drive adopts (or closes) the rest.
     let tracked = fold(&events);

@@ -1,0 +1,25 @@
+{
+  "label": "Garden dark (moss and walnut, lamp amber; #423)",
+  "color-scheme": "dark",
+  "tokens": {
+    "--bg": "#181c15",
+    "--card": "#24231b",
+    "--edge": "#463f2c",
+    "--line": "#2b2e23",
+    "--scrim": "#080a06aa",
+    "--fg": "#ece4cf",
+    "--mute": "#a7a28a",
+    "--l": "#eda055",
+    "--link": "#93c9c0",
+    "--g": "#74c760",
+    "--a": "#f5df63",
+    "--r": "#ff6f7a",
+    "--p": "#c9a2e8",
+    "--c": "#66c8bd",
+    "--fk-l": "#7fb8ec",
+    "--fk-p": "#c9a2e8",
+    "--fk-c": "#66c8bd",
+    "--fk-g": "#74c760",
+    "--fk-a": "#f5df63"
+  }
+}

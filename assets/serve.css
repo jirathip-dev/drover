@@ -284,6 +284,9 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 :is(details.q,.qc) :is(.tl,.cst){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
 :is(details.q,.qc)>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
+/* #423: beside an issue's plant (a theme with `stages`), a long theme + plain state pair (`inspect · review(1)`)
+   ellipsises, never wraps the row. */
+:is(details.q,.qc)>summary:has(.rsp use[href^="#hq-"])>span>span:has(>.thw){display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
 .gt,.gt i{font-style:normal;white-space:pre;color:var(--mute)}
@@ -653,6 +656,8 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .tlv b{font-weight:400;color:var(--a)}.tlv b.g{color:var(--g)}
 .tw{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s4);padding:var(--s2) 0}
 .tw textarea{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);resize:none;font-size:var(--fs-input)}
+/* #404: the composer's chips under the box: an empty thread's harness, a thread's model and effort. */
+.cbar{flex-basis:100%;display:flex;flex-wrap:wrap;gap:var(--s4);padding:0 var(--s2);font-size:var(--fs-meta)}
 /* The composer, sticky above the tab bar: [+] attach, the text, [send]; #405: the picked files wait above it, a row of
    56 px thumbnails (a file's name in its place), [×] under each. */
 .cvp .tw{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));margin-bottom:var(--hit);background:var(--bg);border-top:1px solid var(--line)}

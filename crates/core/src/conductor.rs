@@ -32,15 +32,22 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-/// `herdsman thread new <fleet|all> <title>`: its id.
-pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str) -> Result<String> {
+/// `herdsman thread new <fleet|all> <title> [--harness <h>]`: its id. #404: the thread keeps its harness (`harness`,
+/// else the default's) for good.
+pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, harness: Option<&str>) -> Result<String> {
     if repo != "all" {
         cfg.fleet(repo)?;
     }
     title_ok(title)?;
+    if let Some(h) = harness.filter(|h| !harness::NAMES.contains(h)) {
+        return refused("BAD_VALUE", format!("harness {h:?}: one of {:?}", harness::NAMES));
+    }
+    let h = harness
+        .map(String::from)
+        .or_else(|| defaults(cfg, repo).ok().map(|r| r.1.harness));
     let events = read(&ctx.state)?;
     let id = format!("t{}", events.iter().filter(|e| e.kind == "thread-new").count() + 1);
-    let d = json!({"thread": id, "title": title});
+    let d = json!({"thread": id, "title": title, "harness": h});
     emit(&ctx.state, cfg, Event::new(ctx.now, repo, None, "thread-new", d))?;
     Ok(id)
 }
@@ -144,7 +151,7 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
         to.to_string()
     } else {
         role(cfg, to)?;
-        new(ctx, cfg, to, title)?
+        new(ctx, cfg, to, title, None)?
     };
     if to == from {
         return refused("BAD_VALUE", "a thread hands off to another thread");
@@ -278,8 +285,19 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;
     let awake = last.filter(|s| s.kind == "conductor-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
-    let Some(s) = awake else {
-        return start(ctx, cfg, r, t, &events, line);
+    // #404: a model/effort pick since the conductor started resumes it on them.
+    let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
+    let Some(s) = awake.filter(|_| !picked) else {
+        if let Some(s) = awake {
+            herdr::workspace_close(r, s.str("workspace").unwrap_or_default())?;
+            let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &t.fleet, None, "conductor-sleep", d),
+            )?;
+        }
+        return start(ctx, cfg, r, t, &read(&ctx.state)?, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
     herdr::reply(
@@ -307,6 +325,93 @@ pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
             format!("{repo} has no conductor or impl role; add [fleet.<n>.role.conductor]"),
         ),
     }
+}
+
+/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model and
+/// accounts), model, effort and account(s) over it.
+pub fn defaults<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, Role)> {
+    let (fleet, base) = role(cfg, repo)?;
+    let c = &cfg.chat;
+    let mut r = on(base, c.harness.as_deref());
+    r.model = c.model.clone().or(r.model);
+    r.effort = c.effort.clone().or(r.effort);
+    if c.account.is_some() || !c.accounts.is_empty() {
+        (r.account, r.accounts) = (c.account.clone(), c.accounts.clone());
+    }
+    Ok((fleet, r))
+}
+
+/// `r` on harness `h`: unchanged on its own, else without its model and accounts.
+fn on(r: &Role, h: Option<&str>) -> Role {
+    match h.filter(|h| *h != r.harness) {
+        Some(h) => Role {
+            harness: h.into(),
+            model: None,
+            account: None,
+            accounts: vec![],
+            ..r.clone()
+        },
+        None => r.clone(),
+    }
+}
+
+/// #404: thread `t`'s conductor: the defaults, or the role on another harness it started with; then its last
+/// model/effort pick.
+pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(&'a str, Role)> {
+    let (fleet, d) = defaults(cfg, &t.fleet)?;
+    let mut r = match t.str("harness") {
+        Some(h) if h != d.harness => on(role(cfg, &t.fleet)?.1, Some(h)),
+        _ => d,
+    };
+    r.effort = r.effort.filter(|e| harness::efforts(&r.harness).contains(&e.as_str()));
+    let id = t.str("thread").unwrap_or_default();
+    if let Some(p) = of(events, id).rfind(|e| e.kind == "thread-model") {
+        r.model = p.str("model").map(String::from).or(r.model);
+        r.effort = p.str("effort").map(String::from).or(r.effort);
+    }
+    Ok((fleet, r))
+}
+
+/// #404: the models a thread on harness `h` can pick: those its roles on `h` (or `[chat]`, where a fleet's default
+/// conductor is on `h`) use, any fleet;
+/// none where `h`'s profile owns the model.
+pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
+    if !harness::get(h).takes_model() {
+        return vec![];
+    }
+    let roles = cfg
+        .fleet
+        .values()
+        .flat_map(|f| f.role.values())
+        .filter(|r| r.harness == h);
+    let chat = cfg.chat.model.as_deref().filter(|_| {
+        cfg.fleet
+            .keys()
+            .any(|n| defaults(cfg, n).is_ok_and(|d| d.1.harness == h))
+    });
+    let all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
+    all.into_iter().collect()
+}
+
+/// #404: the composer chip's pick: thread `id`'s model and effort from its next turn (`deliver` resumes the
+/// conductor on them), logged `thread-model`, a system line in the thread.
+pub fn pick(ctx: &Ctx, cfg: &Config, id: &str, model: &str, effort: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let t = find(&events, id)?;
+    let h = thread_role(cfg, &events, t)?.1.harness;
+    let ok = (model.is_empty() || harness_models(cfg, &h).contains(&model))
+        && (effort.is_empty() || harness::efforts(&h).contains(&effort));
+    if !ok || model.is_empty() && effort.is_empty() {
+        return refused("BAD_VALUE", format!("{model} {effort}: not one of {h}'s choices"));
+    }
+    let mut d = json!({"thread": id});
+    for (k, v) in [("model", model), ("effort", effort)]
+        .into_iter()
+        .filter(|p| !p.1.is_empty())
+    {
+        d[k] = json!(v);
+    }
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-model", d))
 }
 
 /// #401: the models a fleet's roles use, the [config] sheet's conductor model choices.
@@ -392,9 +497,9 @@ fn uuid() -> Result<String> {
 /// resume is pointed at the conversation so far instead).
 fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
-    let (fleet, base) = role(cfg, &t.fleet)?;
+    let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
-    let (role, resting) = crate::access::fallback(cfg, events, base, ctx.now)?;
+    let (role, resting) = crate::access::fallback(cfg, events, &base, ctx.now)?;
     let h = harness::get(&role.harness);
     // Only a session this harness started resumes (a fallback to another harness starts its own).
     let first = of(events, id).find(|e| e.kind == "conductor-start" && e.str("harness") == Some(&role.harness));
@@ -477,7 +582,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     if o.code != 0 && !kicked {
         herdr::reply(r, p.harness == "dsh", &agent, &pane, &line.replace('\n', " "))?;
     }
-    let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model,
+    let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
         "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
     if o.code != 0 {
         d["adopted"] = json!(true);
@@ -555,6 +660,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             }
             Some(m)
         }
+        "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
         // #461: a conductor's `timer install`, a system line.
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);
@@ -582,6 +688,15 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         _ => None,
     };
     of(events, id).filter_map(item).collect()
+}
+
+/// #404: a pick's system line: `model sonnet · effort high from the next turn`.
+pub fn picked(e: &Event) -> String {
+    let kv = ["model", "effort"].map(|k| e.str(k).map(|v| format!("{k} {v}")));
+    format!(
+        "{} from the next turn",
+        kv.into_iter().flatten().collect::<Vec<_>>().join(" · ")
+    )
 }
 
 /// Items as lines: `<from>: <text>`, an ask as `<from> asks <id>: <question>` and its `[n]` options.

@@ -1,0 +1,277 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Garden theme mockup</title>
+<link rel=icon href=icon/favicon-32.png>
+<!-- #423 design mockup: the garden theme (a cozy houseplant shop) to #241's contract plus the four proposed keys
+     (`stages`, `species`, `load_scene.kind: "light"`, a light/dark `scheme`). serve.css and herd.css are the board's,
+     unchanged; garden.css is the frame loop and light layers; the <style> below is mockup-only framing. Every sprite
+     comes from art.mjs. The page follows prefers-color-scheme (garden-light / garden-dark); ?s=light|dark pins one;
+     ?still=1 or Reduce Motion stops every loop. Fixture: the demo's acme-* fleets (fake). -->
+<link rel=stylesheet href=../../../assets/serve.css>
+<link rel=stylesheet href=../../../assets/herd.css>
+<link rel=stylesheet href=garden.css>
+<style>
+/* ---- mockup framing only ---- */
+body{padding:0 var(--s3) var(--s4)}
+.doc{max-width:1440px;margin:0 auto}
+.doc>h2{margin:calc(2 * var(--s4)) 0 var(--s1);font-size:var(--fs)}
+.doc>p,.cap2{margin:0 0 var(--s2);color:var(--mute);font-size:var(--fs-meta)}
+.top{display:flex;align-items:center;gap:var(--s3);min-height:calc(var(--hit) + var(--s1));border-bottom:1px solid var(--line)}
+.top{flex-wrap:wrap}.top>b{flex:1 0 auto}
+.top img{width:var(--ctl);height:var(--ctl);border-radius:6px}
+.row3{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-start}
+.ph{flex:0 0 390px;width:390px;min-width:0;max-width:100%;border:1px solid var(--edge);border-radius:12px;overflow:hidden;position:relative}
+.ph>.lbl{margin:0;padding:var(--s1) var(--s3);background:var(--card);color:var(--fg);font-size:var(--fs-meta);border-bottom:1px solid var(--edge)}
+@media (max-width:420px){.ph{flex:1 1 100%;width:auto;max-width:none;margin:0 calc(-1 * var(--s3));border-radius:0;border-width:1px 0}}
+/* the Herd in the shop */
+.hp.g{--done:1;height:auto;overflow:visible;padding-bottom:0;color:#f4ecd8;--pa:repeating-linear-gradient(90deg,#7a5236 0 47px,#6b4a30 47px 48px),#7a5236;background:var(--pa)}
+.hp.g .hs{position:relative;background:#4f3522}.hp.g .hs .sum{color:#f4ecd8bb}
+.hp.g .hr{height:186px;background:#ead9b8}.hp.g .hr>svg{display:block;width:100%;height:100%}
+.hp.g .hcap2{margin:0;padding:0 var(--s2);background:#4f3522;font-size:var(--fs-meta);line-height:var(--ctl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#f4ecd8}
+.hp.g .hh{cursor:default;position:relative}
+.counter{margin:0 var(--s2);padding:var(--s1) 0 0;border-radius:6px;background:linear-gradient(#0000 0 58%,#b07a4a 58% 62%,#8a5a34 62%)}
+.krail{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s1)}
+.hqh{--qw:72px}.hqh svg{width:66px}
+.hqh.n svg{animation:gpulse .8s ease-in-out infinite}
+.still .hqh.n svg{animation:none}
+.bub{position:absolute;z-index:1;left:55%;top:var(--s1);padding:0 var(--s2);border-radius:8px;background:#f7f1e3;color:#2b2420;font-size:var(--fs-meta);line-height:1.6;box-shadow:0 1px 3px #0004;white-space:nowrap}
+.bub.r{background:#f6d9d3;color:#b3261e}
+.hh svg.duo{overflow:hidden}
+/* 1440: the shop wall, one bay of shelves per repo, the current page's lit */
+.wide{width:1440px;border:1px solid var(--edge);border-radius:12px;overflow:hidden;transform-origin:0 0}
+.wwrap{overflow:hidden}
+.line{position:relative;height:186px;display:flex;overflow:hidden}.line>.st:first-child{margin-left:-255px}
+.line>.st{flex:0 0 390px;height:186px;position:relative}.line>.st svg{display:block;width:390px;height:186px}
+.line>.st.off{filter:brightness(.62) saturate(.8)}
+.line>.st>b{position:absolute;right:var(--s2);top:var(--s3);padding:0 var(--s1);border-radius:4px;background:#4f3522d8;font-weight:400;font-size:var(--fs-meta);color:#f4ecd8;border-left:4px solid var(--fk)}
+.lights{display:flex;flex-wrap:wrap;gap:var(--s4)}
+.lights figure{margin:0;flex:0 0 390px;max-width:100%}
+.lights .hr{height:186px;border-radius:8px;background:#ead9b8}.lights .hr svg{display:block;width:100%;height:100%}
+.lights figcaption{font-size:var(--fs-meta);color:var(--mute);padding-top:var(--s1)}
+/* the tabs, in the scheme */
+.tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:var(--s4)}
+.tab{border:1px solid var(--edge);border-radius:12px;padding:0 var(--s3) var(--s2);min-width:0;background:var(--bg)}
+.tab>h3{margin:var(--s2) 0 0;color:var(--fg);font-size:var(--fs)}
+.tsub2{margin:var(--s3) 0 var(--s1);font-weight:600}.tsub2 .pw{margin-left:var(--s1)}
+.qcard{border:1px solid var(--edge);border-top:3px solid var(--fk-g);border-radius:8px;padding:0 var(--s3) var(--s1);background:var(--card)}
+.qcard>p{margin:var(--s2) 0 var(--s1)}
+.qr{display:grid;grid-template-columns:28px 5ch minmax(0,1fr) auto;column-gap:var(--s2);align-items:center;min-height:var(--hit);padding:var(--s1) 0;border-top:1px solid var(--line);position:relative}
+.qr .rsp{margin:0}.qr>.st b{font-weight:600}.qr .tl{grid-column:2/-1;color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qr .ag{color:var(--mute)}
+.qr[data-mo=merged] .rsp{animation:gfr 1.2s infinite,ghop .8s ease-in-out infinite}
+.qr[data-mo=fail]{animation:gshake .4s ease-in-out infinite}
+.qr[data-mo=needs-you]{background:color-mix(in srgb,var(--r) 14%,transparent)}.qr[data-mo=needs-you] .rsp{animation:gfr 1.2s infinite,gpulse .8s ease-in-out infinite}
+.still .qr[data-mo] .rsp,.still .qr[data-mo]{animation:none}
+.mot{position:absolute;right:0;top:calc(var(--s1) + 2px);font-style:normal;font-weight:700;font-size:var(--fs-meta);padding:0 var(--s1);border-radius:var(--s1);color:var(--bg);background:var(--g);white-space:nowrap}
+.qr[data-mo=fail] .mot,.qr[data-mo=needs-you] .mot{background:var(--r)}.qr[data-mo] .ag{visibility:hidden}
+.lane .lr{grid-template-columns:48px minmax(0,1fr) max-content}
+.lane .px{width:48px;height:36px}.lane .av>.px{display:block}
+.lane .now{grid-column:1/-1;margin:0;color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nw{white-space:nowrap}.el{overflow:hidden;text-overflow:ellipsis}
+.grp{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-top:1px solid var(--line)}
+.grp .gn{font-weight:700;letter-spacing:.08em;color:var(--mute);font-size:var(--fs-meta)}
+.grp .lsm{margin-left:auto}.grp .lsm svg{width:72px;height:24px;image-rendering:pixelated;animation:gfr 1.2s infinite}
+.still .grp .lsm svg{animation:none}
+.cmp{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:var(--s2);margin:var(--s2) 0}
+.cmp figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute);text-align:center}
+.cmp .av{width:64px;border:1px solid var(--line);border-radius:4px;background:var(--card)}.cmp .asc{display:grid;color:var(--fg)}
+.ar{font:var(--fs)/1 ui-monospace,Menlo,monospace;white-space:pre;color:var(--fg)}
+.moms{display:flex;flex-wrap:wrap;gap:var(--s4)}
+.moms figure{margin:0;display:flex;flex-direction:column;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute);width:180px}
+.moms .mo{position:relative;width:180px;height:140px;border-radius:8px;background:linear-gradient(#0000 0 76%,#7a523650 76%),#ead9b8;display:flex;align-items:end;justify-content:center}
+.moms .mo svg{width:165px;height:125px}
+.icons{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-end}
+.icons figure{margin:0;display:flex;flex-direction:column;gap:var(--s1);font-size:var(--fs-meta);color:var(--mute)}
+.icons .i512{width:256px;height:256px;border-radius:56px}.icons .i180{width:90px;height:90px;border-radius:20px}.icons .i192{width:96px;height:96px;border-radius:20px}
+.icons .px16{width:16px;height:16px;image-rendering:pixelated}.icons .px32{width:64px;height:64px;image-rendering:pixelated}
+.home{display:grid;grid-template-columns:repeat(4,60px);gap:var(--s3) var(--s4);padding:var(--s4);border-radius:16px;background:linear-gradient(#5d7a5a,#34483a);width:max-content;max-width:100%}
+.home figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:var(--s1);font:var(--fs-meta)/1.2 -apple-system,system-ui,sans-serif;color:#fff}
+.home img{width:60px;height:60px;border-radius:14px;display:block}
+.sheetm{flex:1 1 320px;min-width:0;border:1px solid var(--edge);border-radius:12px 12px 0 0;background:var(--card);padding:var(--s2) var(--s3);max-width:390px}
+.sheetm .nm{white-space:nowrap}.sheetm .pw{white-space:normal}
+.sheetm h4{margin:var(--s2) 0 0;font-size:var(--fs-meta);letter-spacing:.08em;color:var(--mute)}
+.sheetm p{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);margin:0;border-bottom:1px solid var(--line)}
+.sheetm p:last-child{border:0}.sheetm .ck{margin-left:auto;color:var(--l)}
+.chip{display:inline-block;width:var(--s3);height:var(--s3);border-radius:2px}
+.aa{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl);height:var(--ctl);border-radius:4px;border:1px solid var(--edge);font-weight:700}
+.ctab{border-collapse:collapse;font-size:var(--fs-meta);margin:var(--s3) 0;max-width:100%;display:block;overflow-x:auto}
+.ctab td,.ctab th{padding:var(--s1) var(--s2);border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.sw{display:inline-block;width:var(--s3);height:var(--s3);border-radius:2px;vertical-align:-1px;margin-right:var(--s1);border:1px solid #0003}
+.duos{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:var(--s4)}
+.duo2{border:1px solid var(--edge);border-radius:12px;padding:var(--s2) var(--s3);min-width:0}
+.duo2 h3{margin:0 0 var(--s2);font-size:var(--fs)}
+</style></head>
+<body data-mode=scene class=hz>
+<svg width=0 height=0 style="position:absolute" aria-hidden=true><defs id=defs></defs></svg>
+<div class=doc>
+<header class=top><img src=icon/icon-180.png alt=""><b>garden theme · design mockup (#423)</b><span class=m id=sch-name></span></header>
+
+<h2>1 · the shop, 390 px: sun · overcast · rain</h2>
+<p>One page per fleet, as today: that repo's corner of the shop, its shelves edged in its #162 colour. Under it, the counter: one cutting in a jar
+per queued issue. Then the bands: being tended (working, the keeper by role beside the issue's plant at its stage), resting (idle), ready for sale
+(done) and wilting (blocked). The window's light is the load: sun under 0.5 of the limit, overcast from 0.5, rain when spawns are held.</p>
+<div class=row3 id=phones></div>
+
+<h2>2 · 1440 px: the shop wall, one bay of shelves per repo</h2>
+<p>The scene band shows every repo's bay side by side (the existing <code>scene.line</code>), the current page's lit and centred. A swipe walks along the wall.</p>
+<div class=wwrap id=wwrap><div class=wide id=wide></div></div>
+
+<h2>3 · the window light, the Host miniature and Reduce Motion</h2>
+<p>Drawn only from what the farm's weather already reads: <code>load/limit</code> and the spawn gate. Sun: blue sky, a sunbeam across the room. Overcast: grey
+clouds, the room a shade dimmer. Rain: dark cloud, rain running down the glass (two frames, 0.6 s), the room dimmer still. Nothing flashes.</p>
+<div class=lights id=lights></div>
+
+<h2>4 · moments</h2>
+<p>Silent, 2.4 s, once (#370): on the issue's row on the visible tab, else the top-right overlay. Merged: the plant is wrapped in kraft paper and the shop bell rings
+(hop). Review FAIL: a yellowed leaf drops off (the row shakes). Needs you: a red “thirsty” drop pulses over the pot. Reduce Motion: the still frame and the tag.</p>
+<div class=tabs><div class=tab id=mrows><h3>on the row · Queue</h3></div><div class=tab><h3>the overlay (no row in view)</h3><div class=moms id=moms></div></div></div>
+
+<h2>5 · Queue and Lanes at 390 px</h2>
+<p>Queue rows draw the issue's plant at its stage, in its species (issue number mod 6), so neighbouring rows tell apart. Lanes draw the keeper doing the
+role beside that plant. Labels are <code>theme word · plain word</code> (#370). Row heights, text sizes and the 28 px sprite slot don't change.</p>
+<div class=tabs><div class=tab id=tq><h3>queue</h3></div><div class=tab id=tl><h3>lanes</h3></div></div>
+
+<h2>6 · Events, Host, and the ASCII style</h2>
+<div class=tabs><div class=tab id=te><h3>events</h3></div><div class=tab id=ta><h3>ascii style (STYLE · ascii): Lanes cells and row figures</h3></div></div>
+
+<h2>7 · the icon and the look sheet</h2>
+<p>A pixel monstera leaf over a terracotta pot rim, on the linen tile: 512, 192, 180 (apple-touch) and the favicon at 32 and 16. The look sheet lists garden
+under THEME. Under COLOURS, garden-light and garden-dark are one row, <i>garden (follows the phone)</i>, the theme default. A phone that picks one keeps it.</p>
+<div class=row3><div class=icons id=icons></div><div class=sheetm id=look></div></div>
+
+<h2>8 · the two schemes and the gate</h2>
+<p>garden-light: linen and cream, sage and leaf greens, terracotta controls. garden-dark: moss and walnut, lamp-amber controls, leaf green, terracotta red. Both pass
+serve.js's gate (<code>node check.mjs</code>). The rows below are serve.js's checks, each scheme's tightest first.</p>
+<div class=duos id=duos></div>
+</div>
+
+<script type=module>
+import { mode, scheme } from './scheme.mjs';
+import { symbols, style, sv, speciesOf, shop, mini, ASCII, ASCII_ROWS, ASCII_STAGES, ASCII_LOAD } from './art.mjs';
+import { gate } from './gate.mjs';
+const $ = s => document.querySelector(s);
+if (new URLSearchParams(location.search).has('still')) document.body.classList.add('still');
+$('#defs').innerHTML = symbols();
+$('#sch-name').textContent = `colours: garden-${mode()} (follows the phone)`;
+const SHOP = shop();
+
+// A lane in the Herd: the plant at its stage (species by issue) and the keeper doing the role, in one 132 × 100 box.
+const duo = (sp, stage, act, look, fk) => `<svg class=duo viewBox="0 0 132 100"><use href="#p-${sp}-${stage}" style="${sv(sp)}"/><use href="#g-${act}" style="${style(look, fk)}"/></svg>`;
+const sp = n => speciesOf(n).id;
+const lane = (name, n, stage, act, look, fk, state, tone, word, age, extra = '') =>
+  `<button type=button class="hh ${state}">${duo(sp(n), stage, act, look, fk)}<span class=hl><b>${name}</b><span><i class=${tone}>${word}</i>${age ? ' · ' + age : ''}</span></span>${extra}</button>`;
+const jar = (n, needs) => `<button type=button class="hqh${needs ? ' n' : ''}"><svg viewBox="0 0 132 100" style="${sv(sp(n))}"><use href="#p-${sp(n)}-queued"/>${needs ? '<use href="#m-drop"/>' : ''}</svg><span>#${n}${needs ? '<br><i class=r>! thirsty</i>' : ''}</span></button>`;
+const band = (cls, name, plain, n, items) => `<div class="band b-${cls}"><h4>${name} <span>· ${plain} ${n}</span></h4><div class=field>${items}</div></div>`;
+
+function page(light, { load, gate, fk = 'g', fleet = 'acme-web' } = {}) {
+  const working = [
+    lane('acme-web-impl-48', 48, 'impl', 'water', 0, fk, 'working', 'g', 'water · impl', '70s'),
+    lane('acme-web-impl-41', 41, 'fix', 'prune', 1, fk, 'working', 'g', 'prune · fix 2', '12m'),
+    lane('acme-web-rev-38', 38, 'review', 'inspect', 2, fk, 'working', 'g', 'inspect · r1', '4m'),
+    lane('acme-web-impl-36', 36, 'fix', 'repot', 4, fk, 'working', 'g', 'repot · update', '2m'),
+  ].join('');
+  return `<section class="hp g light-${light}"><div class=hs><p><b>${fleet}</b> <span class=n>· 7 here</span></p>` +
+    `<p class=sum>4 cuttings · 1 wilting · 4 tended · 1 resting · 1 ready</p></div>` +
+    `<div class="hr loop" style="--fk:var(--fk-${fk})">${SHOP}</div>` +
+    `<div class=hb><div class="band b-queue"><h4>cuttings <span>· queued 4</span></h4><div class=counter><div class=krail>${jar(52)}${jar(53)}${jar(46, 1)}${jar(55)}</div></div></div>` +
+    band('working', 'being tended', 'working', 4, working) +
+    band('idle', 'resting', 'idle', 1, lane('acme-web-impl-50', 50, 'review', 'idle', 5, fk, 'idle', 'a', 'resting · CI pending', '9m')) +
+    band('done', 'ready for sale', 'done', 1, lane('acme-web-impl-33', 33, 'ready', 'done', 3, fk, 'done', 'g', 'ready · PR #61', '1m')) +
+    band('blocked', 'wilting', 'blocked', 1, lane('acme-web-impl-44', 44, 'blocked', 'wilted', 7, fk, 'blocked', 'r', 'thirsty · needs you', '33m')) +
+    `</div><p class=hcap2>load ${load} · ${light}${gate ? ' · spawns held' : ''} · mem normal · swap 0</p></section>`;
+}
+const phone = (lbl, h) => `<div class=ph><p class=lbl>${lbl}</p>${h}</div>`;
+$('#phones').innerHTML =
+  phone('sun · load/limit 0.16 (under 0.5): blue sky, a sunbeam', page('sun', { load: '0.40 / 2.5' })) +
+  phone('overcast · load/limit 0.72 (0.5 and up): grey cloud, dimmer', page('overcast', { load: '1.80 / 2.5' })) +
+  phone('rain · the spawn gate refuses (3.25 > 2.5): rain on the glass', page('rain', { load: '3.25 / 2.5', gate: 1 }));
+
+const bays = [['docs', 'l'], ['acme-api', 'p'], ['acme-web', 'g'], ['acme-ios', 'a']];
+$('#wide').innerHTML = page('sun', { load: '0.40 / 2.5' }).replace(/<div class="hr loop"[^>]*>[\s\S]*?<\/svg><\/div>/,
+  `<div class="hr loop line">${bays.map(([n, k]) => `<div class="st${n === 'acme-web' ? '' : ' off'}" style="--fk:var(--fk-${k})">${SHOP}<b>${n}</b></div>`).join('')}</div>`);
+const fit = () => { const w = $('#wwrap').clientWidth, k = Math.min(1, w / 1440); $('#wide').style.transform = `scale(${k})`; $('#wwrap').style.height = $('#wide').offsetHeight * k + 'px'; };
+addEventListener('resize', fit); requestAnimationFrame(fit);
+
+const win = (l, cap, still) => `<figure class="light-${l}${still ? ' still' : ''}"><div class="hr loop" style="--fk:var(--fk-g)">${SHOP}</div><figcaption>${cap}</figcaption></figure>`;
+$('#lights').innerHTML = win('sun', 'sun (calm): blue sky, the sun, a sunbeam over the counter') + win('overcast', 'overcast (busy): grey cloud, no beam, the room 10 % dimmer') +
+  win('rain', 'rain (held): dark cloud, rain on the glass, the room 22 % dimmer') + win('rain', 'rain, Reduce Motion: one static frame (drops still on the glass)', 1) +
+  `<figure><div class=tab style="padding-bottom:0">${['sun', 'overcast', 'rain'].map((l, i) => `<p class=grp><i class=dt></i><span class=gn>MACHINE</span><span class=lsm>${mini(l)}<span>${l} · ${['calm', 'busy', 'held'][i]}</span></span></p>`).join('')}</div>` +
+  '<figcaption>Host card header (#370 minis): the window at 72 × 24, 1 pixel = 1; rain loops two frames</figcaption></figure>';
+
+// Rows: the 28 px slot, the 24 × 24 art at 24 px. Queue rows by stage and species; Events rows by the role's tool.
+const rs = (id, st, word) => `<svg class="rsp" viewBox="0 0 24 24" style="${st}" role=img aria-label="${word}"><title>${word}</title><use href="#${id}"/></svg>`;
+const stg = (n, stage, word) => rs(`rs-${sp(n)}-${stage}`, sv(sp(n)), word);
+const qr = (n, spr, tone, w, plain, age, title, mo = '') => `<div class=qr${mo ? ` data-mo=${mo}` : ''}>${spr}<a href=#>#${n}</a><span class="st ${tone}"><b>${w}</b> <span class=pw>· ${plain}</span></span><span class=ag>${age}</span><span class=tl>${title}</span>${mo ? `<i class=mot>${{ merged: 'sold', fail: 'leaf drop', 'needs-you': 'thirsty' }[mo]}</i>` : ''}</div>`;
+const queue = () => '<p class=tsub2>the counter <span class=pw>· queue</span></p><div class=qcard><p><b class=g style="color:var(--fk-g)">acme-web</b> <span class="tag r">! 1 thirsty</span></p>' +
+  qr(46, stg(46, 'needs', 'needs-human'), 'r', 'thirsty', 'needs you', '59m', 'The settings split: how should it ship?') +
+  qr(48, stg(48, 'impl', 'impl'), 'a', 'water', 'impl', '70s', 'Settings: every pane passes a WCAG AA contrast audit') +
+  qr(41, stg(41, 'fix', 'fix'), 'a', 'prune', 'fix(2)', '12m', 'Saved filters survive a reload') +
+  qr(38, stg(38, 'review', 'review'), 'a', 'inspect', 'review(1)', '4m', 'Dark mode for the billing pages') +
+  qr(36, stg(36, 'fix', 'update'), 'a', 'repot', 'fix(1) · update', '2m', 'Bump the router to v7') +
+  qr(33, stg(33, 'ready', 'ready'), 'g', 'ready for sale', 'ready', '1m', 'CSV export of the orders list') +
+  qr(44, stg(44, 'blocked', 'blocked'), 'r', 'wilting', 'blocked', '33m', 'Mobile e2e suite on every PR') +
+  qr(52, stg(52, 'queued', 'queued'), 'm', 'cutting', 'queued', '', 'Invoice PDFs in the customer locale') +
+  qr(53, stg(53, 'queued', 'queued'), 'm', 'cutting', 'queued', '', 'Webhook retries with backoff') +
+  '<p class=m style="font-size:var(--fs-meta)">sold today · merged 3</p></div>';
+$('#tq').insertAdjacentHTML('beforeend', queue());
+$('#mrows').insertAdjacentHTML('beforeend', '<div class=qcard style="margin-top:var(--s2)">' +
+  qr(31, stg(31, 'merged', 'merged'), 'g', 'sold', 'merged', 'now', 'Order history paginates', 'merged') +
+  qr(38, stg(38, 'fail', 'review FAIL'), 'r', 'leaf drop', 'review FAIL', 'now', 'Dark mode for the billing pages', 'fail') +
+  qr(46, stg(46, 'needs', 'needs-human'), 'r', 'thirsty', 'needs you', 'now', 'The settings split: how should it ship?', 'needs-you') +
+  '</div><p class=cap2>Reduce Motion: no hop, shake or pulse; the sprite holds frame 1 and the tag shows for 2.4 s.</p>');
+$('#moms').innerHTML = [['sold', 'sold!', 'merged · hop', ''], ['leaf-drop', 'leaf drop', 'review FAIL · shake', ' r'], ['thirsty', 'thirsty', 'needs you · pulse', ' r']]
+  .map(([m, b, c, r]) => `<figure><span class="mo loop"><svg viewBox="0 0 132 100" class="mo-${{ sold: 'hop', 'leaf-drop': 'shake', thirsty: 'pulse' }[m]}" style="${style(0, 'g')};${sv('monstera')}"><use href="#m-${m}"/></svg><span class="bub${r}">${b}</span></span>${c}</figure>`).join('');
+
+// Lanes: .lr rows, the avatar is the keeper beside the plant (48 × 36).
+const lr = (n, act, stage, look, name, tone, st, now) => `<div class=lane><button type=button class=lr><span class=av><svg class=px viewBox="0 0 132 100"><use href="#p-${sp(n)}-${stage}" style="${sv(sp(n))}"/><use href="#g-${act}" style="${style(look, 'g')}"/></svg></span><span class="nw el">${name}</span><span class="nw ${tone}">${st}</span><p class=now>${now}</p></button></div>`;
+$('#tl').insertAdjacentHTML('beforeend', '<p class=tsub2>being tended <span class=pw>· working (4)</span></p><p class=ch>ACME-WEB (4)</p>' +
+  lr(48, 'water', 'impl', 0, 'acme-web-impl-48-contrast', 'g', 'water · 70s', 'now: running pnpm test settings') +
+  lr(41, 'prune', 'fix', 1, 'acme-web-impl-41', 'g', 'prune · 12m', 'now: editing src/filters.ts') +
+  lr(38, 'inspect', 'review', 2, 'acme-web-rev-38', 'g', 'inspect · 4m', 'now: running pnpm test billing') +
+  lr(36, 'repot', 'fix', 4, 'acme-web-impl-36', 'g', 'repot · 2m', 'now: merging origin/staging') +
+  '<p class=tsub2>resting <span class=pw>· idle (1)</span></p>' + lr(50, 'idle', 'review', 5, 'acme-web-impl-50', 'a', 'resting · 9m', 'pushed 0808080, waiting for drive to spawn review') +
+  '<p class=tsub2>ready for sale <span class=pw>· done (1)</span></p>' + lr(33, 'done', 'ready', 3, 'acme-web-impl-33', 'g', 'ready · 1m', 'PR #61 · CI ✓ · PASS') +
+  '<p class=tsub2>wilting <span class=pw>· blocked (1)</span></p>' + lr(44, 'wilted', 'blocked', 7, 'acme-web-impl-44', 'r', 'thirsty · 33m', 'review rounds ran out (4/3)'));
+
+// Events: the role's tool beside a small plant; merged the wrapped plant, FAIL the falling leaf, asks the thirsty drop.
+const er = (spr, n, sm, ag) => `<div class=qr style="grid-template-columns:28px 5ch minmax(0,1fr) auto">${spr}<a href=#>#${n}</a><span style="font-size:var(--fs-meta)">${sm}</span><span class=ag>${ag}</span></div>`;
+$('#te').insertAdjacentHTML('beforeend', '<p class=tsub2>the ledger <span class=pw>· events</span></p>' +
+  er(rs('r-sold', sv('monstera'), 'merged'), 33, '<b class=g>sold</b> <span class=pw>· merged</span> PR #61 into staging', '1m') +
+  er(rs('r-fall', sv('monstera'), 'review FAIL'), 38, '<b class=r>leaf drop</b> <span class=pw>· FAIL</span> r1 · 2 findings', '4m') +
+  er(rs('r-water', sv('monstera'), 'spawn impl'), 48, '<b>water</b> <span class=pw>· spawn impl</span> claude opus xhigh', '70s') +
+  er(rs('r-inspect', sv('peperomia'), 'spawn rev'), 15, '<b>inspect</b> <span class=pw>· spawn rev</span> claude opus', '9m') +
+  er(rs('r-prune', sv('philodendron'), 'spawn fix'), 41, '<b>prune</b> <span class=pw>· spawn fix</span> round 2', '12m') +
+  er(rs('r-repot', sv('alocasia'), 'update'), 36, '<b>repot</b> <span class=pw>· update</span> merges staging', '2m') +
+  er(rs('r-thirsty', sv('calathea'), 'asks you'), 46, '<b class=r>thirsty</b> <span class=pw>· asks you</span> (q4) How should it ship?', '12m') +
+  '<p class=tsub2>the shop <span class=pw>· host</span></p>' +
+  `<p class=grp><i class=dt></i><span class=gn>MACHINE</span><span class=lsm>${mini('overcast')}<span>overcast · busy</span></span></p>`);
+
+// ASCII: Lanes cells (≤ 3 lines of 8, the farm's 48 × 40 box) and the row figures (3 characters).
+const cell = t => `<span class=av><i class=asc><b>${t.replace(/</g, '&lt;')}</b></i></span>`;
+$('#ta').insertAdjacentHTML('beforeend', '<div class=cmp>' + Object.entries(ASCII).map(([k, t]) => `<figure>${cell(t)}${k}</figure>`).join('') + '</div>' +
+  '<p class=tsub2>row figures <span class=pw>· by stage (Queue) and action (Events)</span></p><div class=cmp>' +
+  Object.entries(ASCII_STAGES).map(([k, t]) => `<figure><span class=ar>${t}</span>${k}</figure>`).join('') +
+  Object.entries(ASCII_ROWS).map(([k, t]) => `<figure><span class=ar>${t.replace(/</g, '&lt;')}</span>${k}</figure>`).join('') + '</div>' +
+  `<p class=tsub2>Host load <span class=pw>· sun, overcast, rain</span></p><div class=cmp>${Object.entries(ASCII_LOAD).map(([k, t]) => `<figure><span class=ar>${t}</span>${k}</figure>`).join('')}<figure><span class=ar>~.Y</span>loading 1</figure><figure><span class=ar>~:Y</span>loading 2</figure></div>` +
+  '<p class=cap2>Farm\'s widths: cells ≤ 8 narrow characters × 3 lines, rows 3 characters, the load ≤ 5. ASCII only, no emoji.</p>');
+
+$('#icons').innerHTML = `<figure><img class=i512 src=icon/icon-512.png alt="">512 (shown at 256)</figure><figure><img class=i192 src=icon/icon-192.png alt="">192</figure>` +
+  `<figure><img class=i180 src=icon/icon-180.png alt="">180 · apple-touch</figure><figure><img class=px32 src=icon/favicon-32.png alt="">favicon 32 (×2)</figure><figure><img class=px16 src=icon/favicon-16.png alt="">16</figure>` +
+  `<figure><span class=home><figure><img src=../../../assets/icon-180.png alt="">farm</figure><figure><img src=../../../assets/themes/kitchen/icon-180.png alt="">kitchen</figure><figure><img src=icon/icon-180.png alt="">garden</figure><figure><img src=../../../assets/themes/terminal/icon-180.png alt="">terminal</figure></span>home screen, beside the others</figure>`;
+const L = scheme('light').tokens, D = scheme('dark').tokens;
+const chips = t => ['--g', '--a', '--r'].map(k => `<span class=chip style="background:${t[k]}"></span>`).join('');
+$('#look').innerHTML = '<h4>THEME</h4>' +
+  `<p><img src=../../../assets/icon-180.png alt="" width=24 height=24 style="border-radius:4px">farm</p><p><svg class=px24 viewBox="0 0 24 24" style="${sv('monstera')}"><use href="#rs-monstera-ready"/></svg>garden<span class=ck>✓</span></p>` +
+  '<h4>COLOURS</h4>' +
+  `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(mode() === 'dark' ? D : L)} <span><span class=nm>garden</span> <span class=pw>theme default · follows the phone</span></span><span class=ck>✓</span></p>` +
+  `<p><span class=aa style="background:${L['--bg']};color:${L['--fg']}">Aa</span>${chips(L)} <span class=nm>garden-light</span></p><p><span class=aa style="background:${D['--bg']};color:${D['--fg']}">Aa</span>${chips(D)} <span class=nm>garden-dark</span></p>`;
+
+$('#duos').innerHTML = ['light', 'dark'].map(k => {
+  const s = scheme(k), rows = gate(s).sort((a, b) => a[1] / a[2] - b[1] / b[2]).slice(0, 12);
+  return `<div class=duo2 style="background:${s.tokens['--bg']};color:${s.tokens['--fg']}"><h3>garden-${k} <span style="color:${s.tokens['--g']}">PASS</span></h3>` +
+    `<p>${Object.entries(s.tokens).filter(([t]) => !t.startsWith('--fk') && t !== '--scrim').map(([t, v]) => `<span style="white-space:nowrap;margin-right:var(--s2);font-size:var(--fs-meta)"><span class=sw style="background:${v}"></span>${t} ${v}</span>`).join(' ')}</p>` +
+    `<table class=ctab>${rows.map(([w, v, m]) => `<tr><td>${w}</td><td>${v.toFixed(2)}</td><td style="color:${s.tokens['--mute']}">min ${m}</td></tr>`).join('')}</table></div>`;
+}).join('');
+document.body.dataset.ready = 1;
+</script>
+</body></html>

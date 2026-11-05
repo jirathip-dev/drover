@@ -559,7 +559,7 @@ fn page_has_no_dash_placeholders() {
     );
     // #115: the card no longer repeats `#n state`; the row is the summary.
     assert!(
-        html.contains("<details class=\"q\" data-q data-act=idle><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/18\">#18</a></span><span class=a>queued</span>"),
+        html.contains("<details class=\"q\" data-q data-act=idle data-grow=queued data-i=18><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/18\">#18</a></span><span class=a>queued</span>"),
         "{html}"
     );
     assert!(

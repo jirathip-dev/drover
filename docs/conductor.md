@@ -21,6 +21,22 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   models the fleet's roles use) and effort choices. A tap from a paired device writes `[fleet.<n>.role.conductor]` in
   place (the first one copies the impl role's keys), after saving the old file as `fleet.toml.bak`; it is refused
   `DOCTOR` when `herdsman doctor` with the new file shows a ✗ it did not show before. The next conductor start uses it.
+- **Harness, model and effort (#404):** the conductor role keeps its powers; the owner picks only these. `[chat]`
+  sets new threads' defaults over the role (each key unset: the role's):
+
+  ```toml
+  [chat]
+  harness = "claude"   # claude | hermes | dsh; another harness than the role's drops its model and accounts
+  model = "opus"
+  effort = "high"
+  account = "A"        # or accounts = ["A", "B"]
+  ```
+
+  A thread keeps the harness it starts on for good (`herdsman thread new … --harness <h>`, or the empty thread's
+  harness chip; a thread from before #404 has the default). Its composer's model and effort chips offer the models
+  that roles (or `[chat]`) on its harness use and the harness's efforts (no model chip where a profile owns the
+  model: Hermes, dsh). A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
+  next message resumes the conductor's session on it. The header reads `repo · harness · model`.
 - **No worktree:** it runs in `<state dir>/conductor/<thread>/` (or `<[conductor] dir>/<thread>/`) in its own herdr workspace, as agent
   `conductor-<thread>`, with `HERDSMAN_LANE=<fleet>:-:conductor` (so the lane hook guards it) and
   `HERDSMAN_THREAD=<thread>`.

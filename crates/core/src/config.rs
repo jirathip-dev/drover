@@ -31,6 +31,19 @@ pub struct Config {
     pub conductor: ConductorCfg,
     /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
     pub telegram: Telegram,
+    /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
+    pub chat: Chat,
+}
+
+/// #404: the harness, model, effort and account(s) a new thread's conductor starts on; each unset one is the role's.
+#[derive(Debug, Default, Deserialize)]
+pub struct Chat {
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub account: Option<String>,
+    #[serde(default)]
+    pub accounts: Vec<String>,
 }
 
 /// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
@@ -543,6 +556,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "wip-blocked",
     "spawn-held",
     "cap-near",
+    "orphan-issue",
 ];
 
 impl Notify {
@@ -605,6 +619,23 @@ impl Config {
             .any(|n| n.webpush() && n.sub.as_deref().is_none_or(str::is_empty))
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
+        }
+        let ch = &c.chat;
+        if let Some(h) = ch.harness.as_deref().filter(|h| !crate::harness::NAMES.contains(h)) {
+            bail!("chat.harness: \"{h}\" must be one of {:?}", crate::harness::NAMES);
+        }
+        if let (Some(h), Some(e)) = (&ch.harness, &ch.effort) {
+            if !crate::harness::efforts(h).contains(&e.as_str()) {
+                bail!("chat.effort: harness {h} does not support effort \"{e}\"");
+            }
+        }
+        if let Some(a) = ch
+            .account
+            .iter()
+            .chain(&ch.accounts)
+            .find(|a| !c.accounts.names.contains_key(*a))
+        {
+            bail!("chat: account '{a}' is not in [accounts]");
         }
         let mut c = c;
         for (name, f) in &mut c.fleet {
