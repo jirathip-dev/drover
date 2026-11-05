@@ -463,7 +463,7 @@ fn per_role_action_resolution() {
     ] {
         assert_eq!(act(role, state), want, "{role} {state}");
     }
-    let a = herdsman::serve::avatar("x-rev-1", "rev", "working");
+    let a = &avatars(&[("x-rev-1", "rev", "working")])[0];
     assert!(a.contains("data-act=rev") && a.contains("<use href=#ha-rev />"), "{a}");
 }
 

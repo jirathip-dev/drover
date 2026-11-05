@@ -317,6 +317,7 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "", NOW);
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
+    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #269: the needs cards as the board draws them
     let i = page.find("name=mtime value=").unwrap() + 17;
     let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let long = "x".repeat(2001);
@@ -579,4 +580,63 @@ fn ask_waiting_pushes_are_capped_per_pass() {
         4,
         "nothing again"
     );
+}
+
+/// #446 (synergy #2358): the lane asks during its startup, after `spawn-started` and before its `spawn` is logged.
+#[test]
+fn an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once() {
+    let d = tmpdir("ask-startup");
+    let mut c = ctx(&d, CONFIG);
+    c.now = NOW - 40 * 60;
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
+    let ev = |kind: &str, ts, d| Event::new(ts, "sendmeter", Some(36), kind, d);
+    let lane = |pane: &str| json!({"role": "impl", "agent": LANE, "pane": pane});
+    let start = c.now - 75;
+    for e in [
+        ev("spawn", start - 3600, lane("w1:p1")),
+        ev(
+            "supersede",
+            start,
+            json!({"agent": LANE, "killed": [LANE], "role": "impl"}),
+        ),
+        ev("spawn-started", start, lane("w1:p2")),
+    ] {
+        append(&c.state, &e).unwrap();
+    }
+    ask(&c);
+    append(&c.state, &ev("spawn", start, lane("w1:p2"))).unwrap(); // logged after the ask, as in #2358
+    c.now = NOW;
+    let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
+    assert!(open.contains("q1 #36"), "{open}");
+
+    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p2")]));
+    let out = check(&c, &r);
+    assert!(out.contains("ask-waiting: q1 unanswered for 40m"), "{out}");
+    assert_eq!(check(&c, &r), "");
+    assert_eq!(kinds(&c, "ask-waiting").len(), 1);
+
+    let r = Fake::default()
+        .reply("herdr agent prompt", "")
+        .reply("herdr pane send-keys", "")
+        .reply("herdr agent wait", "");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("-> {LANE}")), "{out}");
+    assert!(r.called("herdr pane send-keys w1:p2 Enter"), "{:?}", r.calls.borrow());
+}
+
+#[test]
+fn asks_json_says_why_an_ask_closed() {
+    let killed = Event::new(NOW, "sendmeter", Some(36), "lane-killed", json!({"agent": LANE}));
+    let d = tmpdir("ask-closed-json");
+    let c = ctx(&d, CONFIG);
+    lane_spawn(&c, NOW - 90);
+    ask(&c);
+    let (_, open) = run(&c, &Fake::default(), &["asks", "--json"]);
+    let open: serde_json::Value = serde_json::from_str(&open).unwrap();
+    assert_eq!((&open[0]["id"], &open[0]["closed"]), (&json!("q1"), &json!(null)));
+    append(&c.state, &killed).unwrap();
+    let (_, all) = run(&c, &Fake::default(), &["asks", "--all", "--json"]);
+    let all: serde_json::Value = serde_json::from_str(&all).unwrap();
+    assert_eq!(all[0]["closed"], "closed: lane gone", "{all}");
 }

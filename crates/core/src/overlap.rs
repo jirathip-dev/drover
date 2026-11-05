@@ -149,13 +149,18 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 }
 
 /// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
-/// #429: under `warn_within` lines of headroom it warns and still passes.
+/// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let (cap, warn) = limits(&std::fs::read_to_string(config)?)
         .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
     let crates = std::fs::read_dir("crates").into_iter().flatten().flatten();
-    let n = lines(Path::new("src")) + crates.map(|c| lines(&c.path().join("src"))).sum::<usize>();
+    let n = lines(Path::new("src"), "rs") + crates.map(|c| lines(&c.path().join("src"), "rs")).sum::<usize>();
     writeln!(out, "src lines (formatted): {n} / cap {cap}")?;
+    writeln!(
+        out,
+        "web lines (TypeScript, soft budget, not capped): {}",
+        lines(Path::new("web/src"), "ts")
+    )?;
     let left = cap - i64::try_from(n)?;
     if (0..warn).contains(&left) {
         writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
@@ -206,11 +211,11 @@ pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(S
     Some((sha, lines, cap, warn))
 }
 
-fn lines(p: &Path) -> usize {
+fn lines(p: &Path, ext: &str) -> usize {
     let each = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
     let n = |p: PathBuf| match p.extension() {
-        _ if p.is_dir() => lines(&p),
-        Some(x) if x == "rs" => std::fs::read_to_string(&p).map_or(0, |t| t.lines().count()),
+        _ if p.is_dir() => lines(&p, ext),
+        Some(x) if x == ext => std::fs::read_to_string(&p).map_or(0, |t| t.lines().count()),
         _ => 0,
     };
     each.map(n).sum()

@@ -48,6 +48,10 @@ fn brief(name: &str, issue: &str, role: &str, fail: bool, update: bool) -> Strin
         let data = json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": body});
         append(&c.state, &Event::new(10, "api", Some(12), "verdict", data)).unwrap();
     }
+    // #420: a `-repro` case's issue is queued `--repro`.
+    if name.ends_with("repro") {
+        assert_eq!(run(&c, &fake(), &["queue", "api", "add", issue, "--repro"]).0, 0);
+    }
     let args = ["spawn", "api", issue, role, "--update"];
     let (code, out) = run(&c, &fake(), &args[..4 + usize::from(update)]);
     assert!(code == 0 || code == 4, "{name}: {code} {out}");
@@ -69,6 +73,8 @@ fn lane_briefs_match_staging() {
         ("impl-update", "12", "impl", false, true),
         ("rev", "12", "rev", false, false),
         ("design", "12", "design", false, false),
+        ("impl-repro", "12", "impl", false, false),
+        ("rev-repro", "12", "rev", false, false),
     ];
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/briefs");
     for (name, issue, role, fail, update) in cases {
@@ -112,4 +118,21 @@ fn briefs_carry_the_test_antipatterns() {
         "{imp}"
     );
     assert!(rev.contains("`Tests checked against anti-patterns: yes`"), "{rev}");
+}
+
+/// #420: a `--repro` issue's impl and rev briefs carry the repro steps; an unmarked issue's don't.
+#[test]
+fn only_a_repro_issues_briefs_carry_the_repro_steps() {
+    let (imp, rev) = (
+        brief("r-impl-repro", "12", "impl", false, false),
+        brief("r-rev-repro", "12", "rev", false, false),
+    );
+    assert!(imp.contains("commit 1 holds only the regression test"), "{imp}");
+    assert!(rev.contains("`Repro: run`") && rev.contains("`NO_REPRO`"), "{rev}");
+    for b in [
+        brief("r-impl", "12", "impl", false, false),
+        brief("r-rev", "12", "rev", false, false),
+    ] {
+        assert!(!b.contains("--repro") && !b.contains("Repro:"), "{b}");
+    }
 }

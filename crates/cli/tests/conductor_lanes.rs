@@ -140,8 +140,13 @@ fn the_lanes_tab_renders_conductor_rows_with_their_thread() {
     let (c, agents) = setup("conductor-lanes-page");
     let list = json!({"result": {"agents": agents}}).to_string();
     let r = Fake::default().reply("herdr agent list", &list);
-    let page =
-        String::from_utf8_lossy(&Server::new(&c, &r, None).respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)).into_owned();
+    let s = Server::new(&c, &r, None);
+    let page = with_queue(
+        &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
+        &s,
+        "",
+        T,
+    );
     let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
     let idle = &page[at("<h2><span class=a>idle (")..];
     let herd = &idle[idle.find("<h3>herdsman (3)</h3>").unwrap()..];

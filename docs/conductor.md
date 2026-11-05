@@ -92,7 +92,7 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
 - **At 1000 px and up** the list is a 400 px column with the open thread beside it.
 - **Not a paired owner device:** the thread reads the same; the choice rows, `[+ thread]` and the composer are off.
 - **Writes** are `POST /thread` (`op` = `new`, `say` with an optional base64 file of at most 10 MB, `answer`,
-  `read`, `retry`) from a paired device, 10 a minute. #403: `new` and `say` answer once the thread or message is
+  `read`, `retry`; #407 `queue`, `unqueue`, `steer`, `stop`) from a paired device, 10 a minute. #403: `new` and `say` answer once the thread or message is
   logged; starting or resuming the conductor and typing the line run after the reply. A failed delivery is a red
   system line with `[retry]` (`retry` types the same line again, logging no copy). No chat post shows the loading
   overlay.
@@ -101,12 +101,37 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
   up the tab bar hides. Opening a thread pushes a history entry: back, `[‹]` or a swipe right from the left edge
   returns to the list. A working thread shows the theme's loading art (sprite, ascii frames or the glyph) inline
   above the box.
+- **Comfort (#407, from t3code's mobile app):**
+  - *Scrolling:* the thread follows its end on a live update until your own drag (or wheel) leaves the end; back at
+    the very end, or on any send, it follows again. A reply streaming in never pulls you down while you read.
+  - *Pinned send:* after a send your message sits ~16 px under the top (under a bar that sticks there, else the
+    screen's top) and the reply grows below it; the room under it stays empty until the reply fills it.
+  - *Folded turns:* in a finished turn each run of commands is one tappable `▸ N commands` row (open, its rows);
+    replies stay shown. The live turn's commands stay rows. Each fold keeps its open state across live updates.
+  - *The pill:* one floating pill above the box: `working 1m 23s` with the theme's loading art and `[stop]` (Esc to
+    the conductor, `op=stop`), then `stopping…` until the turn ends; `reconnecting…` while the live stream is down,
+    `offline · tap to retry` after 30 s or offline. Idle and connected, none (it replaces the working line).
+  - *Queue or steer:* while a turn runs `[send]` is `[queue]` ("delivered when this turn ends · hold [queue] to
+    steer"): `op=queue` logs `thread-queue` and the server keeps it; when the conductor is no longer working the
+    board's watcher types the queued ones in, oldest first, each logged as your message (`thread-unqueue`, why
+    `sent`). A long press offers `[queue]` and `[steer]` (`op=steer`: Esc, then the message now), each with its
+    line. Queued messages sit above the box with `[send now]` (steered in), `[edit]` (the box shows `editing queued
+    message · [cancel]`; its send replaces it, `op=queue&q=`, and your draft comes back) and `[remove]`
+    (`op=unqueue`, why `removed`).
+  - *Undo:* `[archive]` after a swipe shows `archived · [undo]` for 5 s; `[undo]` restores it. One row is open at a time.
+  - *Drafts:* each thread keeps its draft text (localStorage) and picked files (IndexedDB) on the device, across tab
+    switches, closing the app and lost signal; a failed send keeps them.
+  - *Message menu:* a long press (or right click) on a message: `[copy]` (its text), `[copy as markdown]` (its
+    source), `[quote]` (`> ` lines into the box), then `copied`.
+  - *No push while you look:* the page's live stream names the thread open on a shown page (`/live?thread=`); while
+    it is connected the server stamps `<state dir>/watch-<thread>.at` each second, and a reply or ask in that thread
+    pushes nothing (within 5 s of the stamp). A hidden page's stream drops it.
 
 **Push** (a `webpush` notifier, default `on`): a conductor's reply is `<repo> · <thread title>: <its first line>`, a
 choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The owner's messages, commands and system
-lines never push.
+lines never push, nor (#407) anything in a thread a board has open.
 
-Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, `conductor-start` (session, resumed,
+Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `conductor-start` (session, resumed,
 account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
 `secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only), `telegram-topic`.
 

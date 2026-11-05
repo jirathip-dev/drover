@@ -656,6 +656,10 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
+            // #417: a verify stage the issue doesn't need (or has no recipe for) is logged passed instead.
+            if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
+                continue;
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
@@ -879,8 +883,11 @@ fn handoff(
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
-        let idle = (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
-        if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
+        // #445: a recorded `done --no-change` is due at once; a check that runs only once labelled never blocks it.
+        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some();
+        let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
+        let idle = done || (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
+        if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
         if s.reviewed(head) {

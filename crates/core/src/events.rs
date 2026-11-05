@@ -269,7 +269,15 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
+    // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
+    let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
+    let watched = ev
+        .str("thread")
+        .and_then(at)
+        .and_then(|a| a.trim().parse::<u64>().ok())
+        .is_some_and(|a| a + 5 >= ev.ts);
     let push = match ev.kind.as_str() {
+        _ if watched => "",
         "needs-decision" if ev.str("kind") == Some("routine") => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.
@@ -491,25 +499,33 @@ pub const PASSIVE: &[&str] = &[
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
+    let before = || events.iter().take_while(|e| !std::ptr::eq(*e, a));
     let why: Vec<_> = (events.iter())
         .skip_while(|e| !std::ptr::eq(*e, a))
-        .filter_map(|e| closes(a, e))
+        .filter_map(|e| closes(a, e, || before().any(|x| started(x, e))))
         .collect();
     ["answered", "closed: merged", "closed: lane gone"]
         .into_iter()
         .find(|w| why.contains(w))
 }
 
-/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time).
-fn closes(a: &Event, e: &Event) -> Option<&'static str> {
+/// #446: `e` is the `spawn-started` of spawn `sp` (same agent and pane).
+fn started(e: &Event, sp: &Event) -> bool {
+    e.kind == "spawn-started" && e.str("agent") == sp.str("agent") && e.str("pane") == sp.str("pane")
+}
+
+/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
+/// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
+fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
+    let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && e.str("id") == a.str("id") {
         Some("answered")
     } else if on("merged") {
         Some("closed: merged")
-    } else if matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent") || on("clean") {
+    } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
         Some("closed: lane gone")
     } else {
         None
@@ -525,15 +541,22 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 /// `needs-decision` events not yet closed, oldest first.
 /// #447: one pass, each closing event checked against the asks still open.
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
-    let mut open: Vec<&Event> = vec![];
-    for e in events {
+    let (mut open, mut first): (Vec<(usize, &Event)>, std::collections::HashMap<_, usize>) =
+        (vec![], Default::default());
+    for (i, e) in events.iter().enumerate() {
+        let at = (e.str("agent"), e.str("pane"));
         match e.kind.as_str() {
-            "needs-decision" => open.push(e),
-            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => open.retain(|a| closes(a, e).is_none()),
+            "spawn-started" => {
+                first.entry(at).or_insert(i);
+            }
+            "needs-decision" => open.push((i, e)),
+            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => {
+                open.retain(|(n, a)| closes(a, e, || first.get(&at).is_some_and(|f| f < n)).is_none());
+            }
             _ => {}
         }
     }
-    open
+    open.into_iter().map(|x| x.1).collect()
 }
 
 /// Current per-issue state (the states in `roles/usage-tail.md`).
@@ -631,6 +654,11 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                 } else {
                     format!("fix({}{})", s.rounds, s.form_mark())
                 };
+            }
+            // #417: a verify stage that doesn't run at a head passes it there, in no round.
+            "verify-skipped" | "verify-no-recipe" => {
+                let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
+                s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
             // #412: the owner's decision on the design: impl (or the design again) starts from the queue.

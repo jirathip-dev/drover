@@ -15,18 +15,17 @@ function tab(t) {
   $$('main>section').forEach(s => s.hidden = s.id !== t);
   $$('nav a').forEach(a => a.classList.toggle('on', a.hash === '#' + t));
   put('tab', t);
-  document.cookie = `tab=${t};path=${R || '/'};max-age=31536000;samesite=strict`; // #337: the page carries this tab only
   $('.qhelp').hidden = t !== 'queue';
-  // #337: a tab the page left out (or a refresh made stale) loads when it opens, its last copy painted first.
+  // #337: a tab not read yet (or a refresh made stale) loads when it opens, its last copy painted first.
   if (have.has(t) || DEMO || B.dataset.root === '') return;
   have.add(t);
   // #391: after this script has run (the page's first tab() is before the parts frag() draws with are defined); #268:
-  // after the first frame, so the page paints first (the Queue tab, the TypeScript board's, is never in the page).
+  // after the first frame, so the page paints first (#269: no tab is in the page, the TypeScript board draws each).
   if (!$('#' + t).childElementCount && sget('c:' + t)) requestAnimationFrame(() => setTimeout(() => $('#' + t).childElementCount || frag(t, sget('c:' + t))));
-  wait(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()).then(j => { for (const id in j) frag(id, j[id]); }).catch(() => have.delete(t)));
+  // #269: the board reads the needs cards and the tab's part (on the page's first tab(), not loaded yet: its own first read).
+  if (window.boardTab) wait(window.boardTab(t).catch(() => have.delete(t)));
 }
-// #337: the sections the page came with (the open tab, the needs cards); the rest load on open.
-const have = new Set([...$$('main>section')].filter(s => s.childElementCount).map(s => s.id));
+const have = new Set();
 // #337: a load, refresh or action over 300 ms shows the theme's loading animation, large, over a light scrim near the
 // top of the content (the page stays tappable; [↻] spins as well); it goes as soon as the data paints.
 let waits = 0, ovt = 0;
@@ -466,7 +465,7 @@ async function pushwords() {
 }
 // Sync dot: g = live and up to date (pulses on an update), a = reconnecting (↻ spins), r = offline.
 const dot = $('#dot'), rf = $('#rf');
-let last = Number(B.dataset.ts) * 1000, seq = 0, P = {}, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
+let last = Number(B.dataset.ts) * 1000, seq = 0, es = null, down = Date.now(), tries = 0, poller = 0, busy = false;
 function sync(s) {
   if (DEMO) s = 'demo';
   dot.className = s;
@@ -516,18 +515,20 @@ function frag(id, html) {
   if (id === 'chat') chatPaint(nu);
   tidy(nu);
   morph(el, nu);
+  if (id === 'chat') chatPin(); // #407: before the scroll is put back (the room under a pinned message)
   again();
   bshow(el);
   nows();
   if (id === 'host') groups();
   if (scrollY !== y) scrollTo(0, y);
+  if (id === 'chat') chatFollow();
   if (old.size) rows(el).forEach((r, k) => { if (old.get(k) !== sig(r)) r.classList.add('fl'); }); // #267: a first draw (the TS board's) never flashes
   last = Date.now();
   sput('c:' + id, html);
   alerts();
   badge();
   if (id === 'needs') fold();
-  if (id === 'queue') sync(dot.classList[0]); // #268: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
+  if (id !== 'host' && id !== 'events') sync(dot.classList[0]); // #268, #269: the TypeScript board's draw takes the dot's state (offline, demo: disabled)
   if (id === 'queue' && want) wanted();
 }
 // #234: a Host row's history: its 24 h sparkline (`data-s`, 120 buckets, the worst row of each) and, on tap, its chart
@@ -698,7 +699,7 @@ document.addEventListener('click', async e => {
     if (r.ok) refresh();
   } catch (err) { note(b, 'alerts failed: ' + err.message, false); }
 });
-// Network only (the SW passes `frags` through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
+// Network only (the SW passes the API through); spins ↻ until done; `quiet` (#403: after a chat post): no overlay.
 async function refresh(quiet) {
   dbg('refresh');
   if (DEMO) return herdPull();
@@ -706,10 +707,10 @@ async function refresh(quiet) {
   busy = true;
   sync('a');
   try {
-    const t = document.documentElement.dataset.tab, j = await (quiet ? x => x : wait)(fetch(R + 'frags?tab=' + t, { cache: 'no-store' }).then(r => r.json()));
+    const t = document.documentElement.dataset.tab;
+    await (quiet ? x => x : wait)(window.boardTab ? window.boardTab(t) : Promise.resolve()); // #269: the needs cards and the tab's part
     have.clear();
     have.add(t);
-    for (const id in j) frag(id, j[id]);
     dispatchEvent(new Event('herd-refresh')); // #266: the TypeScript board's tabs read the API again
     herdPull();
     busy = false;
@@ -717,27 +718,19 @@ async function refresh(quiet) {
     pulse();
   } catch (e) { busy = false; sync('r'); }
 }
-// Backoff 1, 2, 5, 10 s; after 30 s down, poll `frags` every 10 s until SSE is back.
+// Backoff 1, 2, 5, 10 s; after 30 s down, refresh every 10 s until SSE is back.
 function connect() {
   if (DEMO) return;
   if (es) es.close();
-  P = {};
-  try { es = new EventSource('live?tab=' + document.documentElement.dataset.tab + (seq ? '&since=' + seq : '')); } catch (e) { es = null; return sync('r'); }
+  const t = watching(); // #407: the open thread: no push for it while this stream lives
+  try { es = new EventSource('live?tab=' + document.documentElement.dataset.tab + (t ? '&thread=' + t : '') + (seq ? '&since=' + seq : '')); es.t = t; } catch (e) { es = null; return sync('r'); }
   // #259: every message carries the log's seq: a reconnect replays what this tab missed (`?since`), each seq once;
   // a moment plays only within 2 min of its event; past the 500-event bound the server says `refresh`.
   const at = e => (seq = Math.max(seq, +e.lastEventId || 0));
-  // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until `frags` lands.
+  // After a gap (the first open included: a cached page may have painted) the dot is refresh()'s: amber until the data lands.
   es.onopen = () => { if (down) refresh(); else sync('g'); down = 0; tries = 0; clearInterval(poller); poller = 0; };
-  // #351: after a part's first copy on this stream, only its changed pieces (`patch`, cut before each `<d` as serve.rs
-  // cuts them): the pieces at or past `p` not in `set` are the old ones, shifted by the length change.
-  const got = (id, ps) => { P[id] = ps; frag(id, ps.join('')); sync('g'); pulse(); claim(); };
-  es.addEventListener('frag', e => { at(e); const j = JSON.parse(e.data); got(j.id, j.html.split(/(?=<d)/)); });
-  es.addEventListener('patch', e => {
-    at(e);
-    const j = JSON.parse(e.data), o = P[j.id];
-    if (!o) return refresh();
-    got(j.id, Array.from({ length: j.n }, (_, i) => j.set[i] ?? (i < j.p ? o[i] : o[i + o.length - j.n])));
-  });
+  // #269: a changed part's data (the needs cards, Lanes, [chat]) as this device sees it; the TypeScript board draws it.
+  for (const id of ['needs', 'lanes', 'chat']) es.addEventListener(id, e => { at(e); dispatchEvent(new CustomEvent('herd-' + id, { detail: JSON.parse(e.data) })); sync('g'); pulse(); claim(); });
   // #391: a page of another build (the service worker's copy) cannot draw this server's parts: it loads again, once a build.
   es.addEventListener('build', e => { if (!$(`script[src*="/${e.data}/"]`) && sget('build') !== e.data) { sput('build', e.data); location.reload(); } });
   es.addEventListener('herd', e => (at(e), herdData(JSON.parse(e.data))));
@@ -758,11 +751,12 @@ function connect() {
 connect();
 sync('a');
 rf.onclick = () => { refresh(); if (!live()) { tries = 0; connect(); } };
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { down = down || Date.now(); tries = 0; connect(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { down = down || Date.now(); tries = 0; connect(); } else if (es && es.t) connect(); });
 addEventListener('online', () => { tries = 0; connect(); });
 addEventListener('offline', () => sync('r'));
 if (location.search) history.replaceState(null, '', location.pathname + (location.search.includes('all=1') ? '?all=1' : '') + location.hash);
-// #66: an action's result is a one-line toast under the header: ok fades after 4 s (report mode's stays), an error stays; a tap dismisses it.
+// #66: an action's result is a one-line toast under the header: ok fades after 4 s (report mode's stays; #407: or
+// after `stay` ms), an error stays; a tap dismisses it.
 function toast(text, stay) {
   $$('.msg.g, .msg.r').forEach(m => m.remove());
   const m = document.createElement('p'), ok = !/^(REFUSED|error)/.test(text);
@@ -770,7 +764,8 @@ function toast(text, stay) {
   m.textContent = text;
   m.onclick = () => m.remove();
   $('header').after(m);
-  if (ok && !stay) setTimeout(() => { m.classList.add('out'); setTimeout(() => m.remove(), 400); }, 4000);
+  if (ok && stay !== true) setTimeout(() => { m.classList.add('out'); setTimeout(() => m.remove(), 400); }, stay || 4000);
+  return m;
 }
 if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
@@ -1912,8 +1907,9 @@ function pgraph(d) {
 // #386: the [chat] tab. The page carries every thread's view; one is open (sessionStorage, or a push's `?thread=`):
 // on a phone the list or that thread, from 1000 px both. #cht is the style that picks it, so a live swap keeps it.
 // `var`: tab() may paint a stored copy of the tab (frag → chatPaint) before this line runs.
-// #405: ATT, the files picked for one thread's next message: { t, l: [{ name, file, src }] } (src: an image's object URL).
-var THR = DBG.get('thread') || sget('thread') || '', ATT = null;
+// #405: ATS, the files picked for each thread's next message: { <t>: [{ name, file, src }] } (src: an image's object URL);
+// #407: kept on the device (IndexedDB), as each thread's draft text is (localStorage `draft:<t>`).
+var THR = DBG.get('thread') || sget('thread') || '', ATS = {};
 B.appendChild(Object.assign(document.createElement('style'), { id: 'cht' }));
 function chatOpen(t) {
   THR = t;
@@ -1922,30 +1918,82 @@ function chatOpen(t) {
   $('#cht').textContent = t ? `#chat .cvp:not([data-t="${q}"]){display:none}@media (max-width:999px){#chat .clp,html[data-tab=chat] :is(#needs,.later){display:none}}
 @media (min-width:1000px){#chat .tr[data-t="${q}"]{background:color-mix(in srgb,var(--fk) 10%,transparent);box-shadow:inset 2px 0 var(--fk)}}` : '#chat .cvp{display:none}';
   if (t && !t.startsWith('new-') && !B.dataset.ro && document.documentElement.dataset.tab === 'chat') send('thread', { op: 'read', t }).catch(() => {});
-  if (t) scrollTo(0, document.body.scrollHeight);
+  if (es && (es.t || '') !== watching()) connect(); // #407: the stream names the open thread (no push for it)
+  FOL = true;
+  if (PIN && PIN.t !== t) PIN = null;
+  if (t) chatFollow();
 }
 // #403: back to the list: the history entry a thread's open pushed, else straight there.
 const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
 addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
+// #407: the thread a board is looking at (the chat tab open on it, the page shown): its stream names it, so the
+// server pushes nothing for it.
+function watching() { return document.documentElement.dataset.tab === 'chat' && !document.hidden && THR && !THR.startsWith('new-') ? THR : ''; }
+// #407: the thread follows its end (a live update scrolls to it) until your own drag or wheel leaves the end; back at
+// the very end, or on a send, it follows again. PIN (after a send): that message stays ~16 px under the thread bar,
+// the room under it kept free until the reply fills it.
+var FOL = true, PIN = null, held = -1e9;
+addEventListener('touchstart', () => { held = 1; }, { passive: true });
+addEventListener('touchend', () => { held = performance.now(); }, { passive: true });
+addEventListener('wheel', () => { held = performance.now(); }, { passive: true });
+addEventListener('scroll', () => {
+  if (!THR || document.documentElement.dataset.tab !== 'chat') return;
+  const end = scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+  if (end) FOL = true; else if (held === 1 || performance.now() - held < 500) FOL = false;
+}, { passive: true });
+function chatPin() {
+  const v = PIN && $(`#chat .cvp[data-t="${CSS.escape(PIN.t)}"]`), tc = v && v.querySelector('.tc');
+  if (!tc) return;
+  tc.style.paddingBottom = '';
+  const mine = tc.querySelectorAll('.blk.me:not(.snt)'), e = mine[PIN.n] || tc.querySelector(`.snt[data-p="${SENT.indexOf(PIN)}"]`);
+  if (!e) return;
+  if (!FOL || THR !== PIN.t || document.documentElement.dataset.tab !== 'chat') return void (tc.style.paddingBottom = PIN.pad + 'px');
+  // At the end, its top 16 px under whatever bar shows at the top (the header, the thread bar), else the screen's
+  // top: measured there, the room corrected (a bar that sticks once scrolled moves it).
+  const base = parseFloat(getComputedStyle(tc).paddingBottom), s4 = parseFloat(getComputedStyle(B).getPropertyValue('--s4'));
+  let pad = base;
+  for (let i = 0; i < 5; i++) { // (room that a short page's screen still swallows takes another pass)
+    tc.style.paddingBottom = pad + 'px';
+    scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
+    const err = e.getBoundingClientRect().top - Math.max(0, ...[$('header'), v.querySelector('.th')].map(x => x.getBoundingClientRect().bottom)) - s4;
+    if (Math.abs(err) < 1) break;
+    pad = Math.max(base, pad + err);
+  }
+  PIN.pad = pad;
+}
+// (Also when the thread's size changes under it: an image loading, the layout above settling.)
+if ($('#chat')) new ResizeObserver(() => chatFollow()).observe($('#chat'));
+function chatFollow() {
+  chatPin();
+  if (FOL && THR && document.documentElement.dataset.tab === 'chat') scrollTo(0, document.documentElement.scrollHeight);
+}
 // Each block's time in the phone's clock; picked files wait above the box as a row of thumbnails, each with [×].
 // (A live swap paints its new copy before the patch, so nothing flashes.) #403: a grown box keeps its height, a
 // working thread's mark is the loading overlay's art (#ld: the theme's sprite, ascii frames or the glyph), and each
 // message sent this session shows: `sending…`, then ✓ on the thread's copy; failed, red with [retry].
 const SENT = [];
 function chatPaint(root = $('#chat')) {
-  if (!root || ATT === undefined) return; // before the `var` line runs
+  if (!root || ATS === undefined) return; // before the `var` line runs
   if (root !== $('#chat')) chatKeep(root);
   clocks(root);
-  root.querySelectorAll('.ats').forEach(e => e.remove());
-  const tw = ATT && root.querySelector(`.tw[data-t="${CSS.escape(ATT.t)}"]`);
-  if (tw) {
-    const row = tw.insertBefore(el('div', 'ats'), tw.firstChild);
-    ATT.l.forEach((a, i) => {
-      const im = a.src ? Object.assign(document.createElement('img'), { src: a.src, alt: a.name }) : el('span', '', a.name);
-      row.appendChild(el('div', 'att')).append(im, Object.assign(el('button', '', '×'), { type: 'button', ariaLabel: 'remove ' + a.name, value: i }));
+  root.querySelectorAll('.ats, .qe, .qh').forEach(e => e.remove());
+  root.querySelectorAll('.fold').forEach(d => { d.open = FOLD.has(d.dataset.n); });
+  for (const tw of root.querySelectorAll('.tw')) {
+    const t = tw.dataset.t, a = tw.elements.text, wk = tw.closest('.cvp').querySelector('.tlv.wk');
+    // #407: while a turn runs [send] is [queue] (a long press offers [steer]); editing a queued message says so.
+    (tw.querySelector('.snd') || {}).textContent = wk && !(EDIT && EDIT.t === t) ? 'queue' : 'send';
+    if (EDIT && EDIT.t === t) tw.insertBefore(el('p', 'qe', 'editing queued message · '), tw.querySelector('input[type=file]')).append(Object.assign(el('button', 'ecl', 'cancel'), { type: 'button' }));
+    else if (wk) tw.append(el('p', 'qh', 'delivered when this turn ends · hold [queue] to steer'));
+    if (!a.value && !(EDIT && EDIT.t === t)) a.value = get('draft:' + t) || '';
+    if (!ATS[t]) continue;
+    const row = tw.insertBefore(el('div', 'ats'), tw.querySelector('input[type=file]'));
+    ATS[t].forEach((f, i) => {
+      const im = f.src ? Object.assign(document.createElement('img'), { src: f.src, alt: f.name }) : el('span', '', f.name);
+      row.appendChild(el('div', 'att')).append(im, Object.assign(el('button', '', '×'), { type: 'button', ariaLabel: 'remove ' + f.name, value: i }));
     });
   }
-  root.querySelectorAll('.tw textarea').forEach(a => { a.style.height = $(`#chat .tw[data-t="${CSS.escape(a.form.dataset.t)}"] textarea`)?.style.height || ''; });
+  root.querySelectorAll('.tw textarea').forEach(a => { a.style.height = $(`#chat .tw[data-t="${CSS.escape(a.form.dataset.t)}"] textarea`)?.style.height || ''; if (a.isConnected && a.value && !a.style.height) grow(a); });
+  pill(root);
   root.querySelectorAll('.tld').forEach(i => { i.innerHTML = $('#ld').innerHTML; });
   root.querySelectorAll('.snt').forEach(e => e.remove());
   for (const p of SENT) {
@@ -1953,6 +2001,7 @@ function chatPaint(root = $('#chat')) {
     if (mine.length > p.n) { mine[p.n].querySelector('summary .ct').before(el('b', 'snt sk', '✓')); continue; }
     if (!tc) continue;
     const b = tc.appendChild(el('details', 'blk me snt' + (p.st === '✗' ? ' bad' : '')));
+    b.dataset.p = SENT.indexOf(p);
     b.open = true;
     b.innerHTML = '<summary><span class=k>you</span><span class=pv></span><span class=ct></span><i class=cv></i></summary><div class=md><p></p></div>';
     b.querySelector('.pv').textContent = p.text.split('\n')[0];
@@ -1963,7 +2012,7 @@ function chatPaint(root = $('#chat')) {
 }
 function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.textContent = new Date(c.dataset.ts * 1e3).toTimeString().slice(0, 5); }); }
 // #408: a thread opens with its last 30 messages; near the top a scroll (or a tap on the marker) loads the 30 before
-// them (`thread/<t>?before=`) above, the reading position kept. A live copy's marker becomes the live thread's blocks
+// them (API v1 `thread/<t>?before=`, the TypeScript board draws them) above, the reading position kept. A live copy's marker becomes the live thread's blocks
 // older than the copy's first (`data-n`), so a swap never drops the pages loaded.
 function chatKeep(root) {
   root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
@@ -1977,7 +2026,8 @@ async function chatOlder() {
   const m = THR && $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tc>.tmo`);
   if (!m || OLDQ) return;
   OLDQ = true;
-  const h = await part(`thread/${encodeURIComponent(THR)}?before=${m.dataset.b}&n=30`), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
+  FOL = false; // #407: up there reading older ones: the end is not followed
+  const h = await window.threadOlder?.(THR, m.dataset.b), a = m.nextElementSibling, y = a && a.getBoundingClientRect().top;
   OLDQ = false;
   if (!h || !m.isConnected) return;
   const t = el('div', '');
@@ -1989,7 +2039,48 @@ async function chatOlder() {
 addEventListener('scroll', () => { if (document.documentElement.dataset.tab === 'chat' && scrollY < innerHeight) chatOlder(); }, { passive: true });
 // #403: the message box grows with its text to 6 lines (then scrolls inside, serve.css) and shrinks back after a send.
 const grow = a => { a.style.height = ''; if (a.value) a.style.height = a.scrollHeight + 2 + 'px'; };
-document.addEventListener('input', e => { if (e.target.matches('#chat .tw textarea')) grow(e.target); });
+// #407: each thread's draft is kept as you type (not a queued message being edited).
+const draft = (t, v) => { try { if (v) localStorage.setItem('draft:' + t, v); else localStorage.removeItem('draft:' + t); } catch (e) {} };
+document.addEventListener('input', e => {
+  const a = e.target;
+  if (!a.matches('#chat .tw textarea')) return;
+  grow(a);
+  if (!(EDIT && EDIT.t === a.form.dataset.t)) draft(a.form.dataset.t, a.value);
+});
+// #407: the picked files of each thread in IndexedDB (their bytes, which every WebKit keeps), read back once at load.
+const IDB = new Promise(ok => { try { const q = indexedDB.open('herdsman', 1); q.onupgradeneeded = () => q.result.createObjectStore('att'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); } catch (e) { ok(null); } });
+const idb = f => IDB.then(d => d && new Promise(ok => { const q = f(d.transaction('att', 'readwrite').objectStore('att')); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); })).catch(() => null);
+const attSave = async t => { const l = ATS[t] && await Promise.all(ATS[t].map(async f => ({ name: f.name, type: f.file.type, data: await f.file.arrayBuffer() }))); return idb(o => l ? o.put(l, t) : o.delete(t)); };
+var ATL = Promise.all([idb(o => o.getAllKeys()), idb(o => o.getAll())]).then(([ks, vs]) => {
+  (ks || []).forEach((t, i) => { ATS[t] ??= vs[i].map(({ name, type, data }) => { const file = new File([data], name, { type }); return { name, file, src: type.startsWith('image/') ? URL.createObjectURL(file) : '' }; }); });
+  chatPaint();
+});
+// #407: the open thread's pill floats above its box: `working 1m 23s` with the theme's loading art and [stop], then
+// `stopping…` (STOP: the turn a stop or steer was tapped in); `reconnecting…` / `offline · tap to retry` while the
+// live stream is down. Idle and connected, none.
+// EDIT: the queued message being edited { t, q, draft } (the draft comes back after).
+const STOP = new Map(), FOLD = new Set();
+let EDIT = null;
+const took = s => s < 60 ? `${s}s` : s < 3600 ? `${s / 60 | 0}m ${s % 60}s` : `${s / 3600 | 0}h ${(s % 3600) / 60 | 0}m`;
+function pill(root = $('#chat')) {
+  root.querySelectorAll('.pill').forEach(p => p.remove());
+  const v = THR && root.querySelector(`.cvp[data-t="${CSS.escape(THR)}"]`), tw = v && v.querySelector('.tw'), wk = v && v.querySelector('.tlv.wk');
+  if (!tw) return;
+  // (The demo has no stream: off there, as `data-demo` says; the audit takes it off to show these.)
+  const gone = !B.dataset.demo && !live() && down && Date.now() - down > 1500, off = gone && (!navigator.onLine || Date.now() - down > 30000);
+  if (!wk) STOP.delete(THR);
+  if (!gone && !wk) return;
+  const p = tw.insertBefore(el('div', 'pill'), tw.firstChild);
+  if (off) p.append(Object.assign(el('button', 'rtr', 'offline · tap to retry'), { type: 'button' }));
+  else if (gone) p.textContent = 'reconnecting…';
+  else if (STOP.get(THR) === wk.dataset.since) p.textContent = 'stopping…';
+  else {
+    p.append(el('i', 'tld'), el('span', '', 'working ' + took(Math.max(0, Math.round(Date.now() / 1e3 - wk.dataset.since)))));
+    p.firstChild.innerHTML = $('#ld').innerHTML;
+    p.append(Object.assign(el('button', 'stp', 'stop'), { type: 'button', disabled: !!B.dataset.ro }));
+  }
+}
+setInterval(() => { if (document.documentElement.dataset.tab === 'chat' && THR) pill(); }, 1000);
 chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
@@ -2002,12 +2093,68 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }
-  else if (t.closest('#chat .sb')) { const b = t.closest('.sb'); chatPost({ op: b.name, t: b.dataset.t }); }
+  else if (t.closest('#chat .sb')) { const b = t.closest('.sb'); chatPost({ op: b.name, t: b.dataset.t }).then(ok => { if (ok && b.name === 'archive') undo(b.dataset.t); }); }
+  else if (t.closest('#chat .tq button')) { // #407: a queued message's [send now] (steered in), edit, [remove]
+    const b = t.closest('button'), q = b.closest('.tq').dataset.q, f = b.closest('.tw'), box = f.elements.text;
+    if (b.name === 'qe') { EDIT = { t: f.dataset.t, q, draft: box.value }; box.value = b.closest('.tq').querySelector('p').textContent; grow(box); chatPaint(); box.focus(); }
+    else chatPost({ op: b.name === 'qn' ? 'steer' : 'unqueue', t: f.dataset.t, q });
+  }
+  else if (t.closest('#chat .ecl')) { const box = t.closest('.tw').elements.text; box.value = EDIT.draft; EDIT = null; grow(box); chatPaint(); }
+  else if (t.closest('#chat .pill .stp')) { STOP.set(THR, $(`#chat .cvp[data-t="${CSS.escape(THR)}"] .tlv.wk`).dataset.since); pill(); chatPost({ op: 'stop', t: THR }); }
+  else if (t.closest('#chat .pill .rtr')) rf.onclick();
   else if (t.closest('#chat .add')) t.closest('.tw').querySelector('input[type=file]').click();
-  else if (t.closest('#chat .att button')) { ATT.l.splice(+t.closest('button').value, 1); if (!ATT.l.length) ATT = null; chatPaint(); }
+  else if (t.closest('#chat .att button')) { const k = t.closest('.tw').dataset.t; ATS[k].splice(+t.closest('button').value, 1); if (!ATS[k].length) delete ATS[k]; attSave(k); chatPaint(); }
   else if (c) { const q = c.closest('.chq'); chatPost({ op: 'answer', fleet: q.dataset.fleet, id: q.dataset.id, choice: c.value }); }
   else if (t.closest('#chat .cpy')) copyBox(t.closest('.cpy'));
   else if (t.closest('#chat .im img')) iv([...t.closest('.blk').querySelectorAll('.im img')].map(i => [i.src, i.alt]), t.src);
+});
+// #407: a finished turn's fold keeps its open state (FOLD, by its first command) across live updates.
+document.addEventListener('toggle', e => { const d = e.target; if (d.matches?.('#chat .fold')) FOLD[d.open ? 'add' : 'delete'](d.dataset.n); }, true);
+// #407: after a swipe's [archive], `archived · [undo]` for 5 s; [undo] restores it.
+function undo(t) {
+  toast('archived · ', 5000).append(Object.assign(el('button', 'und', 'undo'), { type: 'button', onclick: () => chatPost({ op: 'restore', t }) }));
+}
+// #407: a long press (½ s, the finger still) on [queue] offers [queue] or [steer], on a message its menu: [copy],
+// [copy as markdown], [quote] (into the box), then `copied`. The click it ends does nothing else.
+const MM = B.appendChild(Object.assign(document.createElement('div'), { id: 'mm', hidden: true }));
+let lp = null, lpd = false;
+function hold(x, y) {
+  const v = x.closest('.cvp');
+  if (x.matches('.snd')) {
+    if (!v.querySelector('.tlv.wk') || x.disabled) return false;
+    MM.innerHTML = '<button type=button name=choice value=queue><span>queue <small>· delivered when this turn ends</small></span></button><button type=button name=choice value=steer><span>steer <small>· stops the turn and sends it now</small></span></button>';
+  } else MM.innerHTML = '<button type=button value=copy>copy</button><button type=button value=md>copy as markdown</button><button type=button value=quote>quote</button>';
+  MM.on = x;
+  MM.hidden = false;
+  MM.style.top = Math.max(0, Math.min(y - MM.offsetHeight - 16, innerHeight - MM.offsetHeight)) + 'px';
+  return true;
+}
+document.addEventListener('pointerdown', e => {
+  const x = e.target.closest('#chat .tw .snd, #chat .tc .blk:is(.me,.ai)');
+  if (!MM.hidden && !MM.contains(e.target)) MM.hidden = true;
+  clearTimeout(lp?.t);
+  lpd = false;
+  lp = x && { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; lpd = hold(x, e.clientY); }, 500) };
+});
+document.addEventListener('pointermove', e => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) { clearTimeout(lp.t); lp = null; } });
+for (const k of ['pointerup', 'pointercancel']) document.addEventListener(k, () => { if (lp) { clearTimeout(lp.t); lp = null; } });
+document.addEventListener('click', e => { if (lpd) { lpd = false; e.preventDefault(); e.stopPropagation(); } }, true);
+document.addEventListener('contextmenu', e => { const b = e.target.closest('#chat .tc .blk:is(.me,.ai)'); if (b && hold(b, e.clientY)) e.preventDefault(); });
+MM.addEventListener('click', async e => {
+  const b = e.target.closest('button'), x = MM.on;
+  if (!b) return;
+  if (b.name === 'choice') { MM.hidden = true; return chatSay(x.form, b.value); }
+  const md = x.querySelector('.md'), src = md.dataset.md ?? md.textContent, box = x.closest('.cvp').querySelector('.tw textarea');
+  const text = b.value === 'md' ? src : src.replace(/^\s*```.*\n?/gm, '').replace(/`/g, '').trim();
+  if (b.value === 'quote') {
+    box.value = text.split('\n').map(l => '> ' + l).join('\n') + '\n\n' + box.value;
+    grow(box);
+    draft(box.form.dataset.t, box.value);
+    MM.hidden = true;
+    return box.focus();
+  }
+  MM.textContent = await navigator.clipboard.writeText(text).then(() => 'copied', () => 'not copied: no clipboard here');
+  setTimeout(() => { MM.hidden = true; }, 1000);
 });
 // #405: a thread row swiped left shows its [archive] (one row at a time); swiped right, it hides again. The click that
 // ends a swipe opens nothing.
@@ -2099,10 +2246,10 @@ document.addEventListener('change', e => {
   if (!i.matches('#chat .tw input[type=file]') || !i.files.length) return;
   const t = i.closest('.tw').dataset.t, fs = [...i.files];
   i.value = '';
-  if (!ATT || ATT.t !== t) ATT = { t, l: [] };
-  const room = 10 - ATT.l.length;
+  const l = ATS[t] ??= [], room = 10 - l.length;
   if (fs.length > room) toast(`at most 10 files a message: ${fs.length - room} left out`);
-  ATT.l.push(...fs.slice(0, room).map(f => ({ name: f.name, file: f, src: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' })));
+  l.push(...fs.slice(0, room).map(f => ({ name: f.name, file: f, src: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' })));
+  attSave(t);
   chatPaint();
 });
 // #409: a code box's [copy]: its exact text to the clipboard, then `copied` for 1.5 s; without the clipboard API
@@ -2118,7 +2265,7 @@ async function chatPost(d, f) {
   try {
     const r = await send('thread', d), m = (await r.text()).trim();
     if (r.status === 401) unpaired();
-    if (m && !(r.ok && ['say', 'new'].includes(d.op))) toast(m);
+    if (m && !(r.ok && ['say', 'new', 'archive', 'queue', 'steer', 'stop', 'unqueue'].includes(d.op))) toast(m);
     if (r.ok) { if (f) f.reset(); refresh(true); }
     return r.ok && (m || true);
   } catch (err) { toast('error: ' + err.message); }
@@ -2126,24 +2273,33 @@ async function chatPost(d, f) {
 // #403: [send] clears the box at once and shows the message `sending…`; ✓ once the server logged it; failed, red with
 // [retry], the text (and file) back in the box.
 // #405: in an empty thread (`new-<repo>`, from [+ thread]) the first message starts it: `new`, then its thread opens.
-async function chatSay(f) {
-  const a = ATT && ATT.t === f.dataset.t ? ATT : null, box = f.elements.text, text = box.value, repo = f.dataset.repo;
+// #407: while a turn runs it is queued (`how`: the long press's queue or steer; an edit of a queued message replaces
+// it). Every send follows the thread again and pins the message near the top; a failed one keeps the draft.
+async function chatSay(f, how) {
+  const t = f.dataset.t, a = ATS[t] || null, box = f.elements.text, text = box.value, repo = f.dataset.repo, ed = EDIT && EDIT.t === t ? EDIT : null;
   if (!text.trim() && !a) return;
-  const names = a ? a.l.map(x => x.name).join(', ') : '';
-  const p = { t: f.dataset.t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
-  SENT.push(p);
+  const op = repo ? 'new' : ed ? 'queue' : how || (f.closest('.cvp').querySelector('.tlv.wk') ? 'queue' : 'say');
+  const names = a ? a.map(x => x.name).join(', ') : '';
+  const p = { t, text: text.trim() ? text : names, st: 'sending…', n: f.closest('.cvp').querySelectorAll('.tc .blk.me:not(.snt)').length };
+  if (op !== 'queue') SENT.push(p);
   f.reset();
+  if (ed) { box.value = ed.draft; EDIT = null; }
+  draft(t, box.value);
   grow(box);
-  if (a) ATT = null;
+  if (a) { delete ATS[t]; attSave(t); }
+  FOL = true;
+  if (op !== 'queue') PIN = p;
   chatPaint();
-  scrollTo(0, document.body.scrollHeight);
-  const files = a ? { name: a.l.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.l.map(x => b64(x.file)))).join(',') } : {};
-  const ok = await chatPost({ ...(repo ? { op: 'new', repo } : { op: 'say', t: p.t }), text, ...files });
+  chatFollow();
+  const files = a ? { name: a.map(x => x.name.replaceAll('/', '_')).join('/'), data: (await Promise.all(a.map(x => b64(x.file)))).join(',') } : {};
+  const ok = await chatPost({ op, ...(repo ? { repo } : { t }), ...(ed ? { q: ed.q } : {}), text, ...files });
   if (ok && repo) { Object.assign(p, { t: ok.split(' ')[0], n: 0 }); history.replaceState({ thr: p.t }, ''); chatOpen(p.t); }
   p.st = ok ? '✓' : '✗';
-  if (!ok && !box.value) { box.value = text; grow(box); }
-  if (!ok && a && !ATT) ATT = a;
+  if (!ok && ed) EDIT = { ...ed, draft: box.value };
+  if (!ok && (ed || !box.value)) { box.value = text; grow(box); if (!ed) draft(t, text); }
+  if (!ok && a && !ATS[t]) { ATS[t] = a; attSave(t); }
   chatPaint();
+  chatFollow();
 }
 document.addEventListener('submit', async e => {
   const f = e.target;

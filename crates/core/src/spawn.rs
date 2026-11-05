@@ -19,6 +19,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "design" => include_str!("../roles/design.md"),
         "conductor" => include_str!("../roles/conductor.md"),
         "lesson" => include_str!("../roles/lesson.md"),
+        "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -29,7 +30,8 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
         f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
             std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
         });
-    let base = role_prompt(if role == "lesson" { role } else { f.family(role) });
+    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    let base = role_prompt(if own { role } else { f.family(role) });
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
 }
 
@@ -319,7 +321,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules): (Option<&str>, Option<&str>),
+    (fix, rules, repro): (Option<&str>, Option<&str>, bool),
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -341,6 +343,14 @@ fn brief(
             issue = issue
         ),
     };
+    // #420: a `--repro` issue's steps: impl's failing test first, rev's proof it fails on base and passes at head.
+    let steps = match (repro, p.family, p.stage.as_str()) {
+        (false, ..) | (_, "design", _) => "",
+        (_, "rev", "verify") => include_str!("../roles/brief-repro-verify.md"),
+        (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
+        _ => include_str!("../roles/brief-repro-impl.md"),
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
@@ -775,7 +785,11 @@ pub fn spawn(
                 &p,
                 title,
                 &decided.fold(body.to_string(), |b, d| b + &d),
-                (fix, on.read(&p.worktree.join(".herdsman/rules.md")).as_deref()),
+                (
+                    fix,
+                    on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
+                    crate::queue::repro(&events, fleet, issue),
+                ),
             ),
         )
     };
@@ -840,6 +854,22 @@ pub fn spawn(
             start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
             late = soft(&start) && confirm(r, h, &pane);
         }
+        // #463: a start that failed shows why on its screen; a first-start prompt the harness knows gets its answer.
+        let mut screen = String::new();
+        if start.code != 0 && !late {
+            screen = tail(r, &pane);
+            if let Some((prompt, keys)) = h.startup_prompt(&screen) {
+                herdr::keys(r, &pane, &keys)?;
+                event(
+                    "startup-prompt",
+                    json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
+                )?;
+                late = confirm(r, h, &pane);
+                if !late {
+                    screen = tail(r, &pane);
+                }
+            }
+        }
         if start.code != 0 {
             let taken = herdr::failed_with(&start, "agent_name_taken");
             if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
@@ -854,6 +884,11 @@ pub fn spawn(
                 Some(format!("herdr agent start failed: {}", start.stderr.trim()))
             };
             if let Some(why) = why {
+                let shown = if screen.is_empty() {
+                    String::new()
+                } else {
+                    format!("\nscreen:\n{screen}")
+                };
                 // #302: a harness[:account] that failed to start twice in a row rests (`[limits] fallback_rest_minutes`).
                 let mine = |k: &str, e: &Event| e.is(k, fleet, issue) && e.str("agent") == Some(&p.agent);
                 let acct = p.account.as_ref().map(|a| a.0.as_str());
@@ -865,17 +900,18 @@ pub fn spawn(
                     .any(|e| mine("spawn-failed", e) && same(e));
                 let until = ctx.now + cfg.limits.fallback_rest_minutes * 60;
                 let kind = ["spawn-failed", "agent-unavailable"][usize::from(twice)];
-                let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start"});
+                let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start",
+                    "error": format!("{why}{shown}")});
                 if chain {
                     event(kind, d)?;
                 }
                 // #236: on another host the half-made workspace goes too (nobody there would close it).
                 if on.machine.is_some() {
                     let _ = herdr::workspace_close(r, &ws);
-                    bail!("{why}; closed workspace {ws}");
+                    bail!("{why}; closed workspace {ws}{shown}");
                 }
                 let _ = herdr::close(r, &pane);
-                bail!("{why}; closed pane {pane}");
+                bail!("{why}; closed pane {pane}{shown}");
             }
             event("spawn-adopted", json!({"agent": p.agent, "pane": pane}))?;
         }
@@ -949,6 +985,13 @@ pub fn spawn(
 
 /// #393: the longest a spawn runs between `spawn-started` and `spawn`: the start and two confirm windows.
 const SPAWN_SECS: u64 = 3 * herdr::CONFIRM_SECS;
+
+/// #463: the pane's last 40 screen lines, secret-looking values redacted.
+fn tail(r: &dyn Runner, pane: &str) -> String {
+    let s = herdr::read(r, pane).unwrap_or_default();
+    let lines: Vec<_> = s.trim_end().lines().map(crate::lanes::redact).collect();
+    lines[lines.len().saturating_sub(40)..].join("\n")
+}
 
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];

@@ -1,0 +1,20 @@
+name: evidence
+# #453: the PR body's evidence names the head sha. Its own workflow so a body edit re-runs only this check.
+on:
+  pull_request:
+    branches: [staging]
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: the PR body names the head sha it was tested at (or one below drive's staging catch-up merges)
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: printf '%s' "$BODY" | scripts/evidence-check.sh "$HEAD_SHA" "${{ github.base_ref }}"
