@@ -883,7 +883,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
 }
 
-/// #275: a remote lane is told the main host (`HERDSMAN_MAIN`, its path never rehomed) and an answer to it lands
+/// #389: a remote lane gets an outbox, never a route to the main host (`HERDSMAN_MAIN`), and an answer to it lands
 /// with `--machine`: the prompt, then Enter, then the wait that confirms it.
 #[test]
 fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
@@ -896,7 +896,7 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let calls = r.calls.borrow().clone();
     let lane = calls.iter().find(|c| c.starts_with(export)).unwrap();
     assert!(
-        lane.contains(" HERDSMAN_MAIN='mini:/opt/herdsman/bin/herdsman'"),
+        lane.contains(" HERDSMAN_OUTBOX='1'") && !lane.contains("HERDSMAN_MAIN"),
         "{lane}"
     );
     let d = json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "agent": "sendmeter-impl-12"});
@@ -920,8 +920,8 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 12 --why answer --now"));
 }
 
-/// #345: with `[service] url` a remote lane reports over HTTP: it gets the url and its own token, never the main host's
-/// ssh name; the token is in no plan output or event, and it is scoped to its issue.
+/// #345: with `[service] url` a remote lane reports over HTTP: it gets the url and its own token, never an
+/// outbox; the token is in no plan output or event, and it is scoped to its issue.
 #[test]
 fn a_remote_lane_gets_the_service_url_and_its_own_token() {
     let c = setup(
@@ -940,7 +940,7 @@ fn a_remote_lane_gets_the_service_url_and_its_own_token() {
         .find(|c| c.starts_with("herdr --machine bazzite pane run w9:p1 export"))
         .unwrap();
     assert!(
-        lane.contains(" HERDSMAN_SERVICE='http://mini.tail:7778'") && !lane.contains("HERDSMAN_MAIN"),
+        lane.contains(" HERDSMAN_SERVICE='http://mini.tail:7778'") && !lane.contains("HERDSMAN_OUTBOX"),
         "{lane}"
     );
     let token = lane

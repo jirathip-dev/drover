@@ -89,22 +89,19 @@ pub fn grant(ctx: &Ctx, g: &Grant) -> Result<String> {
     Ok(t)
 }
 
-/// The `HERDSMAN_LANE` `args` run as, if the token may run them: a lane command of its own fleet and issue (a verdict
+/// The `HERDSMAN_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict
 /// only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
 pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Result<String> {
     let Some((_, g)) = crate::db::get::<Grant>(&ctx.state, &key(token)) else {
         return refused("TOKEN", "unknown token");
     };
-    let Some((fleet, issue, verdict)) = crate::cli::lane_scope(ctx, args) else {
-        return refused("TOKEN", "not a lane command (ask, answer, verdict, done, kick)");
-    };
-    if (fleet.as_str(), issue) != (g.fleet.as_str(), g.issue) {
-        return refused("TOKEN", format!("this token is {}#{}'s", g.fleet, g.issue));
+    let events = read(&ctx.state)?;
+    if let Some(why) = crate::cli::foreign(args, &g.lane, &events) {
+        return refused("TOKEN", why);
     }
-    if verdict && !cfg.fleet(&fleet)?.flow().is_check(&g.role) {
+    if args[0] == "verdict" && !cfg.fleet(&g.fleet)?.flow().is_check(&g.role) {
         return refused("TOKEN", format!("a {} lane records no verdict", g.role));
     }
-    let events = read(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == g.fleet && e.issue == Some(g.issue);
     let sp = events
         .iter()

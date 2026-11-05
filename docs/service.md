@@ -25,14 +25,16 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 ## Remote lanes over HTTP
 
 With `[service] url = "http://<main host on the tailnet>:7778"` in fleet.toml, a lane spawned on another host gets
-`HERDSMAN_SERVICE` (that url) and `HERDSMAN_TOKEN` instead of `HERDSMAN_MAIN`, so it never needs ssh to the main host.
-Its `ask`, `answer`, `verdict`, `done` and `kick` go to `/api/v1/cmd` with curl; a `--file` travels as its text.
+`HERDSMAN_SERVICE` (that url) and `HERDSMAN_TOKEN` instead of #389's outbox (`HERDSMAN_OUTBOX`), so its commands
+arrive at once. Its `ask`, `answer`, `verdict`, `done`, `kick` and its own events go to `/api/v1/cmd` with curl; a
+`--file` travels as its text.
 The main host keeps controlling other hosts over ssh (spawn, read, kill).
 
 **The token** is 32 random bytes, issued by spawn, stored only as its sha256 in `state.db`, and never printed or
 logged. It runs a command only when:
 
-- the command is a lane command of the token's own fleet and issue (an answer's issue is its ask's);
+- the command is one the outbox would run as that lane (#389's check): its own fleet and issue, an answer's issue
+  being its ask's;
 - a verdict comes from a check role;
 - the token's spawn is still the issue's latest for its role, its lane is not closed or dead, and the issue is open.
 

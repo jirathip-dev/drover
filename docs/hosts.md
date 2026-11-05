@@ -87,17 +87,20 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
 
-## Asks, answers and verdicts from another host (#275)
+## Asks, answers and verdicts from another host (#275, #389)
 
-A lane on another host gets `HERDSMAN_MAIN` (`<main host's [hosts] name>:<its herdsman path>`). Its `herdsman ask`,
-`answer`, `verdict` and its own events (`hook-denied`, `coauthor-trailer`) run on the main host over
-`ssh <main host's name>`, so the main host's log is the only one written and only the main host pushes. So the main
-host's `[hosts]` name must also work as an SSH name on every other host (an `~/.ssh/config` entry back to it, key-based).
-That host's own log (#344: its own `state.db`) is never written by a lane; herdsman warns when it finds one. Each
+A lane on another host never connects to the main host: it holds no key, token or ssh route to it. Spawn exports
+`HERDSMAN_OUTBOX=1`, and its `herdsman ask`, `answer`, `verdict`, `done` and its own events (`hook-denied`,
+`coauthor-trailer`) are appended to `<worktree>/.herdsman/outbox.jsonl` (exit 0: `queued for the main host: drive
+delivers it within 1 min`). Each fast drive pass pulls every live remote lane's outbox over main → host ssh and runs
+each line as that lane (from its spawn event, never the line), once per lane and timestamp; a line for another issue
+or role, or a verb a lane doesn't run itself, is refused and logged `outbox`. `check` raises `outbox-stale` once when a
+line sits there over 5 min. So the main host's log is the only one written and only the main host pushes.
+That host's own log (#344: its own `state.db`) is never written by a lane. Each
 `check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
 `herdsman events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
-#345: with `[service] url` set, a remote lane gets `HERDSMAN_SERVICE` and its own token instead, and reports over
+#345: with `[service] url` set, a remote lane gets `HERDSMAN_SERVICE` and its own token instead of the outbox, and reports over
 HTTP to `herdsman service` (docs/service.md); no ssh back to the main host.
 
 An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` gives up

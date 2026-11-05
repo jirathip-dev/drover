@@ -297,7 +297,7 @@ enum Cmd {
         #[arg(long)]
         install: bool,
     },
-    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane; idempotent, safe from cron
+    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
     Accounts {
@@ -690,7 +690,7 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
         .and_then(|c| c.runtime.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
-    let res = match lane_write.then(|| forward(ctx, r, &sent)).flatten() {
+    let res = match lane_write.then(|| forward(r, &sent)).flatten() {
         Some(o) => o.map(|o| {
             let _ = write!(out, "{}", o.stdout);
             eprint!("{}", o.stderr);
@@ -712,48 +712,38 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
 }
 
-/// #275: a lane on another host has `HERDSMAN_MAIN` (`<main host's ssh name>:<its herdsman>`): its `args` run on the
-/// main host over ssh, so the main log is the only one written and only the main host pushes.
-pub(crate) fn forward(ctx: &Ctx, r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
-    let lane = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())?;
-    // #345: over HTTP to the main host's service with the lane's own token, never ssh.
+/// #389: a lane on another host (`HERDSMAN_OUTBOX`) never connects to the main host: its `args` wait in its
+/// worktree's outbox, which drive pulls over main → host ssh and runs as the lane.
+/// #345: with `HERDSMAN_SERVICE` it goes over HTTP to the main host's service with the lane's own token instead.
+pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
     if let (Ok(url), Ok(token)) = (std::env::var("HERDSMAN_SERVICE"), std::env::var("HERDSMAN_TOKEN")) {
         return Some(crate::service::post(r, &url, &token, args));
     }
-    let main = std::env::var("HERDSMAN_MAIN").ok()?;
-    let (host, exe) = main.split_once(':')?;
-    if crate::db::file(&ctx.state).exists() {
-        let s = crate::db::file(&ctx.state);
-        let s = s.display();
-        eprintln!("herdsman: warning: {s} exists on a lane's host; only the main host's log counts");
-    }
-    let a = [runner::argv(&[&format!("HERDSMAN_LANE={lane}"), exe]), args.to_vec()].concat();
-    Some(crate::hosts::On::new(r, Some(host)).run("env", &a))
+    let lane = crate::outbox::lane()?;
+    Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
+        code: 0,
+        stdout: crate::outbox::QUEUED.into(),
+        stderr: format!("herdsman: queued in {}\n", p.display()),
+    }))
 }
 
-/// #345: a lane command's scope for the service's token check: (fleet, issue, is a verdict); an answer's issue is
-/// its ask's. `None`: no lane command.
-pub(crate) fn lane_scope(ctx: &Ctx, args: &[String]) -> Option<(String, u64, bool)> {
-    let cli = Cli::try_parse_from(std::iter::once("herdsman".to_string()).chain(args.iter().cloned())).ok()?;
-    match cli.cmd {
-        Cmd::Ask { fleet, issue, .. } => Some((fleet, issue.parse().ok()?, false)),
-        Cmd::Verdict { fleet, issue, .. } => Some((fleet, issue, true)),
-        Cmd::Done { fleet, issue, .. }
-        | Cmd::Kick {
-            fleet,
-            issue,
-            now: false,
-            ..
-        } => Some((fleet, issue, false)),
-        Cmd::Answer { fleet, id, .. } => {
-            let events = read(&ctx.state).ok()?;
-            let ask = events
-                .iter()
-                .find(|e| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(&id));
-            Some((fleet, ask?.issue?, false))
+/// #389: why a lane's outbox line is not its own to run (`None`: it is): `ask`, `done`, `verdict`, `answer` for its
+/// issue, events.
+pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
+    let cli = Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().map(String::as_str)));
+    let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
+    let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
+    let (f, n) = match cli.map(|c| c.cmd) {
+        Err(e) => return Some(format!("unparsable: {}", e.kind())),
+        Ok(Cmd::LaneEvent { .. }) => return None,
+        Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
+        Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
+            (fleet, issue.to_string())
         }
-        _ => None,
-    }
+        Ok(Cmd::Answer { fleet, id, .. }) => (fleet.clone(), asked(&fleet, &id).map_or("-".into(), |n| n.to_string())),
+        _ => return Some(format!("`{}` is no lane's own verb", args[0])),
+    };
+    (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
 }
 
 /// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
@@ -800,7 +790,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let env = |k: &str| std::env::var(k).unwrap_or_default();
             crate::usage::statusline(ctx, &env("HERDSMAN_ACCOUNT"), &env("HERDSMAN_LANE"), &buf, out);
         }
-        Cmd::LaneEvent { kind, data } => lane_event(ctx, r, &kind, serde_json::from_str(&data)?),
+        Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
@@ -1470,7 +1460,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     };
     if let Some(reason) = hook::decide(&input, &policy, &cur) {
         if policy.deny.iter().any(|d| d.reason() == reason) {
-            lane_event(ctx, r, "hook-denied", json!({"rule": reason}));
+            lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
         return Ok(());
@@ -1480,7 +1470,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     }
     // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
-        lane_event(ctx, r, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
+        lane_event(ctx, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
     }
     Ok(())
 }
@@ -1492,12 +1482,17 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
         return;
     };
     eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
-    lane_event(ctx, r, "coauthor-trailer", json!({"line": trailer}));
+    lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
 }
 
 /// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
-fn lane_event(ctx: &Ctx, r: &dyn Runner, kind: &str, mut d: serde_json::Value) {
-    if forward(ctx, r, &runner::argv(&["lane-event", kind, &d.to_string()])).is_some() {
+fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
+    if forward(
+        &crate::runner::Real,
+        &runner::argv(&["lane-event", kind, &d.to_string()]),
+    )
+    .is_some()
+    {
         return;
     }
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
@@ -1562,7 +1557,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let diff = runner::ok(r, "git", &args).unwrap_or_default();
         let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
-            lane_event(ctx, r, "hook-denied", json!({"rule": d.reason()}));
+            lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
             writeln!(out, "herdsman: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
             return Ok(1);
         }
