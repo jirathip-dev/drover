@@ -49,11 +49,13 @@ fn fixture() -> (String, String) {
         .reply("herdr agent list", &list.to_string())
         .reply("herdr pane read", MENU);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = req(&s, "GET", "/?all=1", "", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let page = req(&s, "GET", "/?all=1", "", &ck);
     // #60: the parts the live page loads on demand, spliced in as the page shows them once loaded. #268: the board's
-    // Queue tab, and its [config] sheet as the board hands it to serve.js (`queueSheet`).
+    // Queue tab, and its [config] sheet as the board hands it to serve.js (`queueSheet`); #269: the needs cards,
+    // Lanes and [chat] as the board draws them for this paired phone.
     let sheet = serde_json::to_string(&queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')")).unwrap();
-    let html = with_queue(&page[page.find("<!doctype").unwrap()..], &s, ADDR, T)
+    let html = with_board(&page[page.find("<!doctype").unwrap()..], &s, ADDR, &ck, T)
         .replace(
             "<section id=lanes>",
             &format!(

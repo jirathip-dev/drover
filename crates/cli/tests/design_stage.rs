@@ -132,11 +132,10 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
+/// The needs cards and the [chat] tab as the board draws them (#269) for the device.
 fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
-    let r = format!("GET /frags?tab=chat HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    let res = String::from_utf8_lossy(&s.respond(&r, now)).into_owned();
-    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    (j["needs"].as_str().unwrap().into(), j["chat"].as_str().unwrap().into())
+    let [needs, _, chat] = parts(s, ADDR, cookie, now);
+    (needs, chat)
 }
 
 #[test]
