@@ -326,9 +326,9 @@ fn each_check_fails_with_its_fix_and_exit_one() {
 #[test]
 fn warnings_do_not_fail() {
     let (c, _) = setup("doc-warn", "claude");
-    let st = c.state.parent().unwrap().to_path_buf();
-    for f in ["serve/devices.json", "webpush/subs.json"] {
-        std::fs::remove_file(st.join(f)).unwrap();
+    // #344: no paired phone, no push subscription (setup's files were imported into state.db).
+    for t in ["devices", "push"] {
+        herdsman::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
     }
     let old = HERDR.replacen("version: 0.9.5\n\n", "version: 0.9.6\n\n", 1);
     let r = good().once("herdr status", 0, &old);

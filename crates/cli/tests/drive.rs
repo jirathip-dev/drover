@@ -547,21 +547,15 @@ fn paused_fleets_and_host_busy_are_no_ops() {
 fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
     let c = setup("drive-lock");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let lock = c.state.parent().unwrap().join("drive.lock");
-    std::fs::write(&lock, "").unwrap();
-    let r = fake(NO_AGENTS).reply("git -C", "");
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    let r = fake(NO_AGENTS).reply("git -C", "").reply("kill -0 4242", "");
     let (out, steps) = drive(&c, &r);
     assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
     assert!(!r.called("herdr"));
-    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-    std::fs::File::options()
-        .write(true)
-        .open(&lock)
-        .unwrap()
-        .set_modified(old)
-        .unwrap();
+    // #344: expired an hour ago, a live holder's lease is taken over.
+    lease_as(&c, "drive.lock", 4242, c.now - 7200, 3600);
     assert_eq!(drive(&c, &r).1, ["start"]);
-    assert!(!lock.exists(), "released after the pass");
+    assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
     assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), Some(c.now));
 }
 
@@ -570,22 +564,21 @@ fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
 fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
     let c = setup("drive-pid");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let lock = c.state.parent().unwrap().join("drive.lock");
-    std::fs::write(&lock, "4242").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let live = fake(NO_AGENTS).reply("git -C", "").reply("kill -0 4242", "");
     let (out, steps) = drive(&c, &live);
     assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
     assert_eq!(
-        std::fs::read_to_string(&lock).unwrap(),
-        "4242",
-        "a live pass's lock stays"
+        lease_on(&c, "drive.lock").unwrap().pid,
+        4242,
+        "a live pass's lease stays"
     );
     let dead = fake(NO_AGENTS).reply("git -C", "").once("kill -0 4242", 1, "");
-    let gone = || assert!(!lock.exists(), "released after the pass");
+    let gone = || assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
     assert_eq!(drive(&c, &dead).1, ["start"]);
     gone();
-    // The guard releases the lock when the pass fails, too.
-    std::fs::write(&lock, "4242").unwrap();
+    // The guard releases the lease when the pass fails, too.
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let bad = Fake::default().once("kill -0 4242", 1, "");
     assert!(run(&c, &bad, &["drive"]).0 != 0);
     gone();
@@ -1218,7 +1211,7 @@ impl herdsman::runner::Runner for Other<'_> {
                 &Event::new(self.1.now - 3, "sendmeter", None, "drive-pass", d),
             )
             .unwrap();
-            std::fs::remove_file(self.1.state.parent().unwrap().join("drive.lock")).unwrap();
+            assert!(herdsman::db::release(&self.1.state, "drive.lock", None));
         }
     }
 }
@@ -1227,11 +1220,10 @@ impl herdsman::runner::Runner for Other<'_> {
 fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions() {
     let c = setup("drive-wait");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let lock = c.state.parent().unwrap().join("drive.lock");
-    std::fs::write(&lock, "").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     assert!(herdsman::drive::running(&c, "sendmeter"));
-    let (f, mut out) = (fake(NO_AGENTS).reply("git -C", ""), vec![]);
+    let (f, mut out) = (fake(NO_AGENTS).reply("git -C", "").reply("kill -0 4242", ""), vec![]);
     let r = Other(&f, &c, 0.into());
     herdsman::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true, false).unwrap();
     let out = String::from_utf8(out).unwrap();
@@ -1248,7 +1240,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     assert_eq!(passes(&c).len(), 1);
 
     // Bounded: a pass still running after 120 s leaves the press with a pointer to the line.
-    std::fs::write(&lock, "").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let mut out = vec![];
     herdsman::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true, false).unwrap();
     assert_eq!(
@@ -1400,8 +1392,7 @@ fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
     std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
-    let lock = c.state.parent().unwrap().join("drive.lock");
-    std::fs::write(&lock, "4242").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let head = sha("abc");
     let r = fake(NO_AGENTS)
         .reply("kill -0 4242", "")
@@ -1416,17 +1407,19 @@ fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "");
     // An issue whose own lock a live pass holds is skipped.
-    let issue = c.state.parent().unwrap().join("drive-sendmeter-12.lock");
-    std::fs::write(&issue, "4242").unwrap();
+    lease_as(&c, "drive-sendmeter-12.lock", 4242, c.now, 3600);
     assert_eq!(fast(&c, &r).1, Vec::<String>::new());
-    std::fs::remove_file(&issue).unwrap();
+    assert!(herdsman::db::release(&c.state, "drive-sendmeter-12.lock", None));
     let (out, steps) = fast(&c, &r);
     assert_eq!(steps, ["verdict", "merge"], "{out}");
     assert_eq!(state(&c), "merged");
     assert!(!r.called("herdr agent start") && !r.called("git -C /tmp/does-not-matter/sendmeter fetch"));
-    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "4242", "the slow lock stays");
+    assert_eq!(lease_on(&c, "drive.lock").unwrap().pid, 4242, "the slow lock stays");
     assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
-    assert!(!issue.exists(), "the issue lock is released");
+    assert!(
+        lease_on(&c, "drive-sendmeter-12.lock").is_none(),
+        "the issue lock is released"
+    );
 }
 
 /// #212: a ready PASS's card from the cached PR the fast step refreshes: stale says when it was checked, then fresh.
@@ -1708,7 +1701,7 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
 struct Spy<'a>(Fake, &'a herdsman::Ctx, std::sync::Mutex<Vec<bool>>);
 impl herdsman::runner::Runner for Spy<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        let held = self.1.state.parent().unwrap().join("drive.lock").exists();
+        let held = lease_on(self.1, "drive.lock").is_some();
         let logged = held && read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
         self.2.lock().unwrap().push(logged);
         self.0.run(prog, args)
@@ -1773,15 +1766,15 @@ fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
-    let lock = c.state.parent().unwrap().join("drive.lock");
-    std::fs::write(&lock, "").unwrap();
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
+        .reply("kill -0 4242", "")
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert!(code == 0 && out.contains("the next pass starts the round"), "{out}");
     assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
-    assert!(lock.exists(), "the pass's lock is left alone");
+    assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
     assert_eq!(
         read(&c.state)
             .unwrap()
@@ -1791,7 +1784,7 @@ fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
         1
     );
 
-    std::fs::remove_file(&lock).unwrap();
+    assert!(herdsman::db::release(&c.state, "drive.lock", None));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());

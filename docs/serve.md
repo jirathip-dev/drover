@@ -11,7 +11,7 @@ every 15 s, for ages) it reads the needs-you cards and the five tabs again and p
 API v1 data (#269: the server builds no HTML but the page shell; the TypeScript board in `web/` draws every tab):
 `event: queue` and `event: host` (the same to every device), `event: needs`, `event: lanes` and `event: chat` per
 audience (paired or not; a stream whose device was removed is closed at the next tick, and the page reconnects
-unpaired). The board draws each and serve.js swaps it in place: open rows stay open, changed rows flash. #259: every event in `events.jsonl` has a monotonic `seq` (written under the log's lock;
+unpaired). The board draws each and serve.js swaps it in place: open rows stay open, changed rows flash. #259: every event in the log has a monotonic `seq` (#344: the database's row number;
 old rows are numbered by line), each new one goes out as `event: ev` (`{seq, ts, k}`, `k` the moment), and every
 message carries `id: <seq>`. A reconnect sends `Last-Event-ID` or `/live?since=N` and gets every event after N
 once (over 500: one `event: refresh`, a full refresh); the page keeps the tab's last seq, drops any seq it has seen
@@ -21,7 +21,7 @@ down) or red (offline). Tapping ↻, or pulling down from the top (past ~70 px),
 the board's other tabs from API v1 again.
 
 Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
-look at everything the board and `status` show and save it as `<state dir>/snapshot.json`: each read's output by
+look at everything the board and `status` show and save it as the `board` row of `state.db`'s snapshots (#344): each read's output by
 command line. Every remote host's reads (verdict files, `git` facts, its herdr's agent list and pane reads) go in one
 ssh call per host per step, a small script that prints each output and exit code; herdsman's ssh keeps one connection
 per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~/.ssh/config` says). Only what decides
@@ -316,8 +316,8 @@ logged, printed or served; the page gets only the public key and each device's l
 Dependencies: the allowed crates are clap, serde, serde_json, toml and anyhow/thiserror, plus, for web
 push only, the pure-Rust RustCrypto set p256, aes-gcm, hkdf, sha2 and base64 (no async, no HTTP
 client), ts-rs behind the `ts` feature for the board's TS types (#375, never in the release build), and, for the
-berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md). CI's deps gate fails on any
-other direct dependency.
+berth runtime only, berth-proto (berth's serde wire types, no I/O; docs/runtimes.md), and rusqlite (bundled SQLite)
+for the state database (#344, docs/architecture.md). CI's deps gate fails on any other direct dependency.
 
 ## JSON API v1 (#265)
 
@@ -380,7 +380,7 @@ read-only view, without pane text or transcripts.
 `--demo` (#39) is the public demo at <https://jirathip-dev.github.io/herdsman/>, built from the synthetic
 `demo/` (3 made-up repos, `fleet.toml`, `events.jsonl`, `cache/` for issue/PR titles and CI, and
 `runner.json`: the canned `herdr agent list`, pane text and host values by command-line prefix). Nothing
-runs: no herdr, no gh, no network. "Now" is a minute after the log's last event, so ages never go stale.
+runs: no herdr, no gh, no network, and `demo/` is never written (#344: the export imports its files into a scratch database). "Now" is a minute after the log's last event, so ages never go stale.
 The page carries a `demo` badge and a one-line note; every form is `inert` and every button, select and
 the reply box disabled; no POST is ever sent, there is no `/live` stream (the dot is a static blue), no
 pairing and no "Enable alerts". The sheet's transcript reads `lane/<agent>.json`, Herd reads the static

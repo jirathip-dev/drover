@@ -141,7 +141,7 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     );
     let subs = webpush::load(&c.state);
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
-    let file = dir.join("state/webpush/subs.json");
+    let file = dir.join("state/state.db"); // #344: the subscriptions' home
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let page = host_tab(&s, ADDR, 1_000_000);
     assert!(

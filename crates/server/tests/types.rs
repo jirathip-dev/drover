@@ -2,7 +2,7 @@
 //! (`export_bindings`), and `tsc --noEmit` checks serde's JSON of each type against the same text (`serde_json_fits_the_types`).
 #![cfg(feature = "ts")]
 use herdsman_server::api::*;
-use herdsman_server::events::{fold, read, Event, IssueState};
+use herdsman_server::events::{fold, Event, IssueState};
 use herdsman_server::{hosts, waiting::Waiting, Ctx};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -127,7 +127,9 @@ fn demo() -> (PathBuf, Vec<Event>) {
         hints: vec![],
     };
     herdsman_server::serve::export(&ctx, &herdsman_server::runner::Real, &d.join("site"), true).unwrap();
-    (d, read(&ctx.state).unwrap())
+    // #344: the committed log itself: the export imports a copy of it, never `demo/`.
+    let log = std::fs::read_to_string(&ctx.state).unwrap();
+    (d, log.lines().map(|l| serde_json::from_str(l).unwrap()).collect())
 }
 
 /// `v` read as `T` and written again is `v`: the type carries every field the server sends.

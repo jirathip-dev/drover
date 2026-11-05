@@ -273,17 +273,17 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", toml]);
     assert_ne!(code, 0, "{out}");
     assert!(
-        !std::fs::read_to_string(&c.state).unwrap().contains(toml),
+        !herdsman::events::jsonl(&c.state).unwrap().contains(toml),
         "never logged"
     );
     std::os::unix::fs::symlink(&c.config, folder.join("link.toml")).unwrap();
     let line = |n: &str, p: &str| {
         format!("{{\"ts\":{T},\"fleet\":\"sendmeter\",\"type\":\"thread-msg\",\"thread\":\"t1\",\"from\":\"conductor\",\"text\":\"x\",\"files\":[{{\"name\":\"{n}\",\"path\":\"{p}\",\"size\":1}}]}}\n")
     };
-    let mut log = std::fs::read_to_string(&c.state).unwrap();
+    let mut log = herdsman::events::jsonl(&c.state).unwrap();
     log += &line("keys.toml", toml);
     log += &line("link.toml", folder.join("link.toml").to_str().unwrap());
-    std::fs::write(&c.state, log).unwrap();
+    rewrite_log(&c.state, &log);
     for n in ["keys.toml", "link.toml"] {
         let res = req(&s, "GET", &format!("/thread/t1/{n}"), "", "", T + 5);
         assert!(res.starts_with("HTTP/1.1 404"), "{n}: {res}");
@@ -594,7 +594,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
         "{res}"
     );
     assert!(
-        std::fs::read_to_string(&c.state)
+        herdsman::events::jsonl(&c.state)
             .unwrap()
             .contains("\"from\":\"owner\",\"text\":\"a long message\""),
         "logged"
@@ -636,7 +636,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
     assert_eq!(body(&res), "retrying\n", "{res}");
     assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
@@ -875,7 +875,7 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
 }
 
 fn log(c: &herdsman::Ctx) -> String {
-    std::fs::read_to_string(&c.state).unwrap_or_default()
+    herdsman::events::jsonl(&c.state).unwrap_or_default()
 }
 
 /// #405: [+ thread] opens an empty thread that logs nothing; its first message starts the thread, titled with the
