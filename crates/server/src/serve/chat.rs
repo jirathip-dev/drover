@@ -177,19 +177,16 @@ fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
     block(ctx.now, "ai", "conductor", s("question"), &body, a.ts)
 }
 
-/// One thread: the bar, its blocks, the live line and the composer (inert on a device that is not a paired owner's).
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
+/// #408: the thread's last `n` messages before seq `before`, each block tagged `data-n` (its event's seq), under
+/// `thread started …` or, older ones left, the marker serve.js loads them from (`thread/<t>?before=`).
+fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, rw: bool, (before, n): (u64, usize)) -> String {
     let id = t.str("thread").unwrap_or_default();
     let dis = or(rw, "", " disabled");
-    let dir = conductor::dir(ctx, cfg, id).display().to_string();
-    let home = crate::config::home().display().to_string();
-    let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
-    let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
-    let mut h = format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>");
-    for e in of(events, id) {
+    let mut h = vec![];
+    for e in of(events, id).filter(|e| e.seq < before) {
         let s = |k| e.str(k).unwrap_or_default();
         let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
-        h += &match (e.kind.as_str(), s("from")) {
+        let b = match (e.kind.as_str(), s("from")) {
             ("thread-msg", "system") => {
                 let rt = format!(" <button type=button class=rty data-n={}{dis}>retry</button>", e.seq);
                 let (r, rt) = if e.str("line").is_some() { (" r", rt) } else { ("", String::new()) };
@@ -227,7 +224,37 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
             ("conductor-sleep", _) => "<p class=qs>☾ asleep after 30 min idle · writes wake it</p>".into(),
             _ => String::new(),
         };
+        if let Some(i) = b.find(' ') {
+            h.push((e.seq, format!("{} data-n={}{}", &b[..i], e.seq, &b[i..])));
+        }
     }
+    let k = h.len().saturating_sub(n);
+    let top = match h.get(k) {
+        Some((s, _)) if k > 0 => format!("<p class=\"qs tmo\" data-b={s}>↑ older messages</p>"),
+        _ => {
+            let dir = conductor::dir(ctx, cfg, id).display().to_string();
+            let home = crate::config::home().display().to_string();
+            let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
+            let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
+            format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>")
+        }
+    };
+    h[k..].iter().fold(top, |a, b| a + &b.1)
+}
+
+/// #408: `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
+pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>, rw: bool) -> Option<String> {
+    let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
+    let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+    let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
+    Some(page(ctx, &cfg, events, t, rw, (before, n)))
+}
+
+/// One thread: the bar, its last 30 messages, the live line and the composer (inert off a paired owner device).
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
+    let id = t.str("thread").unwrap_or_default();
+    let dis = or(rw, "", " disabled");
+    let h = page(ctx, cfg, events, t, rw, (u64::MAX, 30));
     let st = state(events, id, agents);
     let live = match st {
         "choose" => "<b>●</b> waiting for your answer · sleeps after 30 min idle",
