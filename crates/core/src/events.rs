@@ -394,6 +394,7 @@ pub const PASSIVE: &[&str] = &[
     "wip-blocked",
     "stall",
     "orphan-lane",
+    "orphan-issue",
     "outbox-stale",
     "lane-dead",
     "ready-unmerged",

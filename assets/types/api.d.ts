@@ -94,9 +94,15 @@ export type LaneNow = { title: string, w?: string | null, n?: string | null, t?:
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 
 /**
- * A repo's card in colour `k`: its threads newest first, the archived ones apart.
+ * A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's
+ * `harness` chip.
  */
-export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, };
+export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, harness: Chip, };
+
+/**
+ * #404: a composer chip: `name`'s current value `cur` (none: the default) and its choices `all`.
+ */
+export type Chip = { name: string, cur?: string | null, all: Array<string>, };
 
 /**
  * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
@@ -111,9 +117,10 @@ export type Link = { w: string, t: string, };
 
 /**
  * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
- * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`.
+ * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
+ * its model and effort `chips`.
  */
-export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, page: ThreadPage, };
+export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
 
 /**
  * #407: a message queued for the turn's end, by its id `q`.

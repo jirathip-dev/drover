@@ -621,3 +621,66 @@ pub fn scan(
     }
     out
 }
+
+/// #493: the issues `check` guards: impl, fix, review or ready, and each fleet's next startable queued one.
+pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
+    let st = fold(events);
+    let busy = |s: &&IssueState| cfg.fleet.contains_key(&s.fleet) && crate::queue::in_flight(&s.state);
+    let mut out: Vec<IssueState> = st.values().filter(busy).cloned().collect();
+    for f in cfg.fleet.keys() {
+        let Some(n) = crate::queue::startable(events, f).first().and_then(|n| n.parse().ok()) else {
+            continue;
+        };
+        let q = events
+            .iter()
+            .rfind(|e| e.kind == "queue" && e.fleet == *f)
+            .map_or(0, |e| e.ts);
+        let s = st.get(&(f.clone(), n)).cloned().unwrap_or_else(|| IssueState {
+            fleet: f.clone(),
+            issue: n,
+            state: "queued".into(),
+            ..Default::default()
+        });
+        out.push(IssueState {
+            last_ts: s.last_ts.max(q),
+            ..s
+        });
+    }
+    out
+}
+
+/// #493: a refusal that stops drive's starts for every fleet (`CAP`: its own); the queue waits on it.
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
+pub const ORPHAN_SECS: u64 = 1800;
+
+/// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it
+/// (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).
+pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Value], now: u64) -> Option<u64> {
+    let working = |l: &String| {
+        agents
+            .iter()
+            .any(|a| a["name"] == l.as_str() && a["agent_status"] == "working")
+    };
+    let asked = |a: &&Event| {
+        a.fleet == s.fleet && (a.issue == Some(s.issue) || s.lanes.values().any(|l| a.str("agent") == Some(l)))
+    };
+    let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
+    let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
+    let held = crate::events::held_on(log.all, s).is_some();
+    if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
+        return None;
+    }
+    let (mut since, mut seen) = (s.last_ts, false);
+    for e in log.all.iter().filter(|e| e.kind == "drive-pass") {
+        seen |= e.fleet == s.fleet;
+        for a in e.data.get("actions").and_then(Value::as_array).into_iter().flatten() {
+            let code = a["code"].as_str().unwrap_or_default();
+            let wait = HOST_WAIT.contains(&code) || code == "CAP" && e.fleet == s.fleet;
+            if e.fleet == s.fleet && a["issue"] == s.issue || s.state == "queued" && wait {
+                since = since.max(e.ts);
+            }
+        }
+    }
+    // A fleet drive never passed is driven by hand.
+    (seen && now >= since + ORPHAN_SECS).then_some(since)
+}
