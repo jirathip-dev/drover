@@ -119,7 +119,8 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                 t.iter()
                     .map(|w| w.rsplit('>').next().unwrap_or(w))
                     .filter(|w| protected_path(w, p).is_some())
-                    .all(|w| own_file(w, p))
+                    // The shell expands braces, globs, variables and escapes after this check sees the word.
+                    .all(|w| !expand_home(w).contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(w, p))
             };
             if writes && !own() {
                 return Some(format!(

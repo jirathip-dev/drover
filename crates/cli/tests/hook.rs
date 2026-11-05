@@ -550,6 +550,13 @@ fn a_conductors_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/../t5/a.png"),
         format!("cp {c}/t6/a.png {s}/fleet.toml"),
         format!("rm {s}/events.jsonl"),
+        // The shell expands these after the check: another thread's folder, herdsman's `.thread.md`.
+        format!("cp x {c}/t6/{{a.png,../t5/x}}"),
+        format!("cp x {c}/t6/{{.thread,x}}.md"),
+        format!("rm -f {c}/t6/.thread.m?"),
+        format!("rm -f {c}/t6/.[t]hread.md"),
+        format!("rm -f {c}/t6/\\.thread.md"),
+        format!("cp x {c}/t6/$T"),
     ] {
         assert!(sh(&cmd).contains("is blocked"), "{cmd}");
     }
