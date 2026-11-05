@@ -657,8 +657,8 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     };
     let r = fake(2.0, 0.1);
     write(vec![rows[0]
-        .replace("sendmeter", "berth")
-        .replace("jirathip-dev/berth", "jirathip-dev/other")]);
+        .replace("sendmeter", "shed")
+        .replace("jirathip-dev/shed", "jirathip-dev/other")]);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("bazzite"),

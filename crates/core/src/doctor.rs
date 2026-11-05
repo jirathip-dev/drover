@@ -46,6 +46,12 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool) -> Res
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
+    if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
+        let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
+        rows.push(format!(
+            "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
+        ));
+    }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line); // #333
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
