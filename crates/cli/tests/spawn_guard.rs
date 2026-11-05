@@ -847,6 +847,8 @@ const TRUST_CURSOR: &str = " Accessing workspace:
 
  Enter to confirm · Esc to cancel
 ";
+/// #484: the raw `herdr pane read --source visible` of a failed start: the shell's own `❯` prompts above the menu.
+const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const TRUST_1X: &str = "╭──────────────────────────────────────────╮\n│ Do you trust the files in this folder?   │\n│                                          │\n│ /tmp/cooee/design-1                      │\n│                                          │\n│ ❯ 1. Yes, proceed                        │\n│   2. No, exit                            │\n╰──────────────────────────────────────────╯\n   Enter to confirm · Esc to exit\n";
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
@@ -858,6 +860,7 @@ fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
         (TRUST_1X, "folder-trust", &["1"]),
         (BYPASS, "bypass-permissions", &["2"]),
         (TRUST_CURSOR, "folder-trust", &["Down", "Enter"]),
+        (TRUST_LIVE, "folder-trust", &["Down", "Enter"]),
     ] {
         let (_d, c) = claude_ctx("first-start");
         let up =
