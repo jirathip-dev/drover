@@ -732,6 +732,8 @@ impl<'a> Server<'a> {
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") {
                     140 << 20 // #405: up to 10 files a message
+                } else if h.starts_with("POST /report ") {
+                    3 << 20 // #363: a report carries its screenshot
                 } else {
                     32_768
                 };
@@ -1101,7 +1103,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread" | "/report")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1147,7 +1149,7 @@ impl<'a> Server<'a> {
         devices::find(ctx, header(head, "cookie").unwrap_or_default())
     }
 
-    /// The reply box (or a blocked menu's option, or a sheet action): a paired device (cookie) prompts one agent, at most 10 sends a minute.
+    /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
     fn send(&self, ctx: &Ctx, head: &str, f: &BTreeMap<String, String>, path: &str) -> (&'static str, String) {
         let Some(dev) = self.device(ctx, head) else {
             return ("401 Unauthorized", "pair this device: tap Pair this phone".into());
@@ -1172,6 +1174,8 @@ impl<'a> Server<'a> {
             self.pick(ctx, &dev, &body(f))
         } else if act {
             self.act(ctx, &dev, &body(f))
+        } else if path == "/report" {
+            Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(

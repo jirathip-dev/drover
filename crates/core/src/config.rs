@@ -545,11 +545,13 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
-    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says.
+    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says;
+    /// #363: so does a board report, to each notifier but the phones'.
     pub fn wants(&self, kind: &str) -> bool {
         self.on.iter().any(|k| k == kind)
             || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
             || matches!(kind, "land-paused" | "reverted" | "revert-failed")
+            || kind == "report" && !self.webpush()
     }
 }
 
