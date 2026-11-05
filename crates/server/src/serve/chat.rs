@@ -36,6 +36,28 @@ fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
     of(events, id).find(|e| e.kind == "needs-decision" && closed(events, e).is_none())
 }
 
+/// #407: a queued message's id, and its files.
+fn qid(e: &Event) -> u64 {
+    e.data.get("q").and_then(Value::as_u64).unwrap_or(e.seq)
+}
+fn qfiles(e: &Event) -> Vec<Value> {
+    files_of(e).cloned().collect()
+}
+
+/// #407: the thread's queued messages, oldest first, by id (their first `thread-queue`'s seq; an edit names it `q`).
+fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
+    let mut q = BTreeMap::new();
+    for e in of(events, id) {
+        let n = qid(e);
+        match e.kind.as_str() {
+            "thread-queue" => drop(q.insert(n, e)),
+            "thread-unqueue" => drop(q.remove(&n)),
+            _ => {}
+        }
+    }
+    q
+}
+
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
 fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
     let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
@@ -179,10 +201,35 @@ fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
 
 /// #408: the thread's last `n` messages before seq `before`, each block tagged `data-n` (its event's seq), under
 /// `thread started …` or, older ones left, the marker serve.js loads them from (`thread/<t>?before=`).
-fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, rw: bool, (before, n): (u64, usize)) -> String {
+fn page(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    t: &Event,
+    rw: bool,
+    (before, n): (u64, usize),
+    open: u64,
+) -> String {
     let id = t.str("thread").unwrap_or_default();
     let dis = or(rw, "", " disabled");
     let mut h = vec![];
+    // #407: a finished turn's commands fold, each run of them one `▸ N commands` row (tagged as its first command); a
+    // run after `open` (the live turn's start) stays rows.
+    let tag = |n: u64, b: &str| b.find(' ').map(|i| format!("{} data-n={n}{}", &b[..i], &b[i..]));
+    let fold = |h: &mut Vec<(u64, String)>, run: &mut Vec<(u64, String)>| {
+        let Some(&(f, _)) = run.first() else { return };
+        if f > open {
+            h.extend(run.drain(..).filter_map(|(n, b)| Some((n, tag(n, &b)?))));
+            return;
+        }
+        let (n, rows) = (run.len(), run.drain(..).map(|r| r.1).collect::<String>());
+        let s = or(n == 1, "", "s");
+        let sum = format!(
+            "<details class=\"blk fold\"><summary><span class=pv>{n} command{s}</span></summary>{rows}</details>"
+        );
+        h.extend(tag(f, &sum).map(|b| (f, b)));
+    };
+    let mut run = vec![];
     for e in of(events, id).filter(|e| e.seq < before) {
         let s = |k| e.str(k).unwrap_or_default();
         let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
@@ -200,7 +247,8 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, rw: bool, (before,
                     _ if !lk.is_empty() => ("ai", lk.trim_end()),
                     _ => ("me", "you"),
                 };
-                let body = format!("<div class=md>{}</div>{}", prose(s("text")), files(id, e));
+                let (md, p) = (esc(s("text")), prose(s("text"))); // #407: the message menu's [copy as markdown]
+                let body = format!("<div class=md data-md=\"{md}\">{p}</div>{}", files(id, e));
                 block(ctx.now, k, who, s("text"), &body, e.ts)
             }
             ("thread-cmd", _) => format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>{}</span><i class=cv></i></summary></details>", esc(s("cmd"))),
@@ -224,10 +272,14 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, rw: bool, (before,
             ("conductor-sleep", _) => "<p class=qs>☾ asleep after 30 min idle · writes wake it</p>".into(),
             _ => String::new(),
         };
-        if let Some(i) = b.find(' ') {
-            h.push((e.seq, format!("{} data-n={}{}", &b[..i], e.seq, &b[i..])));
+        if e.kind == "thread-cmd" {
+            run.push((e.seq, b));
+        } else if let Some(b) = tag(e.seq, &b) {
+            fold(&mut h, &mut run);
+            h.push((e.seq, b));
         }
     }
+    fold(&mut h, &mut run);
     let k = h.len().saturating_sub(n);
     let top = match h.get(k) {
         Some((s, _)) if k > 0 => format!("<p class=\"qs tmo\" data-b={s}>↑ older messages</p>"),
@@ -247,15 +299,18 @@ pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>
     let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
-    Some(page(ctx, &cfg, events, t, rw, (before, n)))
+    Some(page(ctx, &cfg, events, t, rw, (before, n), u64::MAX))
 }
 
 /// One thread: the bar, its last 30 messages, the live line and the composer (inert off a paired owner device).
 fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
     let id = t.str("thread").unwrap_or_default();
     let dis = or(rw, "", " disabled");
-    let h = page(ctx, cfg, events, t, rw, (u64::MAX, 30));
     let st = state(events, id, agents);
+    let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
+    let turn = of(events, id).rfind(me).map_or((0, t.ts), |e| (e.seq, e.ts));
+    let open = if st == "working" { turn.0 } else { u64::MAX };
+    let h = page(ctx, cfg, events, t, rw, (u64::MAX, 30), open);
     let live = match st {
         "choose" => "<b>●</b> waiting for your answer · sleeps after 30 min idle",
         "working" => "<i class=tld aria-hidden=true></i> working", // #403: serve.js puts the theme's loading art in
@@ -273,18 +328,35 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
     let title = esc(conductor::title(events, id));
     let dot = or(matches!(st, "asleep" | "new"), "", "<i class=dt></i>");
     let guest = or(rw, "", "<p class=\"ns m\">pair this phone to answer or write</p>");
+    // #407: working, serve.js floats the line as a pill above the box, timed from the turn's start.
+    let tl = if st == "working" {
+        format!("\"tlv wk\" data-since={}", turn.1)
+    } else {
+        "tlv".into()
+    };
     format!(
         "<div class=cvp data-t=\"{id}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>{title}</b><span class=ds>{dot}{ds}</span></div></div>\
-         <div class=tc>{h}</div><p class=tlv>{live}</p>{guest}{}</div>",
-        composer(id, "", dis)
+         <div class=tc>{h}</div><p class={tl}>{live}</p>{guest}{}</div>",
+        composer(id, "", &queue(events, id, dis), dis)
     )
 }
 
-/// The composer: [+] attaches files (#405: several, up to 10), the box, [send].
-fn composer(id: &str, repo: &str, dis: &str) -> String {
+/// #407: the queued messages above the box, each with [send now] (steer it in), edit and [remove].
+fn queue(events: &[Event], id: &str, dis: &str) -> String {
+    let b = |n: &str, l: &str| format!("<button type=button name={n}{dis}>{l}</button>");
+    let (now, ed, rm) = (b("qn", "send now"), b("qe", "edit"), b("qx", "remove"));
+    let row = |(q, e): (&u64, &&Event)| {
+        let t = esc(e.str("text").unwrap_or_default());
+        format!("<div class=tq data-q={q}><p title=\"{t}\">{t}</p><span class=btns>{now}{ed}{rm}</span></div>")
+    };
+    queued(events, id).iter().map(row).collect()
+}
+
+/// The composer: [+] attaches files (#405: several, up to 10), the box, [send]; #407: the queued messages above.
+fn composer(id: &str, repo: &str, qd: &str, dis: &str) -> String {
     format!(
-        "<form class=tw data-t=\"{id}\"{repo}><input type=file multiple hidden{dis}><button type=button class=add aria-label=\"attach images or files\"{dis}>+</button>\
-         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button{dis}>send</button></form>"
+        "<form class=tw data-t=\"{id}\"{repo}>{qd}<input type=file multiple hidden{dis}><button type=button class=add aria-label=\"attach images or files\"{dis}>+</button>\
+         <textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\"{dis}></textarea><button class=snd{dis}>send</button></form>"
     )
 }
 
@@ -295,7 +367,7 @@ fn draft(repo: &str, dis: &str) -> String {
         "<div class=cvp data-t=\"new-{r}\"><div class=th><button type=button class=bk aria-label=\"back to threads\">‹</button><div><b>new thread</b><span class=ds>{}</span></div></div>\
          <div class=tc></div><p class=tlv>your first message starts it; its first line is the title</p>{}</div>",
         or(repo == "all", "all repos", &r),
-        composer(&format!("new-{r}"), &format!(" data-repo=\"{r}\""), dis)
+        composer(&format!("new-{r}"), &format!(" data-repo=\"{r}\""), "", dis)
     )
 }
 
@@ -450,7 +522,9 @@ pub fn post(
     let (id, mut out) = (g("t"), vec![]);
     match g("op") {
         // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
-        "new" | "say" => {
+        // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
+        // ones come); `steer` interrupts the turn (Esc) and sends it now (`q`: queued message q's text and files).
+        "new" | "say" | "queue" | "steer" => {
             let mut names = g("name").split('/').map(|n| n.replace(char::is_control, ""));
             let data = g("data").split(',').filter(|d| !d.is_empty());
             let decode = |d| {
@@ -473,9 +547,48 @@ pub fn post(
                 conductor::find(&events, id)?;
                 id.to_string()
             };
-            let files = conductor::upload(ctx, &cfg, &id, &files)?;
-            later.push(conductor::post(ctx, &cfg, (&id, text, &files), ("owner", false))?);
+            let mut files = conductor::upload(ctx, &cfg, &id, &files)?;
+            let q = g("q").parse::<u64>().ok();
+            let old = q
+                .and_then(|q| queued(&events, &id).remove(&q))
+                .context("no such queued message");
+            let mut text = text.to_string();
+            if g("op") == "queue" {
+                conductor::text_ok(&text)?;
+                let mut d = json!({"thread": id, "text": text, "files": files});
+                if let Ok(o) = old {
+                    d["q"] = json!(q);
+                    (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+                }
+                let t = conductor::find(&events, &id)?;
+                crate::events::append(&ctx.state, &Event::new(ctx.now, &t.fleet, None, "thread-queue", d))?;
+                return Ok("queued".into());
+            }
+            if g("op") == "steer" {
+                if q.is_some() {
+                    let o = old?;
+                    text = o.str("text").unwrap_or_default().into();
+                    files = qfiles(o);
+                    unqueue(ctx, o, "sent")?;
+                }
+                stop(r, &events, &id);
+            }
+            later.push(conductor::post(ctx, &cfg, (&id, &text, &files), ("owner", false))?);
             Ok(if new { format!("{id} started") } else { "sent".into() })
+        }
+        "unqueue" => {
+            let q = g("q").parse::<u64>().unwrap_or_default();
+            unqueue(
+                ctx,
+                queued(&events, id).remove(&q).context("no such queued message")?,
+                "removed",
+            )?;
+            Ok("removed".into())
+        }
+        "stop" => {
+            conductor::find(&events, id)?;
+            stop(r, &events, id);
+            Ok("stopping".into())
         }
         "archive" | "restore" => {
             conductor::archive(ctx, &cfg, r, id, g("op") == "archive")?;
@@ -503,6 +616,49 @@ pub fn post(
         }
         op => bail!("unknown thread op `{op}`"),
     }
+}
+
+/// #407: queued message `e` leaves the queue: `sent` or `removed`.
+fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
+    let d = json!({"thread": e.str("thread"), "q": qid(e), "why": why});
+    crate::events::append(&ctx.state, &Event::new(ctx.now, &e.fleet, None, "thread-unqueue", d))
+}
+
+/// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
+fn stop(r: &dyn Runner, events: &[Event], id: &str) {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+        drop(crate::herdr::keys(r, p, "Escape"));
+    }
+}
+
+/// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
+/// the owner's and unqueued; the lines for `deliver`.
+pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
+    let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), crate::events::read(&ctx.state)) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for t in events.iter().filter(|e| e.kind == "thread-new") {
+        let id = t.str("thread").unwrap_or_default();
+        for e in queued(&events, id)
+            .values()
+            .take_while(|_| state(&events, id, agents) != "working")
+        {
+            let files = qfiles(e);
+            let sent = unqueue(ctx, e, "sent");
+            let p = sent.and_then(|()| {
+                conductor::post(
+                    ctx,
+                    &cfg,
+                    (id, e.str("text").unwrap_or_default(), &files),
+                    ("owner", false),
+                )
+            });
+            out.extend(p.ok());
+        }
+    }
+    out
 }
 
 /// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose
