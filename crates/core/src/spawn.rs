@@ -508,10 +508,14 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
 ];
 
+/// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
+pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
-    let made = ["ui-390/", "node_modules/"];
-    let own = |l: &&str| OWN_FILES.iter().chain(&made).any(|f| l.trim_end() == format!("?? {f}"));
+    let own = |l: &&str| {
+        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/"])).any(|f| l.trim_end() == format!("?? {f}"))
+    };
     st.lines().filter(|l| !own(l)).count()
 }
 
