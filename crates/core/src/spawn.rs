@@ -182,10 +182,10 @@ impl Plan {
 
 /// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
 /// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
+pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
     for (var, fleet, name) in p.secrets() {
-        let v = crate::secret::lookup(on, fleet, &name)?;
+        let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
         let why =
             || format!("{var}: secret {name} is not in the store (`herdsman accounts import` or a secret request)");
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
@@ -899,7 +899,7 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = deliver(&on, &p)?;
+    let _secrets = deliver(&on, cfg, &p)?;
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
     let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
         Err(e) if format!("{e:#}").contains("workspace_not_found") => {

@@ -71,6 +71,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events)?;
+    // #539: a retired config key still set alerts once per key.
+    for (k, w) in cfg.warnings() {
+        let d = json!({"key": k, "reason": format!("{k} is {w}")});
+        fire(ctx, cfg, out, &events, ("herdsman", None), "config-warning", d)?;
+    }
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
         // #429: integration within `warn_within` of its line cap: once per integration sha.
