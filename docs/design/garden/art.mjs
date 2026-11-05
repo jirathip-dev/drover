@@ -694,7 +694,7 @@ export function favicon(size = 32) {
 // ---- ascii (#335): the Lanes cells (≤ 3 lines of 8), the row figures (≤ 3 characters), the Host load, the loading frames ----
 export const ASCII = {
   impl: ' o~. \\|/\n |=|  |\n     \\_/', fix: ' 8<  \\|/\n      |/\n     \\_/', rev: ' (o) \\|/\n   \\  |\n     \\_/',
-  update: ' =.  \\|/\n [#]  |\n     \\_/', idle: ' c[]  \\|/\n       |\n      \\_/', done: ' *  \\Y/*\n    \\|/\n    \\_/', blocked: ' !  ,  ,\n    \\|/\n    \\_/',
+  update: ' =.  \\|/\n [#]  |\n     \\_/', idle: ' c[] \\|/\n      |\n     \\_/', done: ' *  \\Y/*\n    \\|/\n    \\_/', blocked: ' !  ,  ,\n    \\|/\n    \\_/',
 };
 export const ASCII_ROWS = { impl: '~.Y', fix: '8<Y', rev: 'oY.', update: '=uY', idle: 'c.Y', done: '*Y*', blocked: ',v,' };
 export const ASCII_STAGES = { queued: '[v]', impl: '.v.', review: 'vYv', fix: 'vY,', ready: '\\Y/', merged: '/Y\\', blocked: ',v,' };

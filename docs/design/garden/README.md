@@ -51,6 +51,7 @@ light/dark setting. `?s=light` or `?s=dark` pins one. `?still=1` or Reduce Motio
 | `schemes/garden-{light,dark}.json` | the two proposed schemes (phase 2 copies them to `assets/schemes/`) |
 | `gate.mjs`, `check.mjs` | serve.js's scheme gate, ported line for line; `node check.mjs` exits 1 on a fail |
 | `scheme.mjs`, `garden.css` | mockup only: applies a scheme as serve.js's head script does; the frame loop and light layers |
+| `build.mjs` | phase 2: writes `assets/themes/garden/` (sprites.svg, scene.svg, theme.json, icons) and `assets/schemes/garden-*.json` from `art.mjs`: `node docs/design/garden/build.mjs` |
 | `shoot.mjs` | regenerates every PNG: `node shoot.mjs <chrome-headless-shell>` (Chrome over a pipe, via `../theme-370/cdp.mjs`) |
 
 ## What it shows
