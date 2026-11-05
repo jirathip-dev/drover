@@ -719,7 +719,8 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
 }
 
 /// #408 in WebKit on a real server: the thread opens with 30 messages; scrolled to the top it loads 30 more each time
-/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header;
+/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header
+/// (#443: on a phone only the messages scroll, never the page);
 /// a message sent (the live update) keeps every page loaded.
 #[test]
 fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
@@ -738,18 +739,18 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
         const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
         (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
-          for (const k of [60, 90, 100]) { scrollTo(0, 1e6); await new Promise(r => setTimeout(r, 100)); scrollTo(0, 0); const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
+          for (const k of [60, 90, 100]) { tc().scrollTop = 1e6; await new Promise(r => setTimeout(r, 100)); tc().scrollTop = 0; const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
             await until(() => n() >= k); at.push(n(), +(Math.abs(a.getBoundingClientRect().top - y) > 1)); await new Promise(r => setTimeout(r, 200)); } \
           at.push(+!!tc().querySelector('.tmo'), +tc().firstElementChild.textContent.startsWith('thread started')); \
-          scrollTo(0, document.documentElement.scrollHeight / 2); await new Promise(r => setTimeout(r, 200)); \
+          tc().scrollTop = tc().scrollHeight / 2; await new Promise(r => setTimeout(r, 200)); \
           const th = $('#chat .cvp[data-t=\"t1\"] .th'), r = th.getBoundingClientRect(); \
-          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(scrollY > innerHeight)); \
+          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(tc().scrollTop > innerHeight && !document.scrollingElement.scrollTop)); \
           const f = $('#chat .tw[data-t=\"t1\"]'); f.elements.text.value = 'a new one'; f.requestSubmit(); \
           await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
     let png = tmpdir("chat-window-png").join("thread.png");
     let o = swift()
-        .env("HERDSMAN_WAIT", "8")
+        .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
@@ -766,7 +767,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
     // 30 open; 60, 90, 100 loaded, each with no jump; no marker, the start line; the header right under the page's,
-    // on top, the page scrolled; after the send: m1 still first under the start line, the new message in, no errors.
+    // on top, the messages scrolled (the page not); after the send: m1 still first under the start line, the new message in, no errors.
     assert_eq!(
         m,
         [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
@@ -1142,6 +1143,83 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     );
 }
 
+/// #443: WebKit at 390 × 844, a long thread on a paired phone; the keyboard (a 336 px `visualViewport` shrink, as
+/// iOS reports it) opens with the box focused: the composer's bottom is the visual viewport's, the page never scrolls,
+/// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
+#[test]
+fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
+    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let (c, cookie) = long("chat-kb", 30, now);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
+    // is read once it holds, or as it is after 2 s.)
+    // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
+    // (1/0) and how far its top moved against the box's top.
+    let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
+          while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
+          chatOpen('t1'); \
+          const frame = () => new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); st(r, 300); }); await frame(); \
+          const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
+          const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
+          const kb = h => { Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - h }); vv.dispatchEvent(new Event('resize')); }; \
+          const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
+          const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
+            const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
+            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
+          box.focus(); kb(336); await look(); \
+          box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
+          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
+          box.focus(); kb(336); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
+          at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
+    let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
+        std::path::Path::new(&p).join("chat-kb.png")
+    });
+    let o = swift()
+        .env("HERDSMAN_WAIT", "12")
+        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .args([
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
+            &format!("http://{addr}/"),
+            "390",
+            "chat",
+            "scene",
+            png.to_str().unwrap(),
+            js,
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+    assert_eq!(m.len(), 18, "{out}");
+    assert_eq!(m[0], 1.0, "the thread starts scrolled to its end: {out}");
+    for (i, s) in m[1..17].chunks(4).enumerate() {
+        let what = ["keyboard up", "box grown", "keyboard down", "keyboard up again"][i];
+        assert!(
+            s[0] <= 1.0,
+            "{what}: the composer is {} px off the keyboard or tab bar ({out})",
+            s[0]
+        );
+        assert_eq!(s[1], 0.0, "{what}: the page scrolled ({out})");
+        assert_eq!(s[2], 1.0, "{what}: another message above the box ({out})");
+        assert!(
+            s[3] <= 1.0,
+            "{what}: the message above the box moved {} px ({out})",
+            s[3]
+        );
+    }
+    assert_eq!(m[17], 0.0, "page errors: {out}");
+}
+
 /// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
 struct Flip(Fake, std::sync::atomic::AtomicBool);
 impl herdsman::runner::Runner for Flip {
@@ -1425,7 +1503,7 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
 /// it (`thread=t1`; hidden, a stream without it). The thread follows its end on a live update until your own drag
 /// leaves the end (a programmatic scroll does not), a live update then leaves you where you read, back at the end it
 /// follows again, and a send turns it on. A thread's draft and picked file survive a reload (an iframe of the same
-/// page), and a failed send keeps the draft.
+/// page), and a failed send keeps the draft. (#443: at 390 px the thread's messages scroll, never the page.)
 #[test]
 fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
     if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
@@ -1457,14 +1535,14 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
           at.push(+urls.slice(n).some(u => !u.includes('thread='))); \
           Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); \
           const tev = k => Object.defineProperty(new Event(k), 'touches', { value: [{ clientX: 200, clientY: 400 }] }); \
-          const de = document.documentElement, end = () => +(Math.abs(scrollY + innerHeight - de.scrollHeight) <= 2); \
+          const sc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), end = () => +(Math.abs(sc().scrollTop + sc().clientHeight - sc().scrollHeight) <= 2); \
           const more = () => { const k = $('#chat').cloneNode(true); for (let i = 0; i < 8; i++) k.querySelector('.cvp[data-t=\"t1\"] .tc').append(Object.assign(document.createElement('p'), { className: 'qs', textContent: 'a streamed line ' + i })); frag('chat', k.innerHTML); }; \
           more(); more(); await nap(100); at.push(end()); \
-          scrollTo(0, 200); await nap(100); more(); await nap(100); at.push(end()); \
-          dispatchEvent(tev('touchstart')); scrollTo(0, 200); await nap(100); dispatchEvent(tev('touchend')); \
-          more(); await nap(100); at.push(+(scrollY === 200), +!FOL); \
-          scrollTo(0, de.scrollHeight); await nap(100); more(); await nap(100); at.push(end(), +FOL); \
-          dispatchEvent(tev('touchstart')); scrollTo(0, 100); await nap(100); dispatchEvent(tev('touchend')); \
+          sc().scrollTop = 200; await nap(100); more(); await nap(100); at.push(end()); \
+          dispatchEvent(tev('touchstart')); sc().scrollTop = 200; await nap(100); dispatchEvent(tev('touchend')); \
+          more(); await nap(100); at.push(+(sc().scrollTop === 200), +!FOL); \
+          sc().scrollTop = sc().scrollHeight; await nap(100); more(); await nap(100); at.push(end(), +FOL); \
+          dispatchEvent(tev('touchstart')); sc().scrollTop = 100; await nap(100); dispatchEvent(tev('touchend')); \
           const f = $('#chat .tw[data-t=\"t1\"]'), box = f.elements.text; \
           box.value = 'a draft'; box.dispatchEvent(new Event('input', { bubbles: true })); \
           const i = f.querySelector('input[type=file]'), d = new DataTransfer(); d.items.add(new File(['x'], 'notes.txt', { type: 'text/plain' })); \
