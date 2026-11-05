@@ -34,11 +34,23 @@ const CM: [&str; 3] = [
 pub struct On<'a> {
     pub r: &'a dyn Runner,
     pub machine: Option<&'a str>,
+    connect: &'static str,
 }
 
 impl<'a> On<'a> {
     pub fn new(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
-        On { r, machine }
+        On {
+            r,
+            machine,
+            connect: "-oConnectTimeout=10",
+        }
+    }
+    /// #485: a maintenance call that must not hold up a pass: a 5 s connect timeout.
+    pub fn quick(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
+        On {
+            connect: "-oConnectTimeout=5",
+            ..Self::new(r, machine)
+        }
     }
     /// The host a `spawn` event's lane runs on (none: this one).
     pub fn of(r: &'a dyn Runner, e: Option<&'a Event>) -> Self {
@@ -54,16 +66,7 @@ impl<'a> On<'a> {
         }
         let line = quote(prog, args);
         // #337: one connection per host, kept 10 min, whatever the user's ssh config says.
-        let ssh = argv(&[
-            "-oBatchMode=yes",
-            "-oConnectTimeout=10",
-            CM[0],
-            CM[1],
-            CM[2],
-            m,
-            "--",
-            &line,
-        ]);
+        let ssh = argv(&["-oBatchMode=yes", self.connect, CM[0], CM[1], CM[2], m, "--", &line]);
         ("ssh".into(), ssh)
     }
     fn sh(&self, script: &str, p: &Path, input: &str) -> Result<Out> {

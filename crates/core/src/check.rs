@@ -700,15 +700,26 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
-    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
-        if let Err(e) = trim_on(&On::new(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
-            writeln!(out, "builds: {name}: {e:#}")?;
-        }
-    }
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+/// #438: each enabled remote host's shared build folder trimmed to `build_budget_gb`; #485: after the tick's drive,
+/// one quick ssh per host (a disabled or offline one never holds the pass up).
+pub fn trim_hosts(cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let mut tried = std::collections::BTreeSet::new();
+    let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
+    for (name, m) in hosts.filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if !tried.insert(m) {
+            continue;
+        }
+        if let Err(e) = trim_on(&On::quick(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
+            writeln!(out, "builds: {name}: {e:#}")?;
+        }
+    }
+    Ok(())
 }
 
 /// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose

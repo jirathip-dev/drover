@@ -192,7 +192,7 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
 }
 
-/// `herdsman tick`: `check`, then `drive` (under #92's lock), then an hourly alert per red Services row.
+/// `herdsman tick`: `check`, then `drive` (under #92's lock), remote build trims, then an hourly alert per red Services row.
 /// A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and exits 1.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
@@ -216,6 +216,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             }
         }
         let driven = drive::drive(ctx, cfg, r, out, None, false, false);
+        crate::check::trim_hosts(cfg, r, out)?; // #485: maintenance after drive, never before it
         crate::lesson::weekly(ctx, cfg, r, out)?; // #419
         driven
     });
