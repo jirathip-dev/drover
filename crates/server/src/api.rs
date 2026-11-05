@@ -94,18 +94,236 @@ pub struct Moment {
     pub n: Option<u64>,
 }
 
-/// `/live`'s `frag`: a fragment's new HTML.
-pub struct Frag {
-    pub id: String,
-    pub html: String,
+/// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's `age` (once over 2 min),
+/// the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board
+/// takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue;
+/// `pair`: the page offers Pair this phone.
+#[allow(clippy::struct_excessive_bools)] // flags the cards' markup reads, one each
+pub struct NeedsTab {
+    pub now: u64,
+    pub rw: bool,
+    pub live: bool,
+    pub paired: bool,
+    pub pair: bool,
+    pub mtime: String,
+    pub age: Option<String>,
+    pub choosing: usize,
+    pub asks: Vec<NeedAsk>,
+    pub blocked: Vec<Blocked>,
+    pub issues: Vec<NeedIssue>,
 }
 
-/// #351: `/live`'s `patch`: a `frag` as length `n`, common prefix `p` and the changed pieces by index.
-pub struct Patch {
+/// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
+/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th).
+pub struct NeedAsk {
+    pub ask: Ask,
+    pub who: String,
+    pub kind: String,
+    pub from: Option<String>,
+    pub pngs: Vec<String>,
+}
+
+/// A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
+/// else a harness `menu`, or the pane's last lines (`tail`).
+pub struct Blocked {
+    pub name: String,
+    pub who: String,
+    pub push: bool,
+    pub activity: Option<String>,
+    pub menu: Option<Menu>,
+    pub tail: Option<String>,
+}
+
+/// A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and
+/// options, `h` the hash of the menu the card shows (`POST /answer`).
+pub struct Menu {
+    pub title: String,
+    pub reason: String,
+    pub command: String,
+    pub countdown: Option<u64>,
+    pub question: String,
+    pub options: Vec<String>,
+    pub h: String,
+}
+
+/// #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last
+/// verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is
+/// not configured), `mergeable` and `merge` (merge anyway is offered).
+pub struct NeedIssue {
+    pub fleet: String,
+    pub issue: u64,
+    pub pending: bool,
+    pub who: String,
+    pub title: String,
+    pub why: String,
+    pub pass: Option<String>,
+    pub stale: bool,
+    pub fail: String,
+    pub pr: PrLine,
+    pub repo: Option<String>,
+    pub mergeable: String,
+    pub merge: bool,
+}
+
+/// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
+/// fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
+#[allow(clippy::struct_excessive_bools)] // flags the rows' markup reads, one each
+pub struct LanesTab {
+    pub now: u64,
+    pub rw: bool,
+    pub live: bool,
+    pub paired: bool,
+    pub pair: bool,
+    pub error: Option<String>,
+    pub failed: bool,
+    pub sections: Vec<LaneSection>,
+}
+
+/// A state section (`tone`) and its repo groups.
+pub struct LaneSection {
+    pub name: String,
+    pub tone: String,
+    pub repos: Vec<LaneRepo>,
+}
+
+pub struct LaneRepo {
+    pub name: String,
+    pub lanes: Vec<LaneRow>,
+}
+
+/// A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, `atone` and `coat`), name, `state` in `tone` for
+/// `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor
+/// `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
+/// fleet is not configured), `dead` and the blocked card.
+pub struct LaneRow {
+    pub name: String,
+    pub role: String,
+    pub state: String,
+    pub act: String,
+    pub atone: String,
+    pub coat: String,
+    pub tone: String,
+    pub ago: String,
+    pub why: Option<String>,
+    pub why_tone: String,
+    pub activity: String,
+    pub now: Option<LaneNow>,
+    pub gone: bool,
+    pub thread: Option<String>,
+    pub head: String,
+    pub shown: String,
+    pub facts: String,
+    pub issue: Option<u64>,
+    pub pr: Option<PrLine>,
+    pub repo: Option<String>,
+    pub dead: bool,
+    pub blocked: Option<Blocked>,
+}
+
+/// #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
+pub struct LaneNow {
+    pub title: String,
+    pub w: Option<String>,
+    pub n: Option<String>,
+    pub t: Option<String>,
+}
+
+/// #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's
+/// view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+pub struct ChatTab {
+    pub now: u64,
+    pub rw: bool,
+    pub error: Option<String>,
+    pub repos: Vec<ChatRepo>,
+    pub threads: Vec<ThreadView>,
+}
+
+/// A repo's card in colour `k`: its threads newest first, the archived ones apart.
+pub struct ChatRepo {
+    pub repo: String,
+    pub k: String,
+    pub rows: Vec<ThreadRow>,
+    pub archived: Vec<ThreadRow>,
+}
+
+/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line.
+pub struct ThreadRow {
     pub id: String,
-    pub n: usize,
-    pub p: usize,
-    pub set: BTreeMap<String, String>,
+    pub title: String,
+    pub age: String,
+    pub unread: bool,
+    pub state: String,
+    pub links: Vec<Link>,
+    pub line: String,
+}
+
+/// #413: a linked thread's chip: `from t5`, `continued in t6`.
+pub struct Link {
+    pub w: String,
+    pub t: String,
+}
+
+/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
+/// working, the turn's start `since`, and the `queued` messages above the box.
+pub struct ThreadView {
+    pub id: String,
+    pub title: String,
+    pub ds: String,
+    pub state: String,
+    pub since: Option<u64>,
+    pub queued: Vec<QueuedMsg>,
+    pub page: ThreadPage,
+}
+
+/// #407: a message queued for the turn's end, by its id `q`.
+pub struct QueuedMsg {
+    pub q: u64,
+    pub text: String,
+}
+
+/// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
+/// and conductor folder `dir`.
+pub struct ThreadPage {
+    pub msgs: Vec<Msg>,
+    pub older: Option<u64>,
+    pub started: u64,
+    pub dir: String,
+}
+
+/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
+/// `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
+/// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id), `secret` (why, `from` its name),
+/// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
+/// links to.
+pub struct Msg {
+    pub seq: u64,
+    pub ts: u64,
+    pub kind: String,
+    pub text: String,
+    pub link: Option<Link>,
+    pub from: String,
+    pub files: Vec<FileRef>,
+    pub retry: bool,
+    pub signin: Option<String>,
+    pub host: String,
+    pub ask: Option<Ask>,
+    pub routine: bool,
+    pub answer: Option<Answered>,
+    pub open: bool,
+    pub cmds: Vec<String>,
+}
+
+pub struct FileRef {
+    pub name: String,
+    pub size: u64,
+}
+
+/// A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
+pub struct Answered {
+    pub n: Option<u64>,
+    pub choice: String,
+    pub by: Option<String>,
+    pub ts: u64,
 }
 
 /// #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.

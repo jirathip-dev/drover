@@ -317,6 +317,7 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "", NOW);
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
+    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #269: the needs cards as the board draws them
     let i = page.find("name=mtime value=").unwrap() + 17;
     let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let long = "x".repeat(2001);

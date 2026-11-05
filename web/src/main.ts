@@ -1,8 +1,11 @@
-// #265: the TypeScript board's start, a typed client for the JSON API v1 (`/api/v1/`, docs/serve.md). The tabs move
-// here one PR each (Events, Host, Queue, Lanes); #266: Events is drawn here, #267 Host, #268 Queue; Lanes is still the HTML board's.
-import type { Chat, Ev, Events, HostTab, QueueTab, Reply, State } from '../../assets/types/api';
+// #265: the TypeScript board, a typed client for the JSON API v1 (`/api/v1/`, docs/serve.md). The tabs moved here one
+// PR each: #266 Events, #267 Host, #268 Queue, #269 Lanes, [chat] and the needs cards; the server builds no HTML but the page.
+import type { Chat, ChatTab, Ev, Events, HostTab, LanesTab, NeedsTab, QueueTab, Reply, State, ThreadPage } from '../../assets/types/api';
+import { page, tab as chatTab } from './chat';
 import { rows, tab, type Filter } from './events';
 import { tab as hostTab } from './host';
+import { tab as lanesTab } from './lanes';
+import { tab as needsTab } from './needs';
 import { sheet, tab as queueTab } from './queue';
 
 /** serve.js's: paint a section's new HTML (rows keep their open state, changed ones flash, row sprites drawn). */
@@ -22,6 +25,11 @@ export const api = {
   events: (since: number, until?: number) => get<Events>(`events?since=${since}${until == null ? '' : `&until=${until}`}`),
   host: () => get<HostTab>('host'),
   queue: () => get<QueueTab>('queue'),
+  needs: () => get<NeedsTab>('needs'),
+  lanes: () => get<LanesTab>('lanes'),
+  chat: () => get<ChatTab>('chat'),
+  /** #408: a thread's messages before seq `before`. */
+  thread: (t: string, before: string) => get<ThreadPage>(`thread/${encodeURIComponent(t)}?before=${before}&n=30`),
   lane: (agent: string, before = 0) => get<Chat>(`lane/${encodeURIComponent(agent)}?before=${before}`),
   /** A form op (`answer`, `drive`, `pause`, `extend`, …) with the HTML form's fields; `mtime` is `State.mtime`. */
   async post(op: string, fields: Record<string, string>): Promise<Reply> {
@@ -87,7 +95,30 @@ const queue = (d: QueueTab) => frag('queue', queueTab((qd = d)));
 const queueLoad = () => api.queue().then(queue).catch(() => {});
 addEventListener('herd-queue', e => queue((e as CustomEvent<QueueTab>).detail));
 addEventListener('herd-refresh', queueLoad);
-const w = window as unknown as { boardReady: Promise<unknown>; queueSheet: (f: string) => string | null };
+
+// #269: the needs cards, Lanes and [chat], as this device sees them: the needs cards and the open tab on load, a tab
+// when it opens (serve.js's `boardTab`, #337) and on ↻; each again from its `needs`, `lanes` or `chat` on `/live`.
+let cd: ChatTab | null = null;
+const parts = {
+  needs: () => api.needs().then(d => frag('needs', needsTab(d))),
+  lanes: () => api.lanes().then(d => frag('lanes', lanesTab(d))),
+  chat: () => api.chat().then(d => frag('chat', chatTab((cd = d)))),
+};
+addEventListener('herd-needs', e => frag('needs', needsTab((e as CustomEvent<NeedsTab>).detail)));
+addEventListener('herd-lanes', e => frag('lanes', lanesTab((e as CustomEvent<LanesTab>).detail)));
+addEventListener('herd-chat', e => frag('chat', chatTab((cd = (e as CustomEvent<ChatTab>).detail))));
+/** The needs cards and tab `t`'s part, if it has one; an export (and `?all=1`, every tab at once) reads them all. */
+const boardTab = (t: string) => Promise.all([parts.needs(), ...(t === 'lanes' || t === 'chat' ? [parts[t]()] : [])]);
+const exported = document.body.dataset.root === '';
+const w = window as unknown as {
+  boardReady: Promise<unknown>;
+  boardTab: typeof boardTab;
+  queueSheet: (f: string) => string | null;
+  threadOlder: (t: string, before: string) => Promise<string | null>;
+};
 w.queueSheet = f => (qd && sheet(qd, f));
+w.boardTab = boardTab;
+w.threadOlder = (t, before) => api.thread(t, before).then(p => (cd ? page(cd.now, t, p, cd.rw) : null)).catch(() => null);
+const first = exported || all ? Promise.all([parts.needs(), parts.lanes(), parts.chat()]) : boardTab(document.documentElement.dataset.tab ?? 'queue');
 /** ui-audit.js waits for the first draw. */
-w.boardReady = Promise.all([run(load), hostLoad(), queueLoad()]);
+w.boardReady = Promise.all([run(load), hostLoad(), queueLoad(), first.catch(() => {})]);

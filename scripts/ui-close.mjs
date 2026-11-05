@@ -65,7 +65,8 @@ const loaded = new Promise(r => on.push(m => m.method === 'Page.loadEventFired' 
 await cmd('Page.navigate', { url });
 await loaded;
 const js = async e => (await cmd('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true })).result.value;
-// Every frame from here to the end: the page's scroll and <body> position.
+// Every frame from here to the end: the page's scroll and <body> position (#269: once the board has drawn its tabs).
+await js("window.boardReady.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))");
 await js("tab('lanes'); scrollTo(0, 120); window.seen = new Set(); (function f() { seen.add(scrollY + ' ' + getComputedStyle(document.body).position); requestAnimationFrame(f); })(); 1");
 const frames = [];
 on.push(m => {

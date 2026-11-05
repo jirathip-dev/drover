@@ -72,7 +72,7 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         "{chat}"
     );
     // Card: the question and a reply box, never menu buttons.
-    let page = get("/?all=1");
+    let page = with_board(&get("/?all=1"), &s, ADDR, &ck, T); // #269: the needs cards as the board draws them
     let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
     assert!(
         needs.contains("Which database should the meter use?") && !needs.contains("class=pick"),
