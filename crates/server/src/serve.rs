@@ -1038,10 +1038,10 @@ impl<'a> Server<'a> {
                 let mut it = p[6..].splitn(3, '/');
                 let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let v = |e: &&Event| e.kind == "verdict" && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
                 let ev = read(&ctx.state).unwrap_or_default();
-                let at = ev.iter().rfind(v).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                match at.and_then(|p| std::fs::read(p).ok()) {
+                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
+                let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
+                match at.and_then(|(_, p)| std::fs::read(p).ok()) {
                     Some(b) => ("200 OK", PNG, b),
                     None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
@@ -1678,10 +1678,7 @@ impl<'a> Server<'a> {
                 mergeable: m.to_lowercase(),
                 merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
                 // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
-                shots: (events.iter().rfind(|e| e.is("verdict", f, n)).into_iter())
-                    .flat_map(chat::files_of)
-                    .map(|x| x["name"].as_str().unwrap_or_default().into())
-                    .collect(),
+                shots: crate::verify::served(events, (f, n)).into_iter().map(|x| x.0).collect(),
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
