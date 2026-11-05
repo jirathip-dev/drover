@@ -31,8 +31,15 @@ pub struct Config {
     pub conductor: ConductorCfg,
     /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
     pub telegram: Telegram,
+    /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
+    pub service: ServiceCfg,
     /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
     pub chat: Chat,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ServiceCfg {
+    pub url: Option<String>,
 }
 
 /// #404: the harness, model, effort and account(s) a new thread's conductor starts on; each unset one is the role's.
@@ -160,7 +167,7 @@ pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
-/// The key is read from `env_file` (else `[accounts].accounts_env`, else the environment), never from fleet.toml.
+/// The key is read from `env_file` (else the store's `all` secret `key_env`, else the environment), never from fleet.toml.
 #[derive(Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
@@ -198,12 +205,11 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> env var holding its token, plus the settings below.
+/// `[accounts]`: account name -> its token's secret name (#441: in the store, `herdsman accounts import`), plus the
+/// settings below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
-    /// Env file (`VAR=value` lines) the tokens are read from.
-    pub accounts_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -218,7 +224,6 @@ pub struct Accounts {
 impl Default for Accounts {
     fn default() -> Self {
         Accounts {
-            accounts_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
@@ -565,12 +570,13 @@ impl Notify {
     pub fn webpush(&self) -> bool {
         self.kind.as_deref() == Some("webpush")
     }
-    /// #350: every landing pause and revert (or failed revert) goes to each notifier, whatever its `on` says;
+    /// #350: every landing pause and revert (or failed revert), and #345's stalled service, goes to each notifier,
+    /// whatever its `on` says;
     /// #363: so does a board report, to each notifier but the phones'.
     pub fn wants(&self, kind: &str) -> bool {
         self.on.iter().any(|k| k == kind)
             || (self.on.is_empty() && self.webpush() && WEBPUSH_ON.contains(&kind))
-            || matches!(kind, "land-paused" | "reverted" | "revert-failed")
+            || matches!(kind, "land-paused" | "reverted" | "revert-failed" | "service-stalled")
             || kind == "report" && !self.webpush()
     }
 }
@@ -599,6 +605,11 @@ impl Config {
             .find(|v| !crate::secret::name_ok(v.1))
         {
             bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
+        }
+        if c.accounts.names.contains_key("accounts_env") {
+            bail!(
+                "[accounts].accounts_env is retired (#441): run `herdsman accounts import <file>`, then drop the line"
+            );
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");

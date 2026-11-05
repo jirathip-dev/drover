@@ -210,3 +210,68 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     stale.insert("mtime".into(), "1".into());
     assert_eq!(post(&s, &cookie, &stale)["code"], "STALE");
 }
+
+/// #517: a conductor's thread ask on an issue: its question and options on that issue's queue card (and the needs
+/// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
+#[test]
+fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
+    let c = ctx(&tmpdir("queue-thread-ask"), CONFIG);
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
+    let ev = |n: Option<u64>, kind: &str, d: Value| {
+        append(&c.state, &Event::new(T - 60, "sendmeter", n, kind, d)).unwrap();
+    };
+    ev(None, "thread-new", json!({"thread": "t6", "title": "the bell"}));
+    let ask = json!({"id": "q398", "question": "ship the bell now?", "options": ["now", "after #10"],
+        "recommend": 1, "kind": "owner", "thread": "t6"});
+    ev(Some(2), "needs-decision", ask);
+    // herdr ready to start the thread's conductor: the answer goes to it, as a tap in the thread would.
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(
+            "herdr workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
+        )
+        .reply("herdr pane", "")
+        .reply("herdr agent start", "")
+        .reply("herdr agent wait", "")
+        .reply("herdr agent prompt", "");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let html = queue_tab(&s, ADDR, T);
+    assert!(
+        html.contains("ship the bell now?")
+            && html.contains("asked in <a href=#chat class=ath data-go=\"t6\">the bell · t6</a>"),
+        "{html}"
+    );
+    let (mut f, buttons) = form(&html, "answer", Some(("id", "q398")));
+    assert_eq!(buttons[0], ("choice".into(), "1".into()), "{buttons:?}");
+    // The needs card shows it too, with the same thread line.
+    let [needs, _, _] = parts(&s, ADDR, &cookie, T);
+    assert!(
+        needs.contains("ship the bell now?") && needs.contains("the bell · t6"),
+        "{needs}"
+    );
+    f.insert("choice".into(), buttons[1].1.clone());
+    let v = post(&s, &cookie, &f);
+    assert_eq!(v["ok"], true, "{v}");
+    let d = kinds(&c, "decision");
+    assert_eq!(
+        (d.len(), d[0].str("choice"), d[0].str("by")),
+        (1, Some("after #10"), Some("owner"))
+    );
+    assert!(r.called("herdr agent start conductor-t6"), "{:?}", r.calls.borrow());
+    // The thread's copy is answered, not open; the card has no form left.
+    let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
+    let t = (chat["threads"].as_array().unwrap().iter())
+        .find(|t| t["id"] == "t6")
+        .unwrap_or_else(|| panic!("{chat}"));
+    let m = (t["page"]["msgs"].as_array().unwrap().iter())
+        .find(|m| m["ask"]["id"] == "q398")
+        .unwrap_or_else(|| panic!("{t}"));
+    assert_eq!(
+        (&m["open"], &m["answer"]["choice"]),
+        (&json!(false), &json!("after #10")),
+        "{m}"
+    );
+    assert!(!queue_tab(&s, ADDR, T).contains("ship the bell now?"));
+}

@@ -28,7 +28,7 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 - SERIAL_BUSY: spawn: a `--serial` impl waits while the fleet's `serial_max` (default 1) other serial issues have a live impl/fix lane or sit at review/ready
 - SERIAL_UNMARKED: merge: the PR touches the fleet's serial_paths but the issue was not queued `--serial`. STAGING_WOULD_BREAK / STAGING_MOVED: merge: a `premerge` check fails on the PR merged with current integration (→ fix round, not counted) / integration moved during the checks twice; retried next pass
 - CAP / ALL_CAPPED: spawn: the fleet's optional max_impl / max_rev lane cap is reached (unset = no cap) / every account of the role is capped (names the first reset)
-- PAUSED: spawn: the fleet is paused (`herdsman resume <fleet>`); impl/rev lanes wait, live lanes are untouched
+- PAUSED: spawn: the fleet is paused (`herdsman resume <fleet>`); impl/rev lanes wait, live lanes are untouched. NO_STORE: serve: the config names a secret but the main host has no usable OS secret store (Keychain, Secret Service, Credential Manager); there is no plain-file fallback
 - BAD_VALUE: set: a value is empty or has a quote/backslash/control char, or the model is not in `models`; ask: an empty question, over 4 options
 - NO_SUCH_ASK / ALREADY_ANSWERED / NO_RECOMMENDATION / OWNER_TOPIC: answer: the fleet has no such ask id, or it was answered already (a `by: default` decision can be changed once); ask: `--kind routine` without `--recommend`, or with an owner word or its plural/inflection (main, prod, secret, token, delete, spend, cost, $, dependency, scope)
 - STALE: serve: fleet.toml changed since the page was rendered; reload and retry
@@ -60,7 +60,7 @@ Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh 
 profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. Design lanes are owner-only: started by the owner or a conductor thread (`herdsman spawn … design`), never by a lane; never in verdict or merge.
 The hook also refuses `deny_commands` (default: containers: docker, colima, orb, podman, `supabase start`… → `REFUSED NO_CONTAINERS`) and, for every lane, `pkill`, `killall` and `pgrep … | xargs kill` (`REFUSED NO_BROAD_KILL`).
 Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` exports the first uncapped one as `CLAUDE_CODE_OAUTH_TOKEN`;
-an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. MCP: only the role's `mcp` (default none).
+an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. Secrets (tokens, `secret:<NAME>` env) live only in the main host's OS store as `herdsman/<fleet>/<NAME>`; spawn writes a lane's to a 0600 file beside its worktree (over ssh stdin to a remote host), the pane's shell sources it, spawn deletes it. `herdsman accounts import [tokens.env]` (owner only) copies the old file's tokens in, checked by sha256. MCP: only the role's `mcp` (default none).
 
 ## Events
 

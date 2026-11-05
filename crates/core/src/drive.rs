@@ -177,8 +177,12 @@ thread_local! {
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
-    if IN_ACT.get() || crate::outbox::lane().is_some() {
+    if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
         return None;
+    }
+    // #345: a running service drives it in its own process at once; else the detached kick below (direct mode).
+    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why) {
+        return Some(pid);
     }
     a.push("--now".into());
     r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
@@ -465,7 +469,7 @@ pub fn drive(
         }
     }
     if !fast {
-        if let Err(e) = repair(ctx, cfg, out) {
+        if let Err(e) = repair(ctx, cfg, r, out) {
             writeln!(out, "repair: {e:#}")?;
         }
     }
@@ -534,7 +538,8 @@ pub fn drive(
 /// busy host or full disk, so no fleet starts new work this pass. `fast`: verdicts and merges only (#212).
 /// #500: an issue parked `LANE_ENDS` whose every `lane gone` respawn followed a design lane's adoption (before #500 that
 /// adoption hid the issue's verdict) goes back to the state it had (`repaired`); once installed, none is left to find.
-fn repair(ctx: &Ctx, cfg: &Config, out: &mut dyn Write) -> Result<()> {
+/// #517: a lesson issue parked `LANE_ENDS` is closed as "no repeated class".
+fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
     let reset = ["pushed", "verdict", "needs-human", "round-extended"];
     for s in fold(&events)
@@ -547,6 +552,10 @@ fn repair(ctx: &Ctx, cfg: &Config, out: &mut dyn Write) -> Result<()> {
         let Some(at) = mine.iter().rposition(|(_, e)| e.kind == "needs-human") else {
             continue;
         };
+        if s.build.as_deref() == Some("lesson") && mine[at].1.str("code") == Some("LANE_ENDS") {
+            crate::lesson::done(ctx, cfg, r, out, (&s.fleet, s.issue), "no repeated class")?;
+            continue;
+        }
         let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
         let round = &mine[from.map_or(0, |i| i + 1)..at];
         let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
@@ -680,6 +689,33 @@ fn pass(
         if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
+        } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
+            // #517: a lesson lane's one prompt to end with `done --no-change`.
+            let sp = crate::events::last_spawn(&events, &w.lane);
+            let (dsh, pane) = (
+                sp.and_then(|e| e.str("harness")) == Some("dsh"),
+                sp.and_then(|e| e.str("pane")),
+            );
+            let on = crate::hosts::On::of(r, sp);
+            let sent = crate::herdr::reply(
+                &on,
+                dsh,
+                &w.lane,
+                pane.unwrap_or_default(),
+                &crate::lesson::prompt(fleet, s.issue),
+            );
+            writeln!(
+                out,
+                "{fleet} #{n} lesson lane prompted: {}",
+                if sent.is_ok() { "sent" } else { "not sent" }
+            )?;
+            let d = json!({"agent": w.lane, "sent": sent.is_ok()});
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
+            )?;
+        } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
+            crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
         } else if w.who == "drive" {
             // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
             let gone = w.what.split_once(waiting::NO_PUSH);

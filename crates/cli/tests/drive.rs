@@ -2271,3 +2271,84 @@ fn a_told_reviewers_corrected_fail_is_recorded() {
     assert_eq!(told(&r), 1);
     assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
 }
+
+// --- #517: a lesson lane that ends with no push and no `done` ---
+
+/// A lesson lane of #12 (no PR) and a Fake that lists it `idle` (`live`) or not at all.
+fn lesson(name: &str, live: bool) -> (herdsman::Ctx, Fake) {
+    let c = setup(name);
+    let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
+    let list = agents(&[(
+        "sendmeter-lesson-12",
+        "idle",
+        &wt.to_string_lossy(),
+        "w9:sendmeter-lesson-12",
+    )]);
+    let r = fake(if live { &list } else { NO_AGENTS })
+        .reply("git -C", "")
+        .reply("gh issue close", "");
+    (c, r)
+}
+
+const CLOSE: &str = "gh issue close 12 -R jirathip-dev/sendmeter --comment no repeated class";
+
+#[test]
+fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends() {
+    let (c, r) = lesson("drive-lesson-ended", true);
+    let at = |s: u64| herdsman::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    };
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(
+        out.contains("#12 drive: lesson lane ended without a push: prompting it once"),
+        "{out}"
+    );
+    let (out, _) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 lesson lane prompted: sent"), "{out}");
+    let prompt = "herdr agent prompt sendmeter-lesson-12 no repeated class? end with `herdsman done --no-change \"no repeated class\" sendmeter 12`";
+    assert!(r.called(prompt), "{:?}", r.calls.borrow());
+    // Unanswered for under 30 min: nothing more, the prompt is never sent twice.
+    idle(&at(600), &r);
+    assert_eq!(r.count(prompt), 1);
+    assert!(!r.called("gh issue close"));
+    // 30 min on: closed as "no repeated class", never respawned or parked `LANE_ENDS`.
+    let (out, _) = drive(&at(1801), &r);
+    assert!(out.contains("closed sendmeter#12: no repeated class"), "{out}");
+    assert!(r.called(CLOSE), "{:?}", r.calls.borrow());
+    for s in [3602, 7200] {
+        drive(&at(s), &r);
+    }
+    assert_eq!(state(&c), "closed");
+    assert!(kinds(&c, "needs-human").is_empty() && kinds(&c, "respawn").is_empty());
+    assert_eq!((r.count(prompt), r.count(CLOSE)), (1, 1));
+}
+
+#[test]
+fn a_gone_lesson_lane_is_closed_not_respawned() {
+    let (c, r) = lesson("drive-lesson-gone", false);
+    let (out, steps) = drive(&c, &r);
+    assert!(
+        steps.is_empty() && out.contains("closed sendmeter#12: no repeated class"),
+        "{out}"
+    );
+    assert!(
+        !r.called("herdr agent start") && !r.called("herdr agent prompt"),
+        "{out}"
+    );
+    assert_eq!(state(&c), "closed");
+    assert!(kinds(&c, "needs-human").is_empty() && kinds(&c, "respawn").is_empty());
+}
+
+/// The install repair: a lesson issue parked `LANE_ENDS` before #517 is closed as "no repeated class".
+#[test]
+fn a_lesson_issue_parked_lane_ends_is_closed_on_install() {
+    let (c, r) = lesson("drive-lesson-repair", false);
+    let d = json!({"code": "LANE_ENDS", "reason": "lane keeps ending without a push", "agent": "sendmeter-lesson-12"});
+    ev(&c, 20, "needs-human", d);
+    assert_eq!(state(&c), "needs-human");
+    let (out, _) = drive(&c, &r);
+    assert!(out.contains("closed sendmeter#12: no repeated class"), "{out}");
+    assert!(r.called(CLOSE), "{:?}", r.calls.borrow());
+    assert_eq!(state(&c), "closed");
+}

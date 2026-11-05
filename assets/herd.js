@@ -211,14 +211,14 @@ const queued = q => {
 function nh(f) {
   const n = f.needs || [], L = T.looks || [], used = new Set(), hat = k => ['--ht', '--hb', '--hk'].map(x => L[k][x]).join();
   const hats = [...new Set(L.map((_, k) => hat(k)))];
-  const lanes = f.lanes.filter(l => !l.gone).map((l, i) => {
+  const lanes = uniq(f.lanes.filter(l => !l.gone), l => l.name).map((l, i) => {
     let k = hash(l.name) % (L.length || 1);
     for (let t = 0; L.length && t < L.length && (used.has(k) || hat(k) !== hats[i % hats.length]); t++) k = (k + 1) % L.length;
     used.add(k);
     l = Object.assign({}, l, { look: L.length ? k : null });
     return n.includes(l.issue) ? Object.assign(l, { needs: true, state: 'blocked', act: 'blocked', grow: 'blocked', tone: 'r', shown: 'needs you' }) : l;
   });
-  const queue = f.queue.filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
+  const queue = uniq(f.queue, q => q.issue).filter(q => !n.includes(q.issue) || !f.lanes.some(l => l.issue === q.issue)).map(q => Object.assign({}, q, { needs: n.includes(q.issue) }));
   return [f.name, lanes, queue, f.color];
 }
 function card(n) {
@@ -245,9 +245,11 @@ function keyed(have, key, h) {
 }
 // #65: an update patches the page in place, so its scroll never moves: horses are keyed by agent (queued ones by
 // issue), re-parented between bands, added or removed one by one; a band only comes or goes with its first or last horse.
+// #516: keys are unique on the page: a node whose key is already taken goes, and data repeating a key draws it once.
+const nodes = (hb, sel, k) => [...hb.querySelectorAll(sel)].reduce((m, n) => (m.has(n.dataset[k]) ? n.remove() : m.set(n.dataset[k], n), m), new Map());
+const uniq = (xs, k) => xs.filter((x, i) => xs.findIndex(y => k(y) === k(x)) === i);
 function patch(hb, lanes, queue) {
-  const have = new Map([...hb.querySelectorAll('.hh')].map(n => [n.dataset.agent, n]));
-  const haveq = new Map([...hb.querySelectorAll('.hqh')].map(n => [n.dataset.i, n]));
+  const have = nodes(hb, '.hh', 'agent'), haveq = nodes(hb, '.hqh', 'i');
   const groups = [['queue', 'queued', queue, haveq, q => String(q.issue), queued, 'gate'],
     ...BANDS.map(([name, states]) => [name.split('/')[0], name, lanes.filter(l => states.includes(l.state)), have, l => l.name, horse, 'field'])];
   // Gone horses leave first, so a kept one never steps around them.
@@ -316,7 +318,7 @@ function page(key) {
 function draw() {
   if (!data) return;
   const list = data.fleets.map(nh);
-  if (data.others.length) list.push(['Others', data.others, []]);
+  if (data.others.length) list.push(['Others', uniq(data.others, l => l.name), []]);
   for (const [k, p] of pages) if (!list.some(x => x[0] === k)) { p.remove(); pages.delete(k); }
   list.forEach(([key, lanes, queue, c], n) => {
     const p = pages.get(key) || page(key);

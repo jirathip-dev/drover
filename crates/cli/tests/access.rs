@@ -8,10 +8,8 @@ use std::path::Path;
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C from `<dir>/tokens.env`, local repo `<dir>/repo`.
+/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C (tokens in the store, `store`), local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
-    let env = d.join("tokens.env");
-    std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={TOKEN_A}\nexport CLAUDE_CODE_OAUTH_TOKEN_B=\"{TOKEN_B}\"\nCLAUDE_CODE_OAUTH_TOKEN_C=c\n")).unwrap();
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     let mcp = r#"{"mcpServers":{"supabase-dev":{"command":"npx","args":["dev"]},"supabase-prod":{"command":"npx","args":["prod"]},"other":{"url":"http://x"}}}"#;
@@ -19,18 +17,23 @@ fn config(d: &Path, role_extra: &str) -> String {
     CONFIG
         .replace("harness  =  \"hermes\"    # toggled in tests", &format!("harness = \"claude\"\n{role_extra}"))
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
-        + &format!(
-            "\n[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n",
-            env.display()
-        )
+        + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n"
 }
 
-/// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`.
-fn spawn(c: &herdsman::Ctx, n: u64) -> Fake {
+/// #441: the accounts' tokens in the fake store.
+fn store(f: Fake) -> Fake {
+    let svc = |v: &str| format!("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_{v}");
+    f.stored(&svc("A"), TOKEN_A)
+        .stored(&svc("B"), TOKEN_B)
+        .stored(&svc("C"), "c")
+}
+
+/// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; the token its pane's shell exported.
+fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
-    let r = Fake::default()
+    let r = store(Fake::default())
         .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
@@ -46,13 +49,19 @@ fn spawn(c: &herdsman::Ctx, n: u64) -> Fake {
         .reply(&format!("herdr pane run {pane} export"), "{}")
         .reply("herdr agent start", "{}")
         .reply("herdr agent wait", "{}");
-    let (code, out) = run(c, &r, &["spawn", "sendmeter", &n.to_string(), "impl"]);
+    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
+    let (code, out) = run(c, &sh, &["spawn", "sendmeter", &n.to_string(), "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(
         !out.contains(TOKEN_A) && !out.contains(TOKEN_B),
         "token in stdout: {out}"
     );
-    r
+    let token = sh.2.borrow().concat();
+    assert!(
+        !Path::new(&format!("{}.env", wt.display())).exists(),
+        "the secrets file is left behind"
+    );
+    (r, token)
 }
 
 fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
@@ -78,21 +87,16 @@ fn role_account_b_exports_its_token_into_the_lane_and_nowhere_else() {
     let d = tmpdir("acct-b");
     let c = ctx(&d, &config(&d, "account = \"B\""));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let r = spawn(&c, 12);
-    // The lane shell runs the exported assignment: evaluate it as the pane shell would.
+    let (r, token) = spawn(&c, 12);
+    // #441: the pane's shell sourced the secrets file spawn wrote; spawn removed it once the harness started.
     let calls = r.calls.borrow();
-    let export = calls
-        .iter()
-        .find(|l| l.starts_with("herdr pane run w9:p12 export"))
-        .unwrap();
     assert!(!calls.iter().any(|l| l.contains(TOKEN_B)), "token passed through argv");
-    let cmd = export.trim_start_matches("herdr pane run w9:p12 ");
-    let sh = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("{cmd}; printf %s \"$CLAUDE_CODE_OAUTH_TOKEN\""))
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&sh.stdout), TOKEN_B);
+    assert_eq!(token, TOKEN_B);
+    let file = c.worktrees.join("sendmeter/issue-12.env");
+    let sourced = format!("&& . '{}'", file.display());
+    assert!(calls
+        .iter()
+        .any(|l| l.starts_with("herdr pane run w9:p12 export") && l.ends_with(&sourced)));
     assert!(r.index("herdr pane run w9:p12 export").unwrap() < r.index("herdr agent start").unwrap());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().str("account"), Some("B"));
@@ -128,7 +132,7 @@ fn capped_account_is_skipped_until_reset() {
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
 
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
+    let r = store(Fake::default())
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -176,7 +180,7 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
+    let r = store(Fake::default())
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -191,7 +195,7 @@ fn cap_expires_after_cap_reset_minutes() {
 /// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `herdsman check`.
 fn cap(c: &herdsman::Ctx, banner: &str) {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
+    let r = store(Fake::default())
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),

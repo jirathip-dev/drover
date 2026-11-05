@@ -77,11 +77,22 @@ pub fn join(
             ..Lane::default()
         };
         if let Some(e) = sp {
-            seen.insert(e.str("agent").unwrap_or_default().to_string());
+            let name = e.str("agent").unwrap_or_default();
             l = Lane {
-                name: e.str("agent").unwrap_or_default().into(),
+                name: name.into(),
                 ..from_spawn(e, l)
             };
+            // #516: one lane per agent: a second live row for it (herdr's and shed's, a remote host's) folds into
+            // the first, the busier state (blocked, then working) kept.
+            if !seen.insert(name.to_string()) {
+                let rank = |s: &str| SECTIONS.iter().position(|x| *x == s).unwrap_or(2);
+                if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == name) {
+                    if rank(&l.state) < rank(&o.state) {
+                        *o = l;
+                    }
+                }
+                continue;
+            }
         } else if let Some(e) = name.and_then(|n| cs.remove(n)) {
             l = conductor(events, e, l);
         } else {

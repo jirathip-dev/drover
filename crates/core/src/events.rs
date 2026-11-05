@@ -389,6 +389,7 @@ pub fn checks(e: &Event) -> bool {
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
     "lane-state",
+    "lesson-prompted",
     "budget-freed",
     "wip-saved",
     "wip-blocked",

@@ -96,6 +96,26 @@ impl<'a> On<'a> {
         ensure!(o.code == 0, "writing {}: {}", p.display(), o.stderr.trim());
         Ok(())
     }
+    /// #441: `write` a file only its owner reads (a lane's secrets).
+    pub fn write_private(&self, p: &Path, text: &str) -> Result<()> {
+        if self.machine.is_none() {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            let mut f = std::fs::File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(p)?;
+            return Ok(f.write_all(text.as_bytes())?);
+        }
+        let o = self.sh("umask 077 && mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", p, text)?;
+        ensure!(o.code == 0, "writing {}: {}", p.display(), o.stderr.trim());
+        Ok(())
+    }
     /// Remove the file `p`; a missing one is fine.
     pub fn remove(&self, p: &Path) -> Result<()> {
         match self.machine {
@@ -128,6 +148,13 @@ impl Runner for On<'_> {
             b.wire
         };
         Some(crate::shed::Shed { wire, ..b })
+    }
+    /// #441: the store is the main host's; remote hosts keep none.
+    fn secret(&self, svc: &str) -> Result<Option<String>> {
+        self.r.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
+        self.r.set_secret(svc, value)
     }
 }
 
