@@ -66,6 +66,7 @@ integration = "staging"
 # env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
 # env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
+# ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
 
 # #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
 [[fleet.web.serial]]
@@ -105,6 +106,12 @@ profile = "lane-rev"
 [fleet.web.role.design]
 harness = "hermes"
 profile = "lane-design"
+
+# #417: the optional verify stage (docs/pipeline.md): after rev's PASS, a read-only lane drives the real app at the
+# head from the repo's .herdsman/verify.md and screenshots it against the approved design; FAILs use rev's rounds.
+# [fleet.web.role.verify]
+# harness = "claude"
+# model = "claude-opus-5-5"
 
 [accounts]
 accounts_env = "~/.config/herdsman/accounts/tokens.env"   # VAR=token lines; never copied anywhere
@@ -146,7 +153,7 @@ swapout_rate = 2000  # pages swapped out per 2 s sample
 min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 build_root = "~/.cache/herdsman/target"   # lanes' CARGO_TARGET_DIR is <build_root>/<repo> ("" = one per worktree)
-build_budget_gb = 20      # over it drive (and `reclaim`) removes the shared folder's profiles no cargo is building in
+build_budget_gb = 20      # over it drive (and `reclaim`) removes the shared folder's profiles no cargo is building in; enabled remote hosts: the tick, after drive
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
 # deny_commands = ["docker", "supabase start", { cmd = "git push --force", why = "REFUSED NO_FORCE: ask the owner" }]
@@ -169,7 +176,7 @@ on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human"
 # cmd = "claude /login"
 # env = { CLAUDE_CONFIG_DIR = "~/accounts/B" }
 
-# #298: the terminal runtime new lanes start in: herdr (default) or berth (docs/runtimes.md).
+# #298, #455: the terminal runtime new lanes start in: herdr (default) or shed (docs/runtimes.md).
 # [runtime]
-# kind = "berth"
+# kind = "shed"   # "berth", its old name, still works for one release (with a warning)
 # acp = "claude-acp"   # optional ACP mode; the tool guard does not apply there (docs/runtimes.md)

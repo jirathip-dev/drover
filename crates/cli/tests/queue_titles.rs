@@ -63,7 +63,7 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = get(&s, "/");
     assert!(
-        page.contains("<details class=\"q\" data-q data-act=idle>") && !page.contains("class=tl "),
+        page.contains("<details class=\"q\" data-q data-act=idle>") && !page.contains("class=tl title"),
         "{page}"
     );
     assert_eq!(r.count("gh"), 0, "{:?}", r.calls.borrow());
@@ -173,7 +173,7 @@ const go = async (path, mode) => {
   return p ? (await p).body : 'PASS';
 };
 (async () => {
-  const urls = ['/frags', '/herd.json?weather=calm', '/lane?agent=x', '/live', '/a/@V/nope.js'], out = [];
+  const urls = ['/api/v1/needs', '/herd.json?weather=calm', '/lane?agent=x', '/live', '/a/@V/nope.js'], out = [];
   for (const u of urls) out.push(await go(u, 'navigate'));
   out.push(asked.join(' '));
   store.set('/', { body: 'cached-page' });

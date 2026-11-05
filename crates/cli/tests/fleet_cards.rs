@@ -130,6 +130,7 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
     );
     assert!(beta[..beta.find("</summary>").unwrap()].contains("<button>Resume</button>"));
     let gamma = &page[at("gamma")..];
+    let gamma = &gamma[..gamma.find("</section>").unwrap()]; // the Queue tab's (#269: [chat] has its cards too)
     assert!(!gamma.contains("class=fh") && !gamma.contains("class=cfg"), "{gamma}");
     // A working card: the header, [pause] [config], `need you` only where rows need you; needs-you rows first.
     let zeta = &page[at("zeta")..at("alpha")];

@@ -91,7 +91,12 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         // The card says why it stays open.
         let r = fake(&wt, status, ahead).reply("herdr workspace list", "{}");
         let s = herdsman::serve::Server::new(&c, &r, None);
-        let page = String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)).into_owned();
+        let page = with_queue(
+            &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
+            &s,
+            "",
+            T,
+        );
         assert!(page.contains(&format!("kept open: {why}")), "{why}");
     }
 }
@@ -106,4 +111,24 @@ fn a_lane_without_a_logged_handoff_stays_open() {
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(!r.called("herdr pane close") && kinds(&c, "lane-closed").is_empty());
+}
+
+#[test]
+fn a_spawn_whose_prompt_never_landed_is_not_closed_as_done() {
+    // #444 (#363): the spawn exited 4, logged in the same second as the handoff it then seemed to follow.
+    let c = ctx(&tmpdir("close-unconfirmed"), CONFIG);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.to_string_lossy().into_owned();
+    let ev = |kind: &str, d| append(&c.state, &Event::new(T - 3600, "sendmeter", Some(12), kind, d)).unwrap();
+    ev("pushed", json!({"sha": "abc", "via": "pr"}));
+    let sp = json!({"role": "impl", "agent": LANE, "pane": "w1:p2", "worktree": wt, "confirmed": false});
+    ev("spawn", sp);
+    let r = fake(&wt, "", "0\n");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !r.called("herdr pane close") && kinds(&c, "lane-closed").is_empty(),
+        "{out}"
+    );
 }

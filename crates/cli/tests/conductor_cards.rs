@@ -22,11 +22,10 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
+/// The [chat] tab as the board draws it (#269) from API v1's `chat`.
 fn chat(s: &Server, cookie: &str, now: u64) -> String {
-    let r = format!("GET /frags?tab=chat HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
-    let res = String::from_utf8_lossy(&s.respond(&r, now)).into_owned();
-    let j: Value = serde_json::from_str(body(&res)).unwrap();
-    j["chat"].as_str().unwrap().into()
+    let j = api(s, ADDR, cookie, now, "chat");
+    board_js(&[(&j, "chat.tab(d)")]).remove(0)
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
@@ -356,7 +355,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         )]
     );
     let calls = r.0.calls.borrow().join("\n");
-    let log = std::fs::read_to_string(&c.state).unwrap();
+    let log = herdsman::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
     for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {

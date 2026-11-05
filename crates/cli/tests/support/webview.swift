@@ -109,13 +109,18 @@ final class Nav: NSObject, WKNavigationDelegate {
     func webView(_ w: WKWebView, didFinish _: WKNavigation!) {
         // #337 `HERDSMAN_WARM`: load the URL a second time in the same WebKit (its caches and service worker warm).
         if warm, let url { warm = false; return DispatchQueue.main.asyncAfter(deadline: .now() + 1) { w.load(URLRequest(url: url)) } }
-        if let close { return gate(w, close) }
+        // #440: a file's page waits for herd.js's theme (its words and sprites), else they land mid-`js` on some runs.
+        let themed = url == nil ? "typeof themed === 'object' && await themed;" : ""
+        if let close { return w.callAsyncJavaScript(themed + " return 1", arguments: [:], in: nil, in: .page) { _ in gate(w, close) } }
         let js = tab == "-" ? "\(extra); [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]" : """
         tab('\(tab)'); mode('\(mode)'); \(extra);
         \(png == nil ? "document.querySelectorAll('details').forEach(d => d.open = true);" : "document.querySelectorAll('section').forEach(s => { const d = s.querySelector('details'); if (d) d.open = true; });")
         [document.body.scrollWidth, document.documentElement.clientWidth, document.documentElement.scrollHeight, ...(window.measure || [])]
         """
-        w.evaluateJavaScript(js) { r, e in
+        // #269: on a real server the TypeScript board draws every tab from the API: the tab's first draw lands before
+        // `js` runs (a file's page comes drawn, `common::drawn`).
+        let drawn = tab == "-" ? "" : url == nil ? themed : "tab('\(tab)'); await window.boardReady; await window.boardTab?.('\(tab)');"
+        w.callAsyncJavaScript(drawn + " return 1", arguments: [:], in: nil, in: .page) { _ in w.evaluateJavaScript(js) { r, e in
             guard let v = r as? [Double] else { print("js error: \(String(describing: e))"); exit(2) }
             let wide = [Int(v[0]), Int(v[1])].map { "\($0)" }
             guard let png else { print((wide + v.dropFirst(3).map { "\($0)" }).joined(separator: " ")); exit(0) }
@@ -131,7 +136,7 @@ final class Nav: NSObject, WKNavigationDelegate {
                     }
                 }
             }
-        }
+        } }
     }
 }
 let nav = Nav()

@@ -5,13 +5,13 @@ import type { Ask, ConfigSheet, Drive, PrLine, QueueCard, QueueLane, QueueRow, Q
 import { esc } from './events.ts'; // node runs this file as is (tests/queue_board.rs): the extension
 
 /** A form: a live board's posts; an export's are inert. */
-const form = (d: QueueTab, rest = '') => `<form ${d.live ? 'method=post' : 'inert'}${rest}>`;
-const hidden = (op: string, fleet: string, mt: string) => `<input type=hidden name=op value=${op}><input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
+export const form = (d: { live: boolean }, rest = '') => `<form ${d.live ? 'method=post' : 'inert'}${rest}>`;
+export const hidden = (op: string, fleet: string, mt: string) => `<input type=hidden name=op value=${op}><input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
 const none = '<span class=m>none</span>', all = '<span class="tag m">all fleets</span>';
 const list = (v: string[], sep = ', ') => (v.length ? esc(v.join(sep)) : none);
 
 /** Ask `a`'s answer form: option buttons (recommended first) and a free-text box. */
-export function answer(d: QueueTab, a: Ask, send: string): string {
+export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string): string {
   const opts = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
   const btns = opts.map(([o, n]) => `<button name=choice value=${n}>${n}. ${esc(o)}${n === a.recommend ? ' <small>(recommended)</small>' : ''}</button>`).join('');
   return `${form(d)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
@@ -24,15 +24,15 @@ function drive(v: Drive): string {
   return `<details class="dp ${v.tone}"><summary><i>●</i><span>${esc(v.line)}</span><i class=cv></i></summary><ul>${v.meta.map(m => `<li>${esc(m)}</li>`).join('')}${items}</ul></details>`;
 }
 
-/** #169: `[issue] [PR #11] [checks] · CI ✓ · rev PASS r1`. */
-function prLine(p: PrLine, repo: string, n: number): string {
-  const gh = `https://github.com/${esc(repo)}`, a = (u: string, t: string) => `[<a href="${u}">${t}</a>]`;
+/** #169: `[issue] [PR #11] [checks] · CI ✓ · rev PASS r1`; #269: no `repo` (a lane's fleet not configured), no links. */
+export function prLine(p: PrLine, repo: string | null | undefined, n: number): string {
+  const gh = `https://github.com/${esc(repo ?? '')}`, a = (u: string, t: string) => `[<a href="${u}">${t}</a>]`;
   const l = [a(`${gh}/issues/${n}`, 'issue')];
   if (p.pr != null) l.push(a(`${gh}/pull/${p.pr}`, `PR #${p.pr}`), a(`${gh}/pull/${p.pr}/checks`, 'checks'));
   else if (p.run != null) l.push(a(esc(p.run), 'checks'));
-  const parts = [l.join(' ')];
+  const parts = repo == null ? [] : [l.join(' ')];
   if (p.ci == null) parts.push('no PR read yet');
-  else parts.push(`CI <span class=${p.ci === 'failed' ? 'r' : p.ci === 'green' ? 'g' : 'a'}>${p.ci === 'green' ? '✓' : p.ci === 'failed' ? '✗' : '…'}</span>`);
+  else parts.push(...(repo == null ? [`PR #${p.pr ?? 0}`] : []), `CI <span class=${p.ci === 'failed' ? 'r' : p.ci === 'green' ? 'g' : 'a'}>${p.ci === 'green' ? '✓' : p.ci === 'failed' ? '✗' : '…'}</span>`);
   if (p.verdict != null) {
     parts.push(`rev <span class=${p.vtone}>${esc(p.verdict)}</span> r${p.rounds}`);
     if (p.form != null) parts.push(`<span class=a>not counted · form ${p.form}</span>`);

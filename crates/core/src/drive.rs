@@ -12,40 +12,34 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-/// #168: a lock without a live pid older than this belongs to a pass that died; the next pass takes it over.
-const STALE_LOCK_SECS: u64 = 600;
+/// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
+const STALE_LOCK_SECS: u64 = 3600;
 
-/// #168: `drive.lock` holds the pass's pid, then the fleet a manual press drives (#166); dropping the guard (error or panic included) removes it.
-struct Lock(std::path::PathBuf);
+/// #344: a held lease (`drive.lock`, a kick's): dropping the guard (error or panic included) releases it.
+struct Lock(std::path::PathBuf, crate::db::Lease);
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        crate::db::release(&self.0, &self.1.key, Some(&self.1));
     }
 }
 
-/// The lock, unless a live pass holds it: a dead pid's lock is stale at once, one without a pid after `STALE_LOCK_SECS`.
-fn take(r: &dyn Runner, lock: &Path, fleet: &str) -> Option<Lock> {
-    let held = std::fs::read_to_string(lock).unwrap_or_default();
-    let pid = held.split_whitespace().next().filter(|p| p.parse::<u32>().is_ok());
-    let age = lock
-        .metadata()
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok());
-    let dead = match pid {
-        None => age.is_some_and(|a| a.as_secs() > STALE_LOCK_SECS),
-        Some(pid) => !alive(r, pid, age.map_or(0, |a| a.as_secs())),
-    };
-    if dead {
-        let _ = std::fs::remove_file(lock);
-    }
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(lock)
-        .ok()?;
-    let _ = write!(f, "{} {fleet}", std::process::id());
-    Some(Lock(lock.into()))
+/// #344: lease `key` for `secs` with `data`, unless a live holder has it: one whose pid on this host is gone (or
+/// reused) is dead at once, any other (or one without a pid, 0) once it expires.
+fn take(ctx: &Ctx, r: &dyn Runner, key: &str, secs: u64, data: &str) -> Option<Lock> {
+    let now = ctx.now;
+    let dead = |l: &crate::db::Lease| gone(r, l, now);
+    crate::db::take(&ctx.state, key, now, secs, data, &dead).map(|l| Lock(ctx.state.clone(), l))
+}
+
+/// #344: lease `key` is held (unexpired).
+fn held(ctx: &Ctx, key: &str) -> Option<crate::db::Lease> {
+    let mut all = crate::db::leases(&ctx.state, key).into_iter();
+    all.find(|l| l.key == key && l.expires_at > ctx.now)
+}
+
+/// #344: `l`'s holder is a pid on this host that no longer runs (or was reused).
+fn gone(r: &dyn Runner, l: &crate::db::Lease, now: u64) -> bool {
+    l.pid != 0 && l.host == crate::db::host() && !alive(r, &l.pid.to_string(), now.saturating_sub(l.at))
 }
 
 /// #333: `pid` runs and started no later than `age` secs ago (a reused pid started after its file); no `ps`: alive.
@@ -66,35 +60,23 @@ fn alive(r: &dyn Runner, pid: &str, age: u64) -> bool {
     ok(r, "kill", &["-0", pid]).is_ok() && up().is_none_or(|up| up + 5 >= age)
 }
 
-/// #333: each spawn marker and kick lock, live or stale: stale once its pid is gone (or reused) or it is older than
-/// `spawn_pending_max_secs` (a marker without a pid: by age alone). `remove`: delete each stale one, log `stale-marker`.
+/// #333: each spawn marker and kick lock (#344: leases), live or stale: stale once its pid is gone (or reused) or it
+/// expired. `remove`: release each stale one, log `stale-marker`.
 pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<String>, Vec<Event>) {
     let (mut live, mut stale) = (vec![], vec![]);
-    for p in std::fs::read_dir(state_dir(ctx))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-    {
-        let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let all = [
+        crate::db::leases(&ctx.state, "spawn-"),
+        crate::db::leases(&ctx.state, "kick-"),
+    ]
+    .concat();
+    for l in all {
+        let name = l.key.clone();
         let spawn = name.strip_prefix("spawn-").and_then(|n| n.strip_suffix(".pending"));
         let Some(id) = spawn.or_else(|| name.strip_prefix("kick-")?.strip_suffix(".lock")) else {
             continue;
         };
-        let Some(age) = p
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-        else {
-            continue;
-        };
-        let (age, text) = (age.as_secs(), std::fs::read_to_string(&p).unwrap_or_default());
-        let pid = serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|v| v["pid"].as_u64());
-        let pid = pid.or_else(|| text.split_whitespace().next()?.parse().ok());
-        if age <= cfg.limits.spawn_pending_max_secs && pid.is_none_or(|p| alive(r, &p.to_string(), age)) {
+        let age = ctx.now.saturating_sub(l.at);
+        if l.expires_at > ctx.now && age <= cfg.limits.spawn_pending_max_secs && !gone(r, &l, ctx.now) {
             live.push(name);
             continue;
         }
@@ -104,9 +86,9 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             fleet,
             n,
             "stale-marker",
-            json!({"file": name, "pid": pid, "age": age}),
+            json!({"file": name, "pid": l.pid, "age": age}),
         );
-        if remove && std::fs::remove_file(&p).is_ok() {
+        if remove && crate::db::release(&ctx.state, &l.key, Some(&l)) {
             let _ = append(&ctx.state, &e);
         }
         stale.push(e);
@@ -149,8 +131,7 @@ pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
 
 /// #217: `drive.lock` over an extend's spawn, so no pass starts the same round meanwhile; `None` while a pass runs.
 pub fn hold(ctx: &Ctx, r: &dyn Runner, fleet: &str) -> Option<impl Drop> {
-    std::fs::create_dir_all(state_dir(ctx)).ok()?;
-    take(r, &state_dir(ctx).join("drive.lock"), fleet)
+    take(ctx, r, "drive.lock", STALE_LOCK_SECS, fleet)
 }
 
 fn state_dir(ctx: &Ctx) -> &Path {
@@ -212,16 +193,26 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         kick(ctx, r, fleet, n, why);
         return Ok(());
     }
-    std::fs::create_dir_all(state_dir(ctx))?;
-    let again = state_dir(ctx).join(format!("kick-{fleet}-{n}.again"));
-    let mut pending = (why == "drive").then(|| Lock(state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"))));
-    let Some(k) = take(r, &state_dir(ctx).join(format!("kick-{fleet}-{n}.lock")), fleet) else {
-        return Ok(std::fs::write(&again, why)?);
+    let (again, ttl) = (format!("kick-{fleet}-{n}.again"), cfg.limits.spawn_pending_max_secs);
+    let pending = (why == "drive").then(|| held(ctx, &format!("spawn-{fleet}-{n}.pending")));
+    let mut pending = pending.flatten().map(|l| Lock(ctx.state.clone(), l));
+    // #344: a busy kick hears of this one by its `.again` lease.
+    let flag = || crate::db::take(&ctx.state, &again, ctx.now, ttl, why, &|_| true).map(drop);
+    let Some(k) = take(ctx, r, &format!("kick-{fleet}-{n}.lock"), ttl, fleet) else {
+        flag();
+        return Ok(());
     };
     for _ in 0..30 {
-        // #333: a running kick's lock stays younger than `spawn_pending_max_secs`.
-        let lock = std::fs::File::options().append(true).open(&k.0);
-        let _ = lock.and_then(|f| f.set_modified(std::time::SystemTime::now()));
+        // #333: a running kick's lease stays unexpired.
+        let expires_at = crate::now().max(ctx.now) + ttl;
+        crate::db::renew(
+            &ctx.state,
+            &k.1,
+            &crate::db::Lease {
+                expires_at,
+                ..k.1.clone()
+            },
+        );
         let mut buf = vec![];
         KICK.set(Some(n));
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
@@ -230,14 +221,14 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
         let text = String::from_utf8_lossy(&buf).into_owned();
         out.write_all(&buf)?;
         if text.starts_with("drive: ") {
-            std::fs::write(&again, why)?;
+            flag();
         } else {
             let d = json!({"why": why, "result": summary(fleet, &text)});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "kick", d))?;
         }
         res?;
         r.sleep(10);
-        if std::fs::remove_file(&again).is_err() {
+        if !crate::db::release(&ctx.state, &again, None) {
             break;
         }
     }
@@ -262,29 +253,25 @@ fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n:
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
-    let marker = state_dir(ctx).join(format!("spawn-{fleet}-{n}.pending"));
-    std::fs::write(
-        &marker,
-        serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()))?,
-    )?;
-    // #333: the marker carries the detached kick's own pid: its death makes the marker stale at once.
-    if let Some(pid) = kick(ctx, r, fleet, n, "drive").filter(|_| marker.exists()) {
-        d["pid"] = pid.into();
-        std::fs::write(
-            &marker,
-            serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d))?,
-        )?;
-    }
+    let (key, ttl) = (format!("spawn-{fleet}-{n}.pending"), cfg.limits.spawn_pending_max_secs);
+    let ev = |d: &Value| serde_json::to_string(&Event::new(ctx.now, fleet, Some(n), "spawn", d.clone()));
+    let l = crate::db::take(&ctx.state, &key, ctx.now, ttl, &ev(&d)?, &|_| true);
+    let l = l.ok_or_else(|| anyhow::anyhow!("cannot lease {key}"))?;
+    // #333: the marker passes to the detached kick's own pid: its death makes the marker stale at once; no pid (0):
+    // it goes by age alone.
+    let pid = kick(ctx, r, fleet, n, "drive");
+    d["pid"] = pid.into();
+    let data = if pid.is_some() { ev(&d)? } else { l.data.clone() };
+    let pid = pid.unwrap_or(0);
+    crate::db::renew(&ctx.state, &l, &crate::db::Lease { pid, data, ..l.clone() });
     Ok(0)
 }
 
 /// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
 pub(crate) fn pending(ctx: &Ctx) -> Vec<Event> {
-    let young = |p: &Path| Some(p.metadata().ok()?.modified().ok()?.elapsed().ok()?.as_secs() < STALE_LOCK_SECS);
-    let live = |p: &std::path::PathBuf| p.extension() == Some("pending".as_ref()) && young(p) == Some(true);
-    let spawn = |p: std::path::PathBuf| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok();
-    let each = std::fs::read_dir(state_dir(ctx)).into_iter().flatten().flatten();
-    each.map(|e| e.path()).filter(live).filter_map(spawn).collect()
+    let all = crate::db::leases(&ctx.state, "spawn-").into_iter();
+    let live = all.filter(|l| l.key.ends_with(".pending") && l.expires_at > ctx.now);
+    live.filter_map(|l| serde_json::from_str(&l.data).ok()).collect()
 }
 
 /// #166: a code in plain words (#141's table, here until it lands); the host's own reason follows a busy Mac.
@@ -339,8 +326,7 @@ pub fn result(e: &Event) -> (&'static str, String) {
 
 /// #166: a pass is driving `fleet` now (the lock names the fleet a manual press drives; empty: every fleet).
 pub fn running(ctx: &Ctx, fleet: &str) -> bool {
-    let f = std::fs::read_to_string(state_dir(ctx).join("drive.lock"));
-    f.is_ok_and(|f| f.split_whitespace().nth(1).is_none_or(|f| f == fleet))
+    held(ctx, "drive.lock").is_some_and(|l| l.data.is_empty() || fleet.is_empty() || l.data == fleet)
 }
 
 /// A recorded action as `drive` prints it (`<fleet> #<n> <step>: <words>`, a refusal's code before its words).
@@ -360,14 +346,14 @@ fn line(fleet: &str, a: &Value) -> String {
 }
 
 /// #166: a manual press that finds the lock held waits for that pass (at most 120 s), then prints its actions.
-fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &Path, only: Option<&str>) -> Result<()> {
+fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, only: Option<&str>) -> Result<()> {
     for _ in 0..120 {
-        if !lock.exists() {
+        if held(ctx, lock).is_none() {
             break;
         }
         r.sleep(1);
     }
-    if lock.exists() {
+    if held(ctx, lock).is_some() {
         return Ok(writeln!(out, "drive: still driving · result will appear here")?);
     }
     let events = read(&ctx.state)?;
@@ -404,17 +390,14 @@ pub fn drive(
     gh::FORCE.set(fast || KICK.get().is_some());
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
-    let lock = state_dir(ctx).join(["drive.lock", "drive-fast.lock"][i]);
-    let mine = || take(r, &lock, only.unwrap_or_default()).map(Some); // #318: a kick's lock is `kick-<fleet>-<n>.lock`
+    let lock = ["drive.lock", "drive-fast.lock"][i];
+    // #318: a kick's lease is `kick-<fleet>-<n>.lock`
+    let mine = || take(ctx, r, lock, STALE_LOCK_SECS, only.unwrap_or_default()).map(Some);
     let Some(_held) = KICK.get().map_or_else(mine, |_| Some(None)) else {
         if manual {
-            return wait(ctx, r, out, &lock, only);
+            return wait(ctx, r, out, lock, only);
         }
-        return Ok(writeln!(
-            out,
-            "drive: another pass holds {}; nothing done",
-            lock.display()
-        )?);
+        return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?);
     };
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
@@ -422,10 +405,10 @@ pub fn drive(
             writeln!(out, "host history: {e:#}")?;
         }
     }
-    // #298: berth's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
-    if let Some(b) = r.berth().filter(|_| !fast) {
-        if let Err(e) = crate::berth::intake(ctx, cfg, &b.wire) {
-            writeln!(out, "berth events: {e:#}")?;
+    // #298: shed's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
+    if let Some(b) = r.shed().filter(|_| !fast) {
+        if let Err(e) = crate::shed::intake(ctx, cfg, &b.wire) {
+            writeln!(out, "shed events: {e:#}")?;
         }
     }
     // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
@@ -456,7 +439,7 @@ pub fn drive(
         res = Err(e);
     };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
-    let log = || std::fs::metadata(&ctx.state).map(|m| m.len()).ok();
+    let log = || crate::db::last_seq(&ctx.state);
     let mut seen = if fleets.is_empty() {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused: nothing to look at
     } else {
@@ -565,6 +548,10 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    // #412: a design lane done with its pushed design hands it to the owner.
+    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design" && !fast) {
+        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
+    }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
@@ -602,8 +589,10 @@ fn pass(
         .filter(|(s, w)| s.fleet == fleet && s.lane.as_ref() == Some(&w.lane))
     {
         // #212: the fast and slow steps never act on one issue at once.
-        let lock = state_dir(ctx).join(format!("drive-{fleet}-{}.lock", s.issue));
-        let Some(_mine) = take(r, &lock, fleet) else { continue };
+        let lock = format!("drive-{fleet}-{}.lock", s.issue);
+        let Some(_mine) = take(ctx, r, &lock, STALE_LOCK_SECS, fleet) else {
+            continue;
+        };
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
@@ -623,10 +612,26 @@ fn pass(
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" {
+            // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
+            let gone = w.what.split_once(waiting::NO_PUSH);
+            if gone.is_some() && w.next_cmd.is_none() && !fast {
+                let why = "lane keeps ending without a push";
+                writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+                )?;
+            }
+            if gone.is_some_and(|g| !g.1.starts_with("respawning")) {
+                continue;
+            }
             // `waiting` names the exact next command; drive runs it.
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
+                _ if gone.is_some() => "respawn",
                 ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
                 ("spawn", _) if cmd.ends_with("--supersede") => "fix",
@@ -636,11 +641,35 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
+            // #417: a verify stage the issue doesn't need (or has no recipe for) is logged passed instead.
+            if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
+                continue;
+            }
+            // #491: a FAIL refused NO_PROOF is never retried unchanged; its reviewer is told once, or re-run once ended.
+            if step == "verdict" && args[3] == "FAIL" {
+                if let Some(code) = no_proof(
+                    ctx,
+                    cfg,
+                    r,
+                    out,
+                    (&events, &agents),
+                    (fleet, s.issue, &w.lane),
+                    &args,
+                    fast,
+                )? {
+                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
+                    continue;
+                }
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            if let Some((why, _)) = gone.filter(|_| code.is_none()) {
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
+            }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
@@ -696,6 +725,64 @@ fn pass(
         }
     }
     Ok(go)
+}
+
+/// #491: `None` for a FAIL with its Proof blocks (recorded as usual). A proofless one is refused once per head and
+/// file content (`proof-refused`); its reviewer, still in herdr, is prompted with the refusal once; an ended one
+/// gets a fresh review of the same head, which no verdict makes a new round.
+#[allow(clippy::too_many_arguments)]
+fn no_proof(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (ev, agents): (&[Event], &[Value]),
+    (fleet, n, lane): (&str, u64, &str),
+    args: &[&str],
+    fast: bool,
+) -> Result<Option<Code>> {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let on = crate::hosts::On::of(r, sp);
+    let body = on.read(Path::new(args[7])).unwrap_or_default();
+    let Some(why) = crate::gate::no_proof(&body) else {
+        return Ok(None);
+    };
+    let hash = &crate::devices::sha256(body.as_bytes())[..16];
+    let mine: Vec<&Event> = (ev.iter())
+        .filter(|e| e.is("proof-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts))
+        .collect();
+    let seen = mine
+        .iter()
+        .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
+    // `waiting` offers a verdict only once its reviewer stopped working: one still in herdr is told once; gone, or idle
+    // again after that, it has ended.
+    let pane = sp.and_then(|e| e.str("pane"));
+    let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
+    let told = mine.iter().any(|e| e.data["prompted"] == true);
+    if !seen {
+        act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
+        let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let tell =
+            |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+        let prompted = open.filter(|_| !told).is_some_and(tell);
+        let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
+        if prompted {
+            return Ok(Some(Some("NO_PROOF")));
+        }
+    }
+    if fast {
+        return Ok(Some(Some("NO_PROOF")));
+    }
+    let role = sp.and_then(|e| e.str("role")).unwrap_or("rev");
+    let (num, why) = (n.to_string(), "verdict refused NO_PROOF: re-review");
+    let c = ["spawn", fleet, &num, role, "--supersede"];
+    let code = act(ctx, cfg, r, out, ev, (fleet, Some(n), "review"), &c)?;
+    if code.is_none() {
+        let d = json!({"role": role, "agent": lane, "why": why});
+        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-lost", d))?;
+    }
+    Ok(Some(code))
 }
 
 /// #214: the merge just tried was refused or failed on a conflict (its words say so).
@@ -855,8 +942,11 @@ fn handoff(
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
-        let idle = w.who == "none" && ctx.now >= w.since + 120;
-        if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
+        // #445: a recorded `done --no-change` is due at once; a check that runs only once labelled never blocks it.
+        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some();
+        let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
+        let idle = done || (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
+        if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
         if s.reviewed(head) {
@@ -964,7 +1054,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         .take_while(|_| start)
     {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
+        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
+        let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        let c = if design {
+            ["spawn", fleet, &n, "design", "--supersede"]
+        } else {
+            ["spawn", fleet, &n, f.flow().start(), ""]
+        };
+        let code = act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)])?;
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")

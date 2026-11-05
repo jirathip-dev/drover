@@ -203,7 +203,11 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     );
     lane(&c, 9);
     lane(&c, 12);
-    let r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
+    let mut r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
+    // #444: the holder's lane is still at work (a gone one with no push would be respawned).
+    let live = agents(&[("sendmeter-impl-9", "working", "/x", "w9:sendmeter-impl-9")]);
+    r.replies
+        .splice(0..0, Fake::default().reply("herdr agent list", &live).replies);
     let (out, steps) = drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-held"), ["ci (9)"], "{out}");
     let stop = "stop: ci is held by #9; you'll get an update round when it merges";

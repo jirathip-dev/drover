@@ -34,11 +34,23 @@ const CM: [&str; 3] = [
 pub struct On<'a> {
     pub r: &'a dyn Runner,
     pub machine: Option<&'a str>,
+    connect: &'static str,
 }
 
 impl<'a> On<'a> {
     pub fn new(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
-        On { r, machine }
+        On {
+            r,
+            machine,
+            connect: "-oConnectTimeout=10",
+        }
+    }
+    /// #485: a maintenance call that must not hold up a pass: a 5 s connect timeout.
+    pub fn quick(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
+        On {
+            connect: "-oConnectTimeout=5",
+            ..Self::new(r, machine)
+        }
     }
     /// The host a `spawn` event's lane runs on (none: this one).
     pub fn of(r: &'a dyn Runner, e: Option<&'a Event>) -> Self {
@@ -54,16 +66,7 @@ impl<'a> On<'a> {
         }
         let line = quote(prog, args);
         // #337: one connection per host, kept 10 min, whatever the user's ssh config says.
-        let ssh = argv(&[
-            "-oBatchMode=yes",
-            "-oConnectTimeout=10",
-            CM[0],
-            CM[1],
-            CM[2],
-            m,
-            "--",
-            &line,
-        ]);
+        let ssh = argv(&["-oBatchMode=yes", self.connect, CM[0], CM[1], CM[2], m, "--", &line]);
         ("ssh".into(), ssh)
     }
     fn sh(&self, script: &str, p: &Path, input: &str) -> Result<Out> {
@@ -116,15 +119,15 @@ impl Runner for On<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: berth on another host is its own server there, through `berth connect` over ssh.
-    fn berth(&self) -> Option<crate::berth::Berth> {
-        let b = self.r.berth()?;
+    /// #298: shed on another host is its own server there, through `shed connect` over ssh.
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        let b = self.r.shed()?;
         let wire = if self.machine.is_some() {
-            crate::berth::Wire::Connect
+            crate::shed::Wire::Connect
         } else {
             b.wire
         };
-        Some(crate::berth::Berth { wire, ..b })
+        Some(crate::shed::Shed { wire, ..b })
     }
 }
 
@@ -238,7 +241,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
 /// #275: the asks a lane on host `name` logged in that host's own log (before lanes forwarded them), each imported once
 /// under a new id with `from`, agent its newest lane there; #283: only unanswered, recent, open, unmarked ones, no push.
 fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
-    let Some(text) = on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl")) else {
+    // #344: the host's own database through its export; a host on an older build: its log file.
+    let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+    let text = ok(on, &exe, &["events", "--jsonl"]).ok();
+    let Some(text) = text.or_else(|| on.read(&Path::new(home).join(".local/state/herdsman/events.jsonl"))) else {
         return;
     };
     let events = read(&ctx.state).unwrap_or_default();

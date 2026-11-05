@@ -1,12 +1,12 @@
-//! #298: the berth runtime, against a fake berth server on a real Unix socket (berth-proto JSON-RPC lines): every
+//! #298: the shed runtime, against a fake shed server on a real Unix socket (shed-proto JSON-RPC lines): every
 //! adapter call, a lane's spawn, the lane hook's state report, drive's event intake, ACP mode and `--on` hosts.
 mod common;
 use common::*;
-use herdsman::berth::proto::{ErrorCode, Request, Response, RpcError};
-use herdsman::berth::{self, Berth, Wire};
 use herdsman::herdr;
 use herdsman::hosts::On;
 use herdsman::runner::Runner;
+use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError};
+use herdsman::shed::{self, Shed, Wire};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 type Terms = Arc<Mutex<BTreeMap<String, Value>>>;
 
-/// A fake berth server: every request it got (`method`, params), its terminals, and the events `events` streams.
+/// A fake shed server: every request it got (`method`, params), its terminals, and the events `events` streams.
 struct Server {
     sock: PathBuf,
     seen: Arc<Mutex<Vec<(String, Value)>>>,
@@ -44,8 +44,8 @@ impl Server {
         });
         Server { sock, seen, terms }
     }
-    fn berth(&self) -> Berth {
-        Berth {
+    fn shed(&self) -> Shed {
+        Shed {
             wire: Wire::Socket(self.sock.clone()),
             acp: None,
             policy: "ask".into(),
@@ -77,7 +77,7 @@ fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, versio
             seen.lock().unwrap().push((q.method.clone(), q.params.clone()));
         }
         let res = match q.method.as_str() {
-            "hello" => Ok(json!({"version": version})),
+            "hello" => Ok(json!({"product": "shed", "version": version})),
             m => handle(m, &q.params, &mut terms.lock().unwrap()),
         };
         let id = q.id.unwrap();
@@ -85,7 +85,7 @@ fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, versio
         writeln!(w, "{}", serde_json::to_string(&resp).unwrap()).unwrap();
         if q.method == "events" {
             events.iter().for_each(|e| drop(writeln!(w, "{e}")));
-            std::thread::sleep(std::time::Duration::from_secs(3)); // berth never closes the stream
+            std::thread::sleep(std::time::Duration::from_secs(3)); // shed never closes the stream
             return;
         }
     }
@@ -129,12 +129,12 @@ fn lane_labels() -> Value {
 }
 
 #[test]
-fn every_adapter_call_is_a_berth_request() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
+fn every_adapter_call_is_a_shed_request() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
     b.add("sendmeter-impl-12", lane_labels());
     b.add("scratch", json!({})); // no `fleet` label: no lane
     let f = Fake::default();
-    let r = berth::With(&f, b.berth());
+    let r = shed::With(&f, b.shed());
     let lane = "sendmeter-impl-12";
 
     assert_eq!(herdr::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
@@ -168,7 +168,7 @@ fn every_adapter_call_is_a_berth_request() {
     );
     herdr::ok(&r, &herdr::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
-    // list: berth's lanes (running, `fleet`-labelled) beside herdr's, which is absent here.
+    // list: shed's lanes (running, `fleet`-labelled) beside herdr's, which is absent here.
     let a = herdr::agents(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
@@ -183,7 +183,7 @@ fn every_adapter_call_is_a_berth_request() {
     herdr::close(&r, lane).unwrap();
     let o = herdr::exec(&r, &herdr::read_argv(lane)).unwrap();
     assert!(herdr::failed_with(&o, "pane_not_found"), "{o:?}");
-    // herdr's own panes (`ws:pane`) and workspaces never go to berth.
+    // herdr's own panes (`ws:pane`) and workspaces never go to shed.
     assert!(herdr::read(&r, "w1:p1").is_err());
     assert!(f.called("herdr pane read w1:p1"));
     assert!(f.called("herdr agent list"));
@@ -191,49 +191,53 @@ fn every_adapter_call_is_a_berth_request() {
 
 #[test]
 fn a_wait_that_times_out_answers_as_herdr() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
+    let b = Server::new(shed::proto::VERSION, vec![]);
     b.add("slow", lane_labels());
     let f = Fake::default();
-    let r = berth::With(&f, b.berth());
+    let r = shed::With(&f, b.shed());
     let o = herdr::exec(&r, &herdr::wait_working_argv("slow", "20000")).unwrap();
     assert!(o.code != 0 && herdr::failed_with(&o, "timeout"), "{o:?}");
 }
 
 #[test]
-fn another_berth_version_is_refused() {
+fn another_shed_version_is_refused() {
     let b = Server::new("9.9.9", vec![]);
-    let e = berth::call(&Fake::default(), &b.berth().wire, berth::proto::Method::Ls, json!({})).unwrap_err();
-    assert!(format!("{e:#}").starts_with("BERTH_VERSION"), "{e:#}");
+    let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
+    assert!(format!("{e:#}").starts_with("SHED_VERSION"), "{e:#}");
 }
 
 #[test]
-fn another_host_is_reached_through_berth_connect_over_ssh() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
-    let hello = json!(Response::ok(json!(0), json!({"version": berth::proto::VERSION})));
+fn another_host_is_reached_through_shed_connect_over_ssh() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let hello = json!(Response::ok(json!(0), json!(shed::proto::Hello::ours())));
     let read = json!(Response::ok(json!(1), json!({"text": "remote screen"})));
     let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
-    let base = berth::With(&f, b.berth());
+    let base = shed::With(&f, b.shed());
     let on = On::new(&base, Some("box"));
     assert_eq!(herdr::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
     let calls = f.calls.borrow();
     assert!(
         calls
             .iter()
-            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'berth' 'connect' '--autostart'")),
+            .any(|c| c.starts_with("ssh ") && c.contains("box -- 'shed' 'connect' '--autostart'")),
         "{calls:?}"
     );
     assert!(b.methods().is_empty(), "nothing went to this host's server");
 }
 
-fn berth_config(sock: &std::path::Path, extra: &str) -> String {
+fn shed_config(sock: &std::path::Path, extra: &str) -> String {
+    kind_config("shed", sock, extra)
+}
+
+fn kind_config(kind: &str, sock: &std::path::Path, extra: &str) -> String {
     let cfg = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     format!(
-        "{cfg}\n[runtime]\nkind = \"berth\"\nsocket = \"{}\"\n{extra}",
+        "{cfg}\n[runtime]\nkind = \"{kind}\"\nsocket = \"{}\"\n{extra}",
         sock.display()
     )
 }
 
-/// A berth host's spawn: no herdr there (its agent list fails), the branch missing locally.
+/// A shed host's spawn: no herdr there (its agent list fails), the branch missing locally.
 fn spawn_fake() -> Fake {
     Fake::default()
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
@@ -242,10 +246,10 @@ fn spawn_fake() -> Fake {
 }
 
 #[test]
-fn a_lane_spawns_on_berth() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
-    let d = tmpdir("berth-spawn");
-    let c = ctx(&d, &berth_config(&b.sock, ""));
+fn a_lane_spawns_on_shed() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let d = tmpdir("shed-spawn");
+    let c = ctx(&d, &shed_config(&b.sock, ""));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let settings = std::fs::read_to_string(c.config.parent().unwrap().join("claude/fleet-impl/settings.json")).unwrap();
     let s: Value = serde_json::from_str(&settings).unwrap();
@@ -266,7 +270,7 @@ fn a_lane_spawns_on_berth() {
         cmds[1].as_array().unwrap()[3..6],
         [json!("worktree"), json!("add"), json!("-b")]
     );
-    assert_eq!((cmds[2][0].as_str(), cmds[2][1].as_str()), (Some("berth"), Some("run")));
+    assert_eq!((cmds[2][0].as_str(), cmds[2][1].as_str()), (Some("shed"), Some("run")));
     assert!(b.methods().is_empty(), "a dry run calls nothing");
 
     let f = spawn_fake();
@@ -319,7 +323,7 @@ fn a_lane_spawns_on_berth() {
         .unwrap();
     assert_eq!(
         (ev.str("runtime"), ev.str("pane"), ev.str("workspace")),
-        (Some("berth"), Some("sendmeter-impl-12"), Some(""))
+        (Some("shed"), Some("sendmeter-impl-12"), Some(""))
     );
     assert_eq!(ev.data["confirmed"], true);
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
@@ -333,30 +337,28 @@ fn a_lane_spawns_on_berth() {
 }
 
 #[test]
-fn an_acp_lane_starts_and_is_prompted_through_berths_cli() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
-    b.add("sendmeter-impl-12", lane_labels()); // berth's CLI made it (the Fake runs no berth)
+fn an_acp_lane_starts_and_is_prompted_through_sheds_cli() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels()); // shed's CLI made it (the Fake runs no shed)
     b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
-    let d = tmpdir("berth-acp");
+    let d = tmpdir("shed-acp");
     let c = ctx(
         &d,
-        &berth_config(&b.sock, "acp = \"claude-acp\"\nacp_policy = \"allow\"\n"),
+        &shed_config(&b.sock, "acp = \"claude-acp\"\nacp_policy = \"allow\"\n"),
     );
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let f = spawn_fake().reply("berth run", "").reply("berth send", "");
+    let f = spawn_fake().reply("shed run", "").reply("shed send", "");
     let (code, out) = run(&c, &Cli(&f, b.terms.clone()), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let calls = f.calls.borrow();
-    let start = calls.iter().find(|c| c.starts_with("berth run")).unwrap();
+    let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     assert!(
-        start.starts_with("berth run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd "),
+        start.starts_with("shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd "),
         "{start}"
     );
     assert!(start.ends_with("--label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude"));
-    let kick = calls.iter().find(|c| c.starts_with("berth send")).unwrap();
-    assert!(
-        kick.starts_with("berth send sendmeter-impl-12 Read ") && kick.ends_with(".brief.md and execute it fully.")
-    );
+    let kick = calls.iter().find(|c| c.starts_with("shed send")).unwrap();
+    assert!(kick.starts_with("shed send sendmeter-impl-12 Read ") && kick.ends_with(".brief.md and execute it fully."));
     // The exited terminal of the lane before was removed first; nothing typed into a shell; ready, then the turn.
     let m = b.methods();
     assert_eq!(m.iter().filter(|m| *m == "rm").count(), 1, "{m:?}");
@@ -366,28 +368,28 @@ fn an_acp_lane_starts_and_is_prompted_through_berths_cli() {
     );
     assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
     drop(calls);
-    // A reply is framed by berth's CLI too, with no Enter after it.
-    let r = berth::With(
+    // A reply is framed by shed's CLI too, with no Enter after it.
+    let r = shed::With(
         &f,
-        Berth {
+        Shed {
             acp: Some("claude-acp".into()),
-            ..b.berth()
+            ..b.shed()
         },
     );
     b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("running");
     herdr::reply(&r, false, "sendmeter-impl-12", "sendmeter-impl-12", "go on").unwrap();
-    assert!(f.called("berth send sendmeter-impl-12 go on"));
+    assert!(f.called("shed send sendmeter-impl-12 go on"));
     assert!(!b.methods().contains(&"keys".to_string()));
 }
 
-/// berth's CLI as the fake server sees it: `berth run --acp` makes a running terminal of that name.
+/// shed's CLI as the fake server sees it: `shed run --acp` makes a running terminal of that name.
 struct Cli<'a>(&'a Fake, Terms);
 
 impl Runner for Cli<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        if prog == "berth" && args[0] == "run" {
+        if prog == "shed" && args[0] == "run" {
             let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
-            let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["berth"], "keep": false,
+            let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["shed"], "keep": false,
                 "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
             self.1.lock().unwrap().insert(name.clone(), t);
         }
@@ -396,28 +398,38 @@ impl Runner for Cli<'_> {
     fn sleep(&self, _: u64) {}
 }
 
-/// `herdsman hook` in a berth terminal (`$BERTH`) on `event`.
-fn hook(sock: &std::path::Path, event: &str) {
-    let d = tmpdir("berth-hook");
-    std::fs::write(d.join("fleet.toml"), berth_config(sock, "")).unwrap();
+/// `herdsman hook` in a shed terminal (`$SHED`) on `event`: its stderr.
+fn hook(sock: &std::path::Path, event: &str) -> String {
+    hook_in("shed", "SHED", sock, event)
+}
+
+/// `herdsman hook` with config `kind` and only env `var` naming the terminal, on `event`: its stderr.
+fn hook_in(kind: &str, var: &str, sock: &std::path::Path, event: &str) -> String {
+    let d = tmpdir("shed-hook");
+    std::fs::write(d.join("fleet.toml"), kind_config(kind, sock, "")).unwrap();
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
         .args(["hook", "--role", "impl"])
         .env("HERDSMAN_LANE", "sendmeter:-:impl") // no issue number: a turn's end kicks no real drive here
-        .env("BERTH", "sendmeter-impl-12")
+        .env_remove("SHED")
+        .env_remove("BERTH")
+        .env(var, "sendmeter-impl-12")
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     let input = json!({"hook_event_name": event, "session_id": "s"}).to_string();
     child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
-    assert!(child.wait_with_output().unwrap().status.success());
+    let o = child.wait_with_output().unwrap();
+    assert!(o.status.success());
+    String::from_utf8(o.stderr).unwrap()
 }
 
 #[test]
-fn the_lane_hook_reports_its_state_to_berth() {
-    let b = Server::new(berth::proto::VERSION, vec![]);
+fn the_lane_hook_reports_its_state_to_shed() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
     b.add("sendmeter-impl-12", lane_labels());
     for (event, state) in [
         ("UserPromptSubmit", "working"),
@@ -434,7 +446,7 @@ fn the_lane_hook_reports_its_state_to_berth() {
 }
 
 #[test]
-fn drive_logs_berths_state_changes_since_its_last_pass() {
+fn drive_logs_sheds_state_changes_since_its_last_pass() {
     let ev = |seq: u64, name: &str, labels: Value, kind: Value| {
         let mut e = json!({"seq": seq, "name": name, "labels": labels});
         e.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
@@ -461,12 +473,12 @@ fn drive_logs_berths_state_changes_since_its_last_pass() {
             json!({"event": "exited", "code": 0}),
         ),
     ];
-    let b = Server::new(berth::proto::VERSION, events);
-    let d = tmpdir("berth-drive");
-    let c = ctx(&d, &berth_config(&b.sock, ""));
+    let b = Server::new(shed::proto::VERSION, events);
+    let d = tmpdir("shed-drive");
+    let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    assert_eq!(berth::intake(&c, &cfg, &b.berth().wire).unwrap(), 2);
+    assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
     let logged: Vec<_> = herdsman::events::read(&c.state)
         .unwrap()
@@ -485,10 +497,10 @@ fn drive_logs_berths_state_changes_since_its_last_pass() {
         ]
     );
     assert_eq!(
-        std::fs::read_to_string(c.state.with_file_name("berth.seq")).unwrap(),
+        std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
         "7"
     );
-    berth::intake(&c, &cfg, &b.berth().wire).unwrap();
+    shed::intake(&c, &cfg, &b.shed().wire).unwrap();
     assert_eq!(
         b.last("events")["since"],
         7,
@@ -496,14 +508,68 @@ fn drive_logs_berths_state_changes_since_its_last_pass() {
     );
     // No server: an error for drive to print; the polled agent list still covers every lane.
     let none = Wire::Socket(d.join("none.sock"));
-    assert!(berth::intake(&c, &cfg, &none).is_err());
+    assert!(shed::intake(&c, &cfg, &none).is_err());
 }
 
 #[test]
 fn the_default_runtime_is_herdr() {
     let cfg = herdsman::config::Config::parse(CONFIG).unwrap();
-    assert!(cfg.runtime.berth().is_none());
-    assert!(Fake::default().berth().is_none());
+    assert!(cfg.runtime.shed().is_none());
+    assert!(Fake::default().shed().is_none());
     let bad = format!("{CONFIG}\n[runtime]\nkind = \"tmux\"\n");
     assert!(herdsman::config::Config::parse(&bad).is_err());
+}
+
+#[test]
+fn another_product_at_the_same_version_is_refused() {
+    // A berth server: its hello names no product.
+    let hello = json!(Response::ok(json!(0), json!({"version": shed::proto::VERSION})));
+    let f = Fake::default().reply("ssh", &format!("{hello}\n"));
+    let on = On::new(&f, Some("box"));
+    let e = shed::call(&on, &Wire::Connect, shed::proto::Method::Ls, json!({})).unwrap_err();
+    assert!(
+        format!("{e:#}").starts_with("SHED_VERSION") && format!("{e:#}").contains("unnamed"),
+        "{e:#}"
+    );
+}
+
+#[test]
+fn the_old_kind_and_env_still_work_with_a_warning() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let err = hook_in("berth", "BERTH", &b.sock, "Stop");
+    assert_eq!(b.last("state"), json!({"name": "sendmeter-impl-12", "state": "done"}));
+    assert!(
+        err.contains("kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\""),
+        "{err}"
+    );
+    assert!(!hook(&b.sock, "Stop").contains("deprecated"));
+    let d = tmpdir("shed-doctor");
+    let c = ctx(&d, &kind_config("berth", &b.sock, ""));
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
+    assert!(
+        out.contains("! runtime — kind = \"berth\" is deprecated, berth is now shed → set kind = \"shed\" in "),
+        "{out}"
+    );
+    let c = ctx(&tmpdir("shed-doctor-new"), &shed_config(&b.sock, ""));
+    assert!(!run(&c, &Fake::default(), &["doctor"]).1.contains("! runtime"));
+}
+
+#[test]
+fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
+    let ev = json!({"seq": 9, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "killed"});
+    let b = Server::new(shed::proto::VERSION, vec![ev]);
+    let d = tmpdir("shed-old-seq");
+    let c = ctx(&d, &shed_config(&b.sock, ""));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    std::fs::write(c.state.with_file_name("berth.seq"), "8").unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 1);
+    assert_eq!(b.last("events")["since"], 8);
+    assert_eq!(
+        std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
+        "9"
+    );
+    shed::intake(&c, &cfg, &b.shed().wire).unwrap();
+    assert_eq!(b.last("events")["since"], 9, "shed's file wins once it exists");
 }

@@ -392,14 +392,16 @@ pub fn host_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
     host_html(&r[r.find("\r\n\r\n").unwrap() + 4..])
 }
 
-/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node.
+/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node; #440: then what System draws from the same
+/// data (web/src/system.ts): Agent providers and Notifications & devices.
 pub fn host_html(json: &str) -> String {
     let d = tmpdir("host-ts");
     std::fs::write(d.join("host.json"), json).unwrap();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts");
+    let sys = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/system.ts");
     let js = format!(
-        "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
-         process.stdout.write(tab(JSON.parse(fs.readFileSync({:?}))));",
+        "import {{ tab }} from {src:?}; import {{ providers, notifications }} from {sys:?}; import fs from 'node:fs';\n\
+         const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(tab(d) + providers(d) + notifications(d));",
         d.join("host.json")
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
@@ -444,15 +446,169 @@ pub fn queue_html(json: &str, expr: &str) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
+/// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before
+/// board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and
+/// Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
+pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &str) -> String {
+    let get = |p: &str| {
+        let r =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now)).into_owned();
+        assert!(r.starts_with("HTTP/1.1 200"), "{p}: {r}");
+        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
+    let d = tmpdir("system-ts");
+    std::fs::write(d.join("host.json"), get("/api/v1/host")).unwrap();
+    std::fs::write(d.join("queue.json"), get("/api/v1/queue")).unwrap();
+    std::fs::write(d.join("events.html"), events).unwrap();
+    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src").join(f);
+    let js = format!(
+        "import {{ tab }} from {:?}; import * as y from {:?}; import fs from 'node:fs';\n\
+         const h = JSON.parse(fs.readFileSync({:?})), q = JSON.parse(fs.readFileSync({:?}));\n\
+         process.stdout.write(JSON.stringify({{ host: tab(h), 'sy-providers': y.providers(h), 'sy-notifications': y.notifications(h), \
+         'sy-fleets': y.fleets(q), 'sy-conductor': y.conductor(q), events: fs.readFileSync({:?}, 'utf8') }}));",
+        src("host.ts"),
+        src("system.ts"),
+        d.join("host.json"),
+        d.join("queue.json"),
+        d.join("events.html")
+    );
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/system.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let parts = String::from_utf8(o.stdout).unwrap().replace("</", "<\\/");
+    format!("<script>{{ const p = {parts}; for (const id in p) frag(id, p[id]); }}</script>")
+}
+
 /// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`
-/// the request's Host, else an empty one: a read-only server's).
+/// the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws
+/// (`with_board`, for an unpaired request).
 pub fn with_queue(res: &str, s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+    with_board(res, s, host, "", now)
+}
+
+/// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1
+/// data `json` (the first `d`, …), under node: their strings.
+pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
+    let d = tmpdir("board-ts");
+    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts"));
+    let mut js = format!(
+        "import * as lanes from {:?}; import * as needs from {:?}; import * as chat from {:?}; import fs from 'node:fs';\nconst out = [];\n",
+        src("lanes"),
+        src("needs"),
+        src("chat")
+    );
+    for (i, (json, expr)) in parts.iter().enumerate() {
+        std::fs::write(d.join(format!("{i}.json")), json).unwrap();
+        js += &format!(
+            "{{ const d = JSON.parse(fs.readFileSync({:?})); out.push(String({expr})); }}\n",
+            d.join(format!("{i}.json"))
+        );
+    }
+    js += "process.stdout.write(JSON.stringify(out));";
+    std::fs::write(d.join("t.mjs"), js).unwrap();
+    let o = std::process::Command::new("node")
+        .arg(d.join("t.mjs"))
+        .output()
+        .expect("node (24+) runs web/src/*.ts");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    serde_json::from_slice(&o.stdout).unwrap()
+}
+
+/// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and
+/// `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
+pub fn api(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
+    let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
+    let mut r = String::from_utf8_lossy(&s.respond(&req(host), now)).into_owned();
+    if !r.starts_with("HTTP/1.1 200") {
+        r = String::from_utf8_lossy(&s.respond(&req(""), now)).into_owned();
+    }
+    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/{path}: {r}");
+    r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+}
+
+/// #269: the needs cards, the Lanes tab and the [chat] tab as the board draws them for that request (`api`'s).
+pub fn parts(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> [String; 3] {
+    let [n, l, c] = ["needs", "lanes", "chat"].map(|p| api(s, host, extra, now, p));
+    let v = board_js(&[(&n, "needs.tab(d)"), (&l, "lanes.tab(d)"), (&c, "chat.tab(d)")]);
+    [v[0].clone(), v[1].clone(), v[2].clone()]
+}
+
+/// #269: what `/frags?tab=` sent before the board drew them: `needs` and the tab's part (`lanes`, `chat`) by id.
+pub fn frags(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+    let [needs, lanes, chat] = parts(s, host, extra, now);
+    serde_json::json!({ "needs": needs, "lanes": lanes, "chat": chat })
+}
+
+/// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows
+/// them once drawn, for the request with Host `host` and `extra` header lines.
+pub fn with_board(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
     let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
     let q = queue_tab(s, if ok { host } else { "" }, now);
+    let [needs, lanes, chat] = parts(s, host, extra, now);
     res.replacen(
         "<section id=queue></section>",
         &format!("<section id=queue>{q}</section>"),
         1,
     )
+    .replacen("<div id=needs></div>", &format!("<div id=needs>{needs}</div>"), 1)
+    .replacen(
+        "<section id=lanes></section>",
+        &format!("<section id=lanes>{lanes}</section>"),
+        1,
+    )
+    .replacen(
+        "<section id=chat></section>",
+        &format!("<section id=chat>{chat}</section>"),
+        1,
+    )
+}
+
+/// #269: the Lanes row's avatar (web/src/lanes.ts's `avatar`) for each (name, role, herdr state), under node.
+pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
+    use herdsman::serve::{act, coat, tone};
+    let j: Vec<String> = of
+        .iter()
+        .map(|(n, r, s)| {
+            serde_json::json!({"state": s, "act": act(r, s), "atone": tone(s), "coat": coat(n)}).to_string()
+        })
+        .collect();
+    board_js(&j.iter().map(|j| (j.as_str(), "lanes.avatar(d)")).collect::<Vec<_>>())
+}
+
+/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page
+/// file): without the board's module, which would read the API of the server the copy's assets come from.
+pub fn drawn(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
+    let page = with_board(res, s, host, extra, now);
+    let at = page.find("<script type=module").expect("the board's module");
+    let end = at + page[at..].find("</script>").unwrap() + 9;
+    format!("{}{}", &page[..at], &page[end..])
+}
+
+/// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read
+/// imports `text`. Leases, devices and snapshots go with it.
+pub fn rewrite_log(state: &Path, text: &str) {
+    for f in ["state.db", "state.db-wal", "state.db-shm"] {
+        let _ = std::fs::remove_file(state.with_file_name(f));
+    }
+    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+    std::fs::write(state, text).unwrap();
+}
+
+/// #344: lease `key` as process `pid` would hold it: taken at `at` for `secs`.
+pub fn lease_as(c: &Ctx, key: &str, pid: u32, at: u64, secs: u64) {
+    let l = herdsman::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
+    assert!(herdsman::db::renew(
+        &c.state,
+        &l,
+        &herdsman::db::Lease { pid, ..l.clone() }
+    ));
+}
+
+/// #344: the lease on `key`, expired or not.
+pub fn lease_on(c: &Ctx, key: &str) -> Option<herdsman::db::Lease> {
+    herdsman::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
 }

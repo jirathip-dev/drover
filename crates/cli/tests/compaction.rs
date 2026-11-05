@@ -1,4 +1,4 @@
-//! #343: the event log's folded checkpoint and its rotation into monthly archives.
+//! #343: the event log's folded checkpoint and its rotation out of the live log (#344: archived rows in `state.db`).
 mod common;
 use common::tmpdir;
 use herdsman::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
@@ -54,7 +54,7 @@ fn same(a: &States, b: &States) {
     );
 }
 
-/// Bulk rows numbered on from the log's last (append's fsync per row is slow for hundreds of cases).
+/// Bulk rows numbered on from the log's last, as an old JSONL log the next read imports (#344).
 fn write(p: &Path, ev: &[Event]) {
     let n = read(p).unwrap().last().map_or(0, |e| e.seq);
     let rows: String = (ev.iter().zip(n + 1..))
@@ -93,12 +93,12 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         write(&p, &recent.collect::<Vec<_>>());
         let before = read(&p).unwrap();
         let full = fold(&before);
-        let size = std::fs::metadata(&p).unwrap().len();
+        let size = herdsman::db::live_bytes(&p).unwrap();
         rotate(&p, size + 1, now).unwrap();
         assert_eq!(read(&p).unwrap().len(), before.len(), "under the limit nothing moves");
         rotate(&p, 1, now).unwrap();
-        assert!(std::fs::metadata(&p).unwrap().len() < size, "the live log shrank");
-        assert!(d.join("events-197001.jsonl.gz").exists());
+        assert!(herdsman::db::live_bytes(&p).unwrap() < size, "the live log shrank");
+        assert!(read(&p).unwrap().len() < before.len());
         let back = history(&p).unwrap();
         let rows = |v: &[Event]| {
             v.iter()
@@ -127,7 +127,7 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         append(&p, &Event::new(now, "a", Some(1), "stall", json!({}))).unwrap();
         assert_eq!(read(&p).unwrap().last().unwrap().seq, before.len() as u64 + 1);
         let with = states(&p).unwrap();
-        std::fs::remove_file(d.join("state.snapshot.json")).unwrap();
+        herdsman::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
         same(&states(&p).unwrap(), &with);
         checkpoint(&p).unwrap();
         same(&states(&p).unwrap(), &with);
@@ -154,13 +154,14 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     }
     std::fs::write(&p, text).unwrap();
     checkpoint(&p).unwrap();
-    write(&p, &log(7, 50, seq * 600));
+    // #344: the rows after the checkpoint as live writers add them.
+    log(7, 50, seq * 600).iter().for_each(|e| append(&p, e).unwrap());
     let t = std::time::Instant::now();
     let st = states(&p).unwrap();
     let ms = t.elapsed().as_secs_f64() * 1e3;
     eprintln!(
         "#343: fold of a {} MB log from its checkpoint: {ms:.2} ms",
-        std::fs::metadata(&p).unwrap().len() >> 20
+        herdsman::db::live_bytes(&p).unwrap() >> 20
     );
     assert!(ms < 20.0, "{ms} ms");
     same(&st, &fold(&read(&p).unwrap()));

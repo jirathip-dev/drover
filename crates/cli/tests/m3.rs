@@ -265,12 +265,8 @@ fn queue_survives_torn_last_line() {
         json!({"op": "rm", "issues": [12]}),
     ))
     .unwrap();
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&c.state)
-        .unwrap()
-        .write_all(&line.as_bytes()[..30])
-        .unwrap();
+    // #344: an old build's log, torn mid-line, beside the database: its import skips the torn row.
+    std::fs::write(&c.state, &line.as_bytes()[..30]).unwrap();
     assert_eq!(order(&c), [12, 13]);
     q(&c, &["add", "14", "--top"]);
     assert_eq!(order(&c), [14, 12, 13]);

@@ -44,7 +44,9 @@ fn default_pipeline_replays_recorded_histories() {
                 "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]})
         };
         let moved = "e".repeat(40);
+        let log = herdsman::waiting::Log::new(&events[..=i]);
         let a = waiting_on(
+            &log,
             &events[..=i],
             s,
             Some((&last, 1)),
@@ -52,7 +54,7 @@ fn default_pipeline_replays_recorded_histories() {
             f,
             Some(("/v.md", "PASS")),
         );
-        let b = waiting_on(&events[..=i], s, Some((&moved, 1)), &pr(&moved), f, None);
+        let b = waiting_on(&log, &events[..=i], s, Some((&moved, 1)), &pr(&moved), f, None);
         let g = gate(f, &pr(&last), Some(s), false).map_or_else(|r| r.code.to_string(), |_| "ok".into());
         out += &format!(
             "{i} {} #{n} {} r{} u{} x{} | {} {:?} | {} {:?} | {g}\n",
@@ -260,7 +262,15 @@ fn pr(head: &str) -> serde_json::Value {
 fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(), &'static str>) {
     let f = cfg.fleet("atlas").unwrap();
     let s = &fold(events)[&("atlas".to_string(), 12)];
-    let w = waiting_on(events, s, Some((head, 1)), &pr(head), f, None);
+    let w = waiting_on(
+        &herdsman::waiting::Log::new(events),
+        events,
+        s,
+        Some((head, 1)),
+        &pr(head),
+        f,
+        None,
+    );
     (
         w.next_cmd,
         gate(f, &pr(head), Some(s), false).map(drop).map_err(|r| r.code),

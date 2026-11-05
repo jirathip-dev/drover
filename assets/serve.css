@@ -1,4 +1,4 @@
-:root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
+:root{--fs:13px;--fs-meta:11px;--fs-input:16px;--fs-code:32px;--ctl:28px;--hit:44px;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--kb:0px}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 /* #114 app-like: no pinch/double-tap zoom, no text-size jump on rotate, no rubber band (inner scrollers contain).
@@ -97,7 +97,7 @@ button[aria-busy=true]::after{content:" ↻";display:inline-block;animation:s 1s
 main{transition:transform .2s}
 /* #206: the tab is picked before the first paint (serve.rs's head script sets html[data-tab]; tab() keeps it): only its
    section shows, and [?] only on Queue. */
-html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat,html:not([data-tab=host]) #host,html:not([data-tab=events]) #events{display:none}
+html:not([data-tab=queue]) :is(#queue,header .qhelp),html:not([data-tab=lanes]) #lanes,html:not([data-tab=chat]) #chat{display:none}
 .fl{animation:fl .6s}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 .ask pre{white-space:pre-wrap;font-size:var(--fs-meta);margin:var(--s1) 0}
@@ -193,6 +193,10 @@ p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.emp
 .pairp.g{border-color:var(--g);color:var(--g)}.pairp.r{border-color:var(--r)}.pairp p{margin:0}
 .pairp .code{font-size:var(--fs-code);letter-spacing:.2em;text-align:center}
 .st{flex:none;margin:0;font-size:var(--fs-meta);min-height:1.5em}
+/* #363 report mode: the tapped element outlined; the note box fixed at the bottom. */
+.rep .repo{outline:2px solid var(--r);outline-offset:-2px}
+.repf{position:fixed;z-index:4;left:0;right:0;bottom:0;display:flex;align-items:center;gap:var(--s4);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--r)}
+.repf input{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);font-size:var(--fs-input)}
 .ask{border:1px solid var(--r);background:color-mix(in srgb,var(--r) 15%,transparent);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}
 .ask b{color:var(--r)}.ask form{display:flex;flex-wrap:wrap;gap:var(--s4)}.ask input[name=text]{flex:1;min-width:8em;font:inherit;font-size:var(--fs-input)}
 .ask form button[name]{order:-1}
@@ -523,13 +527,10 @@ details.er>summary{grid-template-columns:2ch var(--s2) 6ch minmax(0,1fr) auto;ga
 .ex pre{margin:0;padding:var(--s1) var(--s2);border-radius:4px;background:var(--card);font-size:var(--fs-meta);white-space:pre-wrap;overflow-wrap:anywhere}
 .fl2{list-style:none;margin:var(--s1) 0 0;padding:0;font-size:var(--fs-meta)}
 .fl2 li{padding:calc(var(--s1) / 2) 0}
-/* The header never wraps its title: it ellipsises beside [?] [↻] [🐎] [◐] at 390 (+ [Pair]) as a last resort. */
+/* The header never wraps its title: it ellipsises beside [?] [↻] [🐎] [⚙] at 390 (+ [Pair]) as a last resort. */
 body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* #290: `[◐]` sits on every tab (no select behind it); the look sheet (docs/design/pickers) is the lane sheet's box with
-   two listboxes, THEME and COLOURS (`.cg` groups as in [config]). Its backdrop is light, so the board behind it shows
-   each pick at once; ≥ 720 px the two lists sit side by side and the sheet opens at half. */
-#sheet:has(>.look)>.bd{background:color-mix(in srgb,var(--scrim) 35%,transparent)}
-.sh.look .top{flex:1 1 auto;min-height:0;padding-bottom:var(--s4)}
+/* #290: the look sheet (docs/design/pickers), #440: System's Appearance: two listboxes, THEME and COLOURS (`.cg` groups
+   as in [config]), then STYLE; ≥ 900 px side by side. */
 /* A row: 44 px, the art, the name, `(theme default)`; the current one is in the accent with a ✓. Pressed inverts like a
    control; the keyboard's row has a 2 px accent ring. */
 .lko{display:flex;align-items:center;gap:var(--s3);min-height:var(--hit);padding:0 var(--s1);border-top:1px solid var(--line);cursor:pointer;outline:0;-webkit-tap-highlight-color:transparent}
@@ -550,7 +551,6 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .lsw>b{flex:1;border-radius:3px}
 .lsw>.aa{flex:none;display:grid;place-items:center;width:calc(var(--s4) + var(--s2));border:1px solid var(--edge);font-size:var(--fs-meta);font-weight:400}
 .lkn{margin:var(--s2) 0 0;font-size:var(--fs-meta);color:var(--mute)}
-@media (min-width:720px){.sh.look .top{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}.lkn{grid-column:1/-1}}
 /* #367: the Queue tab one repo at a time (serve.js qchips): repo chips in #170's look, a red dot when it needs you; the
    repo's groups under 13 px headers; a blocked chain one row ([▾] opens its steps in place), `+ N more` likewise; [all]
    shows only the needs-you groups. A sideways swipe is the page's (no pan), a vertical one scrolls. */
@@ -606,6 +606,7 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .th>div{flex:1;min-width:0}
 .th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .th .ds{font-size:var(--fs-meta);color:var(--mute)}
+.th .cw{font-size:var(--fs-meta);font-weight:400} /* #460: `config c1 waiting` under the title while a proposal waits */
 .th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
 .tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
 .tmo{cursor:pointer}
@@ -661,7 +662,14 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
    hides the tab bar. A message sent this session reads `sending…`, then ✓; failed, red with [retry]. A failed
    delivery's system line is red too. A working thread's mark is the loading strip's art (#ld), 24 px, inline. */
 .tw textarea{max-height:calc(6lh + 2 * var(--s2) + 2px);overflow-y:auto}
-@media (max-width:999px){html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp .tw{bottom:0;margin-bottom:0}}
+/* #443: on a phone the open thread is fixed between the header and the tab bar, or the keyboard's top (`--kb`,
+   serve.js) while the box is focused: the composer sits flush on it, the page never scrolls, only the messages do. */
+@media (max-width:999px){
+  html[data-tab=chat] .cvp{position:fixed;top:calc(var(--hit) + var(--s1));left:0;right:0;bottom:max(var(--kb),calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom)));display:flex;flex-direction:column;padding:0 var(--s3)}
+  html[data-tab=chat] .cvp .tc{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  html[data-tab=chat] .cvp .tw{position:relative;bottom:auto;margin-bottom:0}
+  html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp{bottom:var(--kb)}
+}
 .snt .md p{white-space:pre-line}.blk>summary .sk{flex:none;font-weight:400;color:var(--g)}
 .blk.snt.bad{--k:var(--r)}.snt.bad>summary .ct{color:var(--r)}.qs.note.r{border-left-color:var(--r);color:var(--r)}
 .tld{display:inline-grid;place-items:center;min-width:calc(var(--s4) * 1.5);height:calc(var(--s4) * 1.5);vertical-align:middle;font-style:normal}
@@ -669,3 +677,99 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .tld i{font-style:normal;color:var(--mute);animation:s 1s linear infinite}.tld i::before{content:"↻"}.tld .lda{display:none;white-space:pre;color:var(--fg)}
 html:has(#ld.ld) .tld i,html:has(#ld:not(.ld)) .tld .lds,html:has(#ld.la) .tld :is(.lds,i){display:none}html:has(#ld.la) .tld .lda{display:grid}
 @media (prefers-reduced-motion:reduce){.tld :is(.lds,i){animation:none}}
+/* #407: a finished turn's commands fold into one `▸ N commands` row; open, its rows under it. */
+.blk.fold{--k:var(--a)}.fold>summary::before{content:"▸";color:var(--k)}.fold[open]>summary::before{content:"▾"}
+.blk.fold[open]>summary .pv{visibility:visible}.fold>.blk{margin-top:var(--s4)}
+/* #407: the floating pill above the box (working, stopping…, reconnecting…, offline); the line it replaces hides. */
+.tlv.wk{display:none}
+.pill{position:absolute;bottom:calc(100% + var(--s2));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:var(--s2);max-width:calc(100% - 2 * var(--s4));min-height:var(--ctl);padding:0 var(--s3);border:1px solid var(--edge);border-radius:999px;background:var(--card);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap}
+/* #407: queued messages above the box, one line each with [send now] edit [remove]; the edit line; the hint under it. */
+.tq{flex-basis:100%;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:0 var(--s4);padding:0 var(--s2);border-left:2px solid var(--a);border-radius:6px;background:var(--card)}
+.tq>p{flex-basis:100%;margin:0;padding-top:var(--s1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tw>:is(.qe,.qh){flex-basis:100%;margin:0;font-size:var(--fs-meta);color:var(--mute)}.tw>.qh{margin-top:calc(-1 * var(--s2))}
+/* #407: a long press's menu: the send's [queue]/[steer] choices, or a message's [copy] [copy as markdown] [quote]. */
+#mm{position:fixed;z-index:3;left:var(--s3);right:var(--s3);display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);padding:var(--s2) var(--s3);border:1px solid var(--edge);border-radius:6px;background:var(--card);font-size:var(--fs-meta)}
+#mm[hidden]{display:none}
+@media (pointer:coarse){.cvp :is(.snd,.tc .blk:is(.me,.ai)){-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}}
+/* #440: the System sheet (docs/design/system-sheet). [⚙] in [◐]'s place, its dot red, 8 px, on the top right corner. */
+#sysb{position:relative}
+#sysb .sd,.sxi .sd{position:absolute;top:0;right:0;width:var(--s2);height:var(--s2);border-radius:50%;background:var(--r);box-shadow:0 0 0 2px var(--bg)}
+:is(#sysb,.sxi) .sd[hidden]{display:none}
+nav a{flex:1 1 0}
+/* Its own layer under #sheet (z 3), at the full detent; the index between its head and its scroller. */
+#sys{position:fixed;inset:0;z-index:2;overscroll-behavior:contain}
+#sys[hidden]{display:none}
+#sys>.sbd{position:absolute;inset:0;background:var(--scrim)}
+#sys>.sh{transform:none;transition:none}
+html.sysopen{overflow:hidden}
+.sh.sys .hd p{display:flex;align-items:center;gap:var(--s2)}
+.sh.sys .hd b{flex:1}
+/* The index: one line of bracket chips that scrolls sideways at 390, the current one filled like the tab bar's. */
+.sxi{flex:none;display:flex;gap:var(--s3);overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--s3));padding:0 var(--s3) var(--s2);border-bottom:1px solid var(--line);mask-image:linear-gradient(90deg,black calc(100% - 3ch),transparent)}
+.sxi::-webkit-scrollbar{display:none}
+.sxi a{position:relative;flex:none;display:flex;align-items:center;min-height:var(--ctl);color:var(--mute);text-decoration:none;white-space:nowrap}
+.sxi a>span::before{content:"["}.sxi a>span::after{content:"]"}
+.sxi a>span{display:inline-flex;align-items:center;height:var(--ctl);padding:0 .3ch}
+.sxi a.on>span{background:var(--l);color:var(--bg)}
+/* The scroller: every section in one column; a head is the tab line's style (bold, its theme word first). */
+/* It spans the sheet's width, its content inset as the sheet's, so a right-aligned control's tap ring is never clipped. */
+.sh.sys .top{position:relative;flex:1 1 auto;min-height:0;max-height:none;border:0;margin:0 calc(-1 * var(--s3));padding:0 var(--s3) calc(var(--s4) * 4)}
+.sy{padding:var(--s2) 0 var(--s3);border-bottom:1px solid var(--line)}
+.syh{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--s2);margin:var(--s2) 0 var(--s1);padding:var(--s1);font-size:var(--fs);font-weight:700}
+.syh .syt{flex:none}
+.syh .sym{flex:1 1 14ch;min-width:0;font-size:var(--fs-meta);font-weight:400;color:var(--mute);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.syh .sym.a{color:var(--a)}
+.sy[data-t=r]>.syh{color:var(--r);background:color-mix(in srgb,var(--r) 12%,transparent);border-radius:4px}
+.sy[data-t=r]>.syh .sym{color:inherit}
+/* The moved tabs drop their own first line (the head says it), their padding and sticky offsets. */
+#sys :is(#host,#events){display:block;padding:0;margin:0}
+#sys :is(#host,#events)>.tsub{display:none}
+#sys .eg>h3{top:0}
+/* Agent providers: a card per provider (the host card's box), an account or key per row. */
+.pvg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,56ch),1fr));gap:var(--s3);align-items:start}
+.pvc{box-shadow:inset 0 0 0 1px var(--line);border-radius:6px;padding:0 var(--s2) var(--s2);min-width:0}
+.pvch{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-bottom:1px solid var(--line)}
+.pvr{padding:var(--s2) 0;border-bottom:1px solid var(--line)}.pvr:last-child{border-bottom:0}
+.pvr p{margin:0}
+.pvh{display:flex;align-items:center;gap:var(--s2);min-height:var(--ctl)}
+.pvs{margin-left:auto;font-weight:700;text-align:right}
+.pvs.g{color:var(--g)}.pvs.a{color:var(--a)}.pvs.r{color:var(--r)}
+.pvr[data-t=r]{box-shadow:inset 3px 0 var(--r);padding-left:var(--s2)}
+.pvm,.pvf{font-size:var(--fs-meta);color:var(--mute)}
+.pvu{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3);margin-top:var(--s1)!important}
+.pm{display:inline-flex;align-items:center;gap:var(--s1);white-space:nowrap}
+.pm .k{color:var(--mute);font-size:var(--fs-meta);min-width:2.5ch}
+.pvc .bar{font-size:var(--fs-meta)}.pvc .bar.g{color:var(--g)}.pvc .bar.a{color:var(--a)}.pvc .bar.r{color:var(--r)}.pvc .bar i{font-style:normal;opacity:.45}
+.pvf{margin:var(--s2) 0 0}
+/* Fleets: a row per fleet in its colour; it opens to the [config] content (.cs keeps its rules). */
+.sfl{border-top:1px solid var(--line)}.sfl:first-of-type{border-top:0}
+.sfl>summary{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);padding:0 var(--s1);list-style:none;white-space:nowrap}
+.sfl>summary::-webkit-details-marker{display:none}
+.sfl>summary :is(.fq,b){flex:none;font-style:normal;color:var(--fk)}
+.sfl>summary .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-meta)}
+.sfl[open]{box-shadow:inset 3px 0 var(--fk);padding-left:var(--s2)}
+.sfl>.cs{padding:0 0 var(--s2)}
+/* Notifications and Conductor reuse the config groups. */
+.sy .cs .cg:first-child{border-top:0}
+.role2{display:flex;align-items:center;gap:var(--s2);min-height:var(--hit);border-top:1px solid var(--line)}
+.role2:first-of-type{border-top:0}
+.role2>span{flex:1;min-width:0}
+.sy .mt{font-size:var(--fs-meta);color:var(--mute)}
+.role2>span>:is(.m,.mt){display:block}
+.sy code{color:var(--l);background:color-mix(in srgb,var(--l) 12%,transparent);border-radius:3px;padding:0 .3ch;font:inherit}
+.sy a.go{margin-left:var(--s1)}
+/* A host card's [sign in ▾] keeps one line beside the name (Claude's sign-in is Agent providers'). */
+#sys .hhd>.su>summary{white-space:nowrap}
+/* At 900 px and over: the index is a rail on the left, the sections a column on the right. */
+@media (min-width:900px){
+  .sh.sys{display:grid;grid-template-columns:calc(var(--s4) * 13) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:calc(2 * var(--s4))}
+  .sh.sys>.hd{grid-column:1/-1}
+  .sxi{flex-direction:column;align-items:stretch;gap:var(--s1);margin:0;padding:var(--s2) 0;border:0;border-right:1px solid var(--line);overflow:visible;mask-image:none}
+  .sxi a>span{padding:0 .5ch}
+  .sxi a .sd{position:static;margin-left:var(--s2)}
+  .sh.sys .top{margin-left:0}
+  .sy .look{display:grid;grid-template-columns:repeat(2,minmax(0,420px));gap:0 calc(3 * var(--s4));align-content:start}
+  .sy .look .lkn{grid-column:1/-1}
+  .sy>.cs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 calc(2 * var(--s4))}
+  .sy>.cs>.cg:nth-child(2){border-top:0}
+}

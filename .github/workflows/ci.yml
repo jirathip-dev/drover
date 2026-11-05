@@ -24,13 +24,15 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
+      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; budgets hold in a release build)"
+        run: cargo test --release --locked --test perf waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log -- --nocapture
       - name: demo export (#39, synthetic data in demo/)
         run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
       - name: leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|berth-proto|herdsman-core|herdsman-server' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|herdsman-core|herdsman-server' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
       - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
         run: |
@@ -56,6 +58,8 @@ jobs:
           test -z "$(git status --porcelain assets/types/)" || { echo "::error::untracked file in assets/types/: run \`just types\`"; exit 1; }
           cargo test --locked -p herdsman-server --features ts serde_json_fits_the_types
           just types-lint
+      - name: "no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab"
+        run: just html-lint
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
@@ -135,6 +139,10 @@ jobs:
           mkdir -p ui-webkit
           HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
           test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
+      - name: the chat keyboard in WebKit (#443, a 336 px visualViewport shrink at 390)
+        run: |
+          HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
+          test -f ui-webkit/chat-kb.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,12 +1,10 @@
-//! Append-only JSONL event log, the state fold over it, and notifiers.
+//! The append-only event log (#344: in `state.db`, `db`), the state fold over it, and notifiers.
 use crate::config::Config;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::MetadataExt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -57,46 +55,27 @@ fn is_zero(n: &u64) -> bool {
     *n == 0
 }
 
-/// Append one line numbered `seq` and fsync, under an exclusive lock, terminating a torn tail (a writer died
-/// mid-line) first.
+/// #344: one event, numbered next, into the database beside `path` (`db::append`): every writer goes through here.
 pub fn append(path: &Path, ev: &Event) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let mut f = loop {
-        let f = OpenOptions::new().create(true).append(true).read(true).open(path);
-        let f = f.with_context(|| format!("cannot open event log {}", path.display()))?;
-        f.lock()?;
-        // #343: unless a rotation renamed a new log over the one this waited on.
-        if std::fs::metadata(path).is_ok_and(|m| m.ino() == f.metadata().map_or(0, |m| m.ino())) {
-            break f;
-        }
-    };
-    let mut old = vec![];
-    f.read_to_end(&mut old)?;
-    let torn = old.last().is_some_and(|&b| b != b'\n');
-    let text = String::from_utf8_lossy(&old);
-    // #343: after the last row's seq (a rotated log's rows are not their line numbers); old rows: as `read` numbers them.
-    let last = text.lines().rev().find_map(|l| serde_json::from_str::<Event>(l).ok());
-    let ev = Event {
-        seq: last
-            .filter(|e| e.seq > 0)
-            .map_or(text.lines().count() as u64, |e| e.seq)
-            + 1,
-        ..ev.clone()
-    };
-    let mut line = serde_json::to_string(&ev)?;
-    line.push('\n');
-    if torn {
-        line.insert(0, '\n');
-    }
-    f.write_all(line.as_bytes())?;
-    f.sync_all()?;
-    Ok(())
+    crate::db::append(path, ev)
 }
 
-/// Every complete record: a torn last line is skipped silently, any other bad line with a warning.
+/// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
+    crate::db::events(path, "archived = ?1", 0)
+}
+
+/// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
+pub fn jsonl(path: &Path) -> Result<String> {
+    history(path)?
+        .iter()
+        .map(|e| Ok(serde_json::to_string(e)? + "\n"))
+        .collect()
+}
+
+/// A JSONL log from before #344 (`db::import`): every complete record; a torn last line is skipped silently, any other
+/// bad line with a warning.
+pub(crate) fn read_file(path: &Path) -> Result<Vec<Event>> {
     match std::fs::read_to_string(path) {
         Ok(t) => Ok(parse(&t, path)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
@@ -125,20 +104,15 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
     out
 }
 
-/// #343: the fold up to `seq` (`state.snapshot.json`), and the live log's length then: a cache, the logs rebuild it.
+/// #343: the fold up to `seq` (the `states` snapshot row): a cache, the log rebuilds it.
 #[derive(Serialize, Deserialize, Default)]
 struct Checkpoint {
     seq: u64,
-    len: u64,
     states: Vec<IssueState>,
 }
 
-fn saved(path: &Path) -> Option<Checkpoint> {
-    serde_json::from_str(&std::fs::read_to_string(path.with_file_name("state.snapshot.json")).ok()?).ok()
-}
-
-/// #343: every event, the rotated archives' (`events-YYYYMM.jsonl.gz`, read on demand) and the live log's, by seq.
-pub fn history(path: &Path) -> Result<Vec<Event>> {
+/// #343: the rotated archives (`events-YYYYMM.jsonl.gz`) of a log from before #344 (`db::import`).
+pub(crate) fn archives(path: &Path) -> Result<Vec<Event>> {
     let dir = std::fs::read_dir(path.parent().unwrap_or(Path::new(".")));
     let mut gz: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
     gz.retain(|p| {
@@ -155,67 +129,45 @@ pub fn history(path: &Path) -> Result<Vec<Event>> {
             .output()?;
         all.extend(parse(&String::from_utf8_lossy(&o.stdout), &g));
     }
-    all.extend(read(path)?);
-    all.sort_by_key(|e| e.seq);
-    all.dedup_by_key(|e| e.seq); // a rotation that died between its archive and its rename
     Ok(all)
 }
 
-/// #343: the checkpoint's states and seq, the events after it and the log's length read (no checkpoint: every event).
-fn load(path: &Path) -> Result<(States, u64, Vec<Event>, u64)> {
-    // Up to the last complete row: a torn or half-written one is read again next time.
-    let end = |b: &[u8]| b.iter().rposition(|&c| c == b'\n').map_or(0, |i| i as u64 + 1);
-    let Some(cp) = saved(path) else {
-        let len = std::fs::read(path).map_or(0, |b| end(&b));
-        return Ok((States::new(), 0, history(path)?, len));
-    };
+/// #343: every event, the archived ones too, by seq.
+pub fn history(path: &Path) -> Result<Vec<Event>> {
+    crate::db::events(path, "seq > ?1", 0)
+}
+
+/// #343: the checkpoint's states and seq, and the events after it (no checkpoint: every event), read by seq.
+fn load(path: &Path) -> Result<(States, u64, Vec<Event>)> {
+    let cp = crate::db::get::<Checkpoint>(path, "states")
+        .map(|c| c.1)
+        .unwrap_or_default();
     let m = cp.states.into_iter().map(|s| ((s.fleet.clone(), s.issue), s)).collect();
-    let (Ok(mut f), mut tail) = (std::fs::File::open(path), vec![]) else {
-        return Ok((m, cp.seq, vec![], 0));
-    };
-    f.seek(SeekFrom::Start(cp.len.saturating_sub(1)))?;
-    f.read_to_end(&mut tail)?;
-    let ev = (cp.len == 0 || tail.first() == Some(&b'\n')).then(|| parse(&String::from_utf8_lossy(&tail), path));
-    if let Some(ev) = ev.filter(|ev| ev.first().is_none_or(|e| e.seq == cp.seq + 1)) {
-        return Ok((m, cp.seq, ev, cp.len.saturating_sub(1) + end(&tail)));
-    }
-    // The log was rotated or rewritten since: its rows after the checkpoint's seq.
-    let all = std::fs::read(path)?;
-    let ev = parse(&String::from_utf8_lossy(&all), path);
-    Ok((
-        m,
-        cp.seq,
-        ev.into_iter().filter(|e| e.seq > cp.seq).collect(),
-        end(&all),
-    ))
+    Ok((m, cp.seq, crate::db::events(path, "seq > ?1", cp.seq)?))
 }
 
 /// #343: the current per-issue state, from the checkpoint and the events after it: `fold` of every event.
 pub fn states(path: &Path) -> Result<States> {
-    let (m, _, ev, _) = load(path)?;
+    let (m, _, ev) = load(path)?;
     Ok(fold_into(m, &ev))
 }
 
-/// #343: save the checkpoint (each slow pass), atomically; returns its seq.
+/// #343: save the checkpoint (each slow pass); returns its seq.
 pub fn checkpoint(path: &Path) -> Result<u64> {
-    let (m, seq, ev, len) = load(path)?;
+    let (m, seq, ev) = load(path)?;
     let seq = ev.last().map_or(seq, |e| e.seq);
     let states = fold_into(m, &ev).into_values().collect();
-    let tmp = path.with_file_name("state.snapshot.tmp");
-    std::fs::write(&tmp, serde_json::to_string(&Checkpoint { seq, len, states })?)?;
-    std::fs::rename(&tmp, path.with_file_name("state.snapshot.json"))?;
+    crate::db::put(path, "states", seq, &Checkpoint { seq, states })?;
     Ok(seq)
 }
 
-/// #343: over `max` bytes, the events up to the checkpoint and older than 30 days go to `events-YYYYMM.jsonl.gz`
-/// (kept, never deleted), under the append lock. The live log keeps what its readers need: queue changes, every event
+/// #343: over `max` bytes of live log, the events up to the checkpoint and older than 30 days are archived (#344: kept
+/// in the database for `history`, out of `read`). The live log keeps what its readers need: queue changes, every event
 /// of an issue still open or active in the 30 days, and a done issue's merge or close.
 pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
-    if std::fs::metadata(path).map_or(0, |m| m.len()) <= max {
+    if crate::db::live_bytes(path)? <= max {
         return Ok(());
     }
-    let f = OpenOptions::new().read(true).append(true).open(path)?;
-    f.lock()?;
     let (cut, st, all) = (checkpoint(path)?, states(path)?, read(path)?);
     let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
     let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
@@ -230,38 +182,12 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
         "merged" => e.kind == "merged",
         _ => e.kind == "closed" || e.kind == "clean" && e.str("why") != Some("merged"),
     };
-    let moved = |e: &Event| match e.issue {
+    let moved = |e: &&Event| match e.issue {
         Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
         None => old(e),
     };
-    let (mut by, mut live) = (BTreeMap::<String, String>::new(), String::new());
-    for e in &all {
-        let (day, row) = (e.ts / 86_400, serde_json::to_string(e)? + "\n");
-        let ym = format!(
-            "{}{:02}",
-            crate::access::civil_year(day),
-            crate::access::civil_month_day(day).0
-        );
-        *if moved(e) { by.entry(ym).or_default() } else { &mut live } += &row;
-    }
-    for (ym, text) in &by {
-        let gz = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path.with_file_name(format!("events-{ym}.jsonl.gz")))?;
-        let mut c = Command::new("gzip")
-            .arg("-c")
-            .stdin(Stdio::piped())
-            .stdout(gz)
-            .spawn()?;
-        c.stdin.take().context("gzip stdin")?.write_all(text.as_bytes())?;
-        anyhow::ensure!(c.wait()?.success(), "gzip failed");
-    }
-    let tmp = path.with_extension("rotate");
-    std::fs::write(&tmp, live)?;
-    std::fs::File::open(&tmp)?.sync_all()?;
-    std::fs::rename(&tmp, path)?;
-    checkpoint(path).map(drop)
+    let seqs: Vec<u64> = all.iter().filter(moved).map(|e| e.seq).collect();
+    crate::db::archive(path, &seqs)
 }
 
 /// Append, then run notifiers. Notifier failures never fail the caller.
@@ -269,7 +195,15 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
+    // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
+    let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
+    let watched = ev
+        .str("thread")
+        .and_then(at)
+        .and_then(|a| a.trim().parse::<u64>().ok())
+        .is_some_and(|a| a + 5 >= ev.ts);
     let push = match ev.kind.as_str() {
+        _ if watched => "",
         "needs-decision" if ev.str("kind") == Some("routine") => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.
@@ -467,6 +401,7 @@ pub const PASSIVE: &[&str] = &[
     "fallback",
     "ask-waiting",
     "driven",
+    "respawn",
     "drive-pass",
     "kick",
     "amended",
@@ -490,20 +425,37 @@ pub const PASSIVE: &[&str] = &[
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
-    let later = || {
-        events
-            .iter()
-            .skip_while(|e| !std::ptr::eq(*e, a))
-            .filter(|e| e.fleet == a.fleet)
-    };
-    let on = |k: &str| a.issue.is_some() && later().any(|e| e.kind == k && e.issue == a.issue);
-    let gone = later().any(|e| matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent"));
-    let answered = later()
-        .any(|e| e.kind == "decision" && e.str("id") == a.str("id"))
-        .then_some("answered");
-    answered
-        .or(on("merged").then_some("closed: merged"))
-        .or((gone || on("clean")).then_some("closed: lane gone"))
+    let before = || events.iter().take_while(|e| !std::ptr::eq(*e, a));
+    let why: Vec<_> = (events.iter())
+        .skip_while(|e| !std::ptr::eq(*e, a))
+        .filter_map(|e| closes(a, e, || before().any(|x| started(x, e))))
+        .collect();
+    ["answered", "closed: merged", "closed: lane gone"]
+        .into_iter()
+        .find(|w| why.contains(w))
+}
+
+/// #446: `e` is the `spawn-started` of spawn `sp` (same agent and pane).
+fn started(e: &Event, sp: &Event) -> bool {
+    e.kind == "spawn-started" && e.str("agent") == sp.str("agent") && e.str("pane") == sp.str("pane")
+}
+
+/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
+/// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
+fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
+    let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
+    let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
+    if e.fleet != a.fleet {
+        None
+    } else if e.kind == "decision" && e.str("id") == a.str("id") {
+        Some("answered")
+    } else if on("merged") {
+        Some("closed: merged")
+    } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
+        Some("closed: lane gone")
+    } else {
+        None
+    }
 }
 
 /// The first finding of `fleet` #`issue`'s last verdict (the line after `PASS`/`FAIL`).
@@ -513,11 +465,24 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 }
 
 /// `needs-decision` events not yet closed, oldest first.
+/// #447: one pass, each closing event checked against the asks still open.
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
-    events
-        .iter()
-        .filter(|a| a.kind == "needs-decision" && closed(events, a).is_none())
-        .collect()
+    let (mut open, mut first): (Vec<(usize, &Event)>, std::collections::HashMap<_, usize>) =
+        (vec![], std::collections::HashMap::default());
+    for (i, e) in events.iter().enumerate() {
+        let at = (e.str("agent"), e.str("pane"));
+        match e.kind.as_str() {
+            "spawn-started" => {
+                first.entry(at).or_insert(i);
+            }
+            "needs-decision" => open.push((i, e)),
+            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => {
+                open.retain(|(n, a)| closes(a, e, || first.get(&at).is_some_and(|f| f < n)).is_none());
+            }
+            _ => {}
+        }
+    }
+    open.into_iter().map(|x| x.1).collect()
 }
 
 /// Current per-issue state (the states in `roles/usage-tail.md`).
@@ -545,16 +510,21 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         {
             continue;
         }
-        // Design lanes are the owner's: they never move the issue through review or merge.
+        // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
+        // branch (a `--design` issue's, before impl) is the issue's design stage.
         if e.kind == "spawn" && e.str("role") == Some("design") {
             if let Some(a) = e.str("agent") {
                 s.lanes.insert("design".into(), a.into());
             }
-            continue;
+            if !DESIGN.contains(&s.state.as_str()) || e.str("branch").is_none_or(|b| b.starts_with("design-")) {
+                continue;
+            }
+            (s.state, s.lane) = ("design".into(), e.str("agent").map(String::from));
         }
         s.last_ts = e.ts;
         s.last_event.clone_from(&e.kind);
         match e.kind.as_str() {
+            "spawn" if e.str("role") == Some("design") => {}
             "spawn" => {
                 s.lane = e.str("agent").map(String::from);
                 s.effort = e.str("effort").map(String::from);
@@ -611,7 +581,16 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                     format!("fix({}{})", s.rounds, s.form_mark())
                 };
             }
+            // #417: a verify stage that doesn't run at a head passes it there, in no round.
+            "verify-skipped" | "verify-no-recipe" => {
+                let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
+                s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
+            }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
+            "design-review" => s.state = "design-review".into(),
+            "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
+            "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {
@@ -644,6 +623,9 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
     }
     m
 }
+
+/// #412: the states a design spawn moves into `design` (before impl).
+pub const DESIGN: &[&str] = &["queued", "design", "design-review"];
 
 /// #228: a form-only FAIL's suffix in `IssueState::verdicts` (`FAIL (form-only)`).
 pub const FORM: &str = " (form-only)";

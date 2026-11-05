@@ -57,7 +57,7 @@ fn serial_label_defaults_to_db_and_takes_an_override() {
 fn req(s: &Server, path: &str, extra: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T))
         .into_owned();
-    with_queue(&res, s, ADDR, T)
+    with_board(&res, s, ADDR, extra, T)
 }
 
 /// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.
@@ -128,6 +128,9 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let file = d.join("page.html");
     // #268: the Queue tab drawn in (`req`), without the board (it would read this file's base server).
     let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
+    // #440: in terminal (no theme words), so the rows read their plain states once the theme has loaded.
+    let html = html.replace("dataset.theme=m||\"farm\"", "dataset.theme=\"terminal\"");
+    assert!(html.contains("dataset.theme=\"terminal\""));
     std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
     // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
     // #367: each group draws its own trees, so the running #1 stands alone and its queued followers carry `! #1`.
@@ -179,6 +182,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         });
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
         let o = swift()
+            .env("HERDSMAN_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
             .args([
                 script,
                 file.to_str().unwrap(),
