@@ -33,7 +33,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   Finish your work, run the gates, push. If the other PR merges first, herdsman gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `herdsman queue <fleet> block --on N <issue>`
   for your own issue and end the turn. Drive prompts you (or respawns the lane) when #N merges.
-- Start any dev server on `$HERDSMAN_PORT`, never a fixed port.
+- Start any dev server on `$HERDSMAN_PORT`, never a fixed port. Stop only what you started: record
+  its pid (`cmd & echo $! > server.pid`), then `kill "$(cat server.pid)"`; never `pkill`/`killall` (the hook refuses them).
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
 - No AI co-author or 'generated with' trailers in commits or PR bodies. Fix the PR body by editing
