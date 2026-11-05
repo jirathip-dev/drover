@@ -12,19 +12,33 @@ paths and model ids pass.
 
 ## Anthropic (Claude Code lanes)
 
-**Lane tokens.** Each account's OAuth token lives in an env file. You point to it with `accounts_env`.
+**The store (#441).** Every secret lives only in the main host's OS store, through the `keyring` crate: the macOS
+Keychain, Linux Secret Service or the Windows Credential Manager, as `herdsman/<fleet>/<NAME>` (`all` for every fleet).
+There is no plain-file fallback: when fleet.toml names a secret (an `[accounts]` entry or a `secret:` env) and the
+main host has no usable store, `herdsman serve` refuses `NO_STORE`. Remote hosts
+keep no secrets.
+
+**Lane tokens.** Each `[accounts]` entry names the secret holding that account's token, `herdsman/all/<VAR>`:
 
 ```toml
 [accounts]
-accounts_env = "~/.config/herdsman/accounts/tokens.env"   # CLAUDE_CODE_OAUTH_TOKEN_A=… lines, mode 0600
-A = "CLAUDE_CODE_OAUTH_TOKEN_A"                          # a variable name, never the token
+A = "CLAUDE_CODE_OAUTH_TOKEN_A"   # the secret's name, never the token
 B = "CLAUDE_CODE_OAUTH_TOKEN_B"
 ```
 
 Make a token with `claude setup-token` while logged in to that account. It is long-lived.
-A role picks with `account = "A"` or an ordered `accounts = ["A", "B"]`. At spawn, the lane's
-shell sources the file and exports the first uncapped account's token as `CLAUDE_CODE_OAUTH_TOKEN`.
-The token is never copied, logged, or put in argv.
+A role picks with `account = "A"` or an ordered `accounts = ["A", "B"]`.
+
+**Delivery.** At spawn herdsman reads the lane's secrets (the first uncapped account's token as
+`CLAUDE_CODE_OAUTH_TOKEN`, and each `secret:<NAME>` env) from the store and writes them to a 0600 file beside the
+worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's shell
+sources the file; spawn deletes it once the harness has started. A token never reaches argv, the pane's scrollback,
+the event log or a file left behind.
+
+**Import from `tokens.env`.** `accounts_env` is retired; a fleet.toml that still sets it fails to load. Run
+`herdsman accounts import [FILE]` (owner only; default `~/.config/herdsman/accounts/tokens.env`) once: it copies each
+`[accounts]` variable's value into the store, reads it back and checks its sha256, and prints a `✓` row per account.
+It never deletes the file; do that yourself once lanes run on the store.
 
 **Fallback and caps.** `herdsman check` reads each Claude lane's pane. When it shows the usage-limit
 banner, it logs `account-capped` with `until`, the banner's reset time (`resets 9am`, `resets Nov 4, 8am`,
@@ -61,7 +75,8 @@ in `[accounts.usage]` exactly as you set `CLAUDE_CONFIG_DIR`. Without `CLAUDE_CO
 plain `Claude Code-credentials`, your default login. herdsman never reads or writes that one, only
 the hashed items of the `[accounts.usage]` folders.
 
-herdsman reads the item's account attribute, then its value, with `security find-generic-password`.
+herdsman reads the item's account attribute, then its value, with `security find-generic-password` (these logins are
+Claude Code's own items, not herdsman's store).
 When the access token has expired, herdsman refreshes it and writes the rotated login back to the
 same item (same service and account) the way Claude Code does: `security -i`, with the value
 hex-encoded on stdin. It then re-reads the item to check that the new token was stored. A refresh
@@ -101,13 +116,13 @@ The key lives in an env file, like the Claude tokens:
 ```toml
 [providers.deepseek]
 key_env = "DEEPSEEK_API_KEY"     # the variable name
-# env_file = "~/.config/deepseek.env"   # default: [accounts].accounts_env, else herdsman's environment
+# env_file = "~/.config/deepseek.env"   # default: the store's `herdsman/all/<key_env>`, else herdsman's environment
 # warn_below = 5                 # amber, and `provider-low` from `herdsman check`, under this balance
 ```
 
 herdsman reads `GET https://api.deepseek.com/user/balance` with `curl`, at most every 10 min.
 The key goes in a curl config on stdin, never in argv, so `ps` can't show it. The Host tab and
-`herdsman accounts` show `deepseek · USD 2.28 · ok`. The row is hidden when no key is set. If `env_file` (or `accounts_env`) is set but unreadable, or
+`herdsman accounts` show `deepseek · USD 2.28 · ok`. The row is hidden when no key is set. If `env_file` is set but unreadable, or
 lacks the variable, a dim `deepseek · key not found in <file>` row shows instead.
 `herdsman check` logs `provider-low` once each time the balance drops below `warn_below`.
 

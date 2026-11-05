@@ -208,7 +208,7 @@ overflow_after_minutes = 10  # the default
   variable, and `[rate_usd_hour]` per size. `{name}` is the host's name and `{size}` its size. The built-in `boat`
   recipe is assets/recipes/boat.toml. Check its commands and rates against docs.boat.dev, and copy it to
   `<config>/recipes/boat.toml` to change them.
-- **The provider key** is read on the main host from the environment, else from `[accounts].accounts_env`. Each
+- **The provider key** is read on the main host from the environment, else from the store's `herdsman/all/<key_env>`. Each
   command gets it on stdin and exports it. It never appears in argv, fleet.toml or the event log.
 - **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
   refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:

@@ -13,6 +13,7 @@ const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 const ADDR: &str = "127.0.0.1:7777";
+const TOKEN: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 
 /// CONFIG on Claude with two hosts; `extra` lands in `[hosts.bazzite]`.
 fn config(extra: &str) -> String {
@@ -37,6 +38,7 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> herdsman::Ctx 
 /// Both hosts reachable; mini at `mini` load/cpu, bazzite at `remote` (load ÷ 4 cpus, Linux `/proc`).
 fn fake(mini: f64, remote: f64) -> Fake {
     Fake::default()
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", TOKEN)
         .reply("herdr agent list", NO_AGENTS)
         .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
@@ -191,22 +193,16 @@ fn admission_runs_per_host() {
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
-/// The impl role gets account A (its token returned); its profiles synced.
+/// The impl role gets account A (its token, in `fake`'s store, returned); its profiles synced.
 fn with_account(c: &herdsman::Ctx) -> &'static str {
-    let token = concat!("sk", "-ant-oat01-AAAA-secret");
-    let env = c.state.parent().unwrap().join("tokens.env");
-    std::fs::write(&env, format!("CLAUDE_CODE_OAUTH_TOKEN_A={token}\n")).unwrap();
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",
         "harness = \"claude\"\naccount = \"A\"",
         1,
-    ) + &format!(
-        "\n[accounts]\naccounts_env = \"{}\"\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n",
-        env.display()
-    );
+    ) + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n";
     std::fs::write(&c.config, toml).unwrap();
     assert_eq!(run(c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    token
+    TOKEN
 }
 
 /// A fresh lane on bazzite: its clone, worktree, pane and agent start all answer.
@@ -220,6 +216,8 @@ fn remote_fake() -> Fake {
         )
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH}'rm' '-f'"), "")
         .reply("herdr --machine bazzite worktree create", ws)
         .reply(
             "herdr --machine bazzite pane list --workspace w9",
@@ -233,7 +231,7 @@ fn remote_fake() -> Fake {
 #[test]
 fn a_remote_lane_runs_every_command_on_its_host() {
     let c = setup("hosts-spawn", "", true, 0);
-    // The impl role has an account: its token must never reach bazzite (Q3).
+    // #441: the impl role has an account: its token reaches bazzite only over the ssh channel's stdin.
     let token = with_account(&c);
     run(
         &c,
@@ -268,7 +266,28 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         .any(|c| c.starts_with(&format!("{SSH}'sh' '-c' 'mkdir")) && c.ends_with(&format!("'{WT}/.brief.md'"))));
     assert!(
         !calls.iter().any(|c| c.contains("OAUTH_TOKEN") || c.contains(token)),
-        "token sent to bazzite: {calls:?}"
+        "token in argv: {calls:?}"
+    );
+    let write = format!("{SSH}'sh' '-c' 'umask 077 && mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"' 'sh' '{WT}.env'");
+    let sent: Vec<_> = r
+        .inputs
+        .borrow()
+        .iter()
+        .filter(|i| i.1.contains(token))
+        .cloned()
+        .collect();
+    assert_eq!(sent, [(write, format!("export CLAUDE_CODE_OAUTH_TOKEN='{token}'\n"))]);
+    let export = calls.iter().position(|c| c.contains("pane run w9:p1 export")).unwrap();
+    assert!(
+        calls[export].ends_with(&format!("&& . '{WT}.env'")),
+        "{}",
+        calls[export]
+    );
+    let rm = calls.iter().position(|c| c == &format!("{SSH}'rm' '-f' '{WT}.env'"));
+    let start = calls.iter().position(|c| c.contains("agent start")).unwrap();
+    assert!(
+        rm.is_some_and(|rm| rm > start),
+        "the secrets file is removed after the start: {calls:?}"
     );
     let start = calls.iter().find(|c| c.contains("agent start")).unwrap();
     assert!(start.contains(&format!("Read {WT}/.brief.md")), "{start}");
@@ -280,7 +299,7 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         .unwrap();
     assert_eq!(
         (e.str("host"), e.str("machine"), e.str("worktree"), e.str("account")),
-        (Some("bazzite"), Some("bazzite"), Some(WT), None)
+        (Some("bazzite"), Some("bazzite"), Some(WT), Some("A"))
     );
     // Its review round goes to the same host (the worktree lives there).
     assert_eq!(
@@ -758,7 +777,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         .collect();
     let all = cmds.join("\n");
     assert!(!all.contains("OAUTH_TOKEN") && !all.contains(token), "{all}");
-    assert!(pj["account"].is_null() && pj["machine"] == "bazzite", "{pj}");
+    assert!(pj["account"] == "A" && pj["machine"] == "bazzite", "{pj}");
     assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
     assert!(all.contains("--cwd /home/me/src/sendmeter --branch issue-12"), "{all}");
     assert!(

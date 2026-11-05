@@ -60,6 +60,11 @@ pub struct Fake {
     pub calls: Shared<Vec<String>>,
     pub replies: Vec<(String, Out)>,
     pub onces: Shared<Vec<(String, Out)>>,
+    /// #441: the fake OS store (service -> secret); `no_store` makes it unusable, as on a host without one.
+    pub store: Shared<std::collections::BTreeMap<String, String>>,
+    pub no_store: bool,
+    /// Each `run_in`'s command line and its stdin.
+    pub inputs: Shared<Vec<(String, String)>>,
 }
 
 impl Fake {
@@ -94,6 +99,11 @@ impl Fake {
                 stderr: stderr.into(),
             },
         ));
+        self
+    }
+    /// #441: `svc` holds `value` in the fake store.
+    pub fn stored(self, svc: &str, value: &str) -> Self {
+        self.store.borrow_mut().insert(svc.into(), value.into());
         self
     }
     pub fn called(&self, prefix: &str) -> bool {
@@ -162,6 +172,24 @@ impl Runner for Fake {
     }
     fn sleep(&self, secs: u64) {
         self.calls.borrow_mut().push(format!("sleep {secs}"));
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        self.inputs.borrow_mut().push((line, input.into()));
+        self.run(prog, args)
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        anyhow::ensure!(!self.no_store, "no secret store (fake)");
+        Ok(self.store.borrow().get(svc).cloned())
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.no_store, "no secret store (fake)");
+        let mut m = self.store.borrow_mut();
+        let _ = match value {
+            Some(v) => m.insert(svc.into(), v.into()),
+            None => m.remove(svc),
+        };
+        Ok(())
     }
 }
 
@@ -611,4 +639,31 @@ pub fn lease_as(c: &Ctx, key: &str, pid: u32, at: u64, secs: u64) {
 /// #344: the lease on `key`, expired or not.
 pub fn lease_on(c: &Ctx, key: &str) -> Option<herdsman::db::Lease> {
     herdsman::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
+}
+
+/// #441: `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would
+/// (spawn's secrets file exists only meanwhile); `.2` gets each run's `$<.1>`.
+pub struct Shell<'a>(pub &'a Fake, pub &'static str, pub Shared<Vec<String>>);
+
+impl Runner for Shell<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if let Some(i) = args.iter().position(|a| a == "export").filter(|_| prog == "herdr") {
+            let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
+            let o = std::process::Command::new("sh").arg("-c").arg(line).output()?;
+            self.2.borrow_mut().push(String::from_utf8_lossy(&o.stdout).into());
+        }
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
+        self.0.set_secret(svc, value)
+    }
 }
