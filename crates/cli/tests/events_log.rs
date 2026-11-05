@@ -1,9 +1,8 @@
-//! AC6: the event log survives kill -9 mid-write.
+//! AC6: the event log survives kill -9 mid-write. #344: the log is `state.db`; a JSONL log from before is imported.
 mod common;
 use common::tmpdir;
 use herdsman::events::{append, fold, read, Event};
 use serde_json::json;
-use std::io::Write;
 
 fn ev(i: u64) -> Event {
     Event::new(
@@ -19,16 +18,9 @@ fn ev(i: u64) -> Event {
 fn torn_last_line_is_ignored_and_next_append_is_clean() {
     let d = tmpdir("torn");
     let p = d.join("events.jsonl");
-    append(&p, &ev(1)).unwrap();
-    append(&p, &ev(2)).unwrap();
-    // Simulate a writer killed half-way through record 3.
-    let line = serde_json::to_string(&ev(3)).unwrap();
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&p)
-        .unwrap()
-        .write_all(&line.as_bytes()[..100])
-        .unwrap();
+    // An old log whose writer was killed half-way through record 3.
+    let line = |i| serde_json::to_string(&ev(i)).unwrap();
+    std::fs::write(&p, format!("{}\n{}\n{}", line(1), line(2), &line(3)[..100])).unwrap();
     assert_eq!(read(&p).unwrap().len(), 2);
     append(&p, &ev(4)).unwrap();
     let all = read(&p).unwrap();
@@ -75,13 +67,9 @@ fn kill9_mid_append_never_corrupts() {
         assert_eq!(after.len(), before.len() + 1, "round {round}");
         assert_eq!(after.last().unwrap().ts, 999_000 + round);
     }
-    // Every complete line in the file parses; at most the torn ones were dropped.
-    let text = std::fs::read_to_string(&p).unwrap();
-    let bad = text
-        .lines()
-        .filter(|l| serde_json::from_str::<Event>(l).is_err())
-        .count();
-    assert!(bad <= 3, "only torn tails may be unparseable, got {bad}");
+    // Every row reads back, numbered without a gap.
+    let seqs: Vec<u64> = read(&p).unwrap().iter().map(|e| e.seq).collect();
+    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
 }
 
 /// Child mode: read the log so the parent can inspect stderr.
@@ -117,6 +105,7 @@ fn corrupt_middle_line_warns_torn_tail_is_silent() {
     assert!(out.contains("count=2"), "stdout: {out}");
     assert!(!err.contains("corrupt"), "torn tail must be silent: {err}");
     // Garbage on line 2 of 3 (plus a blank line): exactly one warning naming it.
+    let p = tmpdir("corrupt-mid").join("events.jsonl");
     std::fs::write(&p, format!("{}\nnot json\n\n{}\n", line(1), line(2))).unwrap();
     let (out, err) = read_stderr(&p);
     assert!(out.contains("count=2"), "stdout: {out}");
@@ -125,25 +114,53 @@ fn corrupt_middle_line_warns_torn_tail_is_silent() {
     assert!(warns[0].contains("line 2:"), "{}", warns[0]);
 }
 
-/// #259: every row gets a monotonic seq under the append lock, across concurrent writers; old rows by line.
+/// Child mode: append `FLEET_WRITER_N` events tagged with this writer's number.
+#[test]
+fn writer_child() {
+    let (Ok(p), Ok(w)) = (std::env::var("FLEET_WRITER_LOG"), std::env::var("FLEET_WRITER_N")) else {
+        return;
+    };
+    let w: u64 = w.parse().unwrap();
+    (0..25).for_each(|i| append(std::path::Path::new(&p), &ev(w * 100 + i)).unwrap());
+}
+
+/// #259: every row gets a monotonic seq, across concurrent writers; old rows by line. #344: 16 writer processes at
+/// once lose no event and none fails.
 #[test]
 fn seq_is_monotonic_across_concurrent_writers() {
     let d = tmpdir("seq");
     let p = d.join("events.jsonl");
     std::fs::write(&p, serde_json::to_string(&ev(0)).unwrap() + "\n").unwrap();
-    let ws: Vec<_> = (0..8)
+    let ws: Vec<_> = (0..16)
         .map(|w| {
-            let p = p.clone();
-            std::thread::spawn(move || (0..25).for_each(|i| append(&p, &ev(w * 100 + i)).unwrap()))
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "writer_child", "--nocapture"])
+                .env("FLEET_WRITER_LOG", &p)
+                .env("FLEET_WRITER_N", w.to_string())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
         })
         .collect();
-    ws.into_iter().for_each(|w| w.join().unwrap());
-    let seqs: Vec<u64> = read(&p).unwrap().iter().map(|e| e.seq).collect();
-    assert_eq!(seqs, (1..=201).collect::<Vec<_>>());
-    assert!(std::fs::read_to_string(&p)
+    for mut w in ws {
+        assert!(w.wait().unwrap().success(), "a writer failed");
+    }
+    let all = read(&p).unwrap();
+    let seqs: Vec<u64> = all.iter().map(|e| e.seq).collect();
+    assert_eq!(seqs, (1..=401).collect::<Vec<_>>());
+    let mut ts: Vec<u64> = all.iter().map(|e| e.ts).collect();
+    ts.sort_unstable();
+    let want: Vec<u64> = std::iter::once(0)
+        .chain((0..16).flat_map(|w| (0..25).map(move |i| w * 100 + i)))
+        .collect();
+    let mut want = want;
+    want.sort_unstable();
+    assert_eq!(ts, want, "every writer's every event, once");
+    let line = herdsman::events::jsonl(&p)
         .unwrap()
         .lines()
-        .nth(200)
+        .nth(400)
         .unwrap()
-        .starts_with("{\"seq\":201,"));
+        .to_string();
+    assert!(line.starts_with("{\"seq\":401,"), "{line}");
 }

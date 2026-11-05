@@ -1,9 +1,10 @@
 //! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
-    body, Account, Backlog, BacklogIssue, Balance, Bar, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
-    DriveAct, FleetRow, Frag, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, Leftovers,
-    Meter, Moment, Notice, Paired, Patch, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
+    body, Account, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow,
+    Drive, DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow,
+    LaneRepo, LaneRow, LaneSection, LanesTab, Leftovers, Menu, Meter, Moment, NeedAsk, NeedIssue, NeedsTab, Notice,
+    Paired, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, fold, read, Event, IssueState, States};
@@ -222,15 +223,15 @@ impl Runner for Memo<'_> {
         cache().insert(key, (t, out.clone()));
         Ok(crate::snapshot::out(out))
     }
-    /// #298: a call with stdin (`berth connect`, a file write) is never a cached read.
+    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
         }
         self.0.run_in(prog, args, input)
     }
-    fn berth(&self) -> Option<crate::berth::Berth> {
-        self.0.berth()
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        self.0.shed()
     }
 }
 
@@ -294,31 +295,6 @@ fn sse(e: &Event) -> String {
     )
 }
 
-/// #351: a `frag` this client had, as a `patch`: length `n`, common prefix `p`, the changed pieces (cut before `<d`).
-fn delta(sent: &mut BTreeMap<String, Vec<String>>, m: &str) -> Option<String> {
-    let f: Frag = serde_json::from_str(m.split_once("event: frag\ndata: ")?.1).ok()?;
-    let (id, h) = (f.id.as_str(), f.html.as_str());
-    let mut at = vec![0];
-    at.extend(h.match_indices("<d").map(|m| m.0).filter(|&i| i > 0).chain([h.len()]));
-    let new: Vec<String> = at.windows(2).map(|w| h[w[0]..w[1]].into()).collect();
-    let old = sent.insert(id.into(), new.clone())?;
-    let p = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-    let d = old.len().wrapping_sub(new.len());
-    let mut diff = BTreeMap::new();
-    for (i, s) in new.iter().enumerate().skip(p) {
-        if old.get(i.wrapping_add(d)) != Some(s) {
-            diff.insert(i.to_string(), s.clone());
-        }
-    }
-    let j = json!(Patch {
-        id: id.into(),
-        n: new.len(),
-        p,
-        set: diff
-    });
-    Some(format!("{}\nevent: patch\ndata: {j}\n\n", m.lines().next()?))
-}
-
 /// #351: a chat's window: the last at most `n` of `v` within `kb` KB, sized as `{:?}` (no less than JSON; at least one).
 fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
     let (mut size, mut k) = (0, 0);
@@ -352,27 +328,13 @@ pub struct Server<'a> {
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
-    snap: Mutex<(Option<std::time::SystemTime>, Arc<Snapshot>)>,
+    snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
-
-const TABS: [&str; 5] = ["queue", "lanes", "chat", "host", "events"];
-
-/// #337: the query, with the `tab` cookie (serve.js keeps the open tab there) when it names none.
-fn with_tab(mut q: BTreeMap<String, String>, head: &str) -> BTreeMap<String, String> {
-    let c = header(head, "cookie")
-        .unwrap_or_default()
-        .split(';')
-        .find_map(|c| c.trim().strip_prefix("tab="));
-    if let Some(t) = c.filter(|_| !q.contains_key("tab")) {
-        q.insert("tab".into(), t.into());
-    }
-    q
-}
 
 /// A `303 See Other` to `loc`.
 fn see(loc: &str) -> Vec<u8> {
@@ -513,22 +475,20 @@ fn names(name: &str, v: &str) -> bool {
 }
 
 /// green = merged/PASS/ready/working, amber = queued/impl/review/fix/idle, red = blocked/dead/FAIL/needs you.
-fn tone(state: &str) -> &'static str {
+pub fn tone(state: &str) -> &'static str {
     match state.split('(').next().unwrap_or_default() {
         "merged" | "ready" | "PASS" | "working" | "done" | "ok" | "normal" => "g",
-        "blocked" | "needs-human" | "⏸ waiting: decision" | "dead" | "FAIL" | "critical" | "capped" => "r",
+        "blocked"
+        | "needs-human"
+        | "design-review"
+        | "⏸ waiting: decision"
+        | "dead"
+        | "FAIL"
+        | "critical"
+        | "capped" => "r",
         "parked" | "asleep" => "m",
         _ => "a",
     }
-}
-
-/// The non-empty HTML lines, one `<p>` each.
-fn card(lines: &[String]) -> String {
-    lines
-        .iter()
-        .filter(|l| !l.is_empty())
-        .map(|l| format!("<p>{l}</p>"))
-        .collect()
 }
 
 /// Form ops only a paired device may POST.
@@ -546,32 +506,6 @@ fn join(parts: &[&str]) -> String {
         .join(" · ")
 }
 
-/// Ask `a`'s answer form: option buttons (recommended first) and a free-text box.
-fn answer_form(ctx: &Ctx, a: &Event, send: &str) -> String {
-    const REC: &str = " <small>(recommended)</small>";
-    let rec = a.data["recommend"].as_u64();
-    let btn = |(o, n): (&serde_json::Value, u64)| {
-        let o = esc(o.as_str().unwrap_or("?"));
-        let mark = if Some(n) == rec { REC } else { "" };
-        format!("<button name=choice value={n}>{n}. {o}{mark}</button>")
-    };
-    let mut opts: Vec<_> = a.data["options"].as_array().into_iter().flatten().zip(1..).collect();
-    opts.sort_by_key(|o| Some(o.1) != rec);
-    let btns: String = opts.into_iter().map(btn).collect();
-    let id = esc(a.str("id").unwrap_or_default());
-    let op = hidden("answer", &a.fleet, &mtime(ctx));
-    format!("<form method=post>{op}<input type=hidden name=id value=\"{id}\"><input name=text aria-label=answer placeholder=\"or type an answer\"><button>{send}</button>{btns}</form>")
-}
-
-fn hidden(op: &str, fleet: &str, mt: &str) -> String {
-    format!("<input type=hidden name=op value={op}><input type=hidden name=fleet value=\"{}\"><input type=hidden name=mtime value={mt}>", esc(fleet))
-}
-
-const GALLOP: &[&str] = &["    _/>\n~(___)\n /  \\", "    _/>\n~(___)\n  ><"];
-const STAND: &str = "    _/>\n~(___)\n  | |";
-const REST: &str = "\n    _/>\n~(___)_";
-const REAR: &str = "     />\n ~(_/\n  / \\";
-
 /// Corral's 8 coats (HerdArt.swift): body, shade, mane; chestnut, palomino, dun and buckskin carry a blaze.
 const COATS: &[(&str, &str, &str, bool)] = &[
     ("8a5a33", "6f4527", "2e2019", false),
@@ -585,7 +519,7 @@ const COATS: &[(&str, &str, &str, bool)] = &[
 ];
 
 /// The coat as CSS vars, stable per name.
-fn coat(name: &str) -> String {
+pub fn coat(name: &str) -> String {
     let (c, d, m, blaze) = COATS[usize::from_str_radix(&devices::sha256(name.as_bytes())[..2], 16).unwrap_or(0) % 8];
     format!(
         "--c:#{c};--d:#{d};--m:#{m};--b:{}",
@@ -664,22 +598,6 @@ pub fn act(role: &str, state: &str) -> &'static str {
     }
 }
 
-/// The state as an avatar in each mode (CSS shows `body[data-mode]`'s), its sprite the role's action (#241); coat
-/// stable per name.
-pub fn avatar(name: &str, role: &str, state: &str) -> String {
-    let (glyph, art) = match state {
-        "working" => (
-            "▶",
-            format!("<i class=\"asc run\"><b>{}</b><b>{}</b></i>", GALLOP[0], GALLOP[1]),
-        ),
-        "done" => ("✓", format!("<i class=asc><b>{REST}</b></i>")),
-        "blocked" | "dead" => ("✗", format!("<i class=asc><b>{REAR}</b></i>")),
-        _ => ("⏸", format!("<i class=asc><b>{STAND}</b></i>")),
-    };
-    let a = act(role, state);
-    format!("<span class=\"av {} {state}\" data-act={a}><i class=gl>{glyph}</i>{art}<svg class=px viewBox=\"0 0 132 100\" style=\"{}\"><use href=#ha-{a} /></svg></span>", tone(state), coat(name))
-}
-
 /// The device kind and browser from `User-Agent` ("iPhone Safari"), for the Host tab's device lists.
 fn kind(head: &str) -> String {
     let ua = header(head, "user-agent").unwrap_or_default();
@@ -725,6 +643,8 @@ impl<'a> Server<'a> {
                 let n: usize = header(&h, "content-length").and_then(|n| n.parse().ok()).unwrap_or(0);
                 let most = if h.starts_with("POST /thread ") {
                     140 << 20 // #405: up to 10 files a message
+                } else if h.starts_with("POST /report ") {
+                    3 << 20 // #363: a report carries its screenshot
                 } else {
                     32_768
                 };
@@ -771,8 +691,13 @@ impl<'a> Server<'a> {
             // #259: a reconnect replays every event after the last seq it saw; over 500, a full refresh instead.
             let q = form(query);
             let (host, st) = (q.get("tab").is_some_and(|t| t == "host"), self.ctx.state.clone());
+            // #407: a stream with a thread open stamps `watch-<thread>.at` each second: no push for it (`events::emit`).
+            let t = q
+                .get("thread")
+                .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()));
+            let watch = t.map(|t| st.with_file_name(format!("watch-{t}.at")));
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
-            let (mut top, mut sent) = (0, BTreeMap::new());
+            let mut top = 0;
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
                 let ev = read(&self.ctx.state).unwrap_or_default();
                 top = ev.last().map_or(n, |e| e.seq);
@@ -782,13 +707,14 @@ impl<'a> Server<'a> {
                     _ => after.into_iter().map(sse).collect(),
                 };
             }
-            // Each second: a frag (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
+            // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
             // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
                 while s.write_all(msg.as_bytes()).is_ok() {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
+                        let _ = watch.as_ref().map(|f| std::fs::write(f, crate::now().to_string()));
                         match rx.recv_timeout(Duration::from_secs(1)) {
                             Ok(m)
                                 if !m.is_empty()
@@ -797,7 +723,7 @@ impl<'a> Server<'a> {
                                         .and_then(|r| r.split_once("\nevent: ev\n"))
                                         .is_some_and(|(id, _)| id.parse::<u64>().is_ok_and(|i| i <= top)) =>
                             {
-                                break delta(&mut sent, &m).unwrap_or(m)
+                                break m
                             }
                             Err(RecvTimeoutError::Disconnected) => return,
                             _ if s
@@ -836,14 +762,12 @@ impl<'a> Server<'a> {
         let now = crate::now();
         let known: Vec<String> = devices::load(self.ctx).into_iter().map(|d| d.hash).collect();
         lock(&self.clients).retain(|c| c.1.as_ref().is_none_or(|h| known.contains(h)));
-        let log = std::fs::metadata(&self.ctx.state)
-            .ok()
-            .map(|m| (m.len(), m.modified().ok()));
+        let log = Some((crate::db::last_seq(&self.ctx.state), None));
         let kicked = self.kick.swap(false, Relaxed);
         if kicked {
             self.purge();
         }
-        let driving = self.ctx.state.with_file_name("drive.lock").exists();
+        let driving = crate::drive::running(self.ctx, "");
         if log != w.log {
             let ev = read(&self.ctx.state).unwrap_or_default();
             let top = ev.last().map_or(0, |e| e.seq);
@@ -879,6 +803,16 @@ impl<'a> Server<'a> {
             }
             w.herd = (now, hash(&j));
         }
+        // #407: a turn that ended (the log or herdr changed) gets its thread's queued messages.
+        let agents = (changed && self.addr.is_some())
+            .then(|| self.herdr_json(now, "agent"))
+            .flatten();
+        for job in agents
+            .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
+            .unwrap_or_default()
+        {
+            chat::deliver(at, self.r, &job);
+        }
         if !changed {
             return;
         }
@@ -902,14 +836,12 @@ impl<'a> Server<'a> {
             let msg = format!("id: {}\nevent: queue\ndata: {}\n\n", w.seen.unwrap_or(0), json!(q));
             lock(&self.clients).retain(|c| c.0.send(msg.clone()).is_ok());
         }
+        // #269: the needs cards, Lanes and [chat] likewise, per audience (an unpaired device sees no pane text).
         for paired in [false, true] {
-            for (id, html) in self.frags(at, paired, None).unwrap_or_default() {
-                if w.frags
-                    .insert((paired, id), hash(&html))
-                    .is_some_and(|h| h != hash(&html))
-                {
-                    let j = json!(Frag { id: id.into(), html });
-                    let msg = format!("id: {}\nevent: frag\ndata: {j}\n\n", w.seen.unwrap_or(0));
+            for (id, j) in self.parts(at, paired) {
+                let h = hash(&j.replace(&format!("\"now\":{now},"), ""));
+                if w.frags.insert((paired, id), h).is_some_and(|o| o != h) {
+                    let msg = format!("id: {}\nevent: {id}\ndata: {j}\n\n", w.seen.unwrap_or(0));
                     lock(&self.clients).retain(|c| c.1.is_some() != paired || c.0.send(msg.clone()).is_ok());
                 }
             }
@@ -932,11 +864,9 @@ impl<'a> Server<'a> {
         )
     }
 
-    /// #337: the step's snapshot (reloaded when its file changes) and the file's mtime; none: empty.
-    fn snapshot(&self) -> (Option<std::time::SystemTime>, Arc<Snapshot>) {
-        let at = std::fs::metadata(crate::snapshot::file(self.ctx))
-            .and_then(|m| m.modified())
-            .ok();
+    /// #337: the step's snapshot (reloaded when a new one is saved) and its version (#344); none: empty.
+    fn snapshot(&self) -> (Option<u64>, Arc<Snapshot>) {
+        let at = crate::db::stamp(&self.ctx.state, "board");
         let mut s = lock(&self.snap);
         if s.0 != at {
             *s = (at, Arc::new(crate::snapshot::load(self.ctx).unwrap_or_default()));
@@ -973,13 +903,15 @@ impl<'a> Server<'a> {
         let nav = header(head, "sec-fetch-mode") == Some("navigate")
             || header(head, "sec-fetch-dest") == Some("document")
             || header(head, "accept").is_some_and(|a| a.starts_with("text/html"));
-        let frags = path == "/frags" || path == "/" && query == "frag=all"; // `?frag=all`: old cached JS, one release
-        if method == "GET" && nav && (frags || ["/herd.json", "/lane", "/frag"].contains(&path)) {
+        if method == "GET" && nav && ["/herd.json", "/lane", "/frag"].contains(&path) {
             return see("/");
         }
         // Host/Origin-checked: the live stream, transcripts, Herd's data and every write.
         let guarded = method == "GET"
-            && (["/live", "/lane", "/herd.json"].contains(&path) || path.starts_with("/thread/"))
+            && (["/live", "/lane", "/herd.json"].contains(&path)
+                || path.starts_with("/thread/")
+                || path.starts_with("/design/")
+                || path.starts_with("/shot/"))
             || method == "POST" && self.addr.is_some();
         let paired_op = form(body.trim())
             .get("op")
@@ -988,13 +920,10 @@ impl<'a> Server<'a> {
             header(head, "host").is_some_and(|h| ["127.0.0.1", "localhost", "[::1]"].iter().any(|l| names(l, h)));
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, method, p, query, body),
-            ("GET", _) if frags => self.frags(ctx, self.device(ctx, head).is_some(), form(query).get("tab").map(String::as_str)).map_or_else(fail, |f| {
-                ("200 OK", JSON, serde_json::to_vec(&f.into_iter().collect::<BTreeMap<_, _>>()).unwrap_or_default())
-            }),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
-            ("GET", "/") => self.page(ctx, &with_tab(form(query), head), self.device(ctx, head).is_some())
+            ("GET", "/") => self.page(ctx, &form(query), self.device(ctx, head).is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
             ("GET", "/frag") => Self::part(ctx, &form(query))
                 .map_or(("404 Not Found", "text/plain", text("no such part\n")), |h| ("200 OK", HTML, h.into_bytes())),
@@ -1014,12 +943,6 @@ impl<'a> Server<'a> {
                 }),
                 None => ("404 Not Found", "text/plain", text("not a theme file\n")),
             },
-            // #408: a thread's older messages, `/thread/<t>?before=<seq>&n=30`.
-            ("GET", p) if p.starts_with("/thread/") && !p[8..].contains('/') => {
-                let rw = self.device(ctx, head).is_some() && self.addr.is_some();
-                let ev = read(&ctx.state).unwrap_or_default();
-                chat::older(ctx, &ev, &p[8..], &form(query), rw).map_or(("404 Not Found", "text/plain", text("no such thread\n")), |h| ("200 OK", HTML, h.into_bytes()))
-            }
             // #386: a file a thread's message carries.
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
@@ -1028,6 +951,32 @@ impl<'a> Server<'a> {
                 match at.and_then(|p| std::fs::read(p).ok()) {
                     Some(b) => ("200 OK", ctype(&name), b),
                     None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
+                }
+            }
+            // #412: a PNG of the design waiting for the owner's decision.
+            ("GET", p) if p.starts_with("/design/") => {
+                let mut it = p[8..].splitn(3, '/');
+                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
+                let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let ev = read(&ctx.state).unwrap_or_default();
+                let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                match at.and_then(|p| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", PNG, b),
+                    None => ("404 Not Found", "text/plain", text("no such design file\n")),
+                }
+            }
+            // #417: a screenshot the issue's last verdict lists.
+            ("GET", p) if p.starts_with("/shot/") => {
+                let mut it = p[6..].splitn(3, '/');
+                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
+                let v = |e: &&Event| e.kind == "verdict" && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let ev = read(&ctx.state).unwrap_or_default();
+                let at = ev.iter().rfind(v).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                match at.and_then(|p| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", PNG, b),
+                    None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
@@ -1079,7 +1028,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread")) => {
+            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread" | "/report")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1125,7 +1074,7 @@ impl<'a> Server<'a> {
         devices::find(ctx, header(head, "cookie").unwrap_or_default())
     }
 
-    /// The reply box (or a blocked menu's option, or a sheet action): a paired device (cookie) prompts one agent, at most 10 sends a minute.
+    /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.
     fn send(&self, ctx: &Ctx, head: &str, f: &BTreeMap<String, String>, path: &str) -> (&'static str, String) {
         let Some(dev) = self.device(ctx, head) else {
             return ("401 Unauthorized", "pair this device: tap Pair this phone".into());
@@ -1150,6 +1099,8 @@ impl<'a> Server<'a> {
             self.pick(ctx, &dev, &body(f))
         } else if act {
             self.act(ctx, &dev, &body(f))
+        } else if path == "/report" {
+            Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(
@@ -1458,39 +1409,14 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// The live sections' inner HTML by element id (the page, `/?frag=all`, `/live`); pane text only when `paired`.
-    /// #337: `tab` Some: the needs cards and that tab only.
-    fn frags(&self, ctx: &Ctx, paired: bool, tab: Option<&str>) -> Result<Vec<(&'static str, String)>> {
-        let events = read(&ctx.state)?;
-        let (cfg, st) = (Config::load(&ctx.config).ok(), fold(&events));
-        let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
-        let agents = || self.herdr_json(ctx.now, "agent").map(|j| j["result"]["agents"].clone());
-        let agents = || agents().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-        let parts: [(&'static str, &dyn Fn() -> String); 3] = [
-            ("needs", &|| {
-                let n = chat::choosing(ev);
-                self.age(ctx) + &self.needs_you(ctx, cfg, ev, st, paired) + &format!("<i id=chn hidden data-n={n}></i>")
-            }),
-            ("lanes", &|| self.lanes_tab(ctx, cfg, ev, st, paired)),
-            ("chat", &|| {
-                chat::tab(ctx, cfg, ev, &agents(), paired && self.addr.is_some())
-            }),
-        ];
-        let want = |id: &str| tab.is_none_or(|t| id == "needs" || id == t);
-        Ok(parts
-            .into_iter()
-            .filter(|p| want(p.0))
-            .map(|(id, f)| (id, f()))
-            .collect())
-    }
-
-    /// #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
-    fn age(&self, ctx: &Ctx) -> String {
-        let t = self.snapshot().1.ts;
-        let old = (t > 0 && ctx.now > t + 120).then(|| age(ctx.now - t));
-        old.map_or(String::new(), |a| {
-            format!("<p class=\"msg a\">as of the step's look {a} ago</p>")
-        })
+    /// #269: the needs cards, the Lanes tab and the [chat] tab as API v1 sends them (JSON), for a device (`paired`).
+    fn parts(&self, ctx: &Ctx, paired: bool) -> [(&'static str, String); 3] {
+        let rw = paired && self.addr.is_some();
+        [
+            ("needs", json!(self.needs_tab(ctx, paired)).to_string()),
+            ("lanes", json!(self.lanes_tab(ctx, paired)).to_string()),
+            ("chat", json!(self.chat_tab(ctx, rw)).to_string()),
+        ]
     }
 
     /// #60: a part the page loads on demand: a Host chart's series (`id=hist&host=&k=`, #234). #266: the Events tab is
@@ -1503,15 +1429,6 @@ impl<'a> Server<'a> {
     }
 
     fn page(&self, ctx: &Ctx, q: &BTreeMap<String, String>, paired: bool) -> Result<String> {
-        let all = q.get("all").is_some_and(|v| v == "1");
-        // #337: the live page carries its tab only (the `tab` cookie, else Queue); the others load when they open.
-        let tab = q
-            .get("tab")
-            .map(String::as_str)
-            .filter(|t| TABS.contains(t))
-            .unwrap_or("queue");
-        let f = self.frags(ctx, paired, (self.export.is_none() && !all).then_some(tab))?;
-        let f = |id: &str| f.iter().find(|p| p.0 == id).map_or("", |p| p.1.as_str());
         let msg = q.get("msg").map_or(String::new(), |m| {
             let bad = m.starts_with("REFUSED") || m.starts_with("error");
             format!("<p class=\"msg {}\">{}</p>", if bad { "r" } else { "g" }, esc(m))
@@ -1538,11 +1455,13 @@ impl<'a> Server<'a> {
         } else {
             msg
         };
-        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; `[◐]` picks it.
+        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; #440: System's
+        // Appearance picks it. [⚙] opens the System sheet (serve.js), its dot red while a host card is.
         let name = active(ctx);
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
-        let pick = "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>";
+        let pick =
+            "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>";
         // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
         // scheme (serve.js keeps its block), else the board theme's built-in default.
         let def: BTreeMap<_, serde_json::Value> = names
@@ -1589,94 +1508,113 @@ impl<'a> Server<'a> {
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
              <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat','host','events'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
+             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
              <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<span id=stale hidden></span><i id=dot class=a></i>\
-             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs>{}</div><main>\
-             <section id=queue></section><section id=lanes>{}</section><section id=chat>{}</section><section id=host></section>\
-             <section id=events>{}</section></main><nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a>\
-             <a href=#chat><span>chat</span></a><a href=#host><span>host</span></a><a href=#events><span>events</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }, f("needs"), f("lanes"), f("chat"), f("events")
+             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=ld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></div>{msg}<div id=needs></div><main>\
+             <section id=queue></section><section id=lanes></section><section id=chat></section></main>\
+             <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
+            ctx.now, if paired { "" } else { self.pairb() }
         ))
     }
 
-    /// Each open ask as a red card above every tab: options (recommended first) and a free-text box;
-    /// then each blocked lane's pending prompt.
-    fn needs_you(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, paired: bool) -> String {
-        let all = cfg.and_then(|c| self.lanes(ctx.now, c, events, st)).unwrap_or_default();
-        let blocked: String = all
-            .iter()
-            .filter(|l| l.state == "blocked")
-            .map(|l| self.blocked(ctx, l, paired))
-            .collect();
-        // #386: a conductor's asks wait in its thread (amber), not in this stack.
-        crate::events::open_asks(events).into_iter().filter(|a| a.str("thread").is_none()).map(|a| {
-            let s = |k| a.str(k).unwrap_or_default();
-            let who = join(&[&a.fleet, &a.issue.map_or(String::new(), |n| format!("#{n}")), s("agent"), &age(ctx.now.saturating_sub(a.ts))]);
-            let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
-            let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
-            let left = age((a.ts + 60 * mins).saturating_sub(ctx.now));
-            let kind = rec.map_or("owner · waits for you".into(), |n| format!("routine · defaults to {n} in {left}"));
-            let host = a.str("from").and_then(|f| f.split(':').next()).map(|h| format!(" · imported from {h}"));
-            let who = esc(&who);
-            let question = esc(s("question"));
-            let form = self.addr.as_ref().map_or(String::new(), |_| answer_form(ctx, a, "Send"));
-            format!("<div class=ask><p><b>needs you</b> <span class=m>{who}</span> <span class=m>· {kind}{}</span></p><p>{question}</p>{form}</div>", host.unwrap_or_default())
-        }).collect::<String>() + &blocked + &self.needs_human(ctx, cfg, events, st, paired)
+    /// #269: API v1's `needs` for a device (`paired`: pane text and the lane and issue forms), the cards above every
+    /// tab (web/src/needs.ts draws them): the open asks (options recommended first, a free-text box), each blocked
+    /// lane's pending prompt, then the `needs-human` issues.
+    fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
+        let events = read(&ctx.state).unwrap_or_default();
+        let (cfg, st) = (Config::load(&ctx.config).ok(), fold(&events));
+        let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
+        let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
+        let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
+        // #386: a conductor's asks wait in its thread (amber), not in this stack; #412: a design's here too.
+        let asks = crate::events::open_asks(ev)
+            .into_iter()
+            .filter(|a| a.str("thread").is_none() || crate::design::is_ask(a))
+            .map(|a| {
+                let s = |k| a.str(k).unwrap_or_default();
+                let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
+                let left = age((a.ts + 60 * mins).saturating_sub(ctx.now));
+                let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
+                NeedAsk {
+                    ask: v1::ask(a),
+                    who: join(&[&a.fleet, &issue, s("agent"), &age(ctx.now.saturating_sub(a.ts))]),
+                    kind: rec.map_or("owner · waits for you".into(), |n| {
+                        format!("routine · defaults to {n} in {left}")
+                    }),
+                    from: a.str("from").and_then(|f| f.split(':').next()).map(Into::into),
+                    pngs: chat::files_of(a)
+                        .map(|f| f["name"].as_str().unwrap_or_default().into())
+                        .collect(),
+                }
+            });
+        // #337: the snapshot's age above every tab, once its look is over 2 minutes old (the fast step is late).
+        let t = self.snapshot().1.ts;
+        NeedsTab {
+            now: ctx.now,
+            rw: self.addr.is_some(),
+            live: self.addr.is_some() && self.export.is_none(),
+            paired,
+            pair: !self.pairb().is_empty(),
+            mtime: mtime(ctx),
+            age: (t > 0 && ctx.now > t + 120).then(|| age(ctx.now - t)),
+            choosing: chat::choosing(ev),
+            asks: asks.collect(),
+            blocked: (all.iter().filter(|l| l.state == "blocked"))
+                .filter_map(|l| self.blocked(ctx, l, paired))
+                .collect(),
+            issues: Self::needs_human(ctx, cfg, ev, st),
+        }
     }
 
     /// #130: each `needs-human` issue's card: why, the last verdict, then (paired) merge anyway (PASS at head,
     /// CI green, mergeable), one more round, park.
-    fn needs_human(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, paired: bool) -> String {
-        let (mt, rw) = (mtime(ctx), self.addr.is_some() && paired);
-        let card = |s: &IssueState| {
+    fn needs_human(ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States) -> Vec<NeedIssue> {
+        let card = |s: &IssueState, pending: bool| {
             let (f, n) = (&s.fleet, s.issue);
             let (pr, fc) = (gh::cached_pr(ctx, f, n), cfg.and_then(|c| c.fleet.get(f)));
             let why = events
                 .iter()
                 .rev()
                 .find(|e| ["needs-human", "extend-failed"].iter().any(|k| e.is(k, f, n)));
-            let why = esc(why.and_then(|e| e.str("reason")).unwrap_or("gate"));
             let m = pr["mergeable"].as_str().unwrap_or("?");
-            let ok = fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE";
-            let (line, m) = (pr_line(ctx, fc, f, n, None), m.to_lowercase());
-            let fail = esc(crate::events::finding(events, f, n).unwrap_or_default());
-            let v = match s.verdicts.last() {
-                Some((sha, v, _)) if v == "PASS" => {
-                    let stale = if pr["headRefOid"].as_str() == Some(sha.as_str()) {
-                        ""
-                    } else {
-                        " (not the head)"
-                    };
-                    format!("PASS at {sha:.7}{stale} · {line} · {m}")
-                }
-                _ => format!("FAIL: {fail} · {line}"),
-            };
-            let merge = format!("<button name=op value=override data-confirm=\"Merge #{n} past the round limit?\">merge anyway</button>");
-            let (merge, hid) = (if ok { merge.as_str() } else { "" }, hidden("", f, &mt));
-            let form = format!("<form method=post>{hid}<input type=hidden name=issue value={n}>{merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>");
-            let a = age(ctx.now.saturating_sub(s.last_ts));
-            let title = esc(&gh::cached_title(ctx, f, n).unwrap_or_default());
-            let (who, form) = (esc(&format!("{f} · #{n} · {a}")), if rw { form } else { String::new() });
-            format!("<div class=ask data-n={n}><p><b>needs you</b> <span class=m>{who}</span></p><p>#{n} {title} · {why}</p><p class=m>{v}</p>{form}</div>")
+            let pass = s.verdicts.last().filter(|v| v.1 == "PASS").map(|v| v.0.clone());
+            NeedIssue {
+                fleet: f.clone(),
+                issue: n,
+                pending,
+                who: format!("{f} · #{n} · {}", age(ctx.now.saturating_sub(s.last_ts))),
+                title: gh::cached_title(ctx, f, n).unwrap_or_default(),
+                why: why.and_then(|e| e.str("reason")).unwrap_or("gate").into(),
+                stale: pass
+                    .as_ref()
+                    .is_some_and(|sha| pr["headRefOid"].as_str() != Some(sha.as_str())),
+                pass,
+                fail: crate::events::finding(events, f, n).unwrap_or_default().to_string(),
+                pr: pr_data(ctx, fc, f, n, None),
+                repo: fc.map(|c| c.repo.clone()),
+                mergeable: m.to_lowercase(),
+                merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
+                // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
+                shots: (events.iter().rfind(|e| e.is("verdict", f, n)).into_iter())
+                    .flat_map(chat::files_of)
+                    .map(|x| x["name"].as_str().unwrap_or_default().into())
+                    .collect(),
+            }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
         let pend = |s: &IssueState| match s.last_event.as_str() {
-            "round-extended" if crate::waiting::unspawned(events, s) => format!(
-                "<div class=pend data-n={}><p class=m>⟳ one more round · starting a lane…</p></div>",
-                s.issue
-            ),
-            _ if s.state == "needs-human" || s.last_event == "extend-failed" => card(s),
-            _ => String::new(),
+            "round-extended" if crate::waiting::unspawned(events, s) => Some(card(s, true)),
+            _ if s.state == "needs-human" || s.last_event == "extend-failed" => Some(card(s, false)),
+            _ => None,
         };
-        st.values().map(pend).collect()
+        st.values().filter_map(pend).collect()
     }
 
-    /// A blocked lane's card: a harness menu's options as buttons (`/answer`) under its title, reason, command
-    /// and countdown (#127: `data-push=0` while that runs; none once the pane works again), else the question
-    /// (or the last 6 masked lines) and a Reply button that opens the lane's sheet. Unpaired: no
-    /// pane text, only the 1-line activity and a pairing hint.
-    fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> String {
+    /// A blocked lane's card: a harness menu's options under its title, reason, command and countdown (#127: `push`
+    /// false while that runs; none once the pane works again), else the pane's last 6 masked lines. Unpaired: no pane
+    /// text, only the 1-line activity.
+    fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> Option<Blocked> {
         let screen = l
             .pane
             .as_ref()
@@ -1685,51 +1623,29 @@ impl<'a> Server<'a> {
         let rw = self.addr.is_some() && paired;
         let h = crate::harness::get(&l.harness);
         let c = lanes::prompt(&screen).unwrap_or_default();
-        let body = match h.pending_menu(&screen) {
-            None if h.status_word(&screen).is_some() => return String::new(),
-            _ if !paired => format!(
-                "<p class=m>{}</p><p class=m>pair this phone to answer{}</p>",
-                esc(&lanes::activity(&l.harness, &screen)),
-                self.pairb()
-            ),
-            Some((q, opts)) => {
-                let s = |k: &str| format!("<p class={k}>{}</p>", esc(c[k].as_str().unwrap_or_default()));
-                let cd = c["countdown"].as_u64().map(|n| (ctx.now + n, n / 60, n % 60));
-                let cd = cd.map(|(u, m, s)| format!("<p class=cd data-until={u}>auto-denies in {m}:{s:02}</p>"));
-                ["title", "reason", "command"].map(s).concat()
-                    + &cd.unwrap_or_default()
-                    + &format!("<p>{}</p>", esc(&lanes::mask(&q)))
-                    + &opts
-                        .iter()
-                        .zip(1..)
-                        .filter(|_| rw)
-                        .map(|(o, n)| {
-                            format!(
-                                "<button type=button class=pick value={n} data-h={}>{n}. {}</button>",
-                                seen(&q, &opts),
-                                esc(&lanes::mask(o))
-                            )
-                        })
-                        .collect::<String>()
-            }
-            None => format!("<pre>{}</pre>", esc(&lanes::tail(&screen, 6).join("\n"))),
-        };
-        let who = join(&[
-            l.fleet.as_deref().unwrap_or_default(),
-            &l.issue.map_or(String::new(), |n| format!("#{n}")),
-            &l.name,
-        ]);
-        let reply = if rw {
-            "<button type=button class=rp>Reply</button><p class=as></p>"
-        } else {
-            ""
-        };
-        format!(
-            "<div class=ask data-ask=\"{}\" data-push={}><p><b>needs you</b> <span class=m>{}</span></p>{body}{reply}</div>",
-            esc(&l.name),
-            u8::from(c["push"].as_bool().unwrap_or(true)),
-            esc(&who)
-        )
+        let menu = h.pending_menu(&screen);
+        if menu.is_none() && h.status_word(&screen).is_some() {
+            return None;
+        }
+        let s = |k: &str| c[k].as_str().unwrap_or_default().to_string();
+        let menu = menu.filter(|_| paired).map(|(q, opts)| Menu {
+            title: s("title"),
+            reason: s("reason"),
+            command: s("command"),
+            countdown: c["countdown"].as_u64(),
+            question: lanes::mask(&q),
+            options: opts.iter().filter(|_| rw).map(|o| lanes::mask(o)).collect(),
+            h: seen(&q, &opts).to_string(),
+        });
+        let issue = l.issue.map_or(String::new(), |n| format!("#{n}"));
+        Some(Blocked {
+            name: l.name.clone(),
+            who: join(&[l.fleet.as_deref().unwrap_or_default(), &issue, &l.name]),
+            push: c["push"].as_bool().unwrap_or(true),
+            activity: (!paired).then(|| lanes::activity(&l.harness, &screen)),
+            tail: (paired && menu.is_none()).then(|| lanes::tail(&screen, 6).join("\n")),
+            menu,
+        })
     }
 
     /// `herdr agent|workspace list` JSON, read at most every 10 s (None when herdr cannot be read).
@@ -1815,6 +1731,14 @@ impl<'a> Server<'a> {
                     })
                     .collect();
                 let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
+                // #417: a verify stage passed on at this head for want of the repo's recipe.
+                let bare = |e: &&Event| e.is("verify-no-recipe", f, n) && e.str("sha") == Some(head);
+                notes.extend(
+                    events
+                        .iter()
+                        .rfind(bare)
+                        .map(|_| format!("verify skipped: no {}", crate::verify::RECIPE)),
+                );
                 // #325: an answer that never reached the lane stays red until drive types it in.
                 for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (u.str("id").unwrap_or("?"), u.str("reason").unwrap_or("?"));
@@ -1857,7 +1781,7 @@ impl<'a> Server<'a> {
                         stage: s.map_or(vec![], |s| stages(fc, s, head)),
                         lane: lane.into(),
                         live: ls.iter().any(|l| l.name == lane),
-                        pr: pr_data(ctx, fc, f, n, s),
+                        pr: pr_data(ctx, Some(fc), f, n, s),
                         dead,
                         notes,
                         decided: decided.map(|d| d.str("choice").unwrap_or("?").into()),
@@ -1986,7 +1910,8 @@ impl<'a> Server<'a> {
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
-        crate::snapshot::waits(ctx, cfg, &self.cached(ctx.now, 30), events, all)
+        let snap = self.snapshot().1;
+        crate::snapshot::saved_waits(ctx, cfg, &self.cached(ctx.now, 30), &snap, (events, all))
     }
 
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
@@ -2089,35 +2014,43 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// State sections, fleet subgroups inside; a row opens the bottom sheet (serve.js) with its hidden card.
-    fn lanes_tab(&self, ctx: &Ctx, cfg: Option<&Config>, events: &[Event], st: &States, paired: bool) -> String {
-        let Some(cfg) = cfg else {
-            return "<p class=m>no fleet.toml</p>".into();
+    /// #269: API v1's `lanes` for a device (`paired`), the Lanes tab (web/src/lanes.ts draws it): state sections, fleet
+    /// subgroups inside; a row opens the bottom sheet (serve.js) with its hidden card.
+    fn lanes_tab(&self, ctx: &Ctx, paired: bool) -> LanesTab {
+        let mut t = LanesTab {
+            now: ctx.now,
+            rw: self.addr.is_some(),
+            live: self.addr.is_some() && self.export.is_none(),
+            paired,
+            pair: !self.pairb().is_empty(),
+            ..LanesTab::default()
         };
-        let Some(all) = self.lanes(ctx.now, cfg, events, st) else {
-            return "<p class=r>herdr agent list failed</p>".into();
+        let events = read(&ctx.state).unwrap_or_default();
+        let (Ok(cfg), st) = (Config::load(&ctx.config), fold(&events)) else {
+            t.error = Some("no fleet.toml".into());
+            return t;
+        };
+        let Some(all) = self.lanes(ctx.now, &cfg, &events, &st) else {
+            t.failed = true;
+            return t;
         };
         let state = |l: &lanes::Lane| l.issue.zip(l.fleet.as_ref()).and_then(|(n, f)| st.get(&(f.clone(), n)));
-        let waits = self.waits(ctx, cfg, events, &all);
-        let mut h = String::new();
-        for (sec, subs) in lanes::group(&all, |l| state(l).map_or(l.since, |s| s.last_ts.max(l.since))) {
-            h += &format!(
-                "<h2><span class={}>{sec} ({})</span></h2>",
-                tone(sec),
-                subs.iter().map(|s| s.1.len()).sum::<usize>()
-            );
-            for (repo, ls) in subs {
-                h += &format!("<h3>{} ({})</h3>", esc(&repo), ls.len());
-                for l in ls {
-                    h += &self.lane_row(ctx, cfg, l, state(l), paired, &waits);
-                }
-            }
-        }
-        if h.is_empty() {
-            "<p class=m>no agents</p>".into()
-        } else {
-            h
-        }
+        let waits = self.waits(ctx, &cfg, &events, &all);
+        let groups = lanes::group(&all, |l| state(l).map_or(l.since, |s| s.last_ts.max(l.since)));
+        let row = |l: &lanes::Lane| self.lane_row(ctx, &cfg, l, state(l), paired, &waits);
+        let repo = |(name, ls): (String, Vec<&lanes::Lane>)| LaneRepo {
+            name,
+            lanes: ls.into_iter().map(row).collect(),
+        };
+        t.sections = groups
+            .into_iter()
+            .map(|(sec, subs)| LaneSection {
+                name: sec.into(),
+                tone: tone(sec).into(),
+                repos: subs.into_iter().map(repo).collect(),
+            })
+            .collect();
+        t
     }
 
     fn lane_row(
@@ -2128,7 +2061,7 @@ impl<'a> Server<'a> {
         s: Option<&IssueState>,
         paired: bool,
         waits: &[crate::waiting::Waiting],
-    ) -> String {
+    ) -> LaneRow {
         let screen = l
             .pane
             .as_ref()
@@ -2154,65 +2087,64 @@ impl<'a> Server<'a> {
             o(&l.account),
             o(&l.resting),
             o(&l.port),
-            a.clone(),
+            a,
         ];
-        let mut card = vec![
-            esc(format!("{issue} {}", o(&title)).trim()),
-            esc(&join(&facts.iter().map(String::as_str).collect::<Vec<_>>())),
-        ];
-        if let (Some(n), Some(f)) = (l.issue, &l.fleet) {
-            card.push(pr_line(ctx, cfg.fleet.get(f), f, n, s));
-        }
-        if l.state == "dead" {
-            card.push("<span class=r>⚠ log/pane mismatch: the log has this lane open, herdr has no pane</span>".into());
-        }
-        card.insert(1, esc(&shown));
-        let card = self::card(&card)
-            + &if l.state == "blocked" {
-                self.blocked(ctx, l, paired)
-            } else {
-                String::new()
-            };
         let screen = screen.unwrap_or_default();
         // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
         // command summarised; cut first), the elapsed time.
         let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
-        let act = if now.is_none() && spin.is_none() {
-            format!("<span class=act>{}</span>", esc(&lanes::activity(&l.harness, &screen)))
-        } else {
+        let busy = (now.is_some() || spin.is_some()).then(|| {
             let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
             let n = now.as_ref().map(|n| match n.strip_prefix("now: running ") {
                 Some(c) => format!("{}running {}", if w.is_some() { "" } else { "now: " }, lanes::short(c)),
                 None => n.strip_prefix("now: ").filter(|_| w.is_some()).unwrap_or(n).to_string(),
             });
             let title: Vec<_> = [&w, &now, &t].into_iter().flatten().cloned().collect();
-            let tag = |(x, c): (Option<String>, &str)| Some(format!("<span class={c}>{}</span>", esc(&x?)));
-            let parts: Vec<_> = [(w, "el"), (n, "el"), (t, "t")].into_iter().filter_map(tag).collect();
-            let (title, parts) = (esc(&title.join(" · ")), parts.join("<i> · </i>"));
-            format!("<span class=\"act nw el now\" title=\"{title}\">{parts}</span>")
-        };
+            LaneNow {
+                title: title.join(" · "),
+                w,
+                n,
+                t,
+            }
+        });
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
-        let why = match (sup, &w) {
-            (Some(x), _) => format!("<span class=\"why m\">superseded by {}</span>", esc(x)),
-            (None, Some(w)) => format!("<span class=\"why {tone}\">{}</span>", esc(&w.what)),
-            _ => String::new(),
+        let (why, why_tone) = match (sup, &w) {
+            (Some(x), _) => (Some(format!("superseded by {x}")), "m"),
+            (None, Some(w)) => (Some(w.what.clone()), tone),
+            _ => (None, ""),
         };
-        let tone = if sup.is_some() { "m" } else { tone };
         let since = w.filter(|_| sup.is_none()).map_or(l.since, |w| w.since);
-        let a = ago(ctx.now, since);
-        let th = String::from_iter(l.thread.iter().map(|t| format!(" data-thread={}", esc(t)))); // #422: tap opens it
-        format!(
-            "<div class=lane data-agent=\"{}\" data-role={}{th}><button type=button class=lr>{}<span class=\"nw el\">{}</span><span class=\"nw {}\">{} {a}</span>\
-             {why}{act}</button><div class=card hidden>{card}</div></div>",
-            esc(&l.name),
-            esc(&l.role) + if l.pane.is_none() { " data-gone" } else { "" },
-            avatar(&l.name, &l.role, &l.state),
-            esc(&l.name),
-            tone,
-            esc(&l.state)
-        )
+        let fc = l.fleet.as_ref().and_then(|f| cfg.fleet.get(f));
+        LaneRow {
+            name: l.name.clone(),
+            role: l.role.clone(),
+            state: l.state.clone(),
+            act: act(&l.role, &l.state).into(),
+            atone: self::tone(&l.state).into(),
+            coat: coat(&l.name),
+            tone: if sup.is_some() { "m" } else { tone }.into(),
+            ago: ago(ctx.now, since),
+            why,
+            why_tone: why_tone.into(),
+            activity: if busy.is_none() {
+                lanes::activity(&l.harness, &screen)
+            } else {
+                String::new()
+            },
+            now: busy,
+            gone: l.pane.is_none(),
+            thread: l.thread.clone(), // #422: a tap opens it
+            head: format!("{issue} {}", o(&title)).trim().into(),
+            shown,
+            facts: join(&facts.iter().map(String::as_str).collect::<Vec<_>>()),
+            issue: l.issue.filter(|_| l.fleet.is_some()),
+            pr: l.issue.zip(l.fleet.as_ref()).map(|(n, f)| pr_data(ctx, fc, f, n, s)),
+            repo: fc.map(|c| c.repo.clone()),
+            dead: l.state == "dead",
+            blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
+        }
     }
 
     fn sample(&self) -> Host {
@@ -2362,6 +2294,37 @@ impl<'a> Server<'a> {
             detail,
             ..Row::default()
         };
+        // #440: the global notifiers in words and the Telegram bridge, for System's Notifications.
+        if let Some(c) = cfg {
+            let notifier = |n: &crate::config::Notify| crate::api::Notifier {
+                kind: if n.kind.as_deref() == Some("webpush") {
+                    "web push"
+                } else {
+                    "command"
+                }
+                .into(),
+                on: if n.on.is_empty() {
+                    "default events".into()
+                } else {
+                    n.on.join(", ")
+                },
+            };
+            d.notify = c.notify.iter().map(notifier).collect();
+            let polled = std::fs::metadata(ctx.state.with_file_name("telegram.json")).and_then(|m| m.modified());
+            let polled = polled.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            d.telegram = crate::api::Telegram {
+                on: c.telegram.chat.is_some() && c.telegram.owner.is_some(),
+                chat: c.telegram.chat.is_some(),
+                owner: c.telegram.owner.is_some(),
+                topics: events
+                    .iter()
+                    .filter(|e| e.kind == "telegram-topic")
+                    .filter_map(|e| e.str("thread"))
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                polled: polled.map_or(String::new(), |t| ago(ctx.now, t.as_secs())),
+            };
+        }
         if live {
             // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
             let key = crate::webpush::vapid(&ctx.state)
@@ -2944,6 +2907,8 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         Canned::default()
     };
+    // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
+    let _scratch = demo.then(crate::db::Scratch::start);
     let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, read(&ctx.state)?);
     let ctx = &Ctx {
         now: if demo {
@@ -2959,8 +2924,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         ..Server::new(ctx, r, demo.then(|| "demo".into()))
     };
     let (page, herd) = (
-        s.page(ctx, &BTreeMap::new(), demo)?
-            .replace("<form method=post", "<form inert"),
+        s.page(ctx, &BTreeMap::new(), demo)?,
         json!(s.herd(ctx, None)?).to_string(),
     );
     let (sw, v) = (SW.replace("@V", &format!("{VER:08x}")), format!("a/{VER:08x}/"));
@@ -2974,13 +2938,15 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         page
     };
     std::fs::create_dir_all(dir.join("lane"))?;
-    // #266: the API reads the TypeScript board makes (Events, #267 Host, #268 Queue), as files: every event, whatever the query.
+    // #266: the API reads the TypeScript board makes (Events, #267 Host, #268 Queue, #269 the needs cards, Lanes and
+    // [chat]), as files: every event, whatever the query.
     let (state, all) = (
         json!(s.state(ctx)?).to_string(),
         json!(v1::events(ctx, 0, u64::MAX, usize::MAX)),
     );
     let (all, host) = (all.to_string(), json!(s.host_tab(ctx)).to_string());
     let queue = json!(s.queue_tab(ctx)).to_string();
+    let [(_, needs), (_, lanes), (_, chat)] = s.parts(ctx, demo);
     let files = [
         ("index.html", page.as_bytes()),
         ("herd.json", herd.as_bytes()),
@@ -2989,6 +2955,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         ("api/v1/events", all.as_bytes()),
         ("api/v1/host", host.as_bytes()),
         ("api/v1/queue", queue.as_bytes()),
+        ("api/v1/needs", needs.as_bytes()),
+        ("api/v1/lanes", lanes.as_bytes()),
+        ("api/v1/chat", chat.as_bytes()),
     ]
     .map(|(n, b)| (n.to_string(), b));
     for (name, body) in files
@@ -3047,78 +3016,25 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     Ok(())
 }
 
-/// #169: `[issue] [PR #M] [checks]` wherever an issue shows, from the caches only: `checks` is the PR's checks
-/// page, else the issue branch's latest run (`gh::run`, read by the tick), else none.
-fn links(ctx: &Ctx, repo: &str, fleet: &str, issue: u64, pr: Option<u64>) -> String {
-    let (gh, a) = (format!("https://github.com/{}", esc(repo)), |u: &str, t: &str| {
-        format!("[<a href=\"{u}\">{t}</a>]")
-    });
-    let mut l = vec![a(&format!("{gh}/issues/{issue}"), "issue")];
-    if let Some(m) = pr {
-        l.push(a(&format!("{gh}/pull/{m}"), &format!("PR #{m}")));
-        l.push(a(&format!("{gh}/pull/{m}/checks"), "checks"));
-    } else if let Some(u) = gh::cached_run(ctx, fleet, issue) {
-        l.push(a(&esc(&u), "checks"));
-    }
-    l.join(" ")
-}
-
-/// `[issue] [PR #11] [checks] · CI ✓ · rev PASS r1`, from the cached `herdsman pr` read only (never calls `gh`).
-fn pr_line(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> String {
-    let pr = gh::cached_pr(ctx, fleet, issue);
-    let n = pr["number"].as_u64();
-    let mut parts: Vec<String> = fc.map(|c| links(ctx, &c.repo, fleet, issue, n)).into_iter().collect();
-    if pr.is_null() {
-        parts.push("no PR read yet".to_string());
-    } else {
-        if fc.is_none() {
-            parts.push(format!("PR #{}", n.unwrap_or_default()));
-        }
-        let ci = gh::ci(&gh::required(
-            &pr["statusCheckRollup"],
-            fc.map(|c| c.required_checks.as_slice()).unwrap_or_default(),
-        ));
-        let mark = match ci {
-            "green" => "✓",
-            "failed" => "✗",
-            _ => "…",
-        };
-        parts.push(format!(
-            "CI <span class={}>{mark}</span>",
-            tone(if ci == "failed" {
-                "FAIL"
-            } else if ci == "green" {
-                "PASS"
-            } else {
-                ""
-            })
-        ));
-    }
-    if let Some((s, (_, v, _))) = s.and_then(|s| s.verdicts.last().map(|v| (s, v))) {
-        parts.push(format!("rev <span class={}>{}</span> r{}", tone(v), esc(v), s.rounds));
-        if v.ends_with(crate::events::FORM) {
-            let of = fc.and_then(|c| c.form_rounds).unwrap_or_default();
-            parts.push(format!("<span class=a>not counted · form {}/{of}</span>", s.form));
-        }
-    }
-    parts.join(" · ")
-}
-
-/// #268: a Queue row's PR line as data (`pr_line`'s, from the caches only).
-fn pr_data(ctx: &Ctx, fc: &crate::config::Fleet, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
+/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `herdsman pr` read only (never calls
+/// `gh`); #269: `fc` none, a lane's fleet not configured (no links, no required checks).
+fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
     let pr = gh::cached_pr(ctx, fleet, issue);
     let n = pr["number"].as_u64();
     let v = s.and_then(|s| s.verdicts.last().map(|v| (s, v.1.as_str())));
+    let req = fc.map(|c| c.required_checks.as_slice()).unwrap_or_default();
     PrLine {
         pr: n,
-        run: n.is_none().then(|| gh::cached_run(ctx, fleet, issue)).flatten(),
-        ci: (!pr.is_null()).then(|| gh::ci(&gh::required(&pr["statusCheckRollup"], &fc.required_checks)).into()),
+        run: (n.is_none() && fc.is_some())
+            .then(|| gh::cached_run(ctx, fleet, issue))
+            .flatten(),
+        ci: (!pr.is_null()).then(|| gh::ci(&gh::required(&pr["statusCheckRollup"], req)).into()),
         verdict: v.map(|v| v.1.into()),
         vtone: v.map_or("", |v| tone(v.1)).into(),
         rounds: s.map_or(0, |s| s.rounds),
         form: v
             .filter(|v| v.1.ends_with(crate::events::FORM))
-            .map(|(s, _)| format!("{}/{}", s.form, fc.form_rounds.unwrap_or_default())),
+            .map(|(s, _)| format!("{}/{}", s.form, fc.and_then(|c| c.form_rounds).unwrap_or_default())),
     }
 }
 
@@ -3239,8 +3155,9 @@ pub fn words(e: &Event, serial: &str) -> Words {
     let round = round.map_or(String::new(), |n| format!(" · round {n}"));
     match e.kind.as_str() {
         "merged" => ("✓", "g", format!("merged into {} · PR #{}", s("into"), s("pr")), true),
-        "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("review PASS{round}"), true),
-        "verdict" => ("✗", "r", format!("review FAIL{round}"), true),
+        // #417: the verify stage's verdicts say so.
+        "verdict" if s("verdict") == "PASS" => ("✓", "g", format!("{} PASS{round}", check(s("stage"))), true),
+        "verdict" => ("✗", "r", format!("{} FAIL{round}", check(s("stage"))), true),
         "needs-human" => ("!", "r", format!("needs you{r}"), true),
         "needs-decision" => ("!", "r", format!("asks you ({}) · {}", s("id"), s("question")), true),
         "ask-waiting" => ("!", "r", format!("still waiting on you{r}"), true),
@@ -3283,7 +3200,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
                 .collect();
             ("·", "m", format!("queue · {} {}", s("op"), n.join(" ")), false)
         }
-        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing"
+        k if "stall orphan-lane conflict-predicted heads-up ready-unmerged ci-missing verify-no-recipe"
             .split(' ')
             .any(|x| x == k)
             || k.starts_with("orch-") =>
@@ -3291,6 +3208,15 @@ pub fn words(e: &Event, serial: &str) -> Words {
             ("!", "a", format!("{k}{r}"), false)
         }
         k => ("·", "m", format!("{k}{r}"), false),
+    }
+}
+
+/// #417: a verdict's word for its stage: `verify`, else `review`.
+fn check(stage: &str) -> &'static str {
+    if stage == "verify" {
+        "verify"
+    } else {
+        "review"
     }
 }
 

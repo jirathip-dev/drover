@@ -62,7 +62,10 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     // A command for another issue is queued too: drive refuses it.
     let (code, _) = run(&lane, &r, &["done", "sendmeter", "13", "--no-change", "nothing"]);
     assert_eq!(code, 0);
-    assert!(!lane.state.exists(), "the lane host's log is never written");
+    assert!(
+        !herdsman::db::file(&lane.state).exists(),
+        "the lane host's log is never written"
+    );
     assert!(
         r.calls.borrow().is_empty(),
         "no ssh, nothing run: {:?}",

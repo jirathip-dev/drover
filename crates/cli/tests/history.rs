@@ -109,6 +109,6 @@ fn events_open_with_100_rows_then_page() {
     let (n, last) = view(300).unwrap();
     assert_eq!(n, 250);
     assert!(last.contains("n-0<") && !last.contains("class=eo"));
-    // The page and `/frags` carry no Events rows: the board draws them.
-    assert!(!get(&s, "/frags?tab=events", "").contains("details class=\\\"er"));
+    // The page carries no Events rows: the board draws them (#269: no `/frags`, the server sends no HTML parts).
+    assert!(!get(&s, "/", "").contains("details class=\"er"));
 }

@@ -1,12 +1,13 @@
 //! fleet: agents act only through this CLI; it owns state and refuses rule breaks.
 pub mod access;
-pub mod berth;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;
 pub mod cloud;
 pub mod conductor;
 pub mod config;
+pub mod db;
+pub mod design;
 pub mod devices;
 pub mod doctor;
 pub mod drive;
@@ -27,14 +28,17 @@ pub mod pipeline;
 pub mod propose;
 pub mod protection;
 pub mod queue;
+pub mod report;
 pub mod runner;
 pub mod secret;
 pub mod setup;
+pub mod shed;
 pub mod snapshot;
 pub mod spawn;
 pub mod telegram;
 pub mod timer;
 pub mod usage;
+pub mod verify;
 pub mod waiting;
 pub mod webpush;
 
@@ -301,7 +305,9 @@ pub fn ask(
             e.str("role").unwrap_or_default()
         )
     };
-    let spawned = events.iter().rev().find(|e| e.kind == "spawn" && at(e) == lane);
+    // #446: a lane asking during its startup is already its `spawn-started`, not the lane before it.
+    let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
+    let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
     let mut d =
         json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
@@ -347,6 +353,11 @@ pub fn answer(
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
     }
+    // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
+    let design = crate::design::is_ask(ask);
+    if design {
+        crate::design::decide(ctx, cfg, r, ask, text, by)?;
+    }
     let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     let why = via.map_or("answer", |_| "board");
@@ -361,6 +372,9 @@ pub fn answer(
         let q = ask.str("question").unwrap_or_default();
         conductor::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
+    }
+    if design {
+        return Ok(writeln!(out, "{fleet} {id}: {text}")?);
     }
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
         let merged = events::closed(&events, ask) == Some("closed: merged");
@@ -435,7 +449,14 @@ pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, 
         .filter(shown)
         .collect();
     if as_json {
-        writeln!(out, "{}", serde_json::to_string_pretty(&open)?)?;
+        // #446: and why each closed (`closed`, null while open).
+        let mut rows = Vec::new();
+        for e in &open {
+            let mut v = serde_json::to_value(e)?;
+            v["closed"] = json!(events::closed(&events, e));
+            rows.push(v);
+        }
+        writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     }
     for e in open.iter().filter(|_| !as_json) {
         let at = e.issue.map_or("-".into(), |n| format!("#{n}"));

@@ -15,6 +15,12 @@ pub struct Item {
     pub needs: Vec<String>,
     /// #365: queued from the board's backlog, its spec not checked yet (`needs-check`).
     pub check: bool,
+    /// #412: a design lane first, impl only once the owner approves it (`--design`, `queue set <n> design on|off`).
+    pub design: bool,
+    /// #417: the verify stage forced on or off (`--verify [on|off]`, `queue set <n> verify on|off`); unset = by rule.
+    pub verify: Option<bool>,
+    /// #420: a bug fix that starts with a failing test (`--repro`, `queue set <n> repro on|off`).
+    pub repro: bool,
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | set (`needs`).
@@ -64,12 +70,18 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     serial: serial.clone(),
                     needs: strs(&d["needs"]),
                     check: d["check"] == true,
+                    design: d["design"] == true,
+                    verify: onoff(&d["verify"]),
+                    repro: d["repro"] == true,
                 })
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blocked_by = old.blocked_by;
                     m.check |= old.check;
+                    m.design |= old.design;
+                    m.repro |= old.repro;
+                    m.verify = m.verify.or(old.verify);
                     m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
                     m.needs.dedup();
@@ -97,6 +109,12 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
             let i = pos(q, issues[0])?;
             if d.get("serial").is_some() {
                 q[i].serial = strs(&d["serial"]);
+            } else if d.get("design").is_some() {
+                q[i].design = strs(&d["design"]) == ["on"];
+            } else if d.get("verify").is_some() {
+                q[i].verify = onoff(&d["verify"]);
+            } else if d.get("repro").is_some() {
+                q[i].repro = strs(&d["repro"]) == ["on"];
             } else {
                 q[i].needs = strs(&d["needs"]);
             }
@@ -120,10 +138,29 @@ fn strs(v: &Value) -> Vec<String> {
     }
 }
 
+/// #417: `on`/`off` (or `["on"]`, as `queue set` logs it) as a forced verify stage.
+fn onoff(v: &Value) -> Option<bool> {
+    strs(v)
+        .first()
+        .and_then(|o| ["off", "on"].iter().position(|x| x == o))
+        .map(|i| i == 1)
+}
+
 /// #157: the queued issue's `needs` (its queue item's, merged ones included).
 pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
     let q = replay(events, fleet).into_iter().find(|i| i.issue == issue);
     q.map(|i| i.needs).unwrap_or_default()
+}
+
+/// #412: issue `n` is queued for a design stage that the owner has not approved yet.
+pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> bool {
+    let marked = replay(events, fleet).iter().any(|i| i.issue == n && i.design);
+    marked && !events.iter().any(|e| e.is("design-approved", fleet, n))
+}
+
+/// #420: issue `n` is queued `--repro`.
+pub fn repro(events: &[Event], fleet: &str, n: u64) -> bool {
+    replay(events, fleet).iter().any(|i| i.issue == n && i.repro)
 }
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
@@ -246,7 +283,7 @@ pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 

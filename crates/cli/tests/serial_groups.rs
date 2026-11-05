@@ -67,9 +67,10 @@ fn fake(prs: &[(u64, &str)]) -> Fake {
         .reply("herdr agent", "{}")
         .reply("git -C", "");
     for (n, files) in prs {
-        f = f
-            .reply(&format!("gh pr view issue-{n}"), &pr(*n))
-            .reply(&format!("gh pr diff {}", 100 + n), files);
+        f = f.reply(&format!("gh pr view issue-{n}"), &pr(*n)).reply(
+            &format!("gh api repos/jirathip-dev/sendmeter/pulls/{}/files", 100 + n),
+            files,
+        );
     }
     f
 }
@@ -203,7 +204,11 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     );
     lane(&c, 9);
     lane(&c, 12);
-    let r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
+    let mut r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
+    // #444: the holder's lane is still at work (a gone one with no push would be respawned).
+    let live = agents(&[("sendmeter-impl-9", "working", "/x", "w9:sendmeter-impl-9")]);
+    r.replies
+        .splice(0..0, Fake::default().reply("herdr agent list", &live).replies);
     let (out, steps) = drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-held"), ["ci (9)"], "{out}");
     let stop = "stop: ci is held by #9; you'll get an update round when it merges";
@@ -368,7 +373,10 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
     let view = json!({"number": 112, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks});
     let r = Fake::default()
         .reply("gh pr view issue-12", &view.to_string())
-        .reply("gh pr diff 112", "supabase/migrations/1.sql\nscripts/check-x.mjs\n")
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/pulls/112/files",
+            "supabase/migrations/1.sql\nscripts/check-x.mjs\n",
+        )
         .reply("herdr agent list", NO_AGENTS);
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");

@@ -2,7 +2,7 @@
 //! (`export_bindings`), and `tsc --noEmit` checks serde's JSON of each type against the same text (`serde_json_fits_the_types`).
 #![cfg(feature = "ts")]
 use herdsman_server::api::*;
-use herdsman_server::events::{fold, read, Event, IssueState};
+use herdsman_server::events::{fold, Event, IssueState};
 use herdsman_server::{hosts, waiting::Waiting, Ctx};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -22,8 +22,26 @@ macro_rules! each {
             Chat,
             Notice,
             Moment,
-            Frag,
-            Patch,
+            NeedsTab,
+            NeedAsk,
+            Blocked,
+            Menu,
+            NeedIssue,
+            LanesTab,
+            LaneSection,
+            LaneRepo,
+            LaneRow,
+            LaneNow,
+            ChatTab,
+            ChatRepo,
+            ThreadRow,
+            Link,
+            ThreadView,
+            QueuedMsg,
+            ThreadPage,
+            Msg,
+            FileRef,
+            Answered,
             BacklogIssue,
             Send,
             Answer,
@@ -47,6 +65,8 @@ macro_rules! each {
             FleetRow,
             Sub,
             Paired,
+            Notifier,
+            Telegram,
             QueueTab,
             QueueCard,
             Drive,
@@ -109,7 +129,9 @@ fn demo() -> (PathBuf, Vec<Event>) {
         hints: vec![],
     };
     herdsman_server::serve::export(&ctx, &herdsman_server::runner::Real, &d.join("site"), true).unwrap();
-    (d, read(&ctx.state).unwrap())
+    // #344: the committed log itself: the export imports a copy of it, never `demo/`.
+    let log = std::fs::read_to_string(&ctx.state).unwrap();
+    (d, log.lines().map(|l| serde_json::from_str(l).unwrap()).collect())
 }
 
 /// `v` read as `T` and written again is `v`: the type carries every field the server sends.
@@ -130,6 +152,10 @@ fn serde_json_fits_the_types() {
     checks.push(("HostTab", same::<HostTab>(&file(&site.join("api/v1/host")))));
     // #268: the Queue tab's data, its rows, drive lines, backlogs and [config] sheets included.
     checks.push(("QueueTab", same::<QueueTab>(&file(&site.join("api/v1/queue")))));
+    // #269: the needs cards, the Lanes tab and the [chat] tab (its threads' messages, asks and files).
+    checks.push(("NeedsTab", same::<NeedsTab>(&file(&site.join("api/v1/needs")))));
+    checks.push(("LanesTab", same::<LanesTab>(&file(&site.join("api/v1/lanes")))));
+    checks.push(("ChatTab", same::<ChatTab>(&file(&site.join("api/v1/chat")))));
     for l in std::fs::read_dir(site.join("lane")).unwrap() {
         checks.push(("Chat", same::<Chat>(&file(&l.unwrap().path()))));
     }
@@ -154,12 +180,6 @@ fn serde_json_fits_the_types() {
         since: 1,
         next_cmd: None,
     };
-    let patch = Patch {
-        id: "q".into(),
-        n: 3,
-        p: 1,
-        set: [("2".into(), "<d>".into())].into(),
-    };
     let moment = Moment {
         seq: 4,
         ts: 5,
@@ -170,7 +190,6 @@ fn serde_json_fits_the_types() {
     checks.extend([
         ("HostRow", json!(row)),
         ("Waiting", json!(wait)),
-        ("Patch", json!(patch)),
         ("Moment", json!(moment)),
     ]);
     // #365: a backlog row as `gh::backlog`'s jq writes it to the cache.
@@ -189,8 +208,26 @@ fn serde_json_fits_the_types() {
         Chat,
         Notice,
         Moment,
-        Frag,
-        Patch,
+        NeedsTab,
+        NeedAsk,
+        Blocked,
+        Menu,
+        NeedIssue,
+        LanesTab,
+        LaneSection,
+        LaneRepo,
+        LaneRow,
+        LaneNow,
+        ChatTab,
+        ChatRepo,
+        ThreadRow,
+        Link,
+        ThreadView,
+        QueuedMsg,
+        ThreadPage,
+        Msg,
+        FileRef,
+        Answered,
         BacklogIssue,
         Send,
         Answer,
@@ -214,6 +251,8 @@ fn serde_json_fits_the_types() {
         FleetRow,
         Sub,
         Paired,
+        Notifier,
+        Telegram,
         QueueTab,
         QueueCard,
         Drive,

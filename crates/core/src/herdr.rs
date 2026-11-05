@@ -1,12 +1,12 @@
 //! The one herdr adapter (herdr ≥ 0.9.0, docs/setup.md): every `herdr` argv is built here. A `*_argv`
 //! builder is for a command shown in a dry-run plan as well as run; the other functions run one operation.
-//! #298: herdr's words are the lane runtime's interface (`Runtime`); berth (`[runtime] kind = "berth"`) answers them
-//! too, for the lanes it runs (a pane without herdr's `:`), over `crate::berth`'s wire.
-use crate::berth;
+//! #298: herdr's words are the lane runtime's interface (`Runtime`); shed (`[runtime] kind = "shed"`) answers them
+//! too, for the lanes it runs (a pane without herdr's `:`), over `crate::shed`'s wire.
 use crate::runner::{argv, Out, Runner};
+use crate::shed;
 use anyhow::{bail, Context, Result};
-use berth_proto::{KeysParams, LsParams, Method, ReadParams, RunParams, SendParams, Target, TerminalInfo, WaitParams};
 use serde_json::{json, Value};
+use shed_proto::{KeysParams, LsParams, Method, ReadParams, RunParams, SendParams, Target, TerminalInfo, WaitParams};
 use std::path::Path;
 
 /// The program name, for PATH lookups and the Services row.
@@ -34,14 +34,14 @@ impl Runtime for Herdr {
     }
 }
 
-/// #298: berth's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
-pub struct Berth(pub berth::Berth);
+/// #298: shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
+pub struct Shed(pub shed::Shed);
 
-impl Berth {
+impl Shed {
     fn call(&self, r: &dyn Runner, m: Method, params: impl serde::Serialize) -> Result<Value> {
-        berth::call(r, &self.0.wire, m, json!(params))
+        shed::call(r, &self.0.wire, m, json!(params))
     }
-    /// berth's terminal `name`.
+    /// shed's terminal `name`.
     fn get(&self, r: &dyn Runner, name: &str) -> Result<TerminalInfo> {
         Ok(serde_json::from_value(self.call(
             r,
@@ -49,7 +49,7 @@ impl Berth {
             Target { name: name.into() },
         )?)?)
     }
-    /// Whether herdr argv `a` is for one of berth's terminals: a pane without herdr's `ws:pane` colon, an agent berth runs.
+    /// Whether herdr argv `a` is for one of shed's terminals: a pane without herdr's `ws:pane` colon, an agent shed runs.
     fn mine(&self, r: &dyn Runner, a: &[String]) -> bool {
         let t = a.get(2).map_or("", String::as_str);
         match (a[0].as_str(), request(a)) {
@@ -72,10 +72,10 @@ impl Berth {
             acp: None,
         }
     }
-    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (berth's CLI makes its bridge). A
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge). A
     /// terminal of that name an earlier lane left exited is removed first.
     pub fn start(&self, r: &dyn Runner, name: &str, labels: &[(&str, String)], cwd: &str) -> Result<()> {
-        if self.get(r, name).is_ok_and(|t| t.state == berth_proto::State::Exited) {
+        if self.get(r, name).is_ok_and(|t| t.state == shed_proto::State::Exited) {
             self.call(r, Method::Rm, Target { name: name.into() })?;
         }
         let Some(id) = &self.0.acp else {
@@ -94,9 +94,9 @@ impl Berth {
         ];
         let kv: Vec<String> = labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
         a.extend(kv.iter().flat_map(|l| ["--label", l.as_str()]));
-        berth::cli(r, &a).map(drop)
+        shed::cli(r, &a).map(drop)
     }
-    /// The ACP lane's kick: once its session is ready, the prompt (framed by berth's CLI), confirmed by its state.
+    /// The ACP lane's kick: once its session is ready, the prompt (framed by shed's CLI), confirmed by its state.
     pub fn kick_acp(&self, r: &dyn Runner, name: &str, text: &str) -> Result<bool> {
         let ready = WaitParams {
             name: name.into(),
@@ -107,7 +107,7 @@ impl Berth {
         if self.call(r, Method::Wait, ready)?["outcome"] != "matched" {
             return Ok(false);
         }
-        berth::cli(r, &["send", name, text])?;
+        shed::cli(r, &["send", name, text])?;
         let up = WaitParams {
             name: name.into(),
             until: argv(&["working", "blocked", "done"]),
@@ -118,14 +118,14 @@ impl Berth {
     }
 }
 
-/// herdr's agent (`agent list`) or pane (`pane get`) object for berth terminal `t`.
+/// herdr's agent (`agent list`) or pane (`pane get`) object for shed terminal `t`.
 fn agent_of(t: &TerminalInfo) -> Value {
-    let up = t.state == berth_proto::State::Running;
+    let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "berth"})
+        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed"})
 }
 
-/// The berth call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).
+/// The shed call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).
 fn request(a: &[String]) -> Option<(Method, Value)> {
     let w: Vec<&str> = a.iter().map(String::as_str).collect();
     let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
@@ -212,17 +212,17 @@ fn failed(code: &str, message: &str) -> Out {
     }
 }
 
-impl Runtime for Berth {
+impl Runtime for Shed {
     fn exec(&self, r: &dyn Runner, a: &[String]) -> Result<Out> {
         let Some((m, params)) = request(a) else {
-            return Ok(failed("unsupported", &format!("berth runs no `herdr {}`", a.join(" "))));
+            return Ok(failed("unsupported", &format!("shed runs no `herdr {}`", a.join(" "))));
         };
         let name = params["name"].as_str().unwrap_or_default().to_string();
         let acp = self.0.acp.is_some();
         let got = match m {
-            // ACP: a prompt is framed by berth's CLI, and it needs no Enter.
+            // ACP: a prompt is framed by shed's CLI, and it needs no Enter.
             Method::Send if acp => {
-                berth::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
+                shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
             }
             Method::Keys
                 if acp
@@ -240,7 +240,7 @@ impl Runtime for Berth {
             Err(e) if format!("{e:#}").starts_with("NO_SUCH_TERMINAL") => {
                 return Ok(failed("pane_not_found", &format!("{e:#}")))
             }
-            Err(e) => return Ok(failed("berth", &format!("{e:#}"))),
+            Err(e) => return Ok(failed("shed", &format!("{e:#}"))),
         };
         let stdout = match m {
             Method::Read => v["text"].as_str().unwrap_or_default().to_string(),
@@ -251,7 +251,7 @@ impl Runtime for Berth {
                 } else {
                     "agent_exited"
                 };
-                return Ok(failed(code, &format!("berth wait {name}: {}", v["outcome"])));
+                return Ok(failed(code, &format!("shed wait {name}: {}", v["outcome"])));
             }
             _ => v.to_string(),
         };
@@ -265,12 +265,12 @@ impl Runtime for Berth {
         let all: Vec<TerminalInfo> = serde_json::from_value(self.call(r, Method::Ls, LsParams::default())?)?;
         let lanes = all
             .iter()
-            .filter(|t| t.state == berth_proto::State::Running && t.labels.contains_key("fleet"));
+            .filter(|t| t.state == shed_proto::State::Running && t.labels.contains_key("fleet"));
         Ok(lanes.map(agent_of).collect())
     }
 }
 
-/// #298: a harness launch (`start_cmd`) as the line a berth lane's shell runs (`pane run`): `agent start … --kind <k>
+/// #298: a harness launch (`start_cmd`) as the line a shed lane's shell runs (`pane run`): `agent start … --kind <k>
 /// … -- <args>` as `exec <k> <args>`, a typed line as `exec <line>`.
 pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
     let w: Vec<&str> = start.iter().map(String::as_str).collect();
@@ -285,14 +285,14 @@ pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
     run_argv(pane, &["exec", &line])
 }
 
-/// #298: herdr argv `a` as the berth request a plan shows (`berth <method> <params>`); `a` itself when berth runs none.
-pub fn berth_line(a: &[String]) -> Vec<String> {
-    request(a).map_or_else(|| line(a.to_vec()), |(m, v)| argv(&["berth", m.name(), &v.to_string()]))
+/// #298: herdr argv `a` as the shed request a plan shows (`shed <method> <params>`); `a` itself when shed runs none.
+pub fn shed_line(a: &[String]) -> Vec<String> {
+    request(a).map_or_else(|| line(a.to_vec()), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
 }
 
-/// The runtime herdr argv `a` goes to on `r`: berth for its lanes, else herdr.
+/// The runtime herdr argv `a` goes to on `r`: shed for its lanes, else herdr.
 fn runtime(r: &dyn Runner, a: &[String]) -> Box<dyn Runtime> {
-    match r.berth().map(Berth).filter(|b| b.mine(r, a)) {
+    match r.shed().map(Shed).filter(|b| b.mine(r, a)) {
         Some(b) => Box::new(b),
         None => Box::new(Herdr),
     }
@@ -332,31 +332,31 @@ pub fn status(r: &dyn Runner) -> Result<String> {
     ok(r, &argv(&["status"]))
 }
 
-/// `herdr agent list` or `workspace list` (`what`), as JSON; #298: the agents berth's lanes too.
+/// `herdr agent list` or `workspace list` (`what`), as JSON; #298: the agents shed's lanes too.
 pub fn list(r: &dyn Runner, what: &str) -> Result<Value> {
-    if what == "agent" && r.berth().is_some() {
+    if what == "agent" && r.shed().is_some() {
         return Ok(json!({"result": {"agents": agents(r)?}}));
     }
     json(r, &argv(&[what, "list"]))
 }
 
-/// Live agents (`herdr agent list`); #298: with berth, herdr's (if it answers; a cached list's berth rows dropped) and
-/// berth's lanes.
+/// Live agents (`herdr agent list`); #298: with shed, herdr's (if it answers; a cached list's shed rows dropped) and
+/// shed's lanes.
 pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
-    let Some(b) = r.berth() else {
+    let Some(b) = r.shed() else {
         return Herdr.agents(r);
     };
     let herdr = Herdr
         .agents(r)
         .unwrap_or_default()
         .into_iter()
-        .filter(|a| a["runtime"] != "berth");
-    Ok(herdr.chain(Berth(b).agents(r)?).collect())
+        .filter(|a| a["runtime"] != "shed");
+    Ok(herdr.chain(Shed(b).agents(r)?).collect())
 }
 
-/// `herdr agent list`'s stdout when it ran OK (serve's watcher hashes and caches it); #298: with berth, both lists.
+/// `herdr agent list`'s stdout when it ran OK (serve's watcher hashes and caches it); #298: with shed, both lists.
 pub fn agent_list(r: &dyn Runner) -> Option<String> {
-    if r.berth().is_some() {
+    if r.shed().is_some() {
         return list(r, "agent").ok().map(|v| v.to_string());
     }
     exec(r, &argv(&["agent", "list"]))
@@ -439,6 +439,15 @@ pub fn failed_with(o: &Out, code: &str) -> bool {
     [&o.stderr, &o.stdout]
         .iter()
         .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v["error"]["code"] == code))
+}
+
+/// #477: a failed call's `error.message` (herdr's JSON envelope), else its stderr.
+pub fn message(o: &Out) -> String {
+    let m = [&o.stderr, &o.stdout].iter().find_map(|s| {
+        let v: Value = serde_json::from_str(s.trim()).ok()?;
+        Some(v["error"]["message"].as_str()?.to_string())
+    });
+    m.unwrap_or_else(|| o.stderr.trim().into())
 }
 
 pub fn rename_argv(pane: &str, agent: &str) -> Vec<String> {

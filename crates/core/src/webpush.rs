@@ -1,7 +1,7 @@
 //! Web Push to the page's Home Screen app (docs/serve.md): an RFC 8291 aes128gcm body, an ES256
 //! VAPID JWT (RFC 8292), sent by `curl` with the body on stdin. The VAPID key and the subscriptions
 //! are secrets: 0600 files, never logged, printed or served (only the public key and labels are).
-use crate::devices::{random, save, write0600};
+use crate::devices::{random, write0600};
 use crate::events::{finding, plain, read, Event};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
@@ -41,15 +41,13 @@ fn dir(log: &Path) -> PathBuf {
     log.parent().unwrap_or(log).join("webpush")
 }
 
+/// #344: the `push` rows of the database.
 pub fn load(log: &Path) -> Vec<Sub> {
-    std::fs::read_to_string(dir(log).join("subs.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    crate::db::list(log, "push")
 }
 
 fn store(log: &Path, s: &[Sub]) -> Result<()> {
-    save(&dir(log).join("subs.json"), &s)
+    crate::db::store(log, "push", s)
 }
 
 fn b64(s: &str) -> Result<Vec<u8>> {

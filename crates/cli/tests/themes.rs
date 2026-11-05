@@ -174,10 +174,11 @@ fn default_theme_is_farm() {
     let page = get(&c, &r, "/?all=1");
     // The picker: this phone's choice, else the board's default, set before the first paint.
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
-    // #290: one `[◐]` opens the look sheet (serve.js); no native select for theme or colours.
+    // #290: the look sheet's rows, no native select for theme or colours; #440: in System's Appearance, behind [⚙].
     assert!(page.contains(
-        "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>"
+        "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>"
     ));
+    assert!(!page.contains("id=look"));
     assert!(!page.contains("id=theme") && !page.contains("id=scheme"));
 }
 
@@ -463,7 +464,7 @@ fn per_role_action_resolution() {
     ] {
         assert_eq!(act(role, state), want, "{role} {state}");
     }
-    let a = herdsman::serve::avatar("x-rev-1", "rev", "working");
+    let a = &avatars(&[("x-rev-1", "rev", "working")])[0];
     assert!(a.contains("data-act=rev") && a.contains("<use href=#ha-rev />"), "{a}");
 }
 

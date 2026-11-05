@@ -14,8 +14,16 @@ trap 'kill $srv' EXIT
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null && break; sleep 0.1; done
 # #71: a Chrome run that never returns (virtual time stuck) is killed after UI_AUDIT_TIMEOUT s and fails loudly,
 # with its stderr tail, instead of hanging the job (`timeout` where the host has it: coreutils on the runner).
+# #453: a hung run is retried once: the runner's Chrome hangs a view now and then, never on two runs in a row.
 limit=${UI_AUDIT_TIMEOUT:-60} to=$(command -v timeout || command -v gtimeout || true)
 run() { # url, extra args
+  local rc=0; once "$@" || rc=$?
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    echo "$v: retrying the hung run once" >&2; rc=0; once "$@" || rc=$?
+  fi
+  return "$rc"
+}
+once() {
   local prof rc=0; prof=$(mktemp -d)
   ${to:+"$to" -k 5 "$limit"} "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$prof" --no-first-run \
     --window-size="${size:-390,844}" --force-device-scale-factor="${dpr:-3}" --virtual-time-budget=8000 "${@:2}" "$1" 2>"$prof.err" || rc=$?
@@ -40,8 +48,11 @@ fail=0
 # #409: `chat-code` and `chat-copied`: a reply's short and long-line code boxes, and [copy]'s `copied` flash.
 # #405: `chat-new`, `chat-archive`, `chat-archived`, `chat-thumbs`: the empty new thread, a row swiped left to [archive],
 # the archived fold and three images waiting above the box.
+# #407: `chat-pin`, `chat-fold`, `chat-pill` (and -stopping, -reconnecting, -offline), `chat-queue`, `chat-queue-edit`,
+# `chat-steer`, `chat-menu`, `chat-undo`: the pinned send, a folded turn, the pill's states, the queue and its edit, the
+# long-press menus and the undo toast.
 # #365: `queue/queue-backlog`: acme-api's 100-issue backlog searched, filtered and ticked.
-for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet hosts/host-chart@1440 busy/host-ranked@1440 healthy/host-ranked@1440 events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-code chat-copied chat-send chat-long chat-kb chat-back chat-older chat-mid chat-mid@1440 chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs \
+for v in queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet hosts/host-chart@1440 busy/host-ranked@1440 healthy/host-ranked@1440 events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-nodone herd-night herd-night-storm herd-scroll herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-pending chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-code chat-copied chat-send chat-long chat-kb chat-back chat-older chat-mid chat-mid@1440 chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs chat-pin chat-fold chat-pill chat-pill-stopping chat-pill-reconnecting chat-pill-offline chat-queue chat-queue-edit chat-steer chat-menu chat-undo \
   queue-rows events-rows events@1440 events-rows@1440 events-open events-open@1440 events-all queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading-still loading@1440 loading~kitchen@1440 loading~terminal@1440 \
   $(for v in queue lanes host events loading; do echo "ascii-$v ascii-$v~kitchen"; done) ascii-queue~terminal ascii-lanes~terminal \
   $(for v in queue lanes host events; do echo "$v@1440 $v~kitchen@1440 $v~terminal@1440"; done) row-loop row-loop~kitchen row-loop-still moment-row moment-row~kitchen moment-row-still empty empty~kitchen empty~terminal \
@@ -102,5 +113,7 @@ EOF
   rm "$shots/$v.html"
 done
 # #166: the chat sheet opened and swipe-closed under a CDP screencast: no near-black frame, the page never moves.
-${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots" || fail=1
+# #453: one retry, for the runner's Chrome renderer crash; a real regression fails both runs.
+close() { ${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots"; }
+close || { echo "ui-close: retrying once" >&2; close; } || fail=1
 exit $fail

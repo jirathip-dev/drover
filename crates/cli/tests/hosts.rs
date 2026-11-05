@@ -526,6 +526,7 @@ fn lane_cards_and_the_herd_name_the_host() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
+    let page = with_queue(&page, &s, ADDR, NOW); // #269: Lanes as the board draws it
     let card = &page[page.find("data-agent=\"sendmeter-impl-12\"").expect("lane row")..];
     assert!(
         card[..card.find("</div></div>").unwrap()].contains("impl · bazzite · round 0 · claude"),
@@ -656,8 +657,8 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     };
     let r = fake(2.0, 0.1);
     write(vec![rows[0]
-        .replace("sendmeter", "berth")
-        .replace("jirathip-dev/berth", "jirathip-dev/other")]);
+        .replace("sendmeter", "shed")
+        .replace("jirathip-dev/shed", "jirathip-dev/other")]);
     assert_eq!(
         placed(&c, &r, 12, "impl", None).as_deref(),
         Ok("bazzite"),
@@ -1171,24 +1172,97 @@ fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
 }
 
-/// #438: drive's budget pass trims each remote host's shared build folder to `build_budget_gb` over ssh.
-#[test]
-fn the_budget_pass_trims_remote_shared_build_folders() {
-    let c = setup("hosts-budget-trim", "", true, 0);
+/// #438/#485: remote shared build folders are trimmed to `build_budget_gb` by `trim_hosts`, one quick ssh per host;
+/// drive's budget pass no longer ssh's. The build root is absent here, so the local trim never touches this host.
+const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'r=$1;";
+
+fn trim_setup(name: &str, extra: &str) -> herdsman::Ctx {
+    let c = setup(name, extra, true, 0);
     let toml = std::fs::read_to_string(&c.config).unwrap();
     let toml = toml.replace(
         "build_root = \"\"",
-        "build_root = \"~/.cache/herdsman/target\"\nbuild_budget_gb = 2",
+        "build_root = \"/srv/herdsman-485/target\"\nbuild_budget_gb = 2",
     );
     std::fs::write(&c.config, toml).unwrap();
+    c
+}
+
+const TRIMMED: &str = "builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)";
+
+#[test]
+fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass() {
+    let c = trim_setup("hosts-budget-trim", "");
     let cfg = Config::load(&c.config).unwrap();
-    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
-    let line = "builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)";
-    let r = fake(1.0, 0.1).reply(&trim, &format!("{line}\nfreed 9\n"));
+    let r = fake(1.0, 0.1).reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
     let mut out = Vec::new();
     herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    assert!(
+        !r.calls.borrow().iter().any(|l| l.contains("'r=$1;")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains(line), "{out}");
-    let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
-    assert!(call.ends_with("'sh' '~/.cache/herdsman/target' '2097152'"), "{call}");
+    assert!(out.contains(TRIMMED), "{out}");
+    let calls = r.calls.borrow();
+    let trims: Vec<_> = calls.iter().filter(|l| l.contains("'r=$1;")).collect();
+    assert_eq!(trims.len(), 1, "{trims:?}");
+    assert!(
+        trims[0].starts_with(QUICK) && trims[0].ends_with("'sh' '/srv/herdsman-485/target' '2097152'"),
+        "{trims:?}"
+    );
+}
+
+/// #485: a host turned off gets no trim call at all.
+#[test]
+fn a_disabled_host_gets_no_trim_call() {
+    let c = trim_setup("hosts-trim-off", "enabled = false");
+    let cfg = Config::load(&c.config).unwrap();
+    let r = fake(1.0, 0.1);
+    let mut out = Vec::new();
+    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
+    assert!(
+        !r.calls.borrow().iter().any(|l| l.contains("bazzite")),
+        "{:?}",
+        r.calls.borrow()
+    );
+}
+
+/// #485: an unreachable enabled host costs one 5 s attempt per pass, its failure printed, nothing retried.
+#[test]
+fn an_unreachable_host_costs_one_short_attempt_per_pass() {
+    let c = trim_setup("hosts-trim-down", "");
+    let cfg = Config::load(&c.config).unwrap();
+    let down = "ssh: connect to host bazzite port 22: Operation timed out";
+    let r = fake(1.0, 0.1).once_err(QUICK, 255, down);
+    let mut out = Vec::new();
+    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(out, format!("builds: bazzite: trim failed (255): {down}\n"));
+    let calls = r.calls.borrow();
+    let ssh: Vec<_> = calls
+        .iter()
+        .filter(|l| l.contains("bazzite -- 'sh' '-c' 'r=$1;"))
+        .collect();
+    assert_eq!(ssh, [&calls[0]], "one attempt, the quick one: {calls:?}");
+    assert!(ssh[0].starts_with(QUICK));
+}
+
+/// #485: the tick drives first; the remote trim runs after drive's pass.
+#[test]
+fn the_tick_drives_before_it_trims_remote_hosts() {
+    let c = trim_setup("hosts-tick-trim", "");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let r = fake(1.0, 0.1)
+        .reply(
+            "herdr status",
+            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
+        )
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "4\n")
+        .reply("git -C", "")
+        .reply(QUICK, &format!("{TRIMMED}\nfreed 9\n"));
+    let (code, out) = run(&c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
+    assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
 }

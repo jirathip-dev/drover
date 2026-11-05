@@ -205,7 +205,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let ci = cfg
                     .fleet(&s.fleet)
                     .map(|f| gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks)));
+                let done = crate::waiting::fix_done(&events, &s.fleet, s.issue).is_some();
                 let why = match ci {
+                    Ok(_) if same && done => "fix-done recorded, waiting for drive to spawn review".into(),
                     Ok(ci) if same => format!(
                         "fix lane idle, head unchanged, CI {ci}: run herdsman done {} {} --no-change \"<why>\" or push",
                         s.fleet, s.issue
@@ -272,7 +274,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         };
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
         let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
-        let Some(at) = due.filter(|_| !asking) else { continue };
+        // #444: a spawn whose prompt never landed is no finished lane: drive retries it.
+        let landed = e.data.get("confirmed") != Some(&json!(false));
+        let Some(at) = due.filter(|_| !asking && landed) else {
+            continue;
+        };
         if let Some(why) = dirty(r, Path::new(wt)) {
             let d = json!({"key": format!("{name}:{at}"), "agent": name, "why": why, "reason": format!("{name} stays open: {why}")});
             fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
@@ -703,15 +709,26 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
-    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
-        if let Err(e) = trim_on(&On::new(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
-            writeln!(out, "builds: {name}: {e:#}")?;
-        }
-    }
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
     )?)
+}
+
+/// #438: each enabled remote host's shared build folder trimmed to `build_budget_gb`; #485: after the tick's drive,
+/// one quick ssh per host (a disabled or offline one never holds the pass up).
+pub fn trim_hosts(cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let mut tried = std::collections::BTreeSet::new();
+    let hosts = cfg.hosts.iter().filter(|h| h.1.enabled);
+    for (name, m) in hosts.filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
+        if !tried.insert(m) {
+            continue;
+        }
+        if let Err(e) = trim_on(&On::quick(r, Some(m)), cfg, cfg.limits.build_budget_gb, out) {
+            writeln!(out, "builds: {name}: {e:#}")?;
+        }
+    }
+    Ok(())
 }
 
 /// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose

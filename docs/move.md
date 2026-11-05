@@ -16,10 +16,8 @@ A move is copy, regenerate, then `herdsman doctor` until every line is ✓. Path
 | What | Path | Why |
 |---|---|---|
 | Config | `~/.config/herdsman/fleet.toml` | fleets, roles, notifiers, `[serve]` |
-| Event log | `~/.local/state/herdsman/events.jsonl` | queue, lanes, verdicts, asks |
-| Paired phones | `~/.local/state/herdsman/serve/devices.json` | the page's reply cookies (hashes only) |
+| State database (#344) | `~/.local/state/herdsman/state.db` (copy it with herdsman stopped, or `sqlite3 state.db .backup`) | the event log (queue, lanes, verdicts, asks), paired phones (hashes only), push subscriptions |
 | VAPID key | `~/.local/state/herdsman/webpush/vapid.key` | keep it and paired phones keep getting push |
-| Push subscriptions | `~/.local/state/herdsman/webpush/subs.json` | the subscribed devices |
 | Accounts file | `[accounts].accounts_env` | the tokens; keep it mode 0600 |
 
 Copy the secret files with their mode (`scp -p` or `rsync -a`), never through chat or a repo, then

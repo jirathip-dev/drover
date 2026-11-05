@@ -139,7 +139,11 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     let (action, label, load) = cmd;
     let both = [(label, JOBS[0].1), JOBS[1]];
     let line = match action {
-        "install" => both.map(|(l, args)| install(ctx, cfg, r, l, args, load)).join("\n"),
+        "install" => {
+            let lines = both.map(|(l, args)| (l, install(ctx, cfg, r, l, args, load)));
+            installed(ctx, cfg, &lines)?;
+            lines.map(|l| l.1).join("\n")
+        }
         "remove" => both
             .map(|(label, _)| {
                 let _ = exec(r, &ctl(ctx, label, true)[2]);
@@ -162,6 +166,22 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     Ok(i32::from(line.contains('✗')))
 }
 
+/// #461: log `timer-install`: `by` the owner or the lane (`HERDSMAN_LANE`), the jobs written and the labels
+/// reloaded; a conductor's thread (`HERDSMAN_THREAD`) shows it as a system line.
+fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let pick = |f: fn(&str) -> bool| lines.iter().filter(|l| f(&l.1)).map(|l| l.0).collect::<Vec<_>>();
+    let written = pick(|s| !s.starts_with("= ") && !s.contains("→ check"));
+    let reloaded = pick(|s| s.starts_with("✓ ") && !s.starts_with("✓ wrote"));
+    let by = if lane.is_empty() { "owner" } else { &lane };
+    let mut d = serde_json::json!({"by": by, "written": written, "reloaded": reloaded});
+    if let Some(t) = std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+        d["thread"] = t.into();
+    }
+    let ev = Event::new(ctx.now, "herdsman", None, "timer-install", d);
+    emit(&ctx.state, cfg, ev)
+}
+
 /// Log `kind` for `item` and notify, at most once an hour per item.
 fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reason: &str) -> Result<()> {
     let recent = |e: &Event| e.kind == kind && e.str("key") == Some(item) && ctx.now < e.ts + 3600;
@@ -172,7 +192,7 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
 }
 
-/// `herdsman tick`: `check`, then `drive` (under #92's lock), then an hourly alert per red Services row.
+/// `herdsman tick`: `check`, then `drive` (under #92's lock), remote build trims, then an hourly alert per red Services row.
 /// A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and exits 1.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
@@ -196,6 +216,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             }
         }
         let driven = drive::drive(ctx, cfg, r, out, None, false, false);
+        crate::check::trim_hosts(cfg, r, out)?; // #485: maintenance after drive, never before it
         crate::lesson::weekly(ctx, cfg, r, out)?; // #419
         driven
     });

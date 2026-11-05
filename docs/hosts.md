@@ -96,8 +96,9 @@ delivers it within 1 min`). Each fast drive pass pulls every live remote lane's 
 each line as that lane (from its spawn event, never the line), once per lane and timestamp; a line for another issue
 or role, or a verb a lane doesn't run itself, is refused and logged `outbox`. `check` raises `outbox-stale` once when a
 line sits there over 5 min. So the main host's log is the only one written and only the main host pushes.
-That host's own `events.jsonl` is never written; herdsman warns when it finds one. Each `check` imports the asks a lane
-left in a remote host's own log (lanes started before this) under a new id, with `from` naming the old one.
+That host's own log (#344: its own `state.db`) is never written by a lane. Each
+`check` imports the asks a lane left in a remote host's own log (lanes started before this; read through its
+`herdsman events --jsonl`, or its `events.jsonl` on an older build) under a new id, with `from` naming the old one.
 
 An answer reaches a remote lane with `herdr --machine <m> agent prompt`, then Enter. When `agent start` gives up
 (`timeout`, `agent_name_not_found`, `agent_launch_pending`; on any host, the main one under load too), herdsman

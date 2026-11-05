@@ -141,16 +141,16 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     );
     let subs = webpush::load(&c.state);
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
-    let file = dir.join("state/webpush/subs.json");
+    let file = dir.join("state/state.db"); // #344: the subscriptions' home
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let page = host_tab(&s, ADDR, 1_000_000);
     assert!(
         page.contains("Enable alerts") && page.contains(&subs[0].id()),
-        "Host tab lists the device"
+        "Notifications lists the device"
     );
     assert!(
-        page.contains("<span class=k>push</span><span class=w><b class=a>off: no webpush notifier</b>"),
-        "Host row: off"
+        page.contains("<dt>push</dt><dd><b class=a>off: no webpush notifier</b>"),
+        "Notifications' push row: off"
     );
     assert!(
         !page.contains("secret-endpoint") && !page.contains(AUTH),
@@ -362,13 +362,13 @@ fn webpush_notifier_needs_sub() {
 
 const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n";
 
-/// The Host tab's Alerts row at `now`.
+/// System's Notifications push row at `now` (#440: the Host tab's ALERTS row before).
 fn host(s: &Server, now: u64) -> String {
     let page = host_tab(s, ADDR, now);
     let row = page
-        .split("<span class=k>push</span><span class=w><b class=")
+        .split("<dt>push</dt><dd><b class=")
         .nth(1)
-        .expect("ALERTS push row");
+        .expect("Notifications push row");
     row[row.find('>').unwrap() + 1..row.find("</b>").unwrap()].to_string()
 }
 
@@ -613,4 +613,53 @@ fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12 asks: Which scope?");
     assert_eq!(j["url"], "/?thread=t1#chat");
+}
+
+/// #407: no push for a thread a board has open: its stream stamped `watch-<thread>.at` within 5 s of the event (a
+/// reply or a thread ask); a stamp older than that, or another thread's, pushes as before.
+#[test]
+fn no_push_for_the_thread_open_on_a_board() {
+    let dir = tmpdir("wp-watch");
+    let _path = fake_curl(&dir);
+    std::fs::write(dir.join("code"), "201").unwrap();
+    let c = ctx(&dir, CONFIG);
+    let cfg = Config::parse(PUSH).unwrap();
+    let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
+    let f: std::collections::BTreeMap<String, String> = sub_form(&ua, "https://push.example/ep")
+        .split('&')
+        .map(|kv| kv.split_once('=').unwrap())
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+    webpush::subscribe(&c.state, &f, "Mac", 1, None).unwrap();
+    let pushes = || {
+        std::fs::read_to_string(dir.join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    for t in ["t1", "t2"] {
+        let d = serde_json::json!({"thread": t, "title": "Grill"});
+        emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-new", d)).unwrap();
+    }
+    let reply = |t: &str| {
+        let d = serde_json::json!({"thread": t, "from": "conductor", "text": "Scope?"});
+        emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-msg", d)).unwrap();
+    };
+    let watch = c.state.with_file_name("watch-t1.at");
+    std::fs::write(&watch, "97").unwrap();
+    reply("t1");
+    let ask =
+        serde_json::json!({"id": "q1", "question": "Which?", "options": ["a", "b"], "kind": "owner", "thread": "t1"});
+    emit(
+        &c.state,
+        &cfg,
+        Event::new(100, "sendmeter", None, "needs-decision", ask),
+    )
+    .unwrap();
+    assert_eq!(pushes(), 0, "t1 is open on a board");
+    reply("t2");
+    assert_eq!(pushes(), 1, "another thread pushes");
+    std::fs::write(&watch, "90").unwrap();
+    reply("t1");
+    assert_eq!(pushes(), 2, "a stamp 10 s old: the board left");
 }

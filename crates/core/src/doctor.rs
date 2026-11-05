@@ -46,6 +46,12 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool) -> Res
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
+    if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
+        let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
+        rows.push(format!(
+            "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
+        ));
+    }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line); // #333
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
@@ -193,7 +199,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install");
+        let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.

@@ -3,21 +3,31 @@ use crate::config::{Config, Fleet};
 use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
 use crate::runner::{ok, Runner};
 use crate::{gh, Ctx};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Waiting {
     pub fleet: String,
     pub issue: u64,
     /// The lane this row is for; every lane of an issue gets one.
     pub lane: String,
     /// drive | owner | ci | none
-    pub who: &'static str,
+    #[serde(deserialize_with = "who")]
+    pub who: Who,
     pub what: String,
     pub since: u64,
     pub next_cmd: Option<String>,
+}
+
+/// #447: a `who` read back from the snapshot (an alias: serde borrows a field spelled `&str`).
+type Who = &'static str;
+fn who<'de, D: Deserializer<'de>>(d: D) -> Result<Who, D::Error> {
+    let w = String::deserialize(d)?;
+    Ok((["drive", "owner", "ci", "reviewer"].into_iter())
+        .find(|x| *x == w)
+        .unwrap_or("none"))
 }
 
 impl Waiting {
@@ -60,16 +70,55 @@ fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
     (pushed.is_empty() || s.reviewed(pushed)) && since.any(dead)
 }
 
+/// #445: the `fix-done` (`done --no-change`) logged since the issue's last verdict: its head is reviewed again.
+pub fn fix_done<'a>(events: &'a [Event], f: &str, n: u64) -> Option<&'a Event> {
+    let mut since = events.iter().rev().take_while(|e| !e.is("verdict", f, n));
+    since.find(|e| e.is("fix-done", f, n))
+}
+
+/// #444: a gone impl/fix lane's wait (`lane gone, no push: respawning impl`); drive respawns no more often than this.
+pub const NO_PUSH: &str = ", no push: ";
+const RESPAWN_SECS: u64 = 1800;
+
+/// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
+fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
+    let reset = ["pushed", "verdict", "needs-human", "round-extended"];
+    let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let at: Vec<u64> = mine
+        .take_while(|e| !reset.contains(&e.kind.as_str()))
+        .filter(|e| e.kind == "respawn")
+        .map(|e| e.ts)
+        .collect();
+    (at.len(), at.first().copied().unwrap_or(0))
+}
+
 /// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
 pub fn reviewed_head(t: &str) -> Option<&str> {
     let l = t.lines().find(|l| l.contains("Reviewed head"))?;
     l.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40)
 }
 
-/// Pure: the issue's wait reason. `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
+/// #447: the log read once for every issue's wait: all of it, and its open asks.
+pub struct Log<'a> {
+    pub all: &'a [Event],
+    pub asks: Vec<&'a Event>,
+}
+
+impl<'a> Log<'a> {
+    pub fn new(all: &'a [Event]) -> Self {
+        Log {
+            all,
+            asks: open_asks(all),
+        }
+    }
+}
+
+/// Pure: the issue's wait reason. `log` = the whole log, `events` = the issue's part of it (or all of it).
+/// `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
 pub fn waiting_on(
+    log: &Log,
     events: &[Event],
     s: &IssueState,
     head: Option<(&str, u64)>,
@@ -105,13 +154,11 @@ pub fn waiting_on(
     let cmd = |verb: &str, tail: &str| Some(format!("herdsman {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
-    if let Some(a) = open_asks(events).into_iter().find(mine) {
-        return w(
-            "owner",
-            &format!("waiting on your answer ({})", a.str("id").unwrap_or("?")),
-            a.ts,
-            None,
-        );
+    if let Some(a) = log.asks.iter().copied().find(mine) {
+        let id = a.str("id").unwrap_or("?");
+        // #412: a design's ask names its answers.
+        let next = crate::design::is_ask(a).then(|| format!("herdsman answer {f} {id} approve|revise|reject"));
+        return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
     }
     // #350: a reverted landing's issue is in a fix round while its old PR stays merged.
     if s.state == "merged" || pr["state"] == "MERGED" && !s.state.starts_with("fix") {
@@ -131,8 +178,8 @@ pub fn waiting_on(
         .filter(|g| crate::queue::held(events, f, n, &g.name))
         .min_by_key(|g| &g.name)
     {
-        let st = crate::events::fold(events);
-        let h = crate::queue::holders(events, &st, fc, f, &g.name);
+        let st = crate::events::fold(log.all);
+        let h = crate::queue::holders(log.all, &st, fc, f, &g.name);
         let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
         let by = if who.is_empty() {
             "for a slot".into()
@@ -287,12 +334,16 @@ pub fn waiting_on(
         // #319: so is the FAILed head again after a fix round that changed nothing (`fix-no-change`).
         "impl" | "fix"
             if !pushed.is_empty()
-                && (!s.reviewed(pushed) || s.last_event == "fix-no-change")
+                && (!s.reviewed(pushed) || s.last_event == "fix-no-change" || fix_done(events, f, n).is_some())
                 && (handed(pushed) || head.is_none_or(|h| h.0 == pushed)) =>
         {
+            let how = match s.rounds {
+                _ if s.reviewed(pushed) => "no change at ",
+                0 => "pushed ",
+                _ => "pushed fix ",
+            };
             let mut what = format!(
-                "pushed {}{}, waiting for drive to spawn review",
-                if s.rounds > 0 { "fix " } else { "" },
+                "{how}{}, waiting for drive to spawn review",
                 &pushed[..7.min(pushed.len())]
             );
             // #212: drive's last try at this review was refused: say why in plain words.
@@ -317,6 +368,12 @@ pub fn waiting_on(
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
+        "design" => w(
+            "none",
+            "design lane idle without a pushed design (check the pane)",
+            s.last_ts,
+            cmd("spawn", " design --supersede"),
+        ),
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
 }
@@ -331,7 +388,14 @@ pub fn scan(
     agents: &[Value],
     live: bool,
 ) -> Vec<(IssueState, Waiting)> {
-    let mut out = vec![];
+    let (mut out, log) = (vec![], Log::new(events));
+    // #447: each issue's events, in one pass: a wait reads its own, never the whole log again.
+    let mut of: std::collections::HashMap<_, Vec<Event>> = std::collections::HashMap::new();
+    for e in events {
+        if let Some(n) = e.issue {
+            of.entry((e.fleet.as_str(), n)).or_default().push(e.clone());
+        }
+    }
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         // #43: after a `lane-killed`, the issue's surviving lane carries its reason (a killed rev: spawn rev again).
@@ -348,6 +412,7 @@ pub fn scan(
             lane: Some(lane.clone()),
             ..s
         };
+        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
         let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
         // #169: no PR yet: the issue branch's latest run backs the `checks` link (the tick reads it, never a request).
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
@@ -378,13 +443,13 @@ pub fn scan(
             _ => gh::cached_pr(ctx, &s.fleet, s.issue),
         };
         crate::land::mark(ctx, None, f, (&s.fleet, s.issue), events, &mut pr);
-        let sp = last_spawn(events, &lane);
+        let sp = last_spawn(mine, &lane);
         let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
         let on = crate::hosts::On::of(r, sp);
-        let spawn = s.check_lane().and_then(|l| last_spawn(events, l));
+        let spawn = s.check_lane().and_then(|l| last_spawn(mine, l));
         // #337: the worktree head only where it decides something: an impl/fix not seen pushed, a review with no sha.
         let pushed = pr["headRefOid"].as_str().unwrap_or_default();
-        let seen = events
+        let seen = mine
             .iter()
             .any(|e| e.is("pushed", &s.fleet, s.issue) && e.str("sha") == Some(pushed));
         let need = match s.state.split('(').next() {
@@ -411,8 +476,7 @@ pub fn scan(
         let there = crate::hosts::On::of(r, spawn);
         // #337: a verdict recorded since the rev spawn stands for its file, which is then never read again.
         let kept = spawn.and_then(|sp| {
-            events
-                .iter()
+            mine.iter()
                 .rfind(|e| e.is("verdict", &s.fleet, s.issue) && e.ts >= sp.ts)
         });
         let text = path
@@ -443,19 +507,15 @@ pub fn scan(
             word.is_some()
                 && !pushed.is_empty()
                 && !x.eq_ignore_ascii_case(pushed)
-                && !events.iter().any(updated)
+                && !mine.iter().any(updated)
                 && crate::overlap::carries(r, f, &s, x, pushed)
         });
         let ev = carry.map(|(x, _)| {
             let d = serde_json::json!({"from": x, "to": pushed});
-            [
-                events,
-                &[Event::new(ctx.now, &s.fleet, Some(s.issue), "auto-updated", d)],
-            ]
-            .concat()
+            [mine, &[Event::new(ctx.now, &s.fleet, Some(s.issue), "auto-updated", d)]].concat()
         });
-        let ev = ev.as_deref().unwrap_or(events);
-        let mut w = waiting_on(ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
+        let ev = ev.as_deref().unwrap_or(mine);
+        let mut w = waiting_on(&log, ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
         if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
             let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
@@ -474,7 +534,36 @@ pub fn scan(
             w.what = "reviewer exited without a verdict: reviewing again".into();
             w.next_cmd = Some(format!("herdsman spawn {} {} {c} --supersede", s.fleet, s.issue));
         }
-        let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), events, &pr);
+        // #444: an impl/fix lane gone from herdr, or whose prompt never landed, with no push: drive respawns it
+        // `--supersede` at most every 30 min; after two respawns in a row without a push it needs a human.
+        let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
+        let gone = !agents.iter().any(|a| a["name"] == lane.as_str());
+        // A lane started this pass, or a spawn still starting, is not gone yet.
+        let settled = || {
+            sp.is_some_and(|e| ctx.now >= e.ts + 120)
+                && !crate::drive::pending(ctx)
+                    .iter()
+                    .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
+        };
+        if w.what.starts_with("idle without pushing") && (gone || unconfirmed) && settled() {
+            let (n, last) = respawns(mine, &s.fleet, s.issue);
+            let role = s.build.as_deref().unwrap_or(f.flow().start());
+            let why = if gone { "lane gone" } else { "prompt never landed" };
+            w.who = "drive";
+            w.next_cmd = Some(format!("herdsman spawn {} {} {role} --supersede", s.fleet, s.issue));
+            w.what = if n >= 2 {
+                w.next_cmd = None;
+                format!("lane keeps ending{NO_PUSH}needs you")
+            } else if n > 0 && ctx.now < last + RESPAWN_SECS {
+                format!(
+                    "{why}{NO_PUSH}respawned {} ago, again after 30 min",
+                    age(ctx.now - last)
+                )
+            } else {
+                format!("{why}{NO_PUSH}respawning {role}")
+            };
+        }
+        let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
         let m = w.what.starts_with("PASS · CI running").then(gone).flatten();
         w.what = m.map_or(w.what, |m| format!("PASS · {m}"));
         // #150: a PASS whose PR lacks the merge label never gets its full CI run.

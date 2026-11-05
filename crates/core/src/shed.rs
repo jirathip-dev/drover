@@ -1,72 +1,71 @@
-//! #298: berth's wire (`[runtime] kind = "berth"`, docs/runtimes.md): berth-proto JSON-RPC lines over berth's Unix
-//! socket, or through `berth connect` (over ssh on a lane's other host); one connection per call, no async. The
-//! runtime itself (herdr's words as berth calls) is `crate::herdr::Berth`.
+//! #298: shed's wire (`[runtime] kind = "shed"`, docs/runtimes.md): shed-proto JSON-RPC lines over shed's Unix
+//! socket, or through `shed connect` (over ssh on a lane's other host); one connection per call, no async. The
+//! runtime itself (herdr's words as shed calls) is `crate::herdr::Shed`.
 use crate::config::Config;
 use crate::events::{append, Event};
 use crate::runner::{argv, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Context, Result};
-use berth_proto::{EventKind, EventsParams, Hello, Method, Request, Response, VERSION};
 use serde_json::{json, Value};
+use shed_proto::{EventKind, EventsParams, Hello, Method, Request, Response, VERSION};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub use berth_proto as proto;
+pub use shed_proto as proto;
 
-/// Where a host's berth server answers.
+/// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Wire {
     /// This host's socket.
     Socket(PathBuf),
-    /// `berth connect` through the runner: a lane's other host (`hosts::On` sends it over ssh).
+    /// `shed connect` through the runner: a lane's other host (`hosts::On` sends it over ssh).
     Connect,
 }
 
-/// The berth runtime a runner's lanes use: its wire, and the ACP agent its lanes run (`berth run --acp`), if any.
+/// The shed runtime a runner's lanes use: its wire, and the ACP agent its lanes run (`shed run --acp`), if any.
 #[derive(Clone, Debug)]
-pub struct Berth {
+pub struct Shed {
     pub wire: Wire,
     pub acp: Option<String>,
     pub policy: String,
 }
 
-/// berth's per-user socket (as `berth_server::Paths::user`): macOS `~/Library/Caches/berth/berth.sock`, elsewhere
-/// `$XDG_RUNTIME_DIR/berth.sock`.
+/// shed's per-user socket (as `shed_server::Paths::user`): macOS `~/Library/Caches/shed/shed.sock`, elsewhere
+/// `$XDG_RUNTIME_DIR/shed.sock`.
 pub fn default_socket() -> PathBuf {
     if cfg!(target_os = "macos") {
-        return crate::config::home().join("Library/Caches/berth/berth.sock");
+        return crate::config::home().join("Library/Caches/shed/shed.sock");
     }
-    PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_default()).join("berth.sock")
+    PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_default()).join("shed.sock")
 }
 
 /// The `hello` line, then the request.
 fn lines(m: Method, params: Value) -> String {
-    let hello = json!(Hello {
-        version: VERSION.into()
-    });
+    let hello = json!(Hello::ours());
     let [a, b] = [Request::new(0, Method::Hello, hello), Request::new(1, m, params)].map(|q| json!(q).to_string());
     format!("{a}\n{b}\n")
 }
 
-/// The request's result from the server's two answer lines, or berth's `NAME: detail`.
+/// The request's result from the server's two answer lines, or shed's `NAME: detail`.
 fn answer(text: &str) -> Result<Value> {
     let mut it = text.lines().map(serde_json::from_str::<Response>);
-    let mut next = || -> Result<Response> { Ok(it.next().context("berth: connection closed")??) };
+    let mut next = || -> Result<Response> { Ok(it.next().context("shed: connection closed")??) };
     let hello = next()?;
     if let Some(e) = hello.error {
         bail!("{}", e.message);
     }
-    let theirs = hello.result.as_ref().and_then(|v| v["version"].as_str()).unwrap_or("?");
+    let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
     ensure!(
-        theirs == VERSION,
-        "BERTH_VERSION: herdsman speaks berth {VERSION}, the server is {theirs}"
+        theirs.as_ref() == Some(&Hello::ours()),
+        "SHED_VERSION: herdsman speaks shed {VERSION}, the server is {}",
+        theirs.map_or("?".into(), |h| h.label())
     );
     match next()? {
         Response { error: Some(e), .. } => bail!("{}", e.message),
         Response { result: Some(v), .. } => Ok(v),
-        _ => bail!("berth: neither result nor error"),
+        _ => bail!("shed: neither result nor error"),
     }
 }
 
@@ -74,7 +73,7 @@ fn answer(text: &str) -> Result<Value> {
 pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value> {
     let text = match w {
         Wire::Socket(p) => {
-            let mut s = UnixStream::connect(p).with_context(|| format!("no berth server on {}", p.display()))?;
+            let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
             s.write_all(lines(m, params).as_bytes())?;
             let (mut rd, mut text) = (BufReader::new(s), String::new());
             for _ in 0..2 {
@@ -83,10 +82,10 @@ pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value>
             text
         }
         Wire::Connect => {
-            let o = r.run_in("berth", &argv(&["connect", "--autostart"]), &lines(m, params))?;
+            let o = r.run_in("shed", &argv(&["connect", "--autostart"]), &lines(m, params))?;
             ensure!(
                 !o.stdout.is_empty(),
-                "berth connect failed ({}): {}",
+                "shed connect failed ({}): {}",
                 o.code,
                 o.stderr.trim()
             );
@@ -96,12 +95,12 @@ pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value>
     answer(&text)
 }
 
-/// The `berth` CLI (ACP mode only: its bridge and prompt framing are berth's own); fails on a non-zero exit.
+/// The `shed` CLI (ACP mode only: its bridge and prompt framing are shed's own); fails on a non-zero exit.
 pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
-    let o = r.run("berth", &argv(a))?;
+    let o = r.run("shed", &argv(a))?;
     ensure!(
         o.code == 0,
-        "berth {} failed ({}): {}",
+        "shed {} failed ({}): {}",
         a.join(" "),
         o.code,
         o.stderr.trim()
@@ -109,12 +108,12 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
     Ok(o)
 }
 
-/// The kept events after `since` (berth keeps the last 1,000), read until the stream is quiet for `quiet`.
-pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<berth_proto::Event>> {
+/// The kept events after `since` (shed keeps the last 1,000), read until the stream is quiet for `quiet`.
+pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::Event>> {
     let Wire::Socket(p) = w else {
-        bail!("berth events: this host's server only");
+        bail!("shed events: this host's server only");
     };
-    let mut s = UnixStream::connect(p).with_context(|| format!("no berth server on {}", p.display()))?;
+    let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
     let params = EventsParams {
         since: Some(since),
         ..Default::default()
@@ -134,12 +133,14 @@ pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<berth_proto::
     Ok(out)
 }
 
-/// #298: drive's intake of berth's state changes since the last pass (`berth.seq` beside the log): each lane's
+/// #298: drive's intake of shed's state changes since the last pass (`shed.seq` beside the log): each lane's
 /// reported state, exit or kill as a passive `lane-state` event. Only this host's server; the agent list every pass
 /// polls still sees every lane, here and elsewhere.
 pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
-    let seq = ctx.state.with_file_name("berth.seq");
+    let seq = ctx.state.with_file_name("shed.seq");
+    // #455: berth's name, read once if shed's is missing; the next write is shed's.
     let since = std::fs::read_to_string(&seq)
+        .or_else(|_| std::fs::read_to_string(ctx.state.with_file_name("berth.seq")))
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
@@ -158,7 +159,7 @@ pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
             EventKind::Killed => json!({"state": "killed"}),
             _ => continue,
         };
-        (d["agent"], d["berth_seq"]) = (json!(e.name), json!(e.seq));
+        (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
         if cfg.fleet.contains_key(fleet) {
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
             n += 1;
@@ -170,8 +171,8 @@ pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
     Ok(n)
 }
 
-/// A runner whose lanes run on berth: `r` for every program, `b` for the runtime.
-pub struct With<'a>(pub &'a dyn Runner, pub Berth);
+/// A runner whose lanes run on shed: `r` for every program, `b` for the runtime.
+pub struct With<'a>(pub &'a dyn Runner, pub Shed);
 
 impl Runner for With<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
@@ -186,7 +187,7 @@ impl Runner for With<'_> {
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         self.0.detach(exe, args, log)
     }
-    fn berth(&self) -> Option<Berth> {
+    fn shed(&self) -> Option<Shed> {
         Some(self.1.clone())
     }
 }

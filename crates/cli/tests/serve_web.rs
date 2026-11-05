@@ -126,7 +126,7 @@ fn queue_buttons_move_like_queue_mv() {
         location(&res).starts_with("/?msg=error: #99 is not queued"),
         "an error is kept: {res}"
     );
-    assert!(get(&s, "/").contains("events"), "page still renders");
+    assert!(get(&s, "/").contains("</nav>"), "page still renders");
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn set_refuses_toml_injection_on_web_and_cli() {
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let text = |c: &herdsman::Ctx| std::fs::read_to_string(&c.config).unwrap();
-    let (before, log) = (text(&web), std::fs::read_to_string(&web.state).unwrap());
+    let (before, log) = (text(&web), herdsman::events::jsonl(&web.state).unwrap());
     // `opus"\n[[notify]]\ncmd = "touch /tmp/pwned"\n#`, form-encoded, as model and as effort.
     let evil = "opus%22%0A%5B%5Bnotify%5D%5D%0Acmd+%3D+%22touch+%2Ftmp%2Fpwned%22%0A%23";
     for field in ["model", "effort"] {
@@ -280,7 +280,7 @@ fn set_refuses_toml_injection_on_web_and_cli() {
         );
     }
     assert_eq!(text(&web), before, "fleet.toml byte-identical");
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log, "no event");
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "no event");
     let before = text(&cli);
     for v in [
         "opus\"\n[[notify]]\ncmd = \"touch /tmp/pwned\"\n#",
@@ -304,7 +304,7 @@ fn stale_mtime_refuses_without_writing() {
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let (cfg, log) = (
         std::fs::read_to_string(&web.config).unwrap(),
-        std::fs::read_to_string(&web.state).unwrap(),
+        herdsman::events::jsonl(&web.state).unwrap(),
     );
     for body in [
         "op=pause&fleet=sendmeter&mtime=1",
@@ -316,7 +316,7 @@ fn stale_mtime_refuses_without_writing() {
         assert!(location(&res).starts_with("/?msg=REFUSED STALE: "), "{res}");
     }
     assert_eq!(std::fs::read_to_string(&web.config).unwrap(), cfg);
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log);
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log);
     assert!(get(&s, "/?msg=REFUSED%20STALE%3A%20x").contains("<p class=\"msg r\">REFUSED STALE: x</p>"));
 }
 
@@ -326,7 +326,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let body = format!("op=pause&fleet=sendmeter&mtime={}", mtime(&s));
-    let log = std::fs::read_to_string(&web.state).unwrap();
+    let log = herdsman::events::jsonl(&web.state).unwrap();
     for extra in [
         "Origin: https://evil.example\r\n",
         "Origin: http://127.0.0.1:7777.evil\r\n",
@@ -339,7 +339,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
         body.len()
     );
     assert!(String::from_utf8_lossy(&s.respond(&wrong, 1_000_000)).starts_with("HTTP/1.1 403 "));
-    assert_eq!(std::fs::read_to_string(&web.state).unwrap(), log, "nothing written");
+    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "nothing written");
     // `tailscale serve`: the ts.net name from [serve].allowed_hosts, over https.
     let ts = format!(
         "POST / HTTP/1.1\r\nHost: mac.tail1.ts.net:7443\r\nOrigin: https://mac.tail1.ts.net:7443\r\nContent-Length: {}\r\n\r\n{body}",
@@ -551,10 +551,13 @@ fn lanes_group_by_fleet_with_others() {
                 "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
             ))
     );
-    // One herdr agent list per 10 s, one pane read per 30 s.
+    // One herdr agent list per 10 s, one pane read per 30 s (#269: API v1's Lanes, the board's read).
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
-        s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", 1_000_000 + t);
+        assert!(
+            String::from_utf8_lossy(&s.respond("GET /api/v1/lanes HTTP/1.1\r\n\r\n", 1_000_000 + t))
+                .starts_with("HTTP/1.1 200")
+        );
     }
     assert_eq!(r.count("herdr agent list"), 1 + 2);
     assert_eq!(r.count("herdr pane read w1:p2"), 1 + 1);
@@ -682,12 +685,13 @@ fn page_fits_390px_without_horizontal_scroll() {
         html.contains("class=tl title=\"Queue rows show issue and PR titles from the cached reads · PR #33 · src: titles in Queue\">"),
         "title line"
     );
-    for t in ["queue", "lanes", "host", "events"] {
+    for t in ["queue", "lanes", "chat"] {
         assert!(
             html.contains(&format!("<section id={t}>")) && html.contains(&format!("<a href=#{t}>")),
             "{t} tab"
         );
     }
+    // #440: Host and Events are System's sections (tests/system_sheet.rs measures them at 390 px).
     if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
         eprintln!("skipping the WebKit scrollWidth check: no swift/WebKit here");
         return;
@@ -695,7 +699,7 @@ fn page_fits_390px_without_horizontal_scroll() {
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-    for tab in ["queue", "lanes", "host", "events"] {
+    for tab in ["queue", "lanes"] {
         for mode in ["horse", "ascii", "glyph"] {
             let o = swift()
                 .args([script, file.to_str().unwrap(), "390", tab, mode])
@@ -821,10 +825,9 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         "paused fleet's lane is not counted"
     );
     // Events: noise folded into one count, `?all=1` unfolds it.
-    assert_eq!(
-        section("events"),
-        "<section id=events>",
-        "#60: Events loads on tab open"
+    assert!(
+        !page.contains("id=events"),
+        "#60: Events loads when opened; #440: in System (serve.js makes its section)"
     );
     // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red (#266: the
     // board's tab, from API v1).
@@ -913,7 +916,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         ))
         .into_owned()
     };
-    for path in ["/frags", "/?frag=all", "/herd.json"] {
+    for path in ["/herd.json", "/api/v1/needs", "/api/v1/lanes"] {
         let res = send(path, "");
         assert!(
             res.starts_with("HTTP/1.1 200 OK") && res.contains("Content-Type: application/json; charset=utf-8\r\n"),
@@ -922,8 +925,9 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
         assert!(j.is_object(), "{path}");
     }
-    assert!(send("/frags", "").contains("\"needs\""), "frags by element id");
-    for path in ["/frags", "/?frag=all", "/herd.json", "/lane?agent=sendmeter-impl-12"] {
+    // #269: `/frags` (HTML parts) is gone; the board reads API v1.
+    assert!(send("/frags", "").starts_with("HTTP/1.1 404"), "no HTML parts");
+    for path in ["/herd.json", "/lane?agent=sendmeter-impl-12"] {
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
             "Sec-Fetch-Dest: document\r\n",
@@ -945,13 +949,13 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         "the board itself"
     );
     // The SW answers a navigation off the page with the page (#406: but a thread's file, chat_tab.rs), and never
-    // caches `frags`; the page fetches `frags`.
+    // caches the API (#269: the board's every read); serve.js reads no `frags`.
     let sw = send("/sw.js", "");
     assert!(sw.contains("e.request.mode === 'navigate' && u.pathname !== P && !u.pathname.startsWith(P + 'thread/')) return e.respondWith(caches.match(P).then(m => m || fetch(P)))"), "{sw}");
-    assert!(sw.contains("P + 'frags'") && !sw.contains("frag=all"));
+    assert!(sw.contains("u.pathname.startsWith(P + 'api/')") && !sw.contains("frags"));
     let v = send("/", "");
     let v = &v[v.find("/a/").unwrap()..][..11];
-    assert!(send(&format!("{v}/serve.js"), "").contains("fetch(R + 'frags?tab='"));
+    assert!(!send(&format!("{v}/serve.js"), "").contains("frags"));
 }
 
 /// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404. #268:
