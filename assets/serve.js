@@ -2017,7 +2017,8 @@ function clocks(root) { root.querySelectorAll('.ct[data-ts]').forEach(c => { c.t
 function chatKeep(root) {
   root.querySelectorAll('.cvp .tc>.tmo').forEach(m => {
     const tc = $(`#chat .cvp[data-t="${CSS.escape(m.closest('.cvp').dataset.t)}"] .tc`);
-    const old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b) : [];
+    // #460: a block the copy carries anyway (a waiting config card kept under its marker) is not taken twice.
+    const nu = m.closest('.tc'), old = tc ? [...tc.children].filter(c => +c.dataset.n < +m.dataset.b && !nu.querySelector(`:scope>[data-n="${c.dataset.n}"]`)) : [];
     if (old.length) m.replaceWith(tc.firstElementChild.cloneNode(true), ...old.map(c => c.cloneNode(true)));
   });
 }
@@ -2090,6 +2091,7 @@ document.addEventListener('click', async e => {
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .tmo')) chatOlder();
+  else if (t.closest('#chat .th .cw')) { FOL = false; t.closest('.cvp').querySelector('.tc .chc')?.closest('.blk').scrollIntoView({ block: 'center' }); } // #460: to the waiting card
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }

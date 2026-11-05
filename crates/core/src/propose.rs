@@ -74,6 +74,22 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
         .find(|e| e.kind == "config-settled" && e.str("id") == Some(id))
 }
 
+/// #460: proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.
+pub fn stale(ctx: &Ctx, p: &Event) -> bool {
+    let cur = std::fs::read(&ctx.config).unwrap_or_default();
+    p.str("base") != Some(&sha256(&cur))
+}
+
+/// #460: thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.
+pub fn waiting<'a>(ctx: &'a Ctx, events: &'a [Event], thread: &'a str) -> impl Iterator<Item = &'a Event> {
+    events.iter().filter(move |e| {
+        e.kind == "config-propose"
+            && e.str("thread") == Some(thread)
+            && settled(events, e.str("id").unwrap_or_default()).is_none()
+            && !stale(ctx, e)
+    })
+}
+
 /// The owner's [apply] or [discard] on proposal `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) -> Result<String> {
     let events = read(&ctx.state)?;
@@ -97,7 +113,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
     );
     let line = if apply {
         let cur = std::fs::read_to_string(&ctx.config)?;
-        if p.str("base") != Some(&sha256(cur.as_bytes())) {
+        if stale(ctx, p) {
             return refused(
                 "STALE",
                 format!("fleet.toml changed since {id} was proposed; ask for a new one"),
