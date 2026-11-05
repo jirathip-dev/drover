@@ -139,6 +139,8 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
+    Report { id: Option<String> },
     /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
     Thread {
         #[command(subcommand)]
@@ -197,6 +199,13 @@ enum Cmd {
     Next { fleet: String },
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
+    /// File this week's lessons issue, queue it on top and spawn its `lesson` lane (conductors and the owner only)
+    #[command(args_conflicts_with_subcommands = true)]
+    Lesson {
+        #[command(subcommand)]
+        cmd: Option<LessonCmd>,
+        fleet: Option<String>,
+    },
     /// Each `[hosts]` host: on/off, reachable, tags, load, memory, disk and lanes (docs/hosts.md)
     #[command(alias = "host")]
     Hosts {
@@ -242,11 +251,13 @@ enum Cmd {
         #[arg(long, hide = true)]
         now: bool,
     },
-    /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it
+    /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines
     #[command(hide = true)]
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
     },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
     /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
@@ -271,7 +282,7 @@ enum Cmd {
     },
     /// One timer pass: check, then drive; refusals exit 0, a real error logs `tick-failed` (alerts at most hourly)
     Tick,
-    /// Alert once per state on stall, lane-dead, ready-unmerged, ask-waiting, orphan-lane; idempotent, safe from cron
+    /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane; idempotent, safe from cron
     Check,
     /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
     Accounts {
@@ -449,6 +460,9 @@ enum QueueCmd {
         /// Host tags their lanes need besides the fleet's (`docker,gpu`)
         #[arg(long, value_delimiter = ',')]
         needs: Vec<String>,
+        /// A design lane first; impl once the owner approves the design
+        #[arg(long)]
+        design: bool,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -466,10 +480,10 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
-    /// Replace a queued issue's `needs` host tags or serial groups (`queue set 12 needs docker,gpu`; empty clears)
+    /// Replace a queued issue's `needs` host tags, serial groups or design mark (`queue set 12 needs docker,gpu`; `design on|off`)
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs", "serial"])]
+        #[arg(value_parser = ["needs", "serial", "design"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -539,6 +553,17 @@ enum HostsCmd {
 }
 
 #[derive(Subcommand)]
+enum LessonCmd {
+    /// The fleet's recent mistakes as plain text: rev FAIL findings, the owner's thread lines and `by: owner` events, reverts
+    Digest {
+        fleet: String,
+        /// The window in days
+        #[arg(long, default_value_t = 7)]
+        days: u64,
+    },
+}
+
+#[derive(Subcommand)]
 enum ProfilesCmd {
     /// Write ~/.config/herdsman/claude/<profile>/ (settings.json + hooks, role.md, fleet.md) and Hermes profiles' `hooks:` + hook approval
     Sync {
@@ -548,8 +573,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`).
-pub const HELP_AGENT_MAX: usize = 274;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states).
+pub const HELP_AGENT_MAX: usize = 285;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -558,7 +583,8 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "resume", "serve", "setup", "stats", "tick", "timer",
+        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "setup", "stats",
+        "tick", "timer",
     ];
     let subs = cmd
         .get_subcommands()
@@ -672,7 +698,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
         }
         Cmd::Migrate => migrate(&ctx.home, out)?,
-        Cmd::CapCheck { config } => return crate::overlap::cap_check(&config, out),
+        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -811,6 +837,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 .collect();
             write!(out, "{}", boards.join("\n"))?;
         }
+        Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
             all,
@@ -874,6 +901,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     .map_or(String::new(), |b| format!("  blocked by #{b}"));
                 if r["serial"] == true {
                     on += "  serial";
+                }
+                if r["design"] == true {
+                    on += "  design";
                 }
                 if r["needs"].as_array().is_some_and(|n| !n.is_empty()) {
                     on += &format!("  needs {}", r["needs"].to_string().replace(['[', ']', '"'], ""));
@@ -1074,6 +1104,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
+                        check::remote_orphans(&cfg, r, out, orphans && yes)?;
                     }
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
@@ -1110,6 +1141,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = Event::new(ctx.now, &fleet, Some(issue), "fix-done", json!({"why": no_change}));
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
+                    crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                }
+                Cmd::Lesson {
+                    cmd: Some(LessonCmd::Digest { fleet, days }),
+                    ..
+                } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                Cmd::Lesson { fleet, .. } => {
+                    let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
+                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
+                        return Ok(4);
+                    }
                 }
                 Cmd::Park { fleet, issue } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;
@@ -1163,6 +1205,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             after,
                             serial,
                             needs,
+                            design,
                         } => {
                             // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
                             let g =
@@ -1182,6 +1225,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             if !needs.is_empty() {
                                 d["needs"] = json!(needs);
                             }
+                            if design {
+                                d["design"] = json!(true);
+                            }
                             d
                         }
                         QueueCmd::Set { issue, key, tags } => {
@@ -1189,6 +1235,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 key != "serial" || tags.iter().all(known),
                                 "no such serial group: {tags:?}"
                             );
+                            let on = ["on", "off"].iter().any(|o| tags == [*o]);
+                            anyhow::ensure!(key != "design" || on, "design is `on` or `off`");
                             let mut d = queue::op("set", &[issue], false, None, None, None);
                             d[key.as_str()] = json!(tags);
                             d
@@ -1203,6 +1251,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         QueueCmd::Block { issue, on } => queue::op("block", &[issue], false, None, None, Some(on)),
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
+                    // #412: a conductor's design mark: the design's approval asks in its thread too.
+                    let mut d = d;
+                    if let Some(t) = std::env::var("HERDSMAN_THREAD")
+                        .ok()
+                        .filter(|_| d.get("design").is_some())
+                    {
+                        d["design_thread"] = json!(t);
+                    }
                     writeln!(out, "{}", queue_change(ctx, &cfg, &fleet, d, None)?)?;
                 }
                 _ => unreachable!(),

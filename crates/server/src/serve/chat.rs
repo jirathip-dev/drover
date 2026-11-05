@@ -199,35 +199,41 @@ fn ask(ctx: &Ctx, events: &[Event], a: &Event, dis: &str) -> String {
     block(ctx.now, "ai", "conductor", s("question"), &body, a.ts)
 }
 
-/// One thread: the bar, its blocks, the live line and the composer (inert on a device that is not a paired owner's).
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
+/// #408: the thread's last `n` messages before seq `before`, each block tagged `data-n` (its event's seq), under
+/// `thread started …` or, older ones left, the marker serve.js loads them from (`thread/<t>?before=`).
+fn page(
+    ctx: &Ctx,
+    cfg: &Config,
+    events: &[Event],
+    t: &Event,
+    rw: bool,
+    (before, n): (u64, usize),
+    open: u64,
+) -> String {
     let id = t.str("thread").unwrap_or_default();
     let dis = or(rw, "", " disabled");
-    let dir = conductor::dir(ctx, cfg, id).display().to_string();
-    let home = crate::config::home().display().to_string();
-    let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
-    let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
-    let mut h = format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>");
-    // #407: a finished turn's commands fold, each run of them one `▸ N commands` row; the live turn's stay open.
-    let st = state(events, id, agents);
-    let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
-    let turn = of(events, id).rfind(me).map_or((0, t.ts), |e| (e.seq, e.ts));
-    let mut run: Vec<(u64, String)> = vec![];
-    let fold = |run: &mut Vec<(u64, String)>, live: bool| {
-        let (n, f) = (run.len(), run.first().map_or(0, |r| r.0));
-        let rows: String = run.drain(..).map(|r| r.1).collect();
-        let s = or(n == 1, "", "s");
-        let sum = format!("<details class=\"blk fold\" data-f={f}><summary><span class=pv>{n} command{s}</span></summary>{rows}</details>");
-        if live || n == 0 {
-            rows
-        } else {
-            sum
+    let mut h = vec![];
+    // #407: a finished turn's commands fold, each run of them one `▸ N commands` row (tagged as its first command); a
+    // run after `open` (the live turn's start) stays rows.
+    let tag = |n: u64, b: &str| b.find(' ').map(|i| format!("{} data-n={n}{}", &b[..i], &b[i..]));
+    let fold = |h: &mut Vec<(u64, String)>, run: &mut Vec<(u64, String)>| {
+        let Some(&(f, _)) = run.first() else { return };
+        if f > open {
+            h.extend(run.drain(..).filter_map(|(n, b)| Some((n, tag(n, &b)?))));
+            return;
         }
+        let (n, rows) = (run.len(), run.drain(..).map(|r| r.1).collect::<String>());
+        let s = or(n == 1, "", "s");
+        let sum = format!(
+            "<details class=\"blk fold\"><summary><span class=pv>{n} command{s}</span></summary>{rows}</details>"
+        );
+        h.extend(tag(f, &sum).map(|b| (f, b)));
     };
-    for e in of(events, id) {
+    let mut run = vec![];
+    for e in of(events, id).filter(|e| e.seq < before) {
         let s = |k| e.str(k).unwrap_or_default();
         let lk = conductor::link(e).map_or(String::new(), |l| chip(l) + " ");
-        let row = match (e.kind.as_str(), s("from")) {
+        let b = match (e.kind.as_str(), s("from")) {
             ("thread-msg", "system") => {
                 let rt = format!(" <button type=button class=rty data-n={}{dis}>retry</button>", e.seq);
                 let (r, rt) = if e.str("line").is_some() { (" r", rt) } else { ("", String::new()) };
@@ -267,13 +273,44 @@ fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&
             _ => String::new(),
         };
         if e.kind == "thread-cmd" {
-            run.push((e.seq, row));
-        } else if !row.is_empty() {
-            h += &(fold(&mut run, false) + &row);
+            run.push((e.seq, b));
+        } else if let Some(b) = tag(e.seq, &b) {
+            fold(&mut h, &mut run);
+            h.push((e.seq, b));
         }
     }
-    let live = st == "working" && run.first().is_some_and(|r| r.0 > turn.0);
-    h += &fold(&mut run, live);
+    fold(&mut h, &mut run);
+    let k = h.len().saturating_sub(n);
+    let top = match h.get(k) {
+        Some((s, _)) if k > 0 => format!("<p class=\"qs tmo\" data-b={s}>↑ older messages</p>"),
+        _ => {
+            let dir = conductor::dir(ctx, cfg, id).display().to_string();
+            let home = crate::config::home().display().to_string();
+            let dir = dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}"));
+            let (at, dir) = (tm(ctx.now, t.ts), esc(&dir));
+            format!("<p class=qs>thread started by owner · {at} · conductor in {dir}</p>")
+        }
+    };
+    h[k..].iter().fold(top, |a, b| a + &b.1)
+}
+
+/// #408: `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
+pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>, rw: bool) -> Option<String> {
+    let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
+    let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
+    let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
+    Some(page(ctx, &cfg, events, t, rw, (before, n), u64::MAX))
+}
+
+/// One thread: the bar, its last 30 messages, the live line and the composer (inert off a paired owner device).
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (agents, rw): (&[Value], bool)) -> String {
+    let id = t.str("thread").unwrap_or_default();
+    let dis = or(rw, "", " disabled");
+    let st = state(events, id, agents);
+    let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
+    let turn = of(events, id).rfind(me).map_or((0, t.ts), |e| (e.seq, e.ts));
+    let open = if st == "working" { turn.0 } else { u64::MAX };
+    let h = page(ctx, cfg, events, t, rw, (u64::MAX, 30), open);
     let live = match st {
         "choose" => "<b>●</b> waiting for your answer · sleeps after 30 min idle",
         "working" => "<i class=tld aria-hidden=true></i> working", // #403: serve.js puts the theme's loading art in

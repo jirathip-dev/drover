@@ -181,7 +181,8 @@ fn admission_runs_per_host() {
     let low = || fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
-    assert_eq!(e, "DISK_LOW: bazzite: 1.0 GB free < 10; `herdsman clean --yes`");
+    let nothing = "nothing for `herdsman clean --yes` there; `herdsman reclaim` frees idle build folders";
+    assert_eq!(e, format!("DISK_LOW: bazzite: 1.0 GB free < 10; {nothing}"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (code, out) = run(&c, &low(), &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 3, "{out}");
@@ -309,10 +310,76 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         .reply("herdr --machine bazzite pane close w9:p1", "{}");
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains(&format!("removed {WT} (sendmeter#12 merged)")), "{out}");
+    assert!(
+        out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
+        "{out}"
+    );
     assert!(r.called("herdr --machine bazzite worktree remove --workspace w9"));
     assert!(r.called("herdr --machine bazzite pane close w9:p1"));
     assert!(!r.calls.borrow().iter().any(|c| c.starts_with("git ")));
+}
+
+/// #416: a merged lane on bazzite that only `spawn-started` logged (its spawn failed after the worktree was made) and an
+/// orphan folder there: listed with the host, the lane removed by `--yes`, the orphan by `--orphans --yes`; a full
+/// bazzite's `DISK_LOW` names what `clean --yes` frees there.
+#[test]
+fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
+    let c = setup("hosts-clean-416", "", true, 0);
+    let wt = "/home/me/.herdr/worktrees/sendmeter/rev-12-r1";
+    let d = json!({"agent": "sendmeter-rev-12-r1", "role": "rev", "host": "bazzite", "machine": "bazzite",
+                   "worktree": wt, "pane": "w9:p2"});
+    ev(&c, NOW - 900, 12, "spawn-started", d);
+    ev(
+        &c,
+        NOW - 100,
+        12,
+        "merged",
+        json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
+    );
+    let old = "/home/me/.herdr/worktrees/old-repo";
+    let dirs = format!("2048\t/home/me/.herdr/worktrees/sendmeter\n1048576\t{old}\n");
+    let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
+    let r = fake(1.0, 1.0)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'sh' '-c' 'cd && cd"), &dirs)
+        .reply(&format!("{SSH}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C' '{wt}' 'status'"), "")
+        .reply(&format!("{SSH}'rm' '-rf' '--' '{old}'"), "")
+        .reply(&format!("{SSH}'df' '-k' '/'"), df)
+        .reply("herdr --machine bazzite worktree remove --workspace w9", "{}")
+        .reply("herdr --machine bazzite pane close w9:p2", "{}");
+    let e = placed(&c, &r, 13, "impl", Some("bazzite")).unwrap_err();
+    let want = "DISK_LOW: bazzite: 1.0 GB free < 10; `herdsman clean --yes` frees 1 lane worktree(s) there: rev-12-r1";
+    assert_eq!(e, want);
+    let (code, dry) = run(&c, &r, &["clean"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(
+        dry.contains(&format!("would remove bazzite:{wt} (pane w9:p2, sendmeter#12 merged)")),
+        "{dry}"
+    );
+    assert!(dry.contains(&format!("orphan bazzite:{old} 1.0 GB")), "{dry}");
+    assert!(
+        !dry.contains("worktrees/sendmeter "),
+        "a fleet's own folder is no orphan: {dry}"
+    );
+    assert!(
+        r.called(&format!("{SSH}'sh' '-c' 'cd && cd \"$1\"")) && !r.called("herdr --machine bazzite worktree remove")
+    );
+    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("removed bazzite:{wt} (sendmeter#12 merged)")),
+        "{out}"
+    );
+    assert!(r.called("herdr --machine bazzite worktree remove --workspace w9"));
+    assert!(
+        out.contains(&format!("orphan bazzite:{old}")) && !r.called(&format!("{SSH}'rm'")),
+        "{out}"
+    );
+    let (code, out) = run(&c, &r, &["clean", "--orphans", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("removed orphan bazzite:{old}")), "{out}");
+    assert!(r.called(&format!("{SSH}'rm' '-rf' '--' '{old}'")));
 }
 
 #[test]
@@ -790,7 +857,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
         )
         .reply(
             &format!("{SSH}'cat' '{rev}/verdict.md'"),
-            "FAIL\n- blocking [code] a.rs:1\n",
+            "FAIL\n- blocking [code] a.rs:1\n  Proof: spec\n  > AC 1\n",
         )
         .reply(&format!("{SSH}'git' '-C' '{WT}' 'log'"), &format!("{head} 20"))
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
@@ -1072,4 +1139,56 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
         r.calls.borrow()
     );
     assert!(!r.called("herdr pane close w9:p1"), "never on the main host's herdr");
+}
+
+/// #438: short of disk on a remote host, its shared build folder is trimmed over ssh first; then its disk is read again.
+#[test]
+fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
+    let c = setup("hosts-trim", "", true, 0);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let toml = toml.replace("build_root = \"\"", "build_root = \"~/.cache/herdsman/target\"");
+    std::fs::write(&c.config, toml).unwrap();
+    let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
+    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let low = |freed: &str| {
+        fake(1.0, 0.1)
+            .once(&format!("{SSH}'df' '-k' '/'"), 0, &df(1_048_576))
+            .reply(&format!("{SSH}'df' '-k' '/'"), &df(30 * 1_048_576))
+            .reply(
+                &trim,
+                &format!("builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)\n{freed}\n"),
+            )
+    };
+    let r = low("freed 20971520");
+    assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
+    assert!(
+        call.ends_with("'sh' '~/.cache/herdsman/target' '0'"),
+        "every idle profile goes: {call}"
+    );
+    // Nothing freed: the first reading stands.
+    let e = placed(&c, &low("freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
+}
+
+/// #438: drive's budget pass trims each remote host's shared build folder to `build_budget_gb` over ssh.
+#[test]
+fn the_budget_pass_trims_remote_shared_build_folders() {
+    let c = setup("hosts-budget-trim", "", true, 0);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let toml = toml.replace(
+        "build_root = \"\"",
+        "build_root = \"~/.cache/herdsman/target\"\nbuild_budget_gb = 2",
+    );
+    std::fs::write(&c.config, toml).unwrap();
+    let cfg = Config::load(&c.config).unwrap();
+    let trim = format!("{SSH}'sh' '-c' 'r=$1;");
+    let line = "builds: trimmed /home/me/.cache/herdsman/target/synergy/debug/ (9 KB)";
+    let r = fake(1.0, 0.1).reply(&trim, &format!("{line}\nfreed 9\n"));
+    let mut out = Vec::new();
+    herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains(line), "{out}");
+    let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
+    assert!(call.ends_with("'sh' '~/.cache/herdsman/target' '2097152'"), "{call}");
 }

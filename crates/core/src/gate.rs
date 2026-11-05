@@ -70,6 +70,12 @@ pub fn verdict(
     let body = (crate::hosts::On::of(r, at).read(Path::new(file)))
         .with_context(|| format!("cannot read verdict file {file}"))?;
     anyhow::ensure!(!body.trim().is_empty(), "verdict file {file} is empty");
+    // #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call.
+    let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
+    let bad: Vec<String> = findings(&body).into_iter().filter_map(proofless).collect();
+    if !pass && !bad.is_empty() {
+        return refused("NO_PROOF", bad.join("; "));
+    }
     let st = issue_state(ctx, fleet, issue)?;
     let branch = branch_of(st.as_ref(), issue);
     let api = format!("repos/{}/branches/{}", f.repo, branch);
@@ -266,9 +272,10 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
 /// of `cats`; at least one blocker.
 #[doc(hidden)]
 pub fn form_only(body: &str, cats: &[String]) -> bool {
-    // #249: a markdown heading (`## Blocking`) is no finding.
-    let blockers: Vec<String> = (body.lines().skip(1).map(str::to_lowercase))
-        .filter(|l| !l.trim_start().starts_with('#') && l.contains("blocking") && !l.contains("non-blocking"))
+    let blockers: Vec<String> = findings(body)
+        .iter()
+        .filter(|f| f.0)
+        .map(|f| f.1[0].to_lowercase())
         .collect();
     let tag = |l: &str| {
         let (_, rest) = l.split_once("blocking")?;
@@ -276,6 +283,63 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
         rest.split_once(']').map(|t| t.0.trim().to_string())
     };
     !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
+}
+
+/// #418: each finding (a `-`/`*`/`1.` item saying `blocking`, or not when `non-blocking`) with the lines under it,
+/// up to the next finding, heading or unindented prose line (#249: these end it as none); fenced lines never are.
+pub(crate) fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
+    let (mut out, mut fence) = (Vec::<(bool, Vec<&str>)>::new(), false);
+    for l in body.lines().skip(1) {
+        let (t, lc) = (l.trim_start(), l.to_lowercase());
+        let item = t.starts_with(['-', '*']) || t.starts_with(|c: char| c.is_ascii_digit());
+        let finding = !fence && item && lc.contains("blocking");
+        let prose = !l.starts_with(char::is_whitespace) && !t.is_empty() && !item && !t.starts_with(['>', '`', '~']);
+        match out.last_mut() {
+            _ if finding || (!fence && prose && !lc.starts_with("proof:")) => {
+                out.push((finding && !lc.contains("non-blocking"), vec![l]));
+            }
+            Some(f) => f.1.push(l),
+            None => {}
+        }
+        fence ^= t.starts_with("```") || t.starts_with("~~~");
+    }
+    out
+}
+
+/// #418: what a finding's `Proof: run` (a fenced command then its output, or a screenshot path) or `Proof: spec` (a
+/// `>` quoted rule and a `file:line`) lacks.
+fn unproven(ls: &[&str]) -> Option<&'static str> {
+    let lc: Vec<String> = ls.iter().map(|l| l.to_lowercase()).collect();
+    let Some(at) = lc
+        .iter()
+        .position(|l| l.trim_start_matches(['-', '*', '_', ' ']).starts_with("proof:"))
+    else {
+        return Some("no Proof block");
+    };
+    let kind = lc[at]
+        .split_once("proof:")
+        .map_or("", |k| k.1.trim_start_matches(['*', '_', '`', ' ']));
+    let text = ls[at + 1..].join("\n");
+    let p: Vec<&str> = text.split("```").map(str::trim).collect();
+    let quote = |l: &&str| l.trim_start().starts_with('>');
+    let loc = |w: &str| {
+        let w = w.trim_matches(|c: char| "`*()[],;.:".contains(c));
+        w.rsplit_once(':')
+            .is_some_and(|(f, n)| !f.is_empty() && n.starts_with(|c: char| c.is_ascii_digit()))
+    };
+    match kind {
+        k if k.starts_with("run") && [".png", ".jpg", ".webp"].iter().any(|x| text.contains(x)) => None,
+        k if k.starts_with("run") && p.get(1).is_none_or(|c| c.is_empty()) => Some("run proof has no fenced command"),
+        k if k.starts_with("run") => p[2..].iter().all(|o| o.is_empty()).then_some("run proof has no output"),
+        k if k.starts_with("spec") && !text.lines().any(|l| quote(&l) && l.trim().len() > 1) => {
+            Some("spec proof has no `>` quoted line")
+        }
+        k if k.starts_with("spec") => {
+            let mut words = ls.iter().filter(|l| !quote(l)).flat_map(|l| l.split_whitespace());
+            (!words.any(loc)).then_some("spec proof has no file:line")
+        }
+        _ => Some("Proof is neither `run` nor `spec`"),
+    }
 }
 
 /// #309: a check stage's rounds (unset: no limit) plus the owner's extends, worded `/3` or ` of 9+1 (owner extended)`.

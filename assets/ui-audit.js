@@ -422,6 +422,35 @@
       if (DBG.get('check')) { m.querySelector('.und').click(); await wait(); if (posts[1]?.op !== 'restore' || posts[1]?.t !== 't4') early.push(`[undo]: ${JSON.stringify(posts[1])}`); }
     },
     'ascii-chat-wait': () => { style('ascii'); return VIEWS['chat-wait'](); },
+    // #408: a long thread: the demo's t4 under an older-messages marker, the page before it 30 canned messages. `chat-older`:
+    // scrolled to the top, that page loaded above (the message on screen stays put); `chat-mid`: then half way down, the
+    // thread header pinned under the page header.
+    'chat-older': async () => {
+      tab('chat'); chatOpen('t4'); $('.lall')?.click();
+      const tc = $('#chat .cvp[data-t="t4"] .tc'), a = tc.querySelector(':scope>[data-n]'), at = Date.now() / 1e3 | 0;
+      tc.firstElementChild.outerHTML = `<p class="qs tmo" data-b=${a.dataset.n}>↑ older messages</p>`;
+      const msg = i => `<details data-n=${i} class="blk ${i % 3 ? 'ai' : 'me'}" open><summary><span class=k>${i % 3 ? 'conductor' : 'you'}</span><span class=pv>older message ${i}</span><span class=ct data-ts=${at}></span><i class=cv></i></summary><div class=md><p>older message ${i}: the rate limit's burst, the retry window and the docs page.</p></div></details>`;
+      const page = '<p class=qs>thread started by owner · 09:12</p>' + Array.from({ length: 30 }, (_, i) => msg(i + 1)).join('');
+      window.fetch = (u, o) => /thread\/t4\?before=/.test(u) ? Promise.resolve(new Response(page)) : F(u, o);
+      scrollTo({ top: 1e6, behavior: 'instant' }); await wait();
+      scrollTo({ top: 0, behavior: 'instant' }); // headless paints no frames, so it fires no scroll event: send the page's own
+      const y = a.getBoundingClientRect().top;
+      dispatchEvent(new Event('scroll'));
+      await wait();
+      const n = tc.querySelectorAll(':scope>[data-n]').length, d = a.getBoundingClientRect().top - y;
+      if (n < 40 || Math.abs(d) > 1 || tc.querySelector('.tmo')) early.push(`older page: ${n} messages, the one on screen moved ${d} px`);
+      // A view scrolled past about one screen shoots blank (chat-thread): the shot keeps the page's last 3 at the top.
+      if (!DBG.get('check')) { [...tc.querySelectorAll(':scope>[data-n]')].slice(0, 27).forEach(e => { e.hidden = true; }); scrollTo({ top: 0, behavior: 'instant' }); }
+    },
+    'chat-mid': async () => {
+      await VIEWS['chat-older']();
+      scrollTo({ top: document.documentElement.scrollHeight / 2, behavior: 'instant' });
+      await wait();
+      const th = $('#chat .cvp[data-t="t4"] .th'), r = th.getBoundingClientRect(), hb = $('header').getBoundingClientRect().bottom;
+      if (Math.abs(r.top - hb) > 1 || !th.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))) early.push(`thread header at ${r.top} px, not pinned under the page header (${hb})`);
+      // The shot can't scroll (chat-older): the banner and the thread above its middle go, the header over the rest.
+      if (!DBG.get('check')) { $('.msg.a').hidden = true; $$('#chat .cvp[data-t="t4"] .tc>*').forEach((e, i) => { e.hidden = i < 30; }); scrollTo({ top: 0, behavior: 'instant' }); }
+    },
     // #405 gate 2: [+ thread]'s empty thread (`new-<repo>`, as the tap opens it): no title form, no blocks, the
     // composer (its first message starts the thread); the demo's controls inert, so enabled as a paired phone's.
     'chat-new': () => {

@@ -123,8 +123,8 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     assert_eq!(j["fleets"][0]["needs"], json!([12]));
     assert_eq!(j["fleets"][0]["queue"][0]["issue"], 12, "no lane: a gate horse");
 
-    let page = get(&s, "/", "");
-    let i = page.find("name=mtime value=").unwrap() + 17;
+    let page = get(&s, "/api/v1/state", ""); // #268: the forms send `State.mtime`
+    let i = page.find("\"mtime\":\"").unwrap() + 9;
     let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=park&fleet=sendmeter&mtime={mt}&issue=12");
     let post = |extra: &str| {

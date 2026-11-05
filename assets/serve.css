@@ -194,6 +194,10 @@ p.m.empty{display:grid;gap:var(--s1);padding:var(--s3) 0;color:var(--fg)}p.m.emp
 .pairp.g{border-color:var(--g);color:var(--g)}.pairp.r{border-color:var(--r)}.pairp p{margin:0}
 .pairp .code{font-size:var(--fs-code);letter-spacing:.2em;text-align:center}
 .st{flex:none;margin:0;font-size:var(--fs-meta);min-height:1.5em}
+/* #363 report mode: the tapped element outlined; the note box fixed at the bottom. */
+.rep .repo{outline:2px solid var(--r);outline-offset:-2px}
+.repf{position:fixed;z-index:4;left:0;right:0;bottom:0;display:flex;align-items:center;gap:var(--s4);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--r)}
+.repf input{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--edge);border-radius:6px;padding:var(--s2);min-height:var(--hit);font-size:var(--fs-input)}
 .ask{border:1px solid var(--r);background:color-mix(in srgb,var(--r) 15%,transparent);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}
 .ask b{color:var(--r)}.ask form{display:flex;flex-wrap:wrap;gap:var(--s4)}.ask input[name=text]{flex:1;min-width:8em;font:inherit;font-size:var(--fs-input)}
 .ask form button[name]{order:-1}
@@ -601,13 +605,16 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .sw{display:flex;align-items:center;gap:var(--s4);border-top:1px solid var(--line)}
 .sw>.tr{flex:1;min-width:0;border-top:0;touch-action:pan-y}
 .sw:not(.op)>.sb[name=archive]{display:none}
-/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. */
+/* The thread bar, sticky under the header: [‹] (phone only), the title, repo · harness · model · state. #408: on the
+   [chat] tab the page clips sideways instead of hiding (a hidden body is a scroll box: nothing in it would stick). */
+html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .th{position:sticky;top:calc(var(--hit) + var(--s1));z-index:1;display:flex;align-items:center;gap:var(--s4);min-height:calc(var(--hit) + var(--s2));background:var(--bg);border-bottom:1px solid var(--line)}
 .th>div{flex:1;min-width:0}
 .th b,.th .ds{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .th .ds{font-size:var(--fs-meta);color:var(--mute)}
 .th .dt{display:inline-block;width:var(--s2);height:var(--s2);margin-right:.5ch;border-radius:50%;background:var(--g)}
 .tc{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s2) 0}
+.tmo{cursor:pointer}
 .blk>summary .ct{flex:none;color:var(--mute)}
 /* An image at the bubble's width, at most 320 px tall, its name and size under it; any other file one 44 px row. */
 .im{margin:var(--s2) 0 0}
@@ -642,7 +649,7 @@ body>header>b{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;w
 .ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
 .qid{font-size:var(--fs-meta);color:var(--mute)}
 /* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
-.cvp :is(.chq,.chc,.tw):has([disabled]){opacity:.6}
+.cvp :is(.chq,.chc):has([disabled]),.cvp .tw:has([disabled])>*{opacity:.6}
 .cvp>.ns{margin:0;font-size:var(--fs-meta)}
 /* The live line and the composer are the sheet's (.live, .reply). */
 .tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

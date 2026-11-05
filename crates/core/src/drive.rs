@@ -248,8 +248,17 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
 fn launch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], fleet: &str, n: u64, role: &str) -> Result<i32> {
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
-    if live.len() >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
-        return crate::gate::refused("SPAWN_PENDING", format!("{} spawns starting", live.len()));
+    // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
+    let low =
+        |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
+    let bound = |p: &Event| {
+        ev.iter()
+            .rev()
+            .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
+    };
+    let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
+    if n_live >= cfg.limits.max_parallel_spawns || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n)) {
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -556,6 +565,10 @@ fn pass(
             emit(&ctx.state, cfg, e)?;
         }
     }
+    // #412: a design lane done with its pushed design hands it to the owner.
+    for s in st.values().filter(|s| s.fleet == fleet && s.state == "design" && !fast) {
+        crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
+    }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
@@ -598,6 +611,8 @@ fn pass(
         let mut pr = gh::cached_pr(ctx, fleet, s.issue);
         crate::land::mark(ctx, Some(r), f, (fleet, s.issue), &events, &mut pr);
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr)));
+        // #388: CI that never starts is red too, as the card says it (an unlabelled PR has no full CI by design).
+        let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
         let n = s.issue.to_string();
         // #294: a PR's diff joins its serial groups; an issue waiting for a slot does nothing else this pass.
         if pr["state"] == "OPEN" && !f.serial.is_empty() && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)? {
@@ -612,10 +627,26 @@ fn pass(
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" {
+            // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
+            let gone = w.what.split_once(waiting::NO_PUSH);
+            if gone.is_some() && w.next_cmd.is_none() && !fast {
+                let why = "lane keeps ending without a push";
+                writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+                )?;
+            }
+            if gone.is_some_and(|g| !g.1.starts_with("respawning")) {
+                continue;
+            }
             // `waiting` names the exact next command; drive runs it.
             let Some(cmd) = &w.next_cmd else { continue };
             let args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
             let step = match (args[0], args.get(3).copied()) {
+                _ if gone.is_some() => "respawn",
                 ("spawn", Some(r)) if f.flow().is_check(r) => "review",
                 ("spawn", _) if cmd.ends_with("--update") => "conflict",
                 ("spawn", _) if cmd.ends_with("--supersede") => "fix",
@@ -630,6 +661,10 @@ fn pass(
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            if let Some((why, _)) = gone.filter(|_| code.is_none()) {
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
+            }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
@@ -667,11 +702,12 @@ fn pass(
             writeln!(out, "{fleet} #{n} no-action: {}", w.what)?;
             let d = json!({"why": w.what});
             append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "no-action", d))?;
-        } else if !fast && s.state == "ready" && ci == "failed" {
+        } else if !fast && s.state == "ready" && (ci == "failed" || gone.is_some()) {
             // Red CI after a PASS is a FAIL at the same head (no new round), the failed checks as the finding.
             let head = pr["headRefOid"].as_str().unwrap_or_default();
             let file = state_dir(ctx).join(format!("ci-{fleet}-{n}.md"));
-            std::fs::write(&file, ci_findings(r, f, &pr, head))?;
+            let gone = gone.map(|m| format!("FAIL\n\n{m} at {head}: no checks; fix the workflow.\n"));
+            std::fs::write(&file, gone.unwrap_or_else(|| ci_findings(r, f, &pr, head)))?;
             let file = file.to_string_lossy();
             let args = ["verdict", fleet, &n, "FAIL", "--sha", head, "--file", &file];
             act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "ci-red"), &args)?;
@@ -843,7 +879,7 @@ fn handoff(
             .any(|e| e.is("pushed", fleet, s.issue) && e.str("sha") == Some(head));
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
-        let idle = w.who == "none" && ctx.now >= w.since + 120;
+        let idle = (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
         if !(idle && building && ci != "pending" && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
@@ -952,7 +988,14 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         .take_while(|_| start)
     {
         let at = (fleet, n.parse().ok(), "start");
-        let code = act(ctx, cfg, r, out, &events, at, &["spawn", fleet, &n, f.flow().start()])?;
+        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
+        let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        let c = if design {
+            ["spawn", fleet, &n, "design", "--supersede"]
+        } else {
+            ["spawn", fleet, &n, f.flow().start(), ""]
+        };
+        let code = act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)])?;
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
@@ -976,7 +1019,7 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
     if KICK.get().is_none()
         && events
             .iter()
-            .filter(|e| e.kind == "spawn" && e.fleet == fleet)
+            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
             .filter(merged)
             .any(|e| left(&e))
     {
@@ -1136,13 +1179,19 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             .or_default()
             .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "kick": kicks}));
     });
+    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
+    // #438: a launched spawn's outcome is its kick's to log (a refusal there must not follow an `ok` here).
+    if kicks && issue.is_some() && code.is_none() {
+        return writeln!(out, "{who} {step}: launched")
+            .map(|()| None)
+            .map_err(Into::into);
+    }
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
     // A repeated refusal is silent too (no cron mail every pass).
     if code.is_some() && ev.iter().any(|e| recent(e) && same(e)) {
         return Ok(code);
     }
-    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
     writeln!(out, "{who} {step}: {result}")?;
     let d = json!({"step": step, "cmd": format!("herdsman {}", c.join(" ")), "result": result, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "driven", d)).map(|()| code)

@@ -383,6 +383,7 @@ fn serve_is_read_only_html() {
         res.starts_with("HTTP/1.1 200 OK\r\n") && res.contains("Content-Type: text/html"),
         "{res}"
     );
+    let res = with_queue(&res, &srv, "x", 1_000_000); // #268: the board draws the Queue tab from API v1
     for n in ["#17", "#18", "#12"] {
         assert!(res.contains(n), "queued {n} missing");
     }
@@ -420,9 +421,12 @@ fn serve_is_read_only_html() {
         b
     };
     let page = get("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    // #268: the Queue tab's rows come from API v1's `queue`.
+    let q = get("GET /api/v1/queue HTTP/1.1\r\nHost: \r\n\r\n");
     assert!(
-        page.starts_with("HTTP/1.1 200 OK") && page.contains("#17") && page.contains("#18"),
-        "{page}"
+        q.starts_with("HTTP/1.1 200 OK") && q.contains("\"issue\":17,") && q.contains("\"issue\":18,"),
+        "{q}"
     );
     let post = get("POST /queue HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi");
     assert!(post.starts_with("HTTP/1.1 405 "), "{post}");

@@ -18,6 +18,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "conductor" => include_str!("../roles/conductor.md"),
+        "lesson" => include_str!("../roles/lesson.md"),
         _ => include_str!("../roles/rev.md"),
     }
 }
@@ -28,7 +29,7 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
         f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
             std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
         });
-    let base = role_prompt(f.family(role));
+    let base = role_prompt(if role == "lesson" { role } else { f.family(role) });
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
 }
 
@@ -209,7 +210,8 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     let (r, resting) = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?;
     let r = &r;
     let (agent, branch, base, worktree, brief, head) = {
-        let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), issue));
+        let ev = read(&ctx.state)?;
+        let st = fold(&ev).remove(&(fleet.to_string(), issue));
         if st.as_ref().is_some_and(|s| s.state == "merged") {
             return refused(
                 "MERGED",
@@ -229,9 +231,17 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
             )
         } else if role == "design" {
             let head = format!("{fleet} · design #{issue}");
+            // #412: a `--design` issue's design, before impl, commits to the issue branch, where impl goes on.
+            let pre = st
+                .as_ref()
+                .is_none_or(|s| crate::events::DESIGN.contains(&s.state.as_str()));
+            let pre = pre
+                && crate::queue::replay(&ev, fleet)
+                    .iter()
+                    .any(|i| i.issue == issue && i.design);
             (
                 format!("{fleet}-design-{issue}"),
-                format!("design-{issue}"),
+                if pre { impl_branch } else { format!("design-{issue}") },
                 format!("origin/{}", f.integration),
                 head,
             )
@@ -267,7 +277,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         stage: f.flow().stage_of(role).into(),
         family: f.family(role),
         harness: r.harness.clone(),
-        profile: r.profile_or(role),
+        profile: r.profile_or(f.role_key(role)),
         model: r.model.clone(),
         effort: r.effort_or(&cfg.limits),
         branch,
@@ -277,7 +287,10 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         kick,
         lane,
         account,
-        env: f.env.clone().into_iter().chain(f.shared_cache.clone()).collect(),
+        env: shared_target(cfg, f)
+            .chain(f.env.clone())
+            .chain(f.shared_cache.clone())
+            .collect(),
         port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
@@ -288,12 +301,26 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     })
 }
 
+/// #438: one Cargo build folder per host and repo, `[limits] build_root`'s `<repo>`; a fleet's own setting replaces it.
+fn shared_target(cfg: &Config, f: &Fleet) -> impl Iterator<Item = (String, String)> {
+    let root = cfg.limits.build_root.trim_end_matches('/');
+    let d = format!("{root}/{}", f.repo_name());
+    (!root.is_empty()).then(|| ("CARGO_TARGET_DIR".into(), d)).into_iter()
+}
+
 /// #92: a fix round may dispute a finding; the next, fresh reviewer decides.
 const PUSHBACK: &str = "If a finding is wrong or out of scope, say so in your report with file:line proof; \
 that is not a fix. The next reviewer decides.";
 
 /// The issue lane's `.brief.md` (`roles/brief*.md` templates).
-fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&str>) -> String {
+fn brief(
+    f: &Fleet,
+    issue: u64,
+    p: &Plan,
+    title: &str,
+    body: &str,
+    (fix, rules): (Option<&str>, Option<&str>),
+) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
         "rev" => format!(
@@ -316,6 +343,10 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
     };
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
+    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    let rules = rules.map_or(String::new(), |r| {
+        format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
+    });
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
@@ -325,6 +356,7 @@ fn brief(f: &Fleet, issue: u64, p: &Plan, title: &str, body: &str, fix: Option<&
         title = title,
         body = body,
         fix = fix,
+        rules = rules,
         contract = contract.trim_end()
     )
 }
@@ -707,6 +739,9 @@ pub fn spawn(
                 ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
                 let _ = on.remove(&p.worktree.join("verdict.md"));
             }
+        }
+        // #412: a design lane's start head is the tree a rejected design goes back to.
+        if p.family == "rev" || p.family == "design" {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
@@ -734,7 +769,14 @@ pub fn spawn(
             .map(|t| format!("\n\n{t}"));
         (
             created,
-            brief(f, issue, &p, title, &decided.fold(body.to_string(), |b, d| b + &d), fix),
+            brief(
+                f,
+                issue,
+                &p,
+                title,
+                &decided.fold(body.to_string(), |b, d| b + &d),
+                (fix, on.read(&p.worktree.join(".herdsman/rules.md")).as_deref()),
+            ),
         )
     };
     let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);
