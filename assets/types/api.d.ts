@@ -126,11 +126,11 @@ export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: num
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
  * `signin` on `host`), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
- * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `stale`), `secret` (why, `from` its name),
+ * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
  * links to.
  */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, stale: boolean, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
 
 export type FileRef = { name: string, size: number, };
 

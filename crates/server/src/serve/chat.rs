@@ -170,7 +170,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
             ("needs-decision", _) => ask(events, e, m("ask", s("question"))),
             ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
                 from: s("id"),
-                stale: crate::propose::stale(ctx, e), // #460: it can no longer apply
+                open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply
                 ..m("config", s("diff"))
             },
             ("secret-request", _)

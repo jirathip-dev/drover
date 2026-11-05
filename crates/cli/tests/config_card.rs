@@ -169,10 +169,10 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
         .find(|t| t["id"] == "t1")
         .unwrap();
     let msgs = t["page"]["msgs"].as_array().unwrap();
-    let card = (msgs[0]["kind"].as_str(), msgs[0]["from"].as_str(), &msgs[0]["stale"]);
+    let card = (msgs[0]["kind"].as_str(), msgs[0]["from"].as_str(), &msgs[0]["open"]);
     assert_eq!(
         card,
-        (Some("config"), Some("c1"), &json!(false)),
+        (Some("config"), Some("c1"), &json!(true)),
         "first, past the window: {t}"
     );
     assert_eq!(msgs.last().unwrap()["text"], "m39", "{t}");

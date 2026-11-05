@@ -100,7 +100,7 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
     case 'ask': b = ask(now, m, dis); break;
     case 'config': {
       const q = esc(m.from), btn = (v: string) => `<button name=act value=${v}${dis}>${v}</button>`;
-      const act = m.stale ? '<p class=m>stale: fleet.toml changed since</p>' : `<form class=chc data-id="${q}">${btn('apply')}${btn('discard')}</form>`; // #460: stale, it can no longer apply
+      const act = m.open ? `<form class=chc data-id="${q}">${btn('apply')}${btn('discard')}</form>` : '<p class=m>stale: fleet.toml changed since</p>'; // #460: stale, it can no longer apply
       b = block(now, 'ai', 'conductor', `proposes config ${m.from}`, `<div class=md><p class=qid>config ${q}</p><pre class=df>${esc(m.text)}</pre></div>${act}`, m.ts);
       break;
     }
