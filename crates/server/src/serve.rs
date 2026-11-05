@@ -1664,9 +1664,13 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..QueueTab::default()
         };
-        let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), read(&ctx.state)) else {
-            d.error = Some("cannot read fleet.toml".into());
-            return d;
+        // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
+        let (cfg, events) = match (Config::load(&ctx.config), read(&ctx.state)) {
+            (Ok(c), Ok(e)) => (c, e),
+            (Err(e), _) | (_, Err(e)) => {
+                d.error = Some(format!("{e:#}"));
+                return d;
+            }
         };
         let (cfg, events, st) = (&cfg, &events, &fold(&events));
         // The state of an open lane herdr shows no pane for: `dead`, or `parked` (#83).
