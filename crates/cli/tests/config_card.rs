@@ -157,11 +157,14 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
             .filter_map(|l| serde_json::from_str::<Value>(l.lines().next()?).ok())
             .last()
     };
+    // (A tick may land mid-burst: the last data sent, once the burst's end is in.)
     let (t0, mut got) = (Instant::now(), String::new());
-    while chat(&got).is_none() && t0.elapsed() < Duration::from_secs(3) {
+    while !chat(&got).is_some_and(|j| j.to_string().contains("\"text\":\"m39\""))
+        && t0.elapsed() < Duration::from_secs(5)
+    {
         got += &drain(&mut s, 100);
     }
-    let j = chat(&got).unwrap_or_else(|| panic!("no chat data within 3 s: {got}"));
+    let j = chat(&got).unwrap_or_else(|| panic!("no chat data within 5 s: {got}"));
     let t = j["threads"]
         .as_array()
         .unwrap()
