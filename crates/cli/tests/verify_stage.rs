@@ -244,7 +244,15 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
     let f = cfg.fleet("sendmeter").unwrap();
     let s = &fold(events)[&("sendmeter".to_string(), 12)];
     let pr: serde_json::Value = serde_json::from_str(&pr(head)).unwrap();
-    let w = waiting_on(events, s, Some((head, 1)), &pr, f, None);
+    let w = waiting_on(
+        &herdsman::waiting::Log::new(events),
+        events,
+        s,
+        Some((head, 1)),
+        &pr,
+        f,
+        None,
+    );
     (w.next_cmd, gate(f, &pr, Some(s), false).map(drop).map_err(|r| r.code))
 }
 
