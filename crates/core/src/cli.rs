@@ -466,6 +466,9 @@ enum QueueCmd {
         /// Force the verify stage on (plain) or off, whatever the PR touches
         #[arg(long, num_args = 0..=1, default_missing_value = "on", value_parser = ["on", "off"])]
         verify: Option<String>,
+        /// A bug fix: impl's first commit is a failing test, rev proves it fails on base and passes at head
+        #[arg(long)]
+        repro: bool,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -483,10 +486,10 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
-    /// Replace a queued issue's `needs` host tags, serial groups, design or verify mark (`queue set 12 needs docker,gpu`; `design on|off`)
+    /// Replace a queued issue's `needs` host tags, serial groups, design, verify or repro mark (`queue set 12 needs docker,gpu`; `design on|off`)
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs", "serial", "design", "verify"])]
+        #[arg(value_parser = ["needs", "serial", "design", "verify", "repro"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -576,8 +579,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage).
-pub const HELP_AGENT_MAX: usize = 287;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #420's `queue add --repro`).
+pub const HELP_AGENT_MAX: usize = 288;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -908,6 +911,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["design"] == true {
                     on += "  design";
                 }
+                if r["repro"] == true {
+                    on += "  repro";
+                }
                 if let Some(v) = r["verify"].as_bool() {
                     on += if v { "  verify on" } else { "  verify off" };
                 }
@@ -1214,6 +1220,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             needs,
                             design,
                             verify,
+                            repro,
                         } => {
                             // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
                             let g =
@@ -1239,6 +1246,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             if let Some(v) = verify {
                                 d["verify"] = json!(v);
                             }
+                            if repro {
+                                d["repro"] = json!(true);
+                            }
                             d
                         }
                         QueueCmd::Set { issue, key, tags } => {
@@ -1247,7 +1257,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 "no such serial group: {tags:?}"
                             );
                             let on = ["on", "off"].iter().any(|o| tags == [*o]);
-                            anyhow::ensure!(!["design", "verify"].contains(&&*key) || on, "{key} is `on` or `off`");
+                            anyhow::ensure!(
+                                !["design", "verify", "repro"].contains(&&*key) || on,
+                                "{key} is `on` or `off`"
+                            );
                             let mut d = queue::op("set", &[issue], false, None, None, None);
                             d[key.as_str()] = json!(tags);
                             d

@@ -321,7 +321,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules): (Option<&str>, Option<&str>),
+    (fix, rules, repro): (Option<&str>, Option<&str>, bool),
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -343,6 +343,14 @@ fn brief(
             issue = issue
         ),
     };
+    // #420: a `--repro` issue's steps: impl's failing test first, rev's proof it fails on base and passes at head.
+    let steps = match (repro, p.family, p.stage.as_str()) {
+        (false, ..) | (_, "design", _) => "",
+        (_, "rev", "verify") => include_str!("../roles/brief-repro-verify.md"),
+        (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
+        _ => include_str!("../roles/brief-repro-impl.md"),
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
@@ -777,7 +785,11 @@ pub fn spawn(
                 &p,
                 title,
                 &decided.fold(body.to_string(), |b, d| b + &d),
-                (fix, on.read(&p.worktree.join(".herdsman/rules.md")).as_deref()),
+                (
+                    fix,
+                    on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
+                    crate::queue::repro(&events, fleet, issue),
+                ),
             ),
         )
     };

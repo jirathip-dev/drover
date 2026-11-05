@@ -12,8 +12,8 @@ use std::path::Path;
 /// The repo's recipe the verifier follows.
 pub const RECIPE: &str = ".herdsman/verify.md";
 
-/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): forced by its queue mark, else a design stage or a
-/// PR touching `ui_paths`.
+/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): rev's `Repro: verify` PASS, its queue mark, else a
+/// design stage or a PR touching `ui_paths`.
 pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files: &[String]) -> Option<String> {
     let mark = crate::queue::replay(events, fleet)
         .into_iter()
@@ -23,7 +23,10 @@ pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files
         let hit = |p: &&String| ui_paths.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
         files.iter().find(hit).map(|p| format!("touches {p}"))
     };
+    // #420: a `--repro` fix with no cheap test proves itself here.
+    let repro = |e: &Event| e.is("verdict", fleet, n) && e.str("repro") == Some("verify");
     match mark {
+        _ if events.iter().any(repro) => Some("Repro: verify".into()),
         Some(on) => on.then(|| "queued --verify".into()),
         None if events.iter().any(|e| e.is("design-approved", fleet, n)) => Some("had a design stage".into()),
         None => ui(),
