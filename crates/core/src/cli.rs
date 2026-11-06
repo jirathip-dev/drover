@@ -758,6 +758,11 @@ enum ProfilesCmd {
         /// Write nothing; exit 1 unless every fleet Hermes profile lists its hook as `✓ allowed`
         #[arg(long)]
         check: bool,
+        /// #592: only this profile, of role family `--role`, without fleet.toml (spawn's, on a lane's remote host)
+        #[arg(long, requires = "role", hide = true)]
+        profile: Option<String>,
+        #[arg(long, requires = "profile", hide = true)]
+        role: Option<String>,
     },
 }
 
@@ -796,7 +801,7 @@ pub fn usage_doc() -> String {
         s += &format!("\n`{}`\n  {about}\n", usage.trim());
         for a in sub
             .get_arguments()
-            .filter(|a| a.get_long().is_some_and(|l| l != "help"))
+            .filter(|a| !a.is_hide_set() && a.get_long().is_some_and(|l| l != "help"))
         {
             let h = a.get_help().map(std::string::ToString::to_string).unwrap_or_default();
             s += &format!("  --{}  {h}\n", a.get_long().unwrap());
@@ -1182,6 +1187,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Profiles {
+            cmd:
+                ProfilesCmd::Sync {
+                    profile: Some(p),
+                    role: Some(role),
+                    ..
+                },
+        } => {
+            for h in crate::harness::NAMES {
+                crate::harness::get(h).sync(ctx, &role, &p, &usage_doc(), out)?;
+            }
+        }
         Cmd::Service {
             api,
             board,
@@ -1206,14 +1223,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             };
             match cmd {
                 Cmd::Profiles {
-                    cmd: ProfilesCmd::Sync { check: true },
+                    cmd: ProfilesCmd::Sync { check: true, .. },
                 } => {
                     if !spawn::profiles_check(ctx, &cfg, r, out)? {
                         return Ok(1);
                     }
                 }
                 Cmd::Profiles {
-                    cmd: ProfilesCmd::Sync { check: false },
+                    cmd: ProfilesCmd::Sync { check: false, .. },
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
                     // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.

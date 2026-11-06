@@ -48,6 +48,10 @@ fn fake(mini: f64, remote: f64) -> Fake {
             &format!("{} 1 1 1/9 42", remote * 4.0),
         )
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
 }
 
 const HERDR_STATUS: &str = "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.5\n";
@@ -762,8 +766,9 @@ fn an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once() {
         "amber, not red: {out}"
     );
     let sha = env!("HERDSMAN_SHA");
+    let conf = c.config.display(); // #592: the full sync only where an old fleet.toml is left
     let script = format!(
-        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path crates/cli --locked --root '\\''/opt/herdsman'\\'' --force && '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync'"
+        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path crates/cli --locked --root '\\''/opt/herdsman'\\'' --force && {{ test ! -e '\\''{conf}'\\'' || '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync; }}'"
     );
     assert!(old.called(&script), "{:#?}", old.calls.borrow());
     let ev = read(&c.state).unwrap();
@@ -1166,6 +1171,10 @@ fn live_fake() -> Fake {
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
 }
 

@@ -40,6 +40,10 @@ fn remote_fake() -> Fake {
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(&format!("{SSH}'git' "), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
@@ -243,4 +247,34 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
+}
+
+/// #592 (q659): a host with no fleet.toml gets each lane's profile from spawn, by name.
+#[test]
+fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
+    let c = setup("remote-rules-profile");
+    let r = remote_fake();
+    assert_eq!(
+        run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
+        0
+    );
+    let sync = format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
+    let (at, start) = (r.index(&sync), r.index("herdr --machine bazzite agent start"));
+    assert!(at.is_some() && at < start, "{:?}", r.calls.borrow());
+    // There: that one profile is written with no fleet.toml at all.
+    let there = ctx(&tmpdir("remote-rules-profile-there"), "");
+    std::fs::remove_file(&there.config).unwrap();
+    let (code, out) = run(
+        &there,
+        &Fake::default(),
+        &["profiles", "sync", "--profile", "fleet-rev", "--role", "rev"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let settings = std::fs::read_to_string(there.config.with_file_name("claude/fleet-rev/settings.json")).unwrap();
+    assert!(settings.contains("hook --role rev"), "{settings}");
+    assert_ne!(
+        run(&there, &Fake::default(), &["profiles", "sync"]).0,
+        0,
+        "a full sync still needs fleet.toml"
+    );
 }

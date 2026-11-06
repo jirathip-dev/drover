@@ -1035,6 +1035,15 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
+    if on.machine.is_some() {
+        // #592: its host keeps no fleet.toml, so this lane's profile is synced there by name.
+        let exe = home(vec![ctx.exe.clone()]).remove(0);
+        ok(
+            r,
+            &exe,
+            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
+        )?;
+    }
     let _secrets = deliver(&on, cfg, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
