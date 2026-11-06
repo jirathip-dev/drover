@@ -1,7 +1,7 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), the board's data: `state`, `events?since=N`, `host`,
 //! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
 //! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`.
-use super::{act, board, coat, gh, moment, words, BTreeMap, Event, JSON, PAIRED_OPS};
+use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
 use crate::events::plain;
@@ -20,12 +20,27 @@ fn reply(status: &'static str, code: &str, message: impl Into<String>) -> Res {
 
 impl Server<'_> {
     /// `/api/v1/<p>`: Host/Origin-checked like `/live`; `lane/` and the paired ops for a paired device only.
-    pub(super) fn api(&self, ctx: &Ctx, head: &str, method: &str, p: &str, query: &str, body: &str) -> Res {
-        let (f, paired) = (form(query), self.device(ctx, head).is_some());
-        let lane = p.strip_prefix("/api/v1/lane/");
+    pub(super) fn api(
+        &self,
+        ctx: &Ctx,
+        head: &str,
+        (method, p): (&str, &str),
+        query: &str,
+        body: &str,
+        auth: &Auth,
+    ) -> Res {
+        let f = form(query);
+        let (paired, lane) = (auth.is_ok(), p.strip_prefix("/api/v1/lane/"));
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
+            // #501: the devices unread: no unpaired view or 401, the page keeps its last draw and retries.
+            (_, Some(x))
+                if busy(auth)
+                    && (lane.is_some() || ["needs", "lanes", "chat"].contains(&x) || PAIRED_OPS.contains(&x)) =>
+            {
+                reply("503 Service Unavailable", "BUSY", "board busy, retrying")
+            }
             ("GET", Some("state")) => self.state(ctx).map_or_else(
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
