@@ -108,18 +108,25 @@ fn install_loads_and_prints_the_command() {
         out.starts_with("✗ dev.herdsman.tick: ") && out.contains(&format!("→ {cmd}")),
         "{out}"
     );
-    // launchd's bootstrap prefix covers both jobs; systemd enables each job's own .timer.
-    let fast = if MAC {
-        cmd
-    } else {
-        "systemctl --user enable --now dev.herdsman.fast.timer"
+    // launchd's bootstrap prefix covers every job; systemd enables each job's own .timer.
+    let unit = |job: &str| {
+        if MAC {
+            cmd.to_string()
+        } else {
+            format!("systemctl --user enable --now dev.herdsman.{job}.timer")
+        }
     };
-    let r = host(Fake::default()).reply(cmd, "").reply(fast, "");
+    let jobs = ["fast", "update", "clean"];
+    let r = jobs
+        .iter()
+        .fold(host(Fake::default()).reply(cmd, ""), |r, j| r.reply(&unit(j), ""));
     let (code, out) = run(&c, &r, &["timer", "install"]);
     assert_eq!((code, out.starts_with(&format!("✓ {cmd}"))), (0, true), "{out}");
-    let fast_line = out.lines().nth(1).unwrap_or_default();
-    assert!(fast_line.starts_with(&format!("✓ {fast}")), "{out}");
-    assert!(fast_line.contains("dev.herdsman.fast"), "{out}");
+    for (i, j) in jobs.iter().enumerate() {
+        let line = out.lines().nth(i + 1).unwrap_or_default();
+        assert!(line.starts_with(&format!("✓ {}", unit(j))), "{out}");
+        assert!(line.contains(&format!("dev.herdsman.{j}")), "{out}");
+    }
     let (_, out) = run(&c, &r, &["timer", "status"]);
     assert_eq!(out, "dev.herdsman.tick: not loaded · tick ran never\n");
 }

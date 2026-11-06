@@ -92,7 +92,12 @@ pub fn self_update(
     };
     let _ = std::fs::remove_file(&new);
     let why = format!("{sha:.7}: {e:#}");
-    writeln!(out, "✗ self-update {why}; kept {}", live.display())?;
+    let kept = if format!("{e:#}").starts_with("installed, then") {
+        "now live at"
+    } else {
+        "kept"
+    };
+    writeln!(out, "✗ self-update {why}; {kept} {}", live.display())?;
     if !events
         .iter()
         .any(|e| e.kind == "self-update-failed" && e.str("key") == Some(sha))
