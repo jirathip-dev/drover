@@ -75,6 +75,12 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   logged `ask-owner` in the thread: a choice row (the conductor's pick recommended) that pushes like an ask. Each
   conductor answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
   owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
+- **Amendments (#574):** `herdsman amend <fleet> <issue> --basis q<id> "<text>"` (conductors and the owner; the lane
+  hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
+  `- **Amendment (q<id>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
+  `{id, text}` and re-runs the open PR's failed spec-reading checks (board-freeze). `q<id>` must be an ask on that
+  issue answered `by: owner` (or a routine ask's `by: default`), else `REFUSED NO_DECISION` before any GitHub call.
+  A conductor runs it as soon as an owner decision names an amendment; the thread shows it as a tool row.
 
 - **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
   images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is

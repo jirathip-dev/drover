@@ -145,6 +145,15 @@ enum Cmd {
         #[arg(long, value_name = "QUOTE|ID")]
         basis: Option<String>,
     },
+    /// Conductors and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
+    Amend {
+        fleet: String,
+        issue: u64,
+        text: String,
+        /// The ask the owner answered (or a routine ask's default) on this issue that decided it
+        #[arg(long, value_name = "ID")]
+        basis: String,
+    },
     /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
     Report { id: Option<String> },
     /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
@@ -630,8 +639,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`).
-pub const HELP_AGENT_MAX: usize = 294;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +4 for #574's `amend`).
+pub const HELP_AGENT_MAX: usize = 298;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1122,6 +1131,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     None => crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?,
                 },
+                Cmd::Amend {
+                    fleet,
+                    issue,
+                    text,
+                    basis,
+                } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
                     // #413: every thread a conductor starts is logged with its source.

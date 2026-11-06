@@ -437,6 +437,10 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     if !conductor && r.first() == Some(&"lesson") && r.get(1) != Some(&"digest") {
         return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman lesson` (#419)".into());
     }
+    // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
+    if !conductor && r.first() == Some(&"amend") {
+        return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman amend` (#574)".into());
+    }
     // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
     if !conductor && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
         return Some(

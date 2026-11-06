@@ -422,6 +422,20 @@ fn only_a_conductor_runs_lesson() {
     }
 }
 
+/// #574: only a conductor (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
+#[test]
+fn only_a_conductor_runs_amend() {
+    let run = |lane: &str| {
+        let cmd = "herdsman amend synergy 12 --basis q3 \"board-fix: x\"";
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(Some(lane), "impl", input)
+    };
+    assert_eq!(run("synergy:-:conductor"), "", "a conductor may");
+    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
+        assert!(run(lane).contains("REFUSED CONDUCTOR_ONLY"), "{lane}");
+    }
+}
+
 /// #461: a conductor (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
 /// may not; no other `timer` verb changes for a conductor.
 #[test]
