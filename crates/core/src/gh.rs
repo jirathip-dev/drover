@@ -100,31 +100,101 @@ completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
 const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
 [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
 
-/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says).
+/// #530: conditional REST reads that change whenever the snapshot can: the open PRs latest-updated first (heads,
+/// labels, titles), the Actions runs (checks) and integration's head (mergeability).
+fn probes(f: &Fleet) -> [String; 3] {
+    let r = &f.repo;
+    [
+        format!("repos/{r}/pulls?state=open&sort=updated&direction=desc&per_page=100"),
+        format!("repos/{r}/actions/runs?per_page=50"),
+        format!("repos/{r}/branches/{}", f.integration),
+    ]
+}
+
+/// #530: each probe sent with its last `ETag` as `If-None-Match`, `etags` updated; true when none moved (a 304),
+/// which costs no rate limit.
+fn unchanged(r: &dyn Runner, f: &Fleet, etags: &mut Vec<Value>) -> bool {
+    let tag = |l: &str| {
+        Some(json!(l
+            .split_once(':')
+            .filter(|(k, _)| k.eq_ignore_ascii_case("etag"))?
+            .1
+            .trim()))
+    };
+    let mut new = vec![];
+    for (i, path) in probes(f).iter().enumerate() {
+        let old = etags.get(i).and_then(Value::as_str).unwrap_or_default();
+        let h = format!("If-None-Match: {old}");
+        let a: &[&str] = if old.is_empty() {
+            &["api", "-i", path]
+        } else {
+            &["api", "-i", "-H", &h, path]
+        };
+        let out = r
+            .run("gh", &crate::runner::argv(a))
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+        let mut lines = out.lines();
+        let hit = !old.is_empty() && lines.next().is_some_and(|l| l.split(' ').nth(1) == Some("304"));
+        new.push(if hit {
+            json!(old)
+        } else {
+            lines.take_while(|l| !l.trim().is_empty()).find_map(tag).into()
+        });
+    }
+    let same = new
+        .iter()
+        .zip(etags.iter())
+        .filter(|(a, b)| a == b && !a.is_null())
+        .count()
+        == 3;
+    *etags = new;
+    same
+}
+
+/// #530: past this, or while a PR's mergeability is still UNKNOWN, the fast step queries even when every probe is 304.
+const PROBE_MAX: u64 = 300;
+
+/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). #530:
+/// the fast step skips it while `unchanged` says nothing moved since the last query.
 pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "prs", fleet, 0);
-    let c = load::<Value>(&p).filter(|c| fresh(c, now)).unwrap_or_else(|| {
-        let (owner, name) = f.repo.split_once('/').unwrap_or_default();
-        let v = [
-            format!("owner={owner}"),
-            format!("name={name}"),
-            format!("query={PRS_QUERY}"),
-        ];
-        let a = [
-            &["api", "graphql", "--paginate", "--jq", PRS_JQ][..],
-            &["-f", &v[0], "-f", &v[1], "-f", &v[2]],
-        ];
-        let c = match ok(r, "gh", &a.concat()) {
-            Ok(out) => {
-                let prs = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
-                let by = prs.map(|v| (v["headRefName"].as_str().unwrap_or_default().to_string(), v));
-                json!({"ts": now, "prs": by.collect::<serde_json::Map<_, _>>()})
+    let old = load::<Value>(&p).unwrap_or_default();
+    let c = if fresh(&old, now) {
+        old
+    } else {
+        let mut etags = old["etags"].as_array().cloned().unwrap_or_default();
+        let at = old["at"].as_u64().unwrap_or(0);
+        let settled = old["prs"]
+            .as_object()
+            .is_some_and(|m| m.values().all(|v| v["mergeable"] != "UNKNOWN"));
+        let same = FORCE.get() && unchanged(r, f, &mut etags) && settled && now.saturating_sub(at) < PROBE_MAX;
+        let c = if same {
+            json!({"ts": now, "at": at, "prs": old["prs"], "etags": etags})
+        } else {
+            let (owner, name) = f.repo.split_once('/').unwrap_or_default();
+            let v = [
+                format!("owner={owner}"),
+                format!("name={name}"),
+                format!("query={PRS_QUERY}"),
+            ];
+            let a = [
+                &["api", "graphql", "--paginate", "--jq", PRS_JQ][..],
+                &["-f", &v[0], "-f", &v[1], "-f", &v[2]],
+            ];
+            match ok(r, "gh", &a.concat()) {
+                Ok(out) => {
+                    let prs = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
+                    let by = prs.map(|v| (v["headRefName"].as_str().unwrap_or_default().to_string(), v));
+                    let prs = by.collect::<serde_json::Map<_, _>>();
+                    json!({"ts": now, "at": now, "prs": prs, "etags": etags})
+                }
+                Err(e) => json!({"ts": now, "error": format!("{e:#}")}),
             }
-            Err(e) => json!({"ts": now, "error": format!("{e:#}")}),
         };
         let _ = store(&p, &c);
         c
-    });
+    };
     match c["error"].as_str() {
         Some(e) => anyhow::bail!("open PRs of {}: {e}", f.repo),
         None => Ok(c["prs"].clone()),

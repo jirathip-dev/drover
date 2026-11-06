@@ -14,7 +14,10 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
   With no service listening, every command goes on in today's direct mode: nothing is ever stuck on it.
 - **GitHub** is polled by the fast step (`drive --fast`) every 15 s inside the service; the `dev.herdsman.fast` job
   is no longer needed while it runs (`timer` doesn't reinstall it, `doctor` shows it "by the service"). The slow
-  `tick` stays as the safety net.
+  `tick` stays as the safety net. #530: each fleet's open PRs, check rollups and labels come in one GraphQL query; a
+  fast step first sends three conditional REST reads (open PRs latest-updated first, Actions runs, integration's
+  branch) with their last ETags, and when all three answer 304 (free of rate limit) it keeps the last query's
+  result. It queries anyway 5 min after the last query, or while a PR's mergeability is still UNKNOWN.
 - **API v1** (the contract the board and the future cooee plugin use):
   - `GET /api/v1/health`: pid, version, busy jobs, heartbeat age.
   - `GET /api/v1/events?after=<seq>`: Server-Sent Events, the log after `seq` (the last 500), then each new event as
@@ -79,7 +82,7 @@ The owner decided in #345's q409 (2026-11-06): "Defer (a)-(e) to a follow-up iss
 deferred with this decision; merge #519 as the service base." Not built here:
 
 - (a) lane state from herdr (or berth) event streams; lanes are still read by the passes;
-- (b) batched GraphQL polling of GitHub with ETags; the fast step polls as before, every 15 s;
+- (b) batched GraphQL polling of GitHub with ETags: built in #530 (see GitHub above);
 - (c) one kept-open SSH connection per host and one GitHub client;
 - (d) the board served from memory with one live stream to each phone; the board still polls, and the future cooee
   plugin is to use `/api/v1/events`;
