@@ -131,7 +131,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     // #511: the lane reported its turn, so the stop hook asks for none (tests/turn.rs).
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(herdsman::hook::turn_mark(&c.state, "sendmeter:24:impl"), "turn").unwrap();
-    let hook =|r: &Fake| {
+    let hook = |r: &Fake| {
         let stop = json!({"hook_event_name": "Stop", "session_id": "s"}).to_string();
         let argv = ["herdsman", "hook", "--role", "impl"].map(String::from).to_vec();
         let mut out = vec![];
