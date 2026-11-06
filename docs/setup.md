@@ -15,8 +15,8 @@ gh auth status
 herdr --version
 cargo install --path crates/cli --locked --root ~/.local/share/herdsman
 # macOS (#556): sign with one local identity, so the keychain's "Always Allow" outlasts every reinstall.
-sh scripts/signing-identity.sh   # once: creates "herdsman-local" in the login keychain
-codesign --force --sign "herdsman-local" --identifier "herdsman" ~/.local/share/herdsman/bin/herdsman
+sh scripts/signing-identity.sh   # once: creates "herdsman-local", lets codesign use it (asks the login password)
+sh scripts/signing-identity.sh sign ~/.local/share/herdsman/bin/herdsman   # by hash; fails, never hangs, on a dialog
 echo 'export PATH="$HOME/.local/share/herdsman/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
@@ -110,8 +110,9 @@ herdsman needs no Hermes: `herdsman setup` (or `timer install`) also writes two 
 
 - `dev.herdsman.update` runs `herdsman self-update` every 5 minutes. It fetches the herdsman fleet's integration
   branch (the fleet whose repo is `…/herdsman`) and installs a new head only once its CI is all green: it builds in
-  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, signs the build with
-  "herdsman-local" (#556; refused without it: `sh scripts/signing-identity.sh` once), runs the new binary's
+  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, signs the build by hash with
+  "herdsman-local" through `scripts/signing-identity.sh sign` (#556, #568; refused without it:
+  `sh scripts/signing-identity.sh` once), runs the new binary's
   `doctor --config-only` against the live fleet.toml (#539), swaps it in atomically, then runs `profiles sync` and
   restarts the board job. Any failed step keeps the old binary and alerts `self-update-failed` once per head, with
   the exact failure. `herdsman self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
