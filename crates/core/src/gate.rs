@@ -364,20 +364,7 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
 /// two runs (base plus commit 1, then head), each a fenced command and its fenced output; a `verify` block a `>`
 /// quoted reason found in the PR body's `## Repro` section (`section`).
 fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
-    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
-    let ls: Vec<&str> = body.lines().collect();
-    let at =
-        (ls.iter().position(|l| key(l).starts_with("repro:"))).ok_or("no `Repro: run` or `Repro: verify` block")?;
-    let kind = key(ls[at]).split_off(6);
-    let mut fence = false;
-    let block: Vec<&str> = (ls[at + 1..].iter().copied())
-        .take_while(|l| {
-            let t = l.trim_start();
-            let end = !fence && t.starts_with('#');
-            fence ^= t.starts_with("```");
-            !end
-        })
-        .collect();
+    let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     match kind.trim_start_matches(['*', '_', '`', ' ']) {
         k if k.starts_with("run") => {
@@ -404,6 +391,24 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
         }
         _ => Err("`Repro:` is neither `run` nor `verify`".into()),
     }
+}
+
+/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next
+/// heading outside a fence.
+pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
+    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
+    let ls: Vec<&str> = body.lines().collect();
+    let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
+    let mut fence = false;
+    let block = (ls[at + 1..].iter().copied())
+        .take_while(|l| {
+            let t = l.trim_start();
+            let end = !fence && t.starts_with('#');
+            fence ^= t.starts_with("```");
+            !end
+        })
+        .collect();
+    Some((key(ls[at]).split_off(6), block))
 }
 
 /// #420: the PR body's `## Repro` section, to the next heading.

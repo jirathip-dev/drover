@@ -1333,7 +1333,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
-                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
+                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
                         return Ok(4);
                     }
                 }
