@@ -8,7 +8,7 @@
   // next frame it asks for never comes. The herd's endless loop (its storm) hung headless Chrome before the shot.
   let inside = false;
   if (DBG.has('shot')) window.requestAnimationFrame = f => inside ? 0 : setTimeout(() => { inside = true; try { f(2000); } finally { inside = false; } });
-  const hp = n =>H.querySelectorAll('.hp')[n];
+  const hp = n => H.querySelectorAll('.hp')[n];
   // #440: Host and Events are System's Hosts & health and Activity, opened over the Queue tab.
   const sys = s => { tab('queue'); sysopen(s); };
   // #68: each inline control's failure path with a canned long reply (the old 401 pair text, a 140-char refusal,
