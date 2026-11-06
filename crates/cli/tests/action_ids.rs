@@ -26,6 +26,7 @@ fn fake() -> Fake {
         .reply("herdr pane", "{}")
         .reply("herdr agent prompt", "{}")
         .reply("herdr agent wait", "{}")
+        .reply("kill -0", "") // the intent's process (this test) still runs
 }
 
 /// The Fake, with `hook` run once, on the first call starting with `at`: after the call (`after`) or before it.
@@ -133,6 +134,7 @@ fn merge_fake(state: &str) -> Fake {
         )
         .reply("gh pr view 34", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "")
+        .reply("kill -0", "")
 }
 
 #[test]
