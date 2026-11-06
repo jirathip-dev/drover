@@ -158,6 +158,130 @@ impl Runner for On<'_> {
     }
 }
 
+/// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared
+/// connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after 15 s;
+/// one through a dead shared connection drops its socket and runs once more without it. `mark` (the tick's
+/// `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+pub struct Pass<'a> {
+    r: &'a dyn Runner,
+    probe: bool,
+    up: std::sync::Mutex<BTreeMap<String, bool>>,
+    mark: Option<(PathBuf, u64)>,
+    step: std::sync::Mutex<String>,
+}
+
+impl<'a> Pass<'a> {
+    pub fn new(r: &'a dyn Runner, mark: Option<(PathBuf, u64)>) -> Self {
+        let (up, step) = (std::sync::Mutex::default(), std::sync::Mutex::default());
+        Pass {
+            r,
+            probe: true,
+            up,
+            mark,
+            step,
+        }
+    }
+    /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
+    pub fn fast(r: &'a dyn Runner) -> Self {
+        Pass {
+            probe: false,
+            ..Self::new(r, None)
+        }
+    }
+    pub fn step(&self, s: &str) {
+        *self.step.lock().unwrap() = s.into();
+        self.note("");
+    }
+    fn note(&self, child: &str) {
+        if let Some((p, since)) = &self.mark {
+            let step = self.step.lock().unwrap().clone();
+            let _ = std::fs::write(p, json!({"since": since, "step": step, "child": child}).to_string());
+        }
+    }
+    /// The remote host `prog args` runs on: `herdr --machine m …` or `ssh [-o…] m -- …`.
+    fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
+        if prog == crate::herdr::BIN {
+            return args.get(1).filter(|_| args[0] == "--machine").map(String::as_str);
+        }
+        let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
+        args[..end].last().filter(|m| !m.starts_with('-')).map(String::as_str)
+    }
+    fn up(&self, m: &str) -> bool {
+        if let Some(&u) = self.up.lock().unwrap().get(m) {
+            return u;
+        }
+        if !self.probe {
+            return true;
+        }
+        let probe = argv(&[
+            "-oBatchMode=yes",
+            "-oConnectTimeout=5",
+            "-oControlPath=none",
+            m,
+            "--",
+            "true",
+        ]);
+        let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(5));
+        let u = o.is_ok_and(|o| !matches!(o.code, 124 | 255));
+        self.up.lock().unwrap().insert(m.into(), u);
+        u
+    }
+    fn call(&self, prog: &str, args: &[String], input: Option<&str>) -> Result<Out> {
+        let Some(m) = Self::host(prog, args) else {
+            return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
+        };
+        self.note(&quote(prog, args));
+        if !self.up(m) {
+            let stderr = format!("{m}: host offline (no answer to `ssh {m} true` this pass)");
+            return Ok(Out {
+                code: 255,
+                stderr,
+                ..Out::default()
+            });
+        }
+        let (limit, input) = (std::time::Duration::from_secs(15), input.unwrap_or_default());
+        let mut o = self.r.run_for(prog, args, input, limit)?;
+        if matches!(o.code, 124 | 255) && args.iter().any(|a| a == CM[1]) {
+            let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
+            if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
+                let _ = std::fs::remove_file(sock);
+            }
+            let bare = args.iter().filter(|a| !CM.contains(&a.as_str())).cloned();
+            let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
+            o = self.r.run_for(prog, &bare, input, limit)?;
+        }
+        if o.code == 124 {
+            self.up.lock().unwrap().insert(m.into(), false);
+        }
+        self.note("");
+        Ok(o)
+    }
+}
+
+impl Runner for Pass<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
+        self.call(prog, args, None)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
+        self.call(prog, args, Some(input))
+    }
+    fn sleep(&self, secs: u64) {
+        self.r.sleep(secs);
+    }
+    fn detach(&self, exe: &str, args: &[String], log: &Path) -> Result<u32> {
+        self.r.detach(exe, args, log)
+    }
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        self.r.shed()
+    }
+    fn secret(&self, svc: &str) -> Result<Option<String>> {
+        self.r.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
+        self.r.set_secret(svc, value)
+    }
+}
+
 /// What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability,
 /// load/cpu, free memory and disk in GB.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable, rename = "HostSeen"))]

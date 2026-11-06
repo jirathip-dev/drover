@@ -2439,3 +2439,38 @@ fn the_replayed_cooee_1_log_recovers_in_one_pass() {
     assert!(r.called("herdr agent start sendmeter-rev-12-r1"), "{out}");
     assert_eq!(state(&c), "review(1)");
 }
+
+/// #558: one process's passes follow fleet.toml, each read afresh: a fleet appended between two passes has its first
+/// queued issue started by the next one (`waiting` says drive hasn't passed it yet till then); removed, no more passes.
+#[test]
+fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
+    let c = setup("drive-fleets");
+    let r = fake(NO_AGENTS).reply("git -C", "");
+    drive(&c, &r);
+    let passes = || {
+        let e = read(&c.state).unwrap();
+        e.iter()
+            .filter(|e| e.kind == "drive-pass" && e.fleet == "drover")
+            .count()
+    };
+    let added = CONFIG
+        .split("\n[limits]")
+        .next()
+        .unwrap()
+        .replace("sendmeter", "drover");
+    std::fs::write(&c.config, format!("{CONFIG}\n{added}")).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["queue", "drover", "add", "12"]).0, 0);
+    let (_, out) = run(&c, &r, &["waiting", "drover"]);
+    assert!(
+        out.contains("drover #12 drive: next in the queue: drive starts it")
+            && out.contains("→ drive hasn't passed this fleet yet: herdsman drive drover"),
+        "{out}"
+    );
+    let (out, _) = drive(&c, &r);
+    assert!(out.contains("drover #12 start: "), "{out}");
+    assert!(r.called("herdr agent start drover-impl-12"), "{out}");
+    assert_eq!(passes(), 1);
+    std::fs::write(&c.config, CONFIG).unwrap();
+    drive(&c, &r);
+    assert_eq!(passes(), 1, "a removed fleet gets no pass");
+}

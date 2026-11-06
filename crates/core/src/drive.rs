@@ -422,6 +422,7 @@ pub fn drive(
     };
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
+        crate::timer::stuck(ctx, cfg).unwrap_or_else(|e| drop(writeln!(out, "tick-stuck: {e:#}")));
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
