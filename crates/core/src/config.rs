@@ -136,6 +136,9 @@ pub enum RuntimeKind {
     #[default]
     Herdr,
     Shed,
+    /// #565: shed running each lane as an ACP session (`acp` defaults to `claude-acp`, `acp_policy` to `allow`).
+    #[serde(rename = "shed-acp")]
+    ShedAcp,
     /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
     Berth,
 }
@@ -154,10 +157,17 @@ pub struct Runtime {
 impl Runtime {
     /// The shed runtime, when it is the kind.
     pub fn shed(&self) -> Option<crate::shed::Shed> {
-        matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth).then(|| crate::shed::Shed {
+        let acp = self.kind == RuntimeKind::ShedAcp;
+        (acp || matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth)).then(|| crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
-            acp: self.acp.clone(),
-            policy: self.acp_policy.clone().unwrap_or_else(|| "ask".into()),
+            acp: self
+                .acp
+                .clone()
+                .or_else(|| acp.then(crate::harness::default_acp).flatten().map(Into::into)),
+            policy: self
+                .acp_policy
+                .clone()
+                .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
         })
     }
 }
@@ -374,6 +384,8 @@ pub struct Fleet {
     pub ui_paths: Vec<String>,
     /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
+    /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
+    pub runtime: Option<Runtime>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -497,6 +509,8 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #584: an ask nobody waits on (no live asking lane) closes as expired after this many hours.
+    pub ask_expire_hours: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
     /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
@@ -563,6 +577,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            ask_expire_hours: 24,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
             transcript_days: 30,
@@ -836,6 +851,18 @@ impl Config {
     pub fn webpush_sub(&self) -> Option<&str> {
         let all = self.notify.iter().chain(self.fleet.values().flat_map(|f| &f.notify));
         all.filter(|n| n.webpush()).find_map(|n| n.sub.as_deref())
+    }
+
+    /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
+    pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
+        let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
+        own.map_or_else(|| self.runtime.shed(), Runtime::shed)
+    }
+
+    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's.
+    pub fn shed(&self) -> Option<crate::shed::Shed> {
+        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref()?.shed());
+        self.runtime.shed().or_else(first)
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).
