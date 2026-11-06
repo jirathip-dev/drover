@@ -692,6 +692,44 @@ fn premerge_passing_merges_and_logs_its_time() {
     assert!(m.data["premerge_secs"].is_u64(), "{:?}", m.data);
 }
 
+/// #510: a passing premerge runs each shadow lesson check on the merged tree and logs which would fail; active and
+/// hand-written checks are not run there.
+#[test]
+fn premerge_logs_the_shadow_lesson_checks() {
+    // No `ci/cap.toml` and no `premerge`: the shadow checks alone still run the premerge.
+    let (_d, c, local, wt) = premerge_setup("pre-shadow", false, "");
+    std::fs::create_dir_all(format!("{wt}/.herdsman")).unwrap();
+    std::fs::create_dir_all(format!("{local}/.herdsman")).unwrap();
+    let rules = "- don't unwrap (enforced by: no-unwrap `! grep -Hn unwrap src`, shadow since 1970-01-01)\n\
+                 - don't sleep (enforced by: no-sleep `! grep -Hn sleep src`, shadow since 1970-01-01)\n\
+                 - don't panic (enforced by: no-panic `! grep -Hn panic src`, active since 1970-01-01)\n\
+                 - don't hand (enforced by: hand `false`)\n";
+    std::fs::write(format!("{wt}/.herdsman/rules.md"), rules).unwrap();
+    std::fs::write(format!("{local}/.herdsman/rules.md"), rules).unwrap();
+    let r = premerge_fake(&local)
+        .once(
+            "sh -c cd \"$0\" && ! grep -Hn unwrap src",
+            1,
+            "src/a.rs:3: x.unwrap()\n",
+        )
+        .reply("sh -c", "ok\n");
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let e = ev
+        .iter()
+        .find(|e| e.kind == "lesson-shadow")
+        .expect("lesson-shadow logged");
+    assert_eq!(e.issue, Some(12));
+    assert_eq!(
+        json!(e.data),
+        json!({"ran": ["no-unwrap", "no-sleep"], "hits": ["no-unwrap"]})
+    );
+    for gone in ["grep -Hn panic", "&& false"] {
+        assert!(!r.calls.borrow().iter().any(|l| l.contains(gone)), "{gone} ran");
+    }
+}
+
 #[test]
 fn premerge_rechecks_when_staging_moved() {
     let (_d, c, local, wt) = premerge_setup("pre-moved", true, "");
