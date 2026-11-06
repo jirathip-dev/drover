@@ -79,15 +79,22 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let dest = d.join("bin/herdsman");
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     std::fs::write(&dest, "old").unwrap();
-    // #556: a fake `codesign` logs how the install signs (the real one would reach for the keychain).
+    // #556: a fake `codesign` logs how the install signs (the real one would reach for the keychain); #568: a fake
+    // `security` holds the identity, and `codesign` sleeps (a keychain dialog) while HANG is set.
     let fake = d.join("fake");
     std::fs::create_dir_all(&fake).unwrap();
     let log = d.join("codesign.log");
-    let sh = format!("#!/bin/sh\necho \"$@\" >> '{}'\n", log.display());
-    std::fs::write(fake.join("codesign"), sh).unwrap();
-    std::fs::set_permissions(fake.join("codesign"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let sh = format!(
+        "#!/bin/sh\n[ -n \"$HANG\" ] && exec sleep 30\necho \"$@\" >> '{}'\n",
+        log.display()
+    );
+    let sec = "#!/bin/sh\necho 'SHA-256 hash: 00'\necho 'SHA-1 hash: AC01B47A'\n";
+    for (name, body) in [("codesign", sh.as_str()), ("security", sec)] {
+        std::fs::write(fake.join(name), body).unwrap();
+        std::fs::set_permissions(fake.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
-    let gate = |config: &str| {
+    let gate = |config: &str, hang: &str| {
         let cfg = d.join("fleet.toml");
         std::fs::write(&cfg, config).unwrap();
         Command::new("sh")
@@ -96,21 +103,36 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
             .env("FLEET_CONFIG", &cfg)
             .env("FLEET_STATE", d.join("state/events.jsonl"))
             .env("PATH", &path)
+            .env("HOME", &d)
+            .env("HANG", hang)
+            .env("HERDSMAN_SIGN_TIMEOUT", if hang.is_empty() { "60" } else { "1" })
             .output()
             .unwrap()
     };
-    let o = gate("[limits]\neffort = \"bogus\"\n");
+    let o = gate("[limits]\neffort = \"bogus\"\n", "");
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(1), "{out}");
     assert!(out.contains("kept ") && out.contains("✗ config — "), "{out}");
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
     assert!(!log.exists(), "a refused build is never signed");
 
-    let o = gate(RETIRED);
+    // #568: a codesign stuck on a keychain dialog times out: the old binary stays, the fix is named, exit 1.
+    let o = gate(RETIRED, "1");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(1), "{out}");
+    assert!(
+        out.contains("kept ") && out.contains("fix: security set-key-partition-list"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+
+    let o = gate(RETIRED, "");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
+    // #568: by the identity's SHA-1 hash in the login keychain (by name, the untrusted cert is "no identity").
     let signed = format!(
-        "--force --sign herdsman-local --identifier herdsman {}.new\n",
+        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier herdsman {}.new\n",
+        d.display(),
         dest.display()
     );
     assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);

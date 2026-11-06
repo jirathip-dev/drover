@@ -1,0 +1,39 @@
+{
+  "response": {
+    "acts": [
+      "stop",
+      "kill",
+      "clean"
+    ],
+    "before": 0,
+    "harness": "claude",
+    "lines": [],
+    "live": 0,
+    "more": false,
+    "notices": [
+      {
+        "at": 999900,
+        "text": "spawned sendmeter-impl-12"
+      }
+    ],
+    "older": false,
+    "pane": null,
+    "said": null,
+    "status": null
+  },
+  "route": "GET /api/v1/lane/<agent>",
+  "schema": {
+    "acts": [],
+    "before": "number",
+    "harness": "string",
+    "lines": [],
+    "live": "number",
+    "more": "boolean",
+    "notices": [],
+    "older": "boolean",
+    "pane": "null",
+    "said": "null",
+    "status": "null"
+  },
+  "type": "Chat"
+}

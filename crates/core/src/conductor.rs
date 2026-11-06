@@ -633,7 +633,54 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) ->
     for (k, v) in wanted {
         new = crate::config::set_value(&new, fleet, "conductor", k, v)?;
     }
-    let new_cfg = Config::parse(&new)?;
+    let new_cfg = save(ctx, r, &new)?;
+    for (k, v) in wanted {
+        let d = json!({"role": "conductor", "key": k, "new": v, "via": "web"});
+        emit(&ctx.state, &new_cfg, Event::new(ctx.now, fleet, None, "set", d))?;
+    }
+    let line: Vec<String> = wanted.iter().map(|(k, v)| format!("{k} {v}")).collect();
+    Ok(format!("{fleet} conductor: {}", line.join(", ")))
+}
+
+/// #555: `[chat]`'s new-thread defaults (harness, model, effort) in place (the table added when missing), each checked
+/// as fleet.toml's load checks it (`BAD_VALUE`), then written as `set` writes; logs `set` (role `chat`) per key.
+pub fn chat(ctx: &Ctx, r: &dyn Runner, wanted: &[(&str, String)]) -> Result<String> {
+    let text = std::fs::read_to_string(&ctx.config)?;
+    let cfg = Config::parse(&text)?;
+    let models: Vec<&str> = cfg.fleet.values().flat_map(models).collect();
+    let bad = |(k, v): &&(&str, String)| {
+        *k == "model" && !models.contains(&v.as_str()) || v.chars().any(|c| c == '"' || c == '\\' || c.is_control())
+    };
+    if let Some((k, v)) = wanted.iter().find(bad) {
+        return refused("BAD_VALUE", format!("chat {k} {v:?}: not one of the choices"));
+    }
+    let mut new = text.clone();
+    if !toml::from_str::<toml::Table>(&text)?.contains_key("chat") {
+        new += if text.ends_with('\n') {
+            "\n[chat]\n"
+        } else {
+            "\n\n[chat]\n"
+        };
+    }
+    for (k, v) in wanted {
+        new = crate::config::set_in(&new, "[chat]", k, &format!("\"{v}\""))?;
+    }
+    if let Err(e) = Config::parse(&new) {
+        return refused("BAD_VALUE", format!("{e:#}"));
+    }
+    let new_cfg = save(ctx, r, &new)?;
+    for (k, v) in wanted {
+        let d = json!({"role": "chat", "key": k, "new": v, "via": "web"});
+        emit(&ctx.state, &new_cfg, Event::new(ctx.now, "all", None, "set", d))?;
+    }
+    let line: Vec<String> = wanted.iter().map(|(k, v)| format!("{k} {v}")).collect();
+    Ok(format!("chat defaults: {}", line.join(", ")))
+}
+
+/// fleet.toml as `new`, unless `doctor` with it shows a ✗ it did not before (`DOCTOR`); the old file goes to
+/// `fleet.toml.bak` first.
+fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
+    let new_cfg = Config::parse(new)?;
     let fails = |c: &Ctx| -> Result<Vec<String>> {
         let mut out = vec![];
         crate::doctor::doctor(c, r, &mut out, true, false)?;
@@ -643,7 +690,7 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) ->
             .collect())
     };
     let (before, tmp) = (fails(ctx)?, crate::devices::tmp_name(&ctx.config));
-    std::fs::write(&tmp, &new)?;
+    std::fs::write(&tmp, new)?;
     let after = fails(&Ctx {
         config: tmp.clone(),
         ..ctx.clone()
@@ -654,13 +701,8 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) ->
         return refused("DOCTOR", format!("doctor fails with it: {}", bad.join("; ")));
     }
     std::fs::copy(&ctx.config, ctx.config.with_extension("toml.bak"))?;
-    crate::config::write_atomic(&ctx.config, &new)?;
-    for (k, v) in wanted {
-        let d = json!({"role": "conductor", "key": k, "new": v, "via": "web"});
-        emit(&ctx.state, &new_cfg, Event::new(ctx.now, fleet, None, "set", d))?;
-    }
-    let line: Vec<String> = wanted.iter().map(|(k, v)| format!("{k} {v}")).collect();
-    Ok(format!("{fleet} conductor: {}", line.join(", ")))
+    crate::config::write_atomic(&ctx.config, new)?;
+    Ok(new_cfg)
 }
 
 /// A random v4 UUID, a new conductor's session id.
@@ -820,6 +862,13 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
         let text = std::fs::read_to_string(m).unwrap_or_default();
         s += &format!("\n## Memory: {}\n\n{}\n", m.display(), text.trim_end());
     }
+    // #538: what this fleet lets the conductor run.
+    s += "\n## Capability groups ([conductor] allow)\n\n";
+    for (g, verbs) in crate::config::GROUPS {
+        let on = ["off", "on"][usize::from(c.groups().contains(g))];
+        s += &format!("- `{g}` ({on}): {verbs}\n");
+    }
+    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[conductor] allow` with `herdsman config propose`.\n";
     let skills = files(&c.skills);
     if !skills.is_empty() {
         s += "\n## Skills (read one when it applies)\n\n";
@@ -849,6 +898,8 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             Some(m)
         }
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
+        // #538: a run card; its settled line follows as a system message.
+        "run-card" => Some(json!({"ts": e.ts, "from": "conductor", "text": crate::card::text(e)})),
         // #461: a conductor's `timer install`, a system line.
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);

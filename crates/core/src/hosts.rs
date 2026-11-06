@@ -149,6 +149,9 @@ impl Runner for On<'_> {
         };
         Some(crate::shed::Shed { wire, ..b })
     }
+    fn local(&self) -> bool {
+        self.machine.is_none() && self.r.local()
+    }
     /// #441: the store is the main host's; remote hosts keep none.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         self.r.secret(svc)
@@ -273,6 +276,9 @@ impl Runner for Pass<'_> {
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
+    }
+    fn local(&self) -> bool {
+        self.r.local()
     }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         self.r.secret(svc)
