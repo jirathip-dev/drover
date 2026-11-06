@@ -268,7 +268,7 @@ fn ymd(day: u64) -> String {
 /// #510: each lesson check in `rules` with its history and what the next lesson run does with it. The owner's
 /// `promote <name>` / `retire <name>` line in a lesson PR's body comes first; else a shadow check with a false positive
 /// (a `false positive: <name>` line from rev or the owner) is fixed or removed; one that caught a real instance over at
-/// least 7 days or 10 PRs is promoted; one that caught nothing in 30 days is retired.
+/// least 7 days or 10 PRs is promoted; one that ran and caught nothing in 30 days is retired.
 pub fn review(
     ctx: &Ctx,
     cfg: &Config,
@@ -329,7 +329,7 @@ pub fn review(
             Some(_) => "promote",
             _ if fps > 0 => "fix or remove",
             _ if caught > 0 && (c.since <= ymd(today.saturating_sub(7)) || prs.len() >= 10) => "promote",
-            _ if caught == 0 && c.since <= ymd(today.saturating_sub(30)) => "retire",
+            _ if caught == 0 && !prs.is_empty() && c.since <= ymd(today.saturating_sub(30)) => "retire",
             _ => "keep shadow",
         };
         (c, stats, decision)

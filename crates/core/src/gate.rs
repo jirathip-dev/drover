@@ -534,7 +534,9 @@ fn premerge(
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
-    if checks.is_empty() {
+    let rules = std::fs::read_to_string(f.local_path().join(".herdsman/rules.md")).unwrap_or_default();
+    // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
+    if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
     }
     let (wt, into) = (

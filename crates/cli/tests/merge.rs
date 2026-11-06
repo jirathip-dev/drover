@@ -696,13 +696,16 @@ fn premerge_passing_merges_and_logs_its_time() {
 /// hand-written checks are not run there.
 #[test]
 fn premerge_logs_the_shadow_lesson_checks() {
-    let (_d, c, local, wt) = premerge_setup("pre-shadow", true, "");
+    // No `ci/cap.toml` and no `premerge`: the shadow checks alone still run the premerge.
+    let (_d, c, local, wt) = premerge_setup("pre-shadow", false, "");
     std::fs::create_dir_all(format!("{wt}/.herdsman")).unwrap();
+    std::fs::create_dir_all(format!("{local}/.herdsman")).unwrap();
     let rules = "- don't unwrap (enforced by: no-unwrap `! grep -Hn unwrap src`, shadow since 1970-01-01)\n\
                  - don't sleep (enforced by: no-sleep `! grep -Hn sleep src`, shadow since 1970-01-01)\n\
                  - don't panic (enforced by: no-panic `! grep -Hn panic src`, active since 1970-01-01)\n\
                  - don't hand (enforced by: hand `false`)\n";
     std::fs::write(format!("{wt}/.herdsman/rules.md"), rules).unwrap();
+    std::fs::write(format!("{local}/.herdsman/rules.md"), rules).unwrap();
     let r = premerge_fake(&local)
         .once(
             "sh -c cd \"$0\" && ! grep -Hn unwrap src",
