@@ -164,6 +164,7 @@ impl Runner for On<'_> {
 /// `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
+    probe: bool,
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
     step: std::sync::Mutex<String>,
@@ -172,7 +173,20 @@ pub struct Pass<'a> {
 impl<'a> Pass<'a> {
     pub fn new(r: &'a dyn Runner, mark: Option<(PathBuf, u64)>) -> Self {
         let (up, step) = (std::sync::Mutex::default(), std::sync::Mutex::default());
-        Pass { r, up, mark, step }
+        Pass {
+            r,
+            probe: true,
+            up,
+            mark,
+            step,
+        }
+    }
+    /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
+    pub fn fast(r: &'a dyn Runner) -> Self {
+        Pass {
+            probe: false,
+            ..Self::new(r, None)
+        }
     }
     pub fn step(&self, s: &str) {
         *self.step.lock().unwrap() = s.into();
@@ -195,6 +209,9 @@ impl<'a> Pass<'a> {
     fn up(&self, m: &str) -> bool {
         if let Some(&u) = self.up.lock().unwrap().get(m) {
             return u;
+        }
+        if !self.probe {
+            return true;
         }
         let probe = argv(&[
             "-oBatchMode=yes",

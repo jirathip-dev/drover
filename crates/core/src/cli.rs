@@ -1046,7 +1046,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         cmd => {
             let cfg = Config::load(&ctx.config)?;
             // #561: check, clean and drive probe each remote host once and bound every remote call.
-            let pass = crate::hosts::Pass::new(r, None);
+            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
+            let pass = if fast {
+                crate::hosts::Pass::fast(r)
+            } else {
+                crate::hosts::Pass::new(r, None)
+            };
             let r: &dyn Runner = match cmd {
                 Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
                 _ => r,
