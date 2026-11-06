@@ -610,7 +610,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
             s("working", None),
             s("blocked", Some("git push")),
             s("done", Some("end_turn")),
-            s("exited", None)
+            s("gone", None)
         ]
     );
 }
