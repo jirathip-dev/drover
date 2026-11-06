@@ -1,0 +1,199 @@
+{
+  "response": {
+    "list": [
+      {
+        "act": "impl",
+        "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",
+        "data": {
+          "agent": "sendmeter-impl-12",
+          "harness": "claude",
+          "pane": "w1:p2",
+          "role": "impl"
+        },
+        "fleet": "sendmeter",
+        "glyph": "▸",
+        "imp": false,
+        "issue": 12,
+        "k": null,
+        "plain": "sendmeter #12 spawn",
+        "pr": null,
+        "run": null,
+        "seq": 1,
+        "text": "impl started",
+        "tone": "l",
+        "ts": 999900,
+        "type": "spawn"
+      },
+      {
+        "act": "rev",
+        "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+        "data": {
+          "agent": "sendmeter-rev-9-r1",
+          "harness": "claude",
+          "pane": "w1:p3",
+          "role": "rev"
+        },
+        "fleet": "sendmeter",
+        "glyph": "▸",
+        "imp": false,
+        "issue": 9,
+        "k": null,
+        "plain": "sendmeter #9 spawn",
+        "pr": null,
+        "run": null,
+        "seq": 2,
+        "text": "rev started",
+        "tone": "l",
+        "ts": 999900,
+        "type": "spawn"
+      },
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "device": "iPhone"
+        },
+        "fleet": "herdsman",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "herdsman pair-request",
+        "pr": null,
+        "run": null,
+        "seq": 3,
+        "text": "pair-request",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "pair-request"
+      },
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "device": "iPhone f34c"
+        },
+        "fleet": "herdsman",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "herdsman pair-approve",
+        "pr": null,
+        "run": null,
+        "seq": 4,
+        "text": "pair-approve",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "pair-approve"
+      },
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "harness": "hermes",
+          "thread": "t1",
+          "title": "Let's talk about #30"
+        },
+        "fleet": "sendmeter",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "sendmeter thread-new",
+        "pr": null,
+        "run": null,
+        "seq": 5,
+        "text": "thread-new",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "thread-new"
+      },
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "from": "owner",
+          "text": "Let's talk about #30",
+          "thread": "t1"
+        },
+        "fleet": "sendmeter",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "sendmeter thread-msg",
+        "pr": null,
+        "run": null,
+        "seq": 6,
+        "text": "thread-msg",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "thread-msg"
+      },
+      {
+        "act": "idle",
+        "coat": "--c:#a05c2c;--d:#7d4520;--m:#5d3317;--b:#efe7dc",
+        "data": {
+          "account": null,
+          "agent": "conductor-t1",
+          "confirmed": true,
+          "effort": null,
+          "harness": "hermes",
+          "model": "opus",
+          "pane": "w9:p1",
+          "resumed": false,
+          "session": "fdfd5b2b-9278-4304-bf9e-b7a9c365705a",
+          "thread": "t1",
+          "workspace": "w9"
+        },
+        "fleet": "sendmeter",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "sendmeter conductor-start",
+        "pr": null,
+        "run": null,
+        "seq": 7,
+        "text": "conductor-start",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "conductor-start"
+      },
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "host": "bazzite",
+          "machine": "bazzite",
+          "name": "claude B",
+          "pane": "w9:p1",
+          "via": "web iPhone f34c"
+        },
+        "fleet": "",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": " setup",
+        "pr": null,
+        "run": null,
+        "seq": 8,
+        "text": "setup",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "setup"
+      }
+    ],
+    "refresh": false,
+    "seq": 8
+  },
+  "route": "GET /api/v1/events",
+  "schema": {
+    "list": [],
+    "refresh": "boolean",
+    "seq": "number"
+  },
+  "type": "Events"
+}

@@ -1,0 +1,359 @@
+{
+  "response": {
+    "error": null,
+    "fleets": [
+      {
+        "backlog": null,
+        "config": {
+          "ask_minutes": 30,
+          "builtin": true,
+          "color_set": false,
+          "conductor": {
+            "default": true,
+            "effort": null,
+            "efforts": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "harness": "hermes",
+            "model": "opus",
+            "models": [
+              "opus"
+            ],
+            "profile": "lane-conductor"
+          },
+          "deny": [
+            "docker",
+            "docker-compose",
+            "podman",
+            "nerdctl",
+            "colima",
+            "orb",
+            "orbctl",
+            "limactl",
+            "supabase start",
+            "supabase db start",
+            "DOCKER_HOST=",
+            "open -a Docker",
+            "open -a OrbStack"
+          ],
+          "effort": null,
+          "env": [],
+          "file": "fleet.toml",
+          "global": [],
+          "harnesses": [
+            {
+              "efforts": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "name": "claude"
+            },
+            {
+              "efforts": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "name": "hermes"
+            },
+            {
+              "efforts": [
+                "none"
+              ],
+              "name": "dsh"
+            }
+          ],
+          "integration": "staging",
+          "line_cap": null,
+          "local": "/tmp/does-not-matter/sendmeter",
+          "max_impl": null,
+          "max_rev": null,
+          "merge_label": null,
+          "models": [
+            "opus",
+            "sonnet"
+          ],
+          "node_modules": false,
+          "notify": [],
+          "path": "<tmp>/config/fleet.toml",
+          "pipe": {
+            "bad": [],
+            "builtin": true,
+            "checks": [
+              "rev"
+            ],
+            "fleet": "sendmeter",
+            "into": "staging",
+            "parked": 0,
+            "queued": 0,
+            "required": [],
+            "stages": [
+              {
+                "here": 1,
+                "kind": "build",
+                "line": 0,
+                "loop": "impl",
+                "name": "impl",
+                "next": {
+                  "push": "rev"
+                },
+                "role": "impl",
+                "rounds": null,
+                "run": "hermes · opus · effort none"
+              },
+              {
+                "here": 1,
+                "kind": "check",
+                "line": 0,
+                "loop": "rev",
+                "name": "rev",
+                "next": {
+                  "FAIL": "impl",
+                  "PASS": "gates"
+                },
+                "role": "rev",
+                "rounds": 3,
+                "run": "hermes · default · effort none"
+              },
+              {
+                "here": 0,
+                "kind": "gate",
+                "line": 0,
+                "loop": "rev",
+                "name": "gates",
+                "next": {
+                  "ci_red": "impl",
+                  "conflict": "impl:update",
+                  "ok": "merge"
+                },
+                "role": null,
+                "rounds": 3,
+                "run": null
+              }
+            ]
+          },
+          "repo": "jirathip-dev/sendmeter",
+          "required": [],
+          "review_rounds": 3,
+          "roles": [
+            {
+              "accounts": [],
+              "effort": null,
+              "effort_default": "none",
+              "efforts": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "harness": "hermes",
+              "mcp": [],
+              "model": "opus",
+              "model_default": "profile",
+              "name": "impl",
+              "profile": "fleet-impl"
+            },
+            {
+              "accounts": [],
+              "effort": null,
+              "effort_default": "none",
+              "efforts": [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "harness": "hermes",
+              "mcp": [],
+              "model": null,
+              "model_default": "profile",
+              "name": "rev",
+              "profile": "fleet-rev"
+            }
+          ],
+          "serial": [],
+          "stall_minutes": 30,
+          "update_rounds": 3
+        },
+        "done": [],
+        "done_n": 0,
+        "drive": {
+          "acts": [],
+          "line": "drive · no pass yet",
+          "meta": [
+            "stall check: #9 in 28m",
+            "2 lanes"
+          ],
+          "pass": false,
+          "tone": "a"
+        },
+        "k": "g",
+        "name": "sendmeter",
+        "need": 0,
+        "notes": [],
+        "paths": [],
+        "paused": null,
+        "rows": [
+          {
+            "act": "rev",
+            "age": "100s",
+            "ask": null,
+            "blocked_by": null,
+            "check": false,
+            "coat": "--rc:#96685a;--rd:#77524a;--rm:#4a342c;--rb:transparent",
+            "dead": false,
+            "decided": null,
+            "down": null,
+            "groups": [],
+            "grow": "review",
+            "issue": 9,
+            "lane": "sendmeter-rev-9-r1",
+            "lanes": [
+              {
+                "ago": "100s",
+                "link": "live",
+                "name": "sendmeter-rev-9-r1",
+                "state": "blocked",
+                "tone": "r"
+              }
+            ],
+            "live": true,
+            "mv": false,
+            "notes": [],
+            "open": null,
+            "pr": {
+              "ci": null,
+              "form": null,
+              "pr": null,
+              "rounds": 0,
+              "run": null,
+              "verdict": null,
+              "vtone": ""
+            },
+            "queued": false,
+            "stage": [
+              {
+                "at": -1,
+                "g": "▲",
+                "k": "b",
+                "name": "impl",
+                "ok": false
+              },
+              {
+                "at": 0,
+                "g": "◆",
+                "k": "c",
+                "name": "rev · r1",
+                "ok": false
+              },
+              {
+                "at": 1,
+                "g": "◫",
+                "k": "g",
+                "name": "gates",
+                "ok": false
+              }
+            ],
+            "state": "review(1)",
+            "t": 999900,
+            "title": null,
+            "tone": "a",
+            "up": null
+          },
+          {
+            "act": "impl",
+            "age": "100s",
+            "ask": null,
+            "blocked_by": null,
+            "check": false,
+            "coat": "--rc:#bd8f4e;--rd:#96703a;--rm:#241a10;--rb:#efe7dc",
+            "dead": false,
+            "decided": null,
+            "down": null,
+            "groups": [],
+            "grow": "impl",
+            "issue": 12,
+            "lane": "sendmeter-impl-12",
+            "lanes": [
+              {
+                "ago": "100s",
+                "link": "live",
+                "name": "sendmeter-impl-12",
+                "state": "working",
+                "tone": "g"
+              }
+            ],
+            "live": true,
+            "mv": false,
+            "notes": [],
+            "open": null,
+            "pr": {
+              "ci": null,
+              "form": null,
+              "pr": null,
+              "rounds": 0,
+              "run": null,
+              "verdict": null,
+              "vtone": ""
+            },
+            "queued": false,
+            "stage": [
+              {
+                "at": 0,
+                "g": "▲",
+                "k": "b",
+                "name": "impl",
+                "ok": false
+              },
+              {
+                "at": 1,
+                "g": "◆",
+                "k": "c",
+                "name": "rev",
+                "ok": false
+              },
+              {
+                "at": 1,
+                "g": "◫",
+                "k": "g",
+                "name": "gates",
+                "ok": false
+              }
+            ],
+            "state": "impl",
+            "t": 999900,
+            "title": null,
+            "tone": "a",
+            "up": null
+          }
+        ],
+        "serial": []
+      }
+    ],
+    "live": true,
+    "mtime": "1793969430121521119",
+    "now": 1000000,
+    "rw": true
+  },
+  "route": "GET /api/v1/queue",
+  "schema": {
+    "error": "null",
+    "fleets": [],
+    "live": "boolean",
+    "mtime": "string",
+    "now": "number",
+    "rw": "boolean"
+  },
+  "type": "QueueTab"
+}
