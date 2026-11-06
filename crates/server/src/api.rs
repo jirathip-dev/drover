@@ -627,6 +627,18 @@ pub struct QueueCard {
     pub done_n: usize,
     pub backlog: Option<Backlog>,
     pub config: ConfigSheet,
+    pub marks: BTreeMap<String, Marks>,
+}
+
+/// #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`),
+/// `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
+pub struct Marks {
+    pub design: bool,
+    pub verify: Option<String>,
+    pub repro: bool,
+    pub serial: Vec<String>,
+    pub needs: Vec<String>,
+    pub note: Option<String>,
 }
 
 /// #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
@@ -819,6 +831,84 @@ pub struct Ev {
     pub plain: String,
     pub pr: Option<u64>,
     pub run: Option<String>,
+}
+
+/// #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first.
+pub struct IssueView {
+    pub fleet: String,
+    pub issue: u64,
+    pub verdicts: Vec<Verdict>,
+}
+
+/// A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
+/// (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the
+/// `i`th); a `--repro` PASS's `Repro:` block.
+pub struct Verdict {
+    pub role: String,
+    pub round: u64,
+    pub sha: String,
+    pub verdict: String,
+    pub ts: u64,
+    pub findings: String,
+    pub shots: Vec<String>,
+    pub repro: Option<Repro>,
+}
+
+/// #420: a `Repro:` block: `run` (the commands and both outputs) or `verify` (the quoted reason), its lines as `text`.
+pub struct Repro {
+    pub kind: String,
+    pub text: String,
+}
+
+/// #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick`
+/// runs the `next` (none: `off`).
+pub struct Lessons {
+    pub fleets: Vec<LessonFleet>,
+}
+
+pub struct LessonFleet {
+    pub fleet: String,
+    pub lessons: String,
+    pub last: Option<LessonRun>,
+    pub next: Option<u64>,
+}
+
+/// A lesson issue: its lane's spawn time `ts` and the issue's state now.
+pub struct LessonRun {
+    pub issue: u64,
+    pub ts: u64,
+    pub state: String,
+}
+
+/// #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+pub struct Digest {
+    pub fleet: String,
+    pub days: u64,
+    pub text: String,
+}
+
+/// #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every
+/// `https://` URL in it (a wrapped one joined), or `closed`.
+pub struct SetupScreen {
+    pub lines: Vec<String>,
+    pub urls: Vec<String>,
+    pub closed: bool,
+}
+
+/// #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s
+/// new-thread defaults (`POST chat` writes them).
+pub struct Roles {
+    pub fleet: String,
+    pub config: ConfigSheet,
+    pub chat: ChatDefaults,
+}
+
+/// #404: `[chat]`'s harness, model and effort (none: the conductor role's), and the `harnesses` it may name.
+pub struct ChatDefaults {
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub harnesses: Vec<Harness>,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

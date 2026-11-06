@@ -192,3 +192,147 @@ fn a_post_runs_the_boards_op_and_answers_json() {
     assert_eq!((status.as_str(), &v["ok"]), ("HTTP/1.1 200 OK", &json!(true)), "{v}");
     assert_eq!(req(&s, "GET", "/api/v1/state", "", "").1["asks"], json!([]));
 }
+
+/// #576: a queued `--verify --repro` row carries both marks; `qset` needs a paired device, then sets a mark as
+/// `queue set` does (read back from `queue ls`).
+#[test]
+fn queue_rows_carry_their_marks_and_qset_sets_one() {
+    let (c, r) = fixture("api-marks");
+    let add = ["queue", "sendmeter", "add", "21", "--verify", "--repro"];
+    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, q) = req(&s, "GET", "/api/v1/queue", "", "");
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    assert_eq!(
+        q["fleets"][0]["marks"]["21"],
+        json!({"design": false, "verify": "on", "repro": true, "serial": [], "needs": [], "note": null}),
+        "{q}"
+    );
+    assert_eq!(q["fleets"][0]["marks"]["17"]["verify"], json!(null));
+    let body = "fleet=sendmeter&issue=21&key=design&value=on";
+    let (status, v) = req(&s, "POST", "/api/v1/qset", body, "");
+    assert_eq!(
+        (status.as_str(), &v["code"]),
+        ("HTTP/1.1 401 Unauthorized", &json!("UNPAIRED"))
+    );
+    let ls = || {
+        let out = run(&c, &Fake::default(), &["queue", "sendmeter", "ls", "--json"]).1;
+        let rows: Value = serde_json::from_str(&out).unwrap();
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["issue"] == 21)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(ls()["design"], json!(false));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
+    let (status, v) = req(&s, "POST", "/api/v1/qset", body, &cookie);
+    assert_eq!((status.as_str(), &v["ok"]), ("HTTP/1.1 200 OK", &json!(true)), "{v}");
+    assert_eq!((&ls()["design"], &ls()["verify"]), (&json!(true), &json!(true)));
+    let bad = "fleet=sendmeter&issue=21&key=verify&value=maybe";
+    let (status, v) = req(&s, "POST", "/api/v1/qset", bad, &cookie);
+    assert_eq!(
+        (status.as_str(), &v["ok"]),
+        ("HTTP/1.1 400 Bad Request", &json!(false)),
+        "{v}"
+    );
+}
+
+/// #576: `issue/<fleet>/<n>` lists the verdicts `herdsman verdict` recorded, newest first: a verify PASS with its two
+/// screenshots (as `/shot/` serves them), a rev PASS with its `Repro: run` block, a rev FAIL with its findings.
+#[test]
+fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
+    let d = tmpdir("api-issue");
+    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    let c = ctx(&d, &(CONFIG.to_string() + verify));
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]).0,
+        0
+    );
+    let lane = d.join("lane");
+    std::fs::create_dir_all(lane.join("shots")).unwrap();
+    std::fs::write(lane.join("shots/home-390.png"), b"\x89PNG narrow").unwrap();
+    std::fs::write(lane.join("shots/home-1440.png"), b"\x89PNG wide").unwrap();
+    let file = lane.join("verdict.md").to_string_lossy().to_string();
+    let spawn = |ts, role: &str| {
+        let (w, check) = (lane.to_string_lossy(), role != "impl");
+        let d = json!({"role": role, "stage": role, "check": check, "agent": format!("{role}-{ts}"), "worktree": w});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "spawn", d)).unwrap();
+    };
+    let verdict = |v: &str, s: &str, body: &str| {
+        std::fs::write(&file, body).unwrap();
+        let args = ["verdict", "sendmeter", "12", v, "--sha", s, "--file", &file];
+        let (code, out) = run(&c, &Fake::default().reply("gh api", s), &args);
+        assert_eq!(code, 0, "{out}");
+    };
+    let (a, b) = ("a".repeat(40), "b".repeat(40));
+    let repro =
+        "Repro: run\n\n```sh\ncargo test repro\n```\n```text\nFAILED on base\n```\n```sh\ncargo test repro\n```\n\
+                 ```text\nok at head\n```\n";
+    spawn(1, "impl");
+    spawn(2, "rev");
+    verdict("FAIL", &a, "FAIL\n\n- non-blocking: the test is flaky\n");
+    spawn(3, "impl");
+    spawn(4, "rev");
+    verdict("PASS", &b, &format!("PASS\n\n{repro}"));
+    spawn(5, "verify");
+    verdict("PASS", &b, "PASS\n\nshots/home-390.png and shots/home-1440.png\n");
+    let none = Fake::default();
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let (status, v) = req(&s, "GET", "/api/v1/issue/sendmeter/12", "", "");
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    let vs = v["verdicts"].as_array().unwrap();
+    let row = |i: usize| (vs[i]["role"].clone(), vs[i]["verdict"].clone(), vs[i]["sha"].clone());
+    assert_eq!(vs.len(), 3, "{v}");
+    assert_eq!(row(0), (json!("verify"), json!("PASS"), json!(b)));
+    assert_eq!(vs[0]["shots"], json!(["shots/home-390.png", "shots/home-1440.png"]));
+    assert_eq!(vs[0]["repro"], json!(null));
+    assert_eq!(row(1), (json!("rev"), json!("PASS"), json!(b)));
+    assert_eq!(vs[1]["repro"]["kind"], json!("run"));
+    let text = vs[1]["repro"]["text"].as_str().unwrap();
+    assert!(text.contains("cargo test repro") && text.contains("FAILED on base") && text.contains("ok at head"));
+    assert_eq!(row(2), (json!("rev"), json!("FAIL"), json!(a)));
+    assert_eq!(vs[2]["findings"], json!("- non-blocking: the test is flaky"));
+    assert_eq!((&vs[1]["shots"], &vs[2]["repro"]), (&json!([]), &json!(null)));
+    // The second shot's index is the one `/shot/` serves.
+    let r =
+        String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
+            .into_owned();
+    assert!(r.starts_with("HTTP/1.1 200") && r.ends_with("PNG wide"), "{r}");
+}
+
+/// #576: `lessons` shows a fleet's last lesson lane and when tick runs the next; the digest is the CLI's; `POST
+/// lesson` needs a paired device.
+#[test]
+fn lessons_show_the_last_run_and_the_next_due_date() {
+    let (c, r) = fixture("api-lessons");
+    // tick's weekly step: the fleet is under a week old, so it skips and the next is due a week on.
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    herdsman::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
+    let d = json!({"role": "lesson", "stage": "impl", "agent": "sendmeter-lesson-30", "harness": "claude"});
+    append(&c.state, &Event::new(900_400, "sendmeter", Some(30), "spawn", d)).unwrap();
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, "GET", "/api/v1/lessons", "", "");
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    let want = json!({"fleets": [{"fleet": "sendmeter", "lessons": "weekly",
+        "last": {"issue": 30, "ts": 900_400, "state": "impl"}, "next": c.now + 7 * 86400}]});
+    assert_eq!(v, want);
+    let (status, v) = req(&s, "GET", "/api/v1/lessons/sendmeter/digest?days=3", "", "");
+    assert_eq!((status.as_str(), &v["days"]), ("HTTP/1.1 200 OK", &json!(3)));
+    assert!(
+        v["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("# Lessons digest: sendmeter, last 3 days"),
+        "{v}"
+    );
+    let (status, _) = req(&s, "GET", "/api/v1/lessons/digest", "", "");
+    assert_eq!(status, "HTTP/1.1 404 Not Found");
+    let (status, v) = req(&s, "POST", "/api/v1/lesson", "fleet=sendmeter", "");
+    assert_eq!(
+        (status.as_str(), &v["code"]),
+        ("HTTP/1.1 401 Unauthorized", &json!("UNPAIRED"))
+    );
+    assert!(!r.called("gh issue create"));
+}

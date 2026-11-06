@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "ERROR",
+    "message": "no issue",
+    "ok": false
+  },
+  "route": "POST /api/v1/mv",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}

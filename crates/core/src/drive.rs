@@ -176,26 +176,38 @@ thread_local! {
 /// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
+    kick_once(ctx, r, (fleet, issue), why, None)
+}
+
+/// #509: `kick`, carrying its trigger's `id` (a verdict's sha, a decision): the same trigger is driven once.
+pub fn kick_once(ctx: &Ctx, r: &dyn Runner, (fleet, issue): (&str, u64), why: &str, id: Option<&str>) -> Option<u32> {
     let mut a = crate::runner::argv(&["kick", fleet, &issue.to_string(), "--why", why]);
+    a.extend(id.into_iter().flat_map(|i| ["--id".to_string(), i.into()]));
     if IN_ACT.get() || crate::outbox::lane().is_some() || crate::cli::forward(r, &a).is_some() {
         return None;
     }
     // #345: a running service drives it in its own process at once; else the detached kick below (direct mode).
-    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why) {
+    if let Some(pid) = crate::service::kick(ctx, fleet, issue, why, id) {
         return Some(pid);
     }
-    a.push("--now".into());
+    a.insert(5, "--now".into()); // after `--why <why>`, before any `--id`
     r.detach(&ctx.exe, &a, &state_dir(ctx).join("kick.log")).ok()
 }
 
 /// #304: `kick --now`: one pass of `issue` alone under the drive lock. A kick while one runs, or within the 10 s
 /// after it, is coalesced into one follow-up; a busy lock is retried as one too.
-pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (&str, u64, &str, bool)) -> Result<()> {
-    let (fleet, n, why, now) = k;
+pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: Kicked) -> Result<()> {
+    let (fleet, n, why, now, id) = k;
     if !now {
         cfg.fleet(fleet)?;
-        kick(ctx, r, fleet, n, why);
+        kick_once(ctx, r, (fleet, n), why, id);
         return Ok(());
+    }
+    // #509: a trigger seen before (`processed` in state.db) is not driven again.
+    if let Some(id) = id {
+        if !crate::db::processed(&ctx.state, &format!("{fleet}#{n}:{why}:{id}"), ctx.now)? {
+            return Ok(writeln!(out, "kick {why} {id}: already processed")?);
+        }
     }
     let (again, ttl) = (format!("kick-{fleet}-{n}.again"), cfg.limits.spawn_pending_max_secs);
     let pending = (why == "drive").then(|| held(ctx, &format!("spawn-{fleet}-{n}.pending")));
@@ -238,6 +250,9 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: (
     }
     Ok(())
 }
+
+/// `kick --now`'s fleet, issue, why, `--now` and trigger id.
+pub type Kicked<'a> = (&'a str, u64, &'a str, bool, Option<&'a str>);
 
 /// #318: a pass's spawn as its own detached kick, at most `max_parallel_spawns` at once, admitted counting those starting.
 /// #513: a new `start` never takes the last free slot (unless it is the only one): in-flight work keeps it.
@@ -300,6 +315,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SPAWN_PENDING") => crate::waiting::SLOT.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
+        Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
         Some("LANE_LIVE") => match why.strip_prefix("finished (").and_then(|w| w.split_once(')')) {
             Some((st, _)) => format!(
@@ -608,17 +624,23 @@ fn pass(
     let ev = read(&ctx.state)?;
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
-        let (Some(on), Some((role, lane))) = (crate::events::held_on(&ev, s), s.active_lane()) else {
+        let on = crate::events::held_on(&ev, s);
+        let Some((role, lane)) = s.active_lane().filter(|_| !on.is_empty()) else {
             continue;
         };
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
         let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
-        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live || away {
+        let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
+        if on.iter().any(open) || fast && !live || away {
             continue;
         }
-        let text = format!("#{on} merged; rebase on {} and continue", f.integration);
+        let text = format!(
+            "{} merged; rebase on {} and continue",
+            crate::queue::hashes(&on),
+            f.integration
+        );
         let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
         let c = ["spawn", fleet, &n, role, "--supersede"];
         let woke = match pane {
@@ -698,28 +720,49 @@ fn pass(
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
             // #517: a lesson lane's one prompt to end with `done --no-change`.
-            let sp = crate::events::last_spawn(&events, &w.lane);
-            let (dsh, pane) = (
-                sp.and_then(|e| e.str("harness")) == Some("dsh"),
-                sp.and_then(|e| e.str("pane")),
-            );
-            let on = crate::hosts::On::of(r, sp);
-            let sent = crate::herdr::reply(
-                &on,
-                dsh,
-                &w.lane,
-                pane.unwrap_or_default(),
-                &crate::lesson::prompt(fleet, s.issue),
-            );
+            let sent = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue));
             writeln!(
                 out,
                 "{fleet} #{n} lesson lane prompted: {}",
-                if sent.is_ok() { "sent" } else { "not sent" }
+                if sent { "sent" } else { "not sent" }
             )?;
-            let d = json!({"agent": w.lane, "sent": sent.is_ok()});
+            let d = json!({"agent": w.lane, "sent": sent});
             append(
                 &ctx.state,
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
+            )?;
+        } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
+            // #511: a `done` with nothing new pushed is nudged once; a `working` lane gone idle is told to go on.
+            let (state, text) = if w.what == waiting::TURN_NUDGE {
+                let text = "herdsman: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+                    PR). Push and open the PR, then `herdsman turn done`; or `herdsman turn blocked --why <reason>`.";
+                ("done", text)
+            } else {
+                (
+                    "working",
+                    "herdsman: continue the task; end the turn with `herdsman turn …`.",
+                )
+            };
+            let sent = tell(r, &events, &w.lane, text);
+            writeln!(
+                out,
+                "{fleet} #{n} turn {state}: {}",
+                if sent { "prompted" } else { "not sent" }
+            )?;
+            let d = json!({"agent": w.lane, "state": state, "sent": sent});
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(s.issue), "turn-prompted", d),
+            )?;
+        } else if w.who == "drive" && w.what.starts_with(waiting::TURN_BLOCKED) && !fast {
+            // #511: a lane that reports itself blocked is the owner's: a card with its reason.
+            let why = &w.what[waiting::TURN_BLOCKED.len()..];
+            writeln!(out, "{fleet} #{n} needs-human: lane blocked: {why}")?;
+            let d = json!({"code": "LANE_BLOCKED", "reason": format!("lane blocked: {why}"), "agent": w.lane});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
             crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
@@ -902,6 +945,14 @@ fn no_proof(
     Ok(Some(code))
 }
 
+/// #517 #511: type `text` into `lane`'s pane (its last spawn's); true if sent.
+fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> bool {
+    let sp = crate::events::last_spawn(events, lane);
+    let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
+    let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
+    crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, text).is_ok()
+}
+
 /// #534: the words of a `LANE_LIVE` on a finished lane.
 pub(crate) const OLD: &str = "is in the way: replacing it";
 
@@ -1068,9 +1119,13 @@ fn handoff(
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         // #445: a recorded `done --no-change` is due at once; a check that runs only once labelled never blocks it.
-        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some();
+        // #511: so is a head its lane reported `done` at; any reported turn is idle.
+        let turn = waiting::turn(ev, s);
+        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some()
+            || turn.is_some_and(|t| t.str("state") == Some("done"));
         let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
-        let idle = done || (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
+        let quiet = w.who == "none" || w.what.contains(waiting::NO_PUSH) || turn.is_some();
+        let idle = done || quiet && ctx.now >= w.since + 120;
         if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }

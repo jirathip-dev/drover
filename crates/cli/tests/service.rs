@@ -97,7 +97,7 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     let addr = api.local_addr().unwrap().to_string();
     let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default().reply("herdr", "{}"), c.clone())));
     let sc = c.clone();
-    std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api));
+    std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api, None));
     let mut pid = None;
     for _ in 0..100 {
         pid = herdsman::service::up(&c);
@@ -109,7 +109,7 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     // The local socket answers with this process: a kick is taken by the service, not detached.
     assert_eq!(pid, Some(u64::from(std::process::id())));
     assert_eq!(
-        herdsman::service::kick(&c, "sendmeter", 12, "push"),
+        herdsman::service::kick(&c, "sendmeter", 12, "push", Some("t1")),
         Some(std::process::id())
     );
 

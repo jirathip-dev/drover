@@ -161,7 +161,7 @@ fn a_harness_that_wont_start_twice_rests() {
     let ev: Vec<_> = read(&c.state)
         .unwrap()
         .into_iter()
-        .filter(|e| e.kind != "spawn-started")
+        .filter(|e| !["spawn-started", "intent", "failed"].contains(&e.kind.as_str())) // #509: around each try
         .collect();
     let kinds: Vec<_> = ev.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["spawn-failed", "agent-unavailable"]);

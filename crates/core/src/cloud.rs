@@ -12,26 +12,44 @@ use std::path::Path;
 /// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size.
 fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
     let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
-    let file = format!("recipes/{}.toml", c.as_deref().unwrap_or(""));
-    let p = ctx.config.with_file_name(file);
-    let boat = || (c.as_deref() == Some("boat")).then(|| include_str!("../assets/recipes/boat.toml").into());
+    Ok((load(ctx, c.as_deref().unwrap_or(""))?, size))
+}
+
+/// Recipe `c`: `<config>/recipes/<c>.toml`, else the built-in `boat`.
+pub fn load(ctx: &Ctx, c: &str) -> Result<toml::Table> {
+    let p = ctx.config.with_file_name(format!("recipes/{c}.toml"));
+    let boat = || (c == "boat").then(|| include_str!("../assets/recipes/boat.toml").into());
     let text = std::fs::read_to_string(&p).ok().or_else(boat);
     let text = text.with_context(|| format!("cloud recipe {}", p.display()))?;
-    Ok((toml::from_str(&text)?, size))
+    Ok(toml::from_str(&text)?)
 }
 
 /// Run host `name`'s recipe command `verb`, the provider key exported from stdin (never in argv or a log); its stdout.
 fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Result<String> {
     let (rc, size) = recipe(ctx, cfg, name)?;
-    let s = |k: &str| rc.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let (var, line) = (s("key_env"), s(verb).replace("{name}", name).replace("{size}", &size));
-    let stored = || r.secret(&crate::secret::service("all", &var)).ok().flatten();
-    let key = std::env::var(&var).ok().or_else(stored).unwrap_or_default();
+    let line = rc.get(verb).and_then(|v| v.as_str()).unwrap_or_default();
+    let line = line.replace("{name}", name).replace("{size}", &size);
+    run(r, &rc, &format!("{name} {verb}"), &line, None)
+}
+
+/// Run recipe `rc`'s filled-in `line`: its provider key, then #537's `token` (as `RT`), exported from stdin.
+pub fn run(r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, token: Option<&str>) -> Result<String> {
+    let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
+    let stored = || r.secret(&crate::secret::service("all", var)).ok().flatten();
+    let key = std::env::var(var).ok().or_else(stored).unwrap_or_default();
     ensure!(!key.is_empty(), "{var} not set (env or the store's `all` secret {var})");
-    let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {line}");
-    let o = r.run_in("sh", &argv(&["-c", &script]), &format!("{key}\n"))?;
-    let err = o.stderr.trim().replace(&key, "•••");
-    ensure!(o.code == 0, "{name} {verb} failed ({}): {err}", o.code);
+    let rt = token.map_or("", |_| "IFS= read -r RT; export RT; ");
+    let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {rt}{line}");
+    let o = r.run_in(
+        "sh",
+        &argv(&["-c", &script]),
+        &format!("{key}\n{}", token.map_or(String::new(), |t| format!("{t}\n"))),
+    )?;
+    let mut err = o.stderr.trim().replace(&key, "•••");
+    if let Some(t) = token.filter(|t| !t.is_empty()) {
+        err = err.replace(t, "•••");
+    }
+    ensure!(o.code == 0, "{what} failed ({}): {err}", o.code);
     Ok(o.stdout)
 }
 

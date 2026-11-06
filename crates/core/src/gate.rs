@@ -364,20 +364,7 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
 /// two runs (base plus commit 1, then head), each a fenced command and its fenced output; a `verify` block a `>`
 /// quoted reason found in the PR body's `## Repro` section (`section`).
 fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
-    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
-    let ls: Vec<&str> = body.lines().collect();
-    let at =
-        (ls.iter().position(|l| key(l).starts_with("repro:"))).ok_or("no `Repro: run` or `Repro: verify` block")?;
-    let kind = key(ls[at]).split_off(6);
-    let mut fence = false;
-    let block: Vec<&str> = (ls[at + 1..].iter().copied())
-        .take_while(|l| {
-            let t = l.trim_start();
-            let end = !fence && t.starts_with('#');
-            fence ^= t.starts_with("```");
-            !end
-        })
-        .collect();
+    let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     match kind.trim_start_matches(['*', '_', '`', ' ']) {
         k if k.starts_with("run") => {
@@ -404,6 +391,24 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
         }
         _ => Err("`Repro:` is neither `run` nor `verify`".into()),
     }
+}
+
+/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next
+/// heading outside a fence.
+pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
+    let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
+    let ls: Vec<&str> = body.lines().collect();
+    let at = ls.iter().position(|l| key(l).starts_with("repro:"))?;
+    let mut fence = false;
+    let block = (ls[at + 1..].iter().copied())
+        .take_while(|l| {
+            let t = l.trim_start();
+            let end = !fence && t.starts_with('#');
+            fence ^= t.starts_with("```");
+            !end
+        })
+        .collect();
+    Some((key(ls[at]).split_off(6), block))
 }
 
 /// #420: the PR body's `## Repro` section, to the next heading.
@@ -534,7 +539,9 @@ fn premerge(
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
-    if checks.is_empty() {
+    let rules = std::fs::read_to_string(f.local_path().join(".herdsman/rules.md")).unwrap_or_default();
+    // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
+    if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
     }
     let (wt, into) = (
@@ -551,6 +558,9 @@ fn premerge(
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = std::time::Instant::now();
         let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
+        if clean && fail.is_none() {
+            crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
+        }
         let secs = t.elapsed().as_secs();
         let _ = tree(&["remove", "--force", &wts]);
         if !clean {
@@ -679,6 +689,35 @@ pub fn merge(
         writeln!(out, "already merged → {} (PR #{})", s("merge_sha"), s("pr"))?;
         return Ok(());
     }
+    // #509: a merge whose `merged` was never logged: in flight until its timeout, then done or the PR's own state.
+    let landed = |num: &str| -> Result<bool> {
+        Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
+    };
+    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
+    if let Some(a) = crate::action::last(&events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a)) {
+        let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
+        if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(r, a) {
+            return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
+        }
+        let d = json!({"pr": num, "head": head, "recovered": true});
+        let done = a.kind == "done" || landed(num)?;
+        if a.kind == "intent" {
+            crate::action::finish(&ctx.state, ctx.now, a, ["failed", "done"][usize::from(done)], d)?;
+        }
+        if done {
+            let over = a.data.get("over") == Some(&json!(true));
+            let fast = a.data.get("fast") == Some(&json!(true));
+            return merged(
+                ctx,
+                cfg,
+                r,
+                out,
+                (fleet, issue),
+                &json!({}),
+                (num, head, over, None, fast),
+            );
+        }
+    }
     let branch = branch_of(st.as_ref(), issue);
     let mut pr = if is_main(&f.integration) {
         json!({"baseRefName": f.integration})
@@ -778,8 +817,31 @@ pub fn merge(
         "--body",
         &body,
     ];
+    let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
+    let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
+    let at = (fleet, issue, "merge", head.as_str());
+    // Done meanwhile by another pass: skipped here, logged by the next (above).
+    let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
-    let mc = json(r, "gh", &["pr", "view", &num, "-R", &f.repo, "--json", "mergeCommit"])?;
+    intent.done(json!({"pr": num, "head": head}))?;
+    merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+/// #509: how long a merge's intent may stay open before the next pass recovers it from the PR.
+const MERGE_SECS: u64 = 600;
+
+/// After the PR merged: log it and its landing, the evidence comment, close the issue, tear its lanes down.
+fn merged(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, issue): (&str, u64),
+    pr: &Value,
+    (num, head, over, secs, fast): (&str, &str, bool, Option<u64>, bool),
+) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
+    let mc = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "mergeCommit"])?;
     let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
     if let Some(s) = secs {
@@ -791,7 +853,7 @@ pub fn merge(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     if f.land.is_some() {
         // #350: what `land::watch` and `stats land` read: the landing's mode and how long its gating checks took.
-        let checks = gh::required(&pr["statusCheckRollup"], f.checks(&pr));
+        let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {
             checks
                 .as_array()

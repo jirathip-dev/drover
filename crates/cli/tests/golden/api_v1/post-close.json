@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "BAD_VALUE",
+    "message": "no issue number",
+    "ok": false
+  },
+  "route": "POST /api/v1/close",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}

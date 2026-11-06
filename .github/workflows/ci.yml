@@ -64,6 +64,8 @@ jobs:
         run: just html-lint
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
+      - name: "lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)"
+        run: ./target/release/herdsman lesson-check
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
         run: |
           n=$(cat assets/*.js assets/*.css | wc -l)

@@ -19,6 +19,15 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
 | `snapshot` | `board`: #337's reads; `states`: #343's fold checkpoint |
+| `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
+
+**Retry-safe side effects (#509, `crates/core/src/action.rs`):** spawn, supersede and merge log an `intent` with a
+stable `action_id` (`<fleet>#<issue>:<step>@<key>`; key: the head sha for a merge, the role and the issue's last
+spawn seq for a spawn) before they act, and `done` or `failed` with the same id after. The intent is taken in one
+transaction that first reads the id's latest outcome: `done` skips (`ALREADY_DONE`), an intent younger than the
+step's timeout skips (`IN_FLIGHT`), an older one (a crash) is recovered from the real world (the PR merged, the lane
+logged or up) as `done`, or else `failed` and acted on again. A per-issue worker (#345) gets the same ids: each
+step derives its own.
 
 **Leases:** a row names its holder (pid and host), when it was taken and when it expires. Taking one is an atomic
 insert-if-free in one transaction: free means no row, an expired row, or a holder pid on this host that no longer

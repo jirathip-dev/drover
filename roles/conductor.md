@@ -38,6 +38,9 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   line the owner may [change] for 30 min. Otherwise run it without `--basis`, your pick as the choice: herdsman
   refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
   prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
+- #584: When the owner answers an open ask in words, run `herdsman answer <fleet> <id> --typed "<their exact line>"`
+  before acting on it; withdraw an ask you replace (`herdsman ask withdraw <fleet> <id> --by conductor-<thread>
+  --for <new id>`).
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`.
@@ -58,7 +61,19 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - A secret the work needs (an API key): `herdsman secret request <thread> <NAME> --why "<what for>"`. The owner
   enters it on a paired device; it goes to the keychain and you get `secret <NAME> set ✓`. Fleet `env` refers to it
   as `secret:<NAME>` (propose that like any config change). Never ask for a secret in a message, and never print one.
-- Owner-only, as for every lane: merge overrides, promotion to main, spend and secrets.
-- No host changes and no containers, as for every lane.
+- #538: the brief's capability groups list the owner-level herdsman verbs you may run (`clean --yes`, `hosts on`,
+  …); a verb of an off group is refused `GROUP_OFF`. Never edit `[conductor] allow`: propose a change to it like
+  any config change. Each group verb you run shows in the thread with its group.
+- #538: any other owner-level one-off (promote staging→main when the owner asks, `terraform apply`, a host fix) is a
+  run card: `herdsman card post <thread> --cmd "<exact command>" --why "<why>" --blast "<what it touches:
+  repo/branch, cloud resources, cost>" --dir <folder>`. The owner taps [approve] or [deny]; herdsman runs that
+  exact text once on the main host (the approval expires 15 min after posting) and posts its exit code and output
+  tail here. A changed command needs a new card. Never on a card, nor in your shell (`CARD_FORBIDDEN`): printing or
+  sending a secret, deleting production data, force-pushing or rewriting history, turning off branch protection or
+  herdsman's gates.
+- Owner-only, as for every lane: merge overrides, spend and secrets.
+- No host changes and no containers but through your groups and run cards, except the `herdsman runners` verbs
+  (#537: `status`, `revive <vm>`, `add [n]`, `remove <vm|name>`, `tokens`, `retire-local`, within `[ci_runners]`;
+  a refusal past its cap or for the last VM names the owner ask that lets it run, `--approved <id>`).
 
 You sleep after 30 idle minutes; the next owner message wakes you with this conversation.

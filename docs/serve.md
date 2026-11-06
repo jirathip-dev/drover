@@ -336,20 +336,36 @@ fails on any other direct dependency.
 ## JSON API v1 (#265)
 
 `herdsman serve` answers JSON under `/api/v1/`, the TypeScript board's (`web/`) every read, and later the native app's. Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
-transcript, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host) refuse an unpaired one.
+transcript, a setup screen, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host, bqueue, cond, and
+#555's send, menu, act, setup, chat-about, chat, close) refuse an unpaired one.
 
 | route | answer |
 |---|---|
 | `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
 | `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
-| `GET queue` | #268: the Queue tab: a card per fleet (needing you first) with its `k` colour, serial groups, `need`, `paused` line or `drive` line and red `notes`, its `rows` (state, age and `t`, stage chips, lane, PR line, notes, a defaulted decision and its `ask`, ▲/▼ targets, the `lanes` list), `done` today, the `backlog` and the `config` sheet's data; `rw` and `live` say which forms show and whether they post |
+| `GET queue` | #268: the Queue tab: a card per fleet (needing you first) with its `k` colour, serial groups, `need`, `paused` line or `drive` line and red `notes`, its `rows` (state, age and `t`, stage chips, lane, PR line, notes, a defaulted decision and its `ask`, ▲/▼ targets, the `lanes` list), #576 their `marks` by issue (`design`, `verify` `on`/`off`/null, `repro`, `serial`, `needs`, the verify `note`), `done` today, the `backlog` and the `config` sheet's data; `rw` and `live` say which forms show and whether they post |
+| `GET issue/<fleet>/<n>` | #576: the issue's recorded verdicts, newest first: `role` (the stage: `rev`, `verify`), `round`, `sha`, `verdict`, `findings` (verdict.md after its first line), the newest one's screenshot `shots` (`/shot/<fleet>/<n>/<i>` serves the `i`th) and a `--repro` PASS's `repro` block (`kind` `run` or `verify`, its `text`) |
+| `GET lessons` | #576: per fleet its `lessons` (`weekly`, `off`), the `last` lesson lane (`issue`, its spawn `ts`, the issue's `state`) and `next`, when tick runs the next (null: `off`) |
+| `GET lessons/<fleet>/digest?days=N` | #576: the CLI's `lesson digest` (default 7 days) as `text` |
 | `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
 | `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread) |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes |
 | `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
-| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
+| `GET herd` | #555: Herd mode's data, the same as `/herd.json` |
+| `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the conductor) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
+| `GET setup/<pane>` | #555: a setup terminal's screen (`lines`, `urls`, `closed`), the old board's `/lane?setup=` |
+| `POST send` | #555: `{agent, text}` to a lane, or `{setup, text}` into a setup terminal: the old board's `/send` (10 a minute per device: `RATE_LIMIT`; `PAUSED`, `REV_READONLY`, `BAD_VALUE`) |
+| `POST menu` | #555: `{agent, choice, h}`, a blocked lane's menu option: `/answer` (`STALE` when the menu is not the card's `h`) |
+| `POST act` | #555: `{agent, op, confirm}`, stop, kill, clean or close: `/act` (kill and clean dry-run without `confirm`) |
+| `POST setup` | #555: `{host, name}`, start a configured setup terminal: `/setup` (`NO_SUCH_SETUP`) |
+| `POST chat-about` | #555: `{fleet, issue}`, a backlog row's [chat about]: a new thread in the fleet's repo whose first message names the issue |
+| `POST chat` | #555: `{harness, model, effort, mtime}`, `[chat]`'s defaults written into fleet.toml (`BAD_VALUE`, `STALE`, `DOCTOR` as `cond`) |
+| `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
+| `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
+| `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
@@ -358,7 +374,11 @@ never caches `api/`. A breaking change is `/api/v2/`.
 
 The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
 `assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
-`crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`.
+`crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`. #555: the contract with
+cooee and the drover plugins is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
+`crates/cli/tests/golden/api_v1/` (the route, its Rust type, the type's schema generated from its default, and a recorded
+response; drover's module tests copy them). A response whose shape (keys, each value's JSON type) or a type whose schema
+changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
 `dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev
