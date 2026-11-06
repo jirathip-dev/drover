@@ -340,7 +340,9 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    /// #537: the `[ci_runners]` VMs and their GitHub runners (a conductor's `runners` group); each verb logged `runners-*`
+    /// #537: the `[ci_runners]` VMs and their GitHub runners (a conductor's `runners` group, its brief names the verbs);
+    /// each verb logged `runners-*`
+    #[command(hide = true)]
     Runners {
         #[command(subcommand)]
         cmd: RunnersCmd,

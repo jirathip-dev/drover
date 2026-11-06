@@ -108,13 +108,14 @@ fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Opti
     let fill = |l: String| {
         let ttl = (c.ttl_hours * 3600).to_string();
         let l = l.replace("{vm}", vm).replace("{size}", &c.size).replace("{ttl}", &ttl);
-        l.replace("{snapshots}", &c.snapshots.to_string())
+        let l = l.replace("{snapshots}", &c.snapshots.to_string());
+        l.replace("{service}", &c.service)
     };
     let line = match key {
         "runner_create" | "runner_state" | "runner_delete" => fill(s(key)?),
         _ => format!(
             "export C='{}'; {}",
-            s(key)?.replace('\'', "'\\''"),
+            fill(s(key)?).replace('\'', "'\\''"),
             fill(s("runner_exec")?)
         ),
     };

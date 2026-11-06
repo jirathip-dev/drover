@@ -58,6 +58,13 @@ pub struct CiRunners {
     pub vms: Vec<String>,
     pub local_label: Option<String>,
     pub local_stop: Option<String>,
+    /// The VMs' runner service (the recipe's `{service}`).
+    #[serde(default = "ci_service")]
+    pub service: String,
+}
+
+fn ci_service() -> String {
+    "ci-runner".into()
 }
 
 #[derive(Debug, Default, Deserialize)]

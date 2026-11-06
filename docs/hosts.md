@@ -267,7 +267,7 @@ sandbox from it that starts ready. Check both against docs.boat.dev.
 [ci_runners]
 provider = "boat"        # a recipe, like a cloud host's: the built-in boat, or <config>/recipes/<name>.toml
 repo = "owner/app"       # the repo the runners register to
-label = "synergy-boat"   # the VM runners' label
+label = "app-boat"       # the VM runners' label
 size = "large"           # a key of the recipe's [rate_usd_hour]
 ttl_hours = 0            # 0: no TTL
 snapshots = false
@@ -275,7 +275,8 @@ slots = 3                # runner slots per VM
 max_vms = 5
 usd_day = 30             # the $/day cap: VMs × rate × 24
 vms = ["bx_1", "bx_2"]   # the VMs made by hand; `runners add|remove` change the set in the log
-local_label = "synergy-self"                      # optional: this host's own runners (`retire-local`)
+service = "ci-runner"    # the VMs' runner service (the default), the recipe's `{service}`
+local_label = "app-self"                          # optional: this host's own runners (`retire-local`)
 local_stop = "~/ci/ci-runners.sh down --now"      # optional: the command that stops them
 ```
 

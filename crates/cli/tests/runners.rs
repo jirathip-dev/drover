@@ -15,7 +15,7 @@ runner_create = "fakeboat create {size} {ttl} {snapshots}"
 runner_state = "fakeboat state {vm}"
 runner_delete = "fakeboat delete {vm}"
 runner_exec = "fakeboat exec {vm}"
-runner_revive = "revive {rt}"
+runner_revive = "revive {rt} {service}"
 runner_token = "token {rt}"
 runner_drain = "drain"
 runner_names = "names"
@@ -135,7 +135,11 @@ fn revive_pushes_a_fresh_token_restarts_and_logs_it_never_showing_the_token() {
     let r = fake(&fleet(0, false));
     let (code, out) = run(&c, &r, &["runners", "revive", "vm2"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called(&on("vm2", true, "revive {rt}")), "{:?}", r.calls.borrow());
+    assert!(
+        r.called(&on("vm2", true, "revive {rt} ci-runner")),
+        "{:?}",
+        r.calls.borrow()
+    );
     let stdin = r
         .inputs
         .borrow()
@@ -148,7 +152,7 @@ fn revive_pushes_a_fresh_token_restarts_and_logs_it_never_showing_the_token() {
     assert_eq!(kinds(&c, "runners-revive")[0].str("vm"), Some("vm2"));
     no_token(&c, &r, &out);
     assert_ne!(run(&c, &r, &["runners", "revive", "vm9"]).0, 0, "no such VM");
-    assert!(!r.called(&on("vm9", true, "revive {rt}")));
+    assert!(!r.called(&on("vm9", true, "revive {rt} ci-runner")));
 }
 
 #[test]
@@ -160,7 +164,7 @@ fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on()
     assert!(out.contains("vm3: created (large), 3 runners starting"), "{out}");
     let add = &kinds(&c, "runners-add")[0];
     assert_eq!((add.str("vm"), add.data["usd_day"].as_f64()), (Some("vm3"), Some(12.0)));
-    assert!(r.called(&on("vm3", true, "revive {rt}")));
+    assert!(r.called(&on("vm3", true, "revive {rt} ci-runner")));
     no_token(&c, &r, &out);
     // A 4th VM is past max_vms 3: refused, nothing created.
     let made = r.count(&rc(false, "fakeboat create"));
