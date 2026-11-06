@@ -219,6 +219,14 @@ decision shows on its issue row as `decided by default: <option>` with **[change
 `herdsman answer`) logs a new `decision` and prompts the lane, or the next lane's brief carries it. A decision
 someone made is final (`ALREADY_ANSWERED`).
 
+#584: an ask closes on every real ending, and `herdsman asks --all` says which: `answered` (a tap, `herdsman answer`,
+or `answer <fleet> <id> --typed "<line>"`, which a conductor runs with the owner's exact line from the ask's thread,
+logged `by: owner (typed)`; any other line is `NOT_TYPED`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
+thread's conductor), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
+gone`. `herdsman check` expires an ask open over `[limits] ask_expire_hours` (24) that nobody waits on: a thread ask
+with no lane, a handoff card, an ask whose lane is no live agent. A live lane's ask never expires; `ask-waiting`
+repeats for it once a day. The first `check` after #584 sweeps the log once (`asks-swept`, with the count).
+
 ## Check and notifiers
 
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
