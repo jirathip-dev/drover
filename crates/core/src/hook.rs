@@ -138,11 +138,12 @@ fn resolve(w: &str, cwd: &str) -> String {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    let cmd = &unquote(cmd);
-    let mut cwd = cwd.to_string();
-    if let Some(d) = denied(cmd, &p.deny) {
+    // #537: a quoted argument's text (`gh issue create --body "…docker…"`) is no command word.
+    if let Some(d) = denied(&unquote(cmd, true), &p.deny) {
         return Some(d.reason());
     }
+    let cmd = &unquote(cmd, false);
+    let mut cwd = cwd.to_string();
     // #538: the hard nos no run card may run, from a conductor's own shell either.
     if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.conductor) {
         return Some(format!(
@@ -244,8 +245,9 @@ fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
 
 /// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
 /// bodies fed to `cat` or `tee`, comments, and the quoted text of `herdsman thread reply|say` and `herdsman ask`
-/// (the question, each `--option`).
-fn unquote(cmd: &str) -> String {
+/// (the question, each `--option`). #537: with `args`, also any quoted argument of a command that runs no text of its
+/// own: none of its words a wrapper (`sh`, `eval`, …), `ssh`, `watch`, `parallel` or `-c` (`su -c`, `script -c`).
+fn unquote(cmd: &str, args: bool) -> String {
     let (mut out, mut cur) = (String::new(), String::new());
     // Pending heredocs: delimiter, quoted, body dropped.
     let mut docs = Vec::<(String, bool, bool)>::new();
@@ -267,6 +269,10 @@ fn unquote(cmd: &str) -> String {
                 });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
+                let runs =
+                    |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
+                let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
+                let text = text || data;
                 // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
                 let ansi = c == '\'' && out.ends_with('$');
                 out.push(c);
