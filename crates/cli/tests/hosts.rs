@@ -1393,5 +1393,6 @@ fn a_symlinked_herdsman_updates_and_reads_back_its_real_install_root() {
         "--root '\\''{}'\\'' --force && '\\''{real}'\\'' profiles sync",
         root.display()
     );
-    assert!(r.called(&root), "{:#?}", r.calls.borrow());
+    let calls = r.calls.borrow();
+    assert!(calls.iter().any(|c| c.contains(&root)), "{calls:#?}");
 }
