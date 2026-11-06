@@ -69,6 +69,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   sending a secret, deleting production data, force-pushing or rewriting history, turning off branch protection or
   herdsman's gates.
 - Owner-only, as for every lane: merge overrides, spend and secrets.
-- No host changes and no containers but through your groups and run cards.
+- No host changes and no containers but through your groups and run cards, except the `herdsman runners` verbs
+  (#537: `status`, `revive <vm>`, `add [n]`, `remove <vm|name>`, `tokens`, `retire-local`, within `[ci_runners]`;
+  a refusal past its cap or for the last VM names the owner ask that lets it run, `--approved <id>`).
 
 You sleep after 30 idle minutes; the next owner message wakes you with this conversation.

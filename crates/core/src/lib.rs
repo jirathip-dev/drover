@@ -31,6 +31,7 @@ pub mod protection;
 pub mod queue;
 pub mod report;
 pub mod runner;
+pub mod runners;
 pub mod secret;
 pub mod service;
 pub mod setup;

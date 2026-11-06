@@ -346,6 +346,13 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
+    /// #537: the `[ci_runners]` VMs and their GitHub runners (a conductor's `runners` group, its brief names the verbs);
+    /// each verb logged `runners-*`
+    #[command(hide = true)]
+    Runners {
+        #[command(subcommand)]
+        cmd: RunnersCmd,
+    },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
@@ -657,6 +664,37 @@ enum HostsCmd {
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
     #[command(hide = true)]
     Snapshot { name: String },
+}
+
+#[derive(Subcommand)]
+enum RunnersCmd {
+    /// The GitHub runners, each VM's state and a health line (`9/9 online`)
+    Status,
+    /// A fresh registration token and a runner-service restart on that VM
+    Revive { vm: String },
+    /// Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)
+    Add {
+        #[arg(default_value_t = 1)]
+        n: u64,
+        /// The owner ask that approved going past the cap
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
+    /// Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name
+    Remove {
+        target: String,
+        /// The owner ask that approved removing the last online VM (RUNNERS_LAST)
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
+    /// Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher
+    Tokens,
+    /// Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)
+    RetireLocal {
+        /// The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1376,6 +1414,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::strays(ctx, &cfg, out, yes)?;
                         check::remote_orphans(&cfg, r, out, orphans && yes)?;
                     }
+                }
+                Cmd::Runners { cmd } => {
+                    use crate::runners::Verb;
+                    let (verb, id) = match cmd {
+                        RunnersCmd::Status => (Verb::Status, None),
+                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
+                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
+                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
+                        RunnersCmd::Tokens => (Verb::Tokens, None),
+                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
+                    };
+                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
                 }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
