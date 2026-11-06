@@ -99,6 +99,8 @@ jobs:
   ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20 # #71: backstop; ui-audit.sh kills a hung Chrome run after 60 s
+    outputs:
+      flaky: ${{ steps.hangs.outputs.flaky }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -117,6 +119,13 @@ jobs:
           echo "CHROME=$c" >> "$GITHUB_ENV"
       - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
+      # #566: every hung Chrome run in the job summary; views still hung after 2 retries go to the soft `ui-flaky` check.
+      - name: Chrome hangs
+        id: hangs
+        if: always()
+        run: |
+          if [ -s ui-390/hangs.txt ]; then { echo "### Chrome hangs (#566)"; sed 's/^/- /' ui-390/hangs.txt; } >> "$GITHUB_STEP_SUMMARY"; fi
+          echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
       - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
         run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
       - uses: actions/upload-artifact@v4
@@ -125,6 +134,37 @@ jobs:
           name: ui-390
           path: ui-390/*.png
           retention-days: 14
+
+  # #566 AC2, temporary: the herd-night-storm screenshot 20 times in a row, each under 10 s (removed after one run).
+  storm-loop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - run: cargo build --release --locked
+      - run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
+      - run: |
+          c=$(npx -y @puppeteer/browsers@2.6.1 install chrome-headless-shell@156.0.8078.80 --path "$RUNNER_TEMP/chs" | tail -1 | cut -d' ' -f2-)
+          python3 -m http.server 8390 --bind 127.0.0.1 --directory site >/dev/null 2>&1 & sleep 2
+          for i in $(seq 20); do
+            p=$(mktemp -d); s=$(date +%s.%N)
+            timeout 10 "$c" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$p" --no-first-run --window-size=390,844 \
+              --force-device-scale-factor=3 --virtual-time-budget=8000 --screenshot="storm-$i.png" \
+              "http://127.0.0.1:8390/index.html?audit=herd-night-storm&shot=1" 2>/dev/null || { echo "run $i: exit $? (10 s limit)"; exit 1; }
+            echo "run $i: $(echo "$(date +%s.%N) - $s" | bc) s" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+  # #566: the soft check: views whose Chrome run hung 3 times. A warning, never red: the hang is no assertion failure.
+  ui-flaky:
+    needs: ui
+    if: always() && needs.ui.outputs.flaky != ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::warning::headless Chrome hung 3 times on: $FLAKY (not this PR's failure; see the ui job summary)"
+          echo "Chrome hung 3 times on: $FLAKY" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          FLAKY: ${{ needs.ui.outputs.flaky }}
 
   # #200: the sheet close in WebKit (iOS Safari's engine; Chrome never showed the flash): the page above a closing
   # sheet keeps its colour. The PNG is each sheet's worst frame.
