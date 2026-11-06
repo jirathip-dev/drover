@@ -447,6 +447,10 @@ pub const PASSIVE: &[&str] = &[
     "ask-failed",
     "ask-expired",
     "asks-swept",
+    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
+    "intent",
+    "done",
+    "failed",
 ];
 
 /// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its

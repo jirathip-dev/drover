@@ -109,7 +109,7 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     // The local socket answers with this process: a kick is taken by the service, not detached.
     assert_eq!(pid, Some(u64::from(std::process::id())));
     assert_eq!(
-        herdsman::service::kick(&c, "sendmeter", 12, "push"),
+        herdsman::service::kick(&c, "sendmeter", 12, "push", Some("t1")),
         Some(std::process::id())
     );
 

@@ -37,8 +37,11 @@ pub fn up(ctx: &Ctx) -> Option<u64> {
 }
 
 /// A kick the service drives in process at once: its pid (the spawn marker's holder).
-pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str) -> Option<u32> {
-    let v = call(ctx, &json!({"kick": {"fleet": fleet, "issue": issue, "why": why}}))?;
+pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str, id: Option<&str>) -> Option<u32> {
+    let v = call(
+        ctx,
+        &json!({"kick": {"fleet": fleet, "issue": issue, "why": why, "id": id}}),
+    )?;
     v["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
 }
 
