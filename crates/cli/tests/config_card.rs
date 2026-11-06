@@ -268,3 +268,33 @@ fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
         [1., 0.]
     );
 }
+
+/// #558: `config apply` of a proposal adding a fleet kicks drive for its first queued issue at once; an existing
+/// fleet's queue is left to the pass.
+#[test]
+fn applying_a_new_fleet_kicks_its_first_queued_issue() {
+    let c = setup("cfg-add-fleet");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let added = old.split("\n[limits]").next().unwrap().replace("sendmeter", "drover");
+    let file = c.config.with_file_name("proposed.toml");
+    std::fs::write(&file, format!("{old}\n{added}")).unwrap();
+    let r = Fake::default();
+    assert_eq!(
+        run(&c, &r, &["config", "propose", "t1", file.to_str().unwrap()]).1,
+        "c1\n"
+    );
+    for (f, n) in [("drover", 5), ("drover", 6), ("sendmeter", 9)] {
+        let d = json!({"op": "add", "issues": [n]});
+        append(&c.state, &Event::new(T, f, None, "queue", d)).unwrap();
+    }
+    let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.trim_end().ends_with(", drover #5 kicked"), "{out}");
+    let calls = r.calls.borrow();
+    let kicks: Vec<_> = calls.iter().filter(|c| c.contains(" kick ")).collect();
+    assert_eq!(kicks.len(), 1, "{kicks:?}");
+    assert!(
+        kicks[0].contains(" kick drover 5 --why config-apply --now "),
+        "{kicks:?}"
+    );
+}

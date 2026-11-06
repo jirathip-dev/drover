@@ -17,6 +17,10 @@ pub trait Runner: Sync {
     fn run_in(&self, prog: &str, args: &[String], _input: &str) -> Result<Out> {
         self.run(prog, args)
     }
+    /// #561: `run_in`, its child killed (exit 124) once `limit` has passed; fakes answer at once.
+    fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> Result<Out> {
+        self.run_in(prog, args, input)
+    }
     /// Pause between polls/retries; fakes skip it.
     fn sleep(&self, secs: u64) {
         std::thread::sleep(std::time::Duration::from_secs(secs));
@@ -56,6 +60,9 @@ impl Runner for Real {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         self.within(prog, args, input, limit(prog, args))
     }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
+        self.within(prog, args, input, Some(limit))
+    }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
         extern "C" {
@@ -80,16 +87,92 @@ impl Runner for Real {
         Ok(pid)
     }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
-        match entry(svc)?.get_password() {
-            Err(keyring::Error::NoEntry) => Ok(None),
-            x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
-        }
+        store_get(self, svc)
     }
     fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        let e = entry(svc)?;
-        let done = value.map_or_else(|| e.delete_credential(), |v| e.set_password(v));
-        done.with_context(|| format!("secret store: {svc}"))
+        store_set(self, svc, value)
     }
+}
+
+/// #441: `svc`'s secret in the OS store (None: not set); #548: on `r`'s clock, `KEYCHAIN_LOCKED` past `KEYCHAIN_SECS`.
+pub fn store_get(r: &dyn Runner, svc: &str) -> Result<Option<String>> {
+    let e = entry(svc)?;
+    match keychain(r, svc, move || e.get_password())? {
+        Err(keyring::Error::NoEntry) => Ok(None),
+        x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
+    }
+}
+
+/// #441: save `svc`'s secret (None: delete it) in the OS store; #548: as `store_get`, never blocking.
+pub fn store_set(r: &dyn Runner, svc: &str, value: Option<&str>) -> Result<()> {
+    let (e, v) = (entry(svc)?, value.map(String::from));
+    let done = keychain(r, svc, move || {
+        v.map_or_else(|| e.delete_credential(), |v| e.set_password(&v))
+    })?;
+    done.with_context(|| format!("secret store: {svc}"))
+}
+
+/// #548: how long a keychain call may wait (a macOS access dialog nobody clicks blocks it for good).
+pub const KEYCHAIN_SECS: u64 = 5;
+
+/// #548: `f` (a keychain call on `svc`) on a worker thread, given `KEYCHAIN_SECS` (`r`'s clock) to answer; past that
+/// `KEYCHAIN_LOCKED` with the fix, and the worker is left waiting on the dialog.
+fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(f()));
+    let mut got = rx.recv_timeout(Duration::from_millis(200)).ok();
+    for _ in 0..KEYCHAIN_SECS {
+        if got.is_some() {
+            break;
+        }
+        r.sleep(1);
+        got = rx.try_recv().ok();
+    }
+    got.map_or_else(|| locked(r, svc), Ok)
+}
+
+/// #548: the one-time fix that lets the herdsman with code hash `cdhash` read `svc` without a prompt: its partition
+/// list admits that build (amendment A: an ad-hoc signed rebuild matches only its own `cdhash:`).
+pub fn keychain_fix(cdhash: Option<&str>, svc: &str) -> String {
+    let cd = cdhash.map(|h| format!(",cdhash:{h}")).unwrap_or_default();
+    format!("security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:{cd} -s {svc} -a herdsman")
+}
+
+/// #548: this binary's code hash (`codesign`'s `CDHash=`); None: unsigned or no `codesign` (not macOS).
+pub fn cdhash(r: &dyn Runner) -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let o = r.run("codesign", &argv(&["-dvvv", &exe.to_string_lossy()])).ok()?;
+    let all = o.stdout + &o.stderr;
+    all.lines().find_map(|l| l.strip_prefix("CDHash=")).map(String::from)
+}
+
+/// #548: each `herdsman/` item's partition list in `security dump-keychain -a` output: (service, `apple-tool:, …`).
+pub fn partitions(dump: &str) -> Vec<(String, String)> {
+    let (mut out, mut svc, mut next) = (Vec::new(), None, false);
+    for l in dump.lines().map(str::trim) {
+        if l.starts_with("keychain: ") {
+            (svc, next) = (None, false);
+        } else if let Some(s) = l.strip_prefix("\"svce\"<blob>=\"").and_then(|s| s.strip_suffix('"')) {
+            svc = s.starts_with("herdsman/").then(|| s.to_string());
+        } else if l.ends_with("): partition_id") {
+            next = true;
+        } else if let (true, Some(p), Some(s)) = (next, l.strip_prefix("description: "), &svc) {
+            out.push((s.clone(), p.to_string()));
+            next = false;
+        }
+    }
+    out
+}
+
+fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
+    let host = ok(r, "hostname", &["-s"]).map_or_else(|_| "this host".into(), |h| h.trim().to_string());
+    crate::gate::refused(
+        "KEYCHAIN_LOCKED",
+        format!(
+            "approve herdsman in the Keychain dialog on {host}, or run {}",
+            keychain_fix(cdhash(r).as_deref(), svc)
+        ),
+    )
 }
 
 impl Real {

@@ -126,8 +126,21 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         d.as_object_mut()
             .unwrap()
             .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);
+        // #558: each fleet it adds has its first queued issue kicked now, not at the next pass.
+        let new = Config::parse(p.str("text").unwrap_or_default())?;
+        let mut kicked = String::new();
+        for (f, _) in new
+            .fleet
+            .iter()
+            .filter(|(f, c)| !c.paused && !cfg.fleet.contains_key(*f))
+        {
+            if let Some(n) = crate::queue::startable(&events, f).first().and_then(|n| n.parse().ok()) {
+                crate::drive::kick(ctx, r, f, n, "config-apply");
+                kicked += &format!(", {f} #{n} kicked");
+            }
+        }
         format!(
-            "config {id} applied by owner, backup kept, doctor {}",
+            "config {id} applied by owner, backup kept, doctor {}{kicked}",
             ["✗ (run herdsman doctor)", "✓"][usize::from(ok)]
         )
     } else {
