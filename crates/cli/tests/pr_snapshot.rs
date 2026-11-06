@@ -96,3 +96,69 @@ fn status_and_serve_make_no_gh_call() {
     let after = &r.calls.borrow()[seen..];
     assert!(!after.iter().any(|l| l.starts_with("gh ")), "{after:?}");
 }
+
+/// `gh api -i` output: a status line, the `ETag` header, a body.
+fn probe(status: &str, etag: &str) -> String {
+    format!("HTTP/2.0 {status}\r\nContent-Type: application/json\r\nEtag: {etag}\r\n\r\n[]")
+}
+
+#[test]
+fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
+    let c = ctx(&tmpdir("snap-etag"), CONFIG);
+    let ns: Vec<u64> = (1..=30).collect();
+    for n in &ns {
+        lane(&c, "sendmeter", *n);
+    }
+    let pulls = "gh api -i repos/jirathip-dev/sendmeter/pulls?";
+    let r = calm()
+        .reply("gh api graphql", &open_prs(&ns))
+        .reply(pulls, &probe("200 OK", "W/\"p1\""))
+        .reply(
+            "gh api -i repos/jirathip-dev/sendmeter/actions/runs",
+            &probe("200 OK", "\"a1\""),
+        )
+        .reply(
+            "gh api -i repos/jirathip-dev/sendmeter/branches/staging",
+            &probe("200 OK", "\"b1\""),
+        )
+        .reply("gh api -i -H If-None-Match: ", &probe("304 Not Modified", "\"x\""));
+    let mut c = c;
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(
+        r.count("gh api graphql"),
+        1,
+        "30 PRs, one query: {:?}",
+        r.calls.borrow()
+    );
+    assert_eq!(herdsman::gh::cached_pr(&c, "sendmeter", 30)["number"], 130);
+    // The next poll: each probe carries its ETag, each answers 304, and nothing else reaches GitHub.
+    c.now += 15;
+    let seen = r.calls.borrow().len();
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    let gh: Vec<_> = r.calls.borrow()[seen..]
+        .iter()
+        .filter(|l| l.starts_with("gh "))
+        .cloned()
+        .collect();
+    assert_eq!(
+        gh,
+        [
+            "gh api -i -H If-None-Match: W/\"p1\" repos/jirathip-dev/sendmeter/pulls?state=open&sort=updated&direction=desc&per_page=100",
+            "gh api -i -H If-None-Match: \"a1\" repos/jirathip-dev/sendmeter/actions/runs?per_page=50",
+            "gh api -i -H If-None-Match: \"b1\" repos/jirathip-dev/sendmeter/branches/staging",
+        ]
+    );
+    assert_eq!(
+        herdsman::gh::cached_at(&c, "sendmeter", 30),
+        Some(c.now),
+        "the cards stay fresh"
+    );
+    // A moved probe (a 200 with a new ETag) queries again.
+    let r2 = calm()
+        .reply("gh api graphql", &open_prs(&ns))
+        .reply("gh api -i -H If-None-Match: W/\"p1\"", &probe("200 OK", "W/\"p2\""))
+        .reply("gh api -i -H If-None-Match: ", &probe("304 Not Modified", "\"x\""));
+    c.now += 15;
+    assert_eq!(run(&c, &r2, &["drive", "--fast"]).0, 0);
+    assert_eq!(r2.count("gh api graphql"), 1, "{:?}", r2.calls.borrow());
+}
