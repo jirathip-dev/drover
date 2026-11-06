@@ -222,3 +222,39 @@ fn a_lane_live_loop_on_a_finished_lane_is_an_orphan() {
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     fires_once(&mut c, &r, T0 + 10, 7);
 }
+
+/// #558: `waiting` names why drive hasn't started a queued issue, never `→ ?`: a paused fleet, or drive's last pass
+/// of the fleet and, past 10 min, a stuck tick.
+#[test]
+fn waiting_names_why_drive_has_not_started_a_queued_issue() {
+    let d = tmpdir("orphan-558");
+    let mut c = ctx(&d, CONFIG);
+    ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
+    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let line = |c: &herdsman::Ctx| {
+        let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(!out.contains("→ ?"), "{out}");
+        out.lines()
+            .find(|l| l.starts_with("sendmeter #12 drive: "))
+            .unwrap()
+            .to_string()
+    };
+    let last = c.state.parent().unwrap().join("drive-sendmeter.last");
+    std::fs::write(&last, T0.to_string()).unwrap();
+    c.now = T0 + 120;
+    assert!(line(&c).ends_with("→ drive's next pass (last 2m ago)"), "{}", line(&c));
+    c.now = T0 + 1200;
+    let l = line(&c);
+    assert!(
+        l.ends_with("→ drive's next pass (last 20m ago): tick stuck? herdsman doctor"),
+        "{l}"
+    );
+    let paused = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
+    std::fs::write(&c.config, paused).unwrap();
+    assert!(
+        line(&c).ends_with("→ paused: herdsman resume sendmeter"),
+        "{}",
+        line(&c)
+    );
+}
