@@ -130,6 +130,16 @@ impl Harness for Claude {
     fn env(&self) -> &'static [&'static str] {
         &["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"]
     }
+    /// #565: claude-agent-acp loads Claude Code's user settings, so a lane whose `CLAUDE_CONFIG_DIR` is its profile
+    /// runs that profile's `PreToolUse` guard.
+    fn acp(&self) -> Option<&'static str> {
+        Some("claude-acp")
+    }
+    fn acp_env(&self, profile: &Path, model: Option<&str>) -> Vec<(&'static str, String)> {
+        let mut env = vec![("CLAUDE_CONFIG_DIR", profile.to_string_lossy().into_owned())];
+        env.extend(model.map(|m| ("ANTHROPIC_MODEL", m.to_string())));
+        env
+    }
     /// The env var Claude Code reads its OAuth token from.
     fn credential(&self) -> Credential {
         Credential::Token("CLAUDE_CODE_OAUTH_TOKEN")

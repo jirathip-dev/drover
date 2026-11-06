@@ -101,7 +101,10 @@ impl Runtime {
         let acp = self.kind == RuntimeKind::ShedAcp;
         (acp || matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth)).then(|| crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
-            acp: self.acp.clone().or_else(|| acp.then(|| "claude-acp".into())),
+            acp: self
+                .acp
+                .clone()
+                .or_else(|| acp.then(crate::harness::default_acp).flatten().map(Into::into)),
             policy: self
                 .acp_policy
                 .clone()

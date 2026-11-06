@@ -480,12 +480,8 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: the ACP adapters known to run their harness's own hooks: claude-agent-acp loads Claude Code's user settings,
-/// so a lane whose `CLAUDE_CONFIG_DIR` is its profile runs that profile's `PreToolUse` guard.
-const HOOKED_ACP: [(&str, &str); 1] = [("claude", "claude-acp")];
-
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
-/// file, with its profile as Claude Code's config folder and no `$SHED` (its state is the session's, not the hook's).
+/// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
 fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
@@ -498,7 +494,7 @@ fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Resul
     let guard = hook_command(ctx, p.family);
     let why = if remote {
         "shed runs ACP sessions on its own host only".to_string()
-    } else if !HOOKED_ACP.contains(&(p.harness.as_str(), id)) {
+    } else if harness::get(&p.harness).acp() != Some(id) {
         format!("ACP agent {id} runs no {} hook", p.harness)
     } else if !hooks.into_iter().any(|h| h["command"] == guard.as_str()) {
         format!(
@@ -521,8 +517,8 @@ fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Resul
     let mut words = p.lane_cmd("")[3..].to_vec();
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let mut own = vec![format!("CLAUDE_CONFIG_DIR={}", q(&dir.to_string_lossy()))];
-    own.extend(p.model.iter().map(|m| format!("ANTHROPIC_MODEL={}", q(m))));
+    let env = harness::get(&p.harness).acp_env(&dir, p.model.as_deref());
+    let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
     let line = words.join(" ") + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
