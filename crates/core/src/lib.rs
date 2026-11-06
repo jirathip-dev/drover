@@ -1,6 +1,7 @@
 //! fleet: agents act only through this CLI; it owns state and refuses rule breaks.
 pub mod access;
 pub mod action;
+pub mod card;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;

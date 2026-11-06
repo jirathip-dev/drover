@@ -1,0 +1,75 @@
+{
+  "response": {
+    "fleets": [
+      {
+        "color": "g",
+        "lanes": [
+          {
+            "account": null,
+            "act": "impl",
+            "age": "100s",
+            "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",
+            "effort": null,
+            "gone": false,
+            "grow": "impl",
+            "harness": "claude",
+            "host": null,
+            "issue": 12,
+            "model": null,
+            "name": "sendmeter-impl-12",
+            "role": "impl",
+            "shown": "working",
+            "state": "working",
+            "title": null,
+            "tone": "g"
+          },
+          {
+            "account": null,
+            "act": "blocked",
+            "age": "100s",
+            "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+            "effort": null,
+            "gone": false,
+            "grow": "blocked",
+            "harness": "claude",
+            "host": null,
+            "issue": 9,
+            "model": null,
+            "name": "sendmeter-rev-9-r1",
+            "role": "rev",
+            "shown": "blocked",
+            "state": "blocked",
+            "title": null,
+            "tone": "r"
+          }
+        ],
+        "name": "sendmeter",
+        "needs": [],
+        "queue": []
+      }
+    ],
+    "host": {
+      "gate": null,
+      "limit": 2.5,
+      "load": null,
+      "pressure": null,
+      "swap_limit": 2000.0,
+      "swapouts": null
+    },
+    "others": []
+  },
+  "route": "GET /api/v1/herd",
+  "schema": {
+    "fleets": [],
+    "host": {
+      "gate": "null",
+      "limit": "number",
+      "load": "null",
+      "pressure": "null",
+      "swap_limit": "number",
+      "swapouts": "null"
+    },
+    "others": []
+  },
+  "type": "Herd"
+}
