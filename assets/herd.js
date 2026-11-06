@@ -10,9 +10,6 @@ const hx = s => String(s ?? '').replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) +
 const f1 = n => +n.toFixed(1);
 // RanchWind: one gust phase (period 5.2 s), per-anchor offsets, a coherent grass wave.
 const WIND = { period: 5.2, canopy: 2.8, grass: 2.1 };
-// #566: `?shot=1` (the audit's screenshots) paints one fixed frame (t = 2 s) and runs no loop: headless Chrome hung on
-// the endless storm loop, never reaching the shot.
-const SHOT = DBG.has('shot');
 const phase = t => t * 2 * Math.PI / WIND.period;
 const anchor = x => ((x % 390) / 390) * 2 * Math.PI * 0.7;
 const sway = (t, a, amp) => amp * (0.74 * Math.sin(phase(t) + a) + 0.26 * Math.sin(1.93 * phase(t) + a * 1.7));
@@ -394,7 +391,6 @@ function weather(h) {
   ['heat', 'light'].forEach(x => { H.classList.toggle(x, x === kd); ['calm', 'busy', 'held'].forEach(k => H.classList.toggle(`${x}-${k}`, x === kd && k === lv)); });
   H.dataset.heat = lv;
   if ((lv === 'held') !== (was === 'held') && data) draw();
-  if (SHOT) anim(); // the storm's rain and mane at the fixed frame
   cap.textContent = `load ${h.load == null ? '?' : h.load.toFixed(2)} · mem ${h.pressure || '?'} · swap ${h.swapouts == null ? '?' : Math.round(h.swapouts)}`;
 }
 
@@ -487,9 +483,9 @@ function frame(ms) {
   }
   frames++;
   if (DBG.has('fps') && t - fpsAt >= 1) { cap.dataset.fps = Math.round(frames / (t - fpsAt)) + ' fps'; frames = 0; fpsAt = t; }
-  if (!SHOT) raf = requestAnimationFrame(frame);
+  raf = requestAnimationFrame(frame);
 }
-function anim() { if (!raf && !H.hidden && !document.hidden && !still.matches) { lastT = 0; nextFlash = performance.now() / 1000 + 4; SHOT ? frame(2000) : raf = requestAnimationFrame(frame); } }
+function anim() { if (!raf && !H.hidden && !document.hidden && !still.matches) { lastT = 0; nextFlash = performance.now() / 1000 + 4; raf = requestAnimationFrame(frame); } }
 
 // Taps: a horse opens the Lanes sheet (#43: card, transcript, Stop/Kill/Clean, reply); a queued one its row.
 H.addEventListener('click', e => {
