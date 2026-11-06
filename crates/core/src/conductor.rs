@@ -820,6 +820,13 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
         let text = std::fs::read_to_string(m).unwrap_or_default();
         s += &format!("\n## Memory: {}\n\n{}\n", m.display(), text.trim_end());
     }
+    // #538: what this fleet lets the conductor run.
+    s += "\n## Capability groups ([conductor] allow)\n\n";
+    for (g, verbs) in crate::config::GROUPS {
+        let on = ["off", "on"][usize::from(c.groups().contains(g))];
+        s += &format!("- `{g}` ({on}): {verbs}\n");
+    }
+    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[conductor] allow` with `herdsman config propose`.\n";
     let skills = files(&c.skills);
     if !skills.is_empty() {
         s += "\n## Skills (read one when it applies)\n\n";
@@ -849,6 +856,8 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             Some(m)
         }
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
+        // #538: a run card; its settled line follows as a system message.
+        "run-card" => Some(json!({"ts": e.ts, "from": "conductor", "text": crate::card::text(e)})),
         // #461: a conductor's `timer install`, a system line.
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);

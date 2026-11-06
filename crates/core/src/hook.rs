@@ -15,6 +15,8 @@ pub struct Policy {
     pub conductor: bool,
     /// #410: the conductor's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
     pub own: Option<String>,
+    /// #538: the capability groups a conductor has on (`[conductor] allow`).
+    pub groups: Vec<String>,
     /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
 }
@@ -141,6 +143,12 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
     }
+    // #538: the hard nos no run card may run, from a conductor's own shell either.
+    if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.conductor) {
+        return Some(format!(
+            "REFUSED CARD_FORBIDDEN: this command {w}; a conductor never runs it (#538)"
+        ));
+    }
     // #502: `pgrep x | xargs kill` and `kill $(pgrep x)` kill by pattern too.
     let runs = |c: &str| denied(cmd, &[Deny::Cmd(c.into())]).is_some();
     if runs("pgrep") && runs("kill") {
@@ -165,7 +173,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .or_else(|| git_push(&t, &cwd, p, cur_branch))
             .or_else(|| reviewer_git(&t, p))
             .or_else(|| target_dir(&t, p));
-        if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
+        if let Some(r) = found.or_else(|| design_spawn(&t, p)) {
             return Some(r);
         }
         // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
@@ -404,9 +412,36 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// `herdsman spawn … design` (or pre-rename `fleet`; a conductor's too, #410), `setup`, `serve
-/// approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm` and `accounts import`: owner-only.
-fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
+/// #538: the capability group of a `herdsman` verb (its words after `herdsman`), if it is in one.
+fn group(r: &[&str]) -> Option<&'static str> {
+    let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
+    Some(match (*r.first()?, r.get(1).copied()) {
+        ("spawn", _) if r[1..].contains(&"design") => "design",
+        ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
+        ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
+        ("reclaim", _) => "reclaim",
+        ("accounts", Some("reset")) => "accounts",
+        ("runners", Some(_)) => "runners",
+        ("pause" | "resume", _) => "pause",
+        ("set", _) => "set",
+        _ => return None,
+    })
+}
+
+/// #538: the capability group of the `herdsman` verb `cmd` runs, if any (its thread row names it).
+pub fn group_of(cmd: &str) -> Option<&'static str> {
+    cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
+        let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
+        let i = t.iter().position(|w| matches!(word(w), "herdsman" | "fleet"))?;
+        group(&t[i + 1..])
+    })
+}
+
+/// `setup`, `serve approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm`, `accounts import` and
+/// `card approve|deny`: owner-only (pre-rename `fleet` too). #538: a group verb (`clean --yes`, a design spawn, …)
+/// is a conductor's too while `[conductor] allow` has its group on, never another lane's.
+fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
+    let conductor = p.conductor;
     let i = t
         .iter()
         .position(|w| matches!(w.rsplit('/').next(), Some("herdsman" | "fleet")))?;
@@ -419,9 +454,11 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"accounts"), Some(&"import"))
+            | (Some(&"card"), Some(&("approve" | "deny")))
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config or lists and removes secrets, never a lane (#387)"
+            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards or lists and removes secrets, never \
+             a lane (#387)"
                 .into(),
         );
     }
@@ -446,9 +483,27 @@ fn design_spawn(t: &[&str], conductor: bool) -> Option<String> {
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }
-    (!conductor && t.get(i + 1) == Some(&"spawn") && t[i + 2..].contains(&"design")).then(|| {
-        "design lanes are owner-only: the owner or a conductor thread runs `herdsman spawn … design`, never a lane"
-            .into()
+    if !conductor && r.first() == Some(&"card") {
+        return Some("REFUSED CONDUCTOR_ONLY: only a conductor posts run cards (#538)".into());
+    }
+    let g = group(r)?;
+    if g == "design" && !conductor {
+        return Some(
+            "design lanes are owner-only: the owner or a conductor thread runs `herdsman spawn … design`, never a lane"
+                .into(),
+        );
+    }
+    if !conductor {
+        return Some(format!(
+            "REFUSED OWNER_ONLY: `herdsman {}` ({g} group) is the owner's or a conductor's, never a lane's (#538)",
+            r[0]
+        ));
+    }
+    (!p.groups.iter().any(|x| x == g)).then(|| {
+        format!(
+            "REFUSED GROUP_OFF: the `{g}` group is off in [conductor] allow; propose turning it on with \
+             `herdsman config propose` (#538)"
+        )
     })
 }
 
