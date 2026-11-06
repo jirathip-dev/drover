@@ -112,8 +112,15 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, wait: u64) -> Result<()> {
                 )
             };
             let by = ("owner", Some("telegram"));
-            let res = crate::answer(ctx, cfg, r, &mut vec![], (f, id), n, by);
-            let text = res.map_or_else(|e| format!("{e:#}"), |()| format!("answered {id}"));
+            // #538: a run card's tap: `card:<id>:<sha prefix>` approves that exact command, `card:<id>:deny` denies.
+            let text = if f == "card" {
+                let (ok, sha) = (n != "deny", Some(n).filter(|n| *n != "deny"));
+                let res = crate::card::settle(ctx, cfg, r, id, ok, sha);
+                res.map_or_else(|e| format!("{e:#}"), |_| format!("{id} settled"))
+            } else {
+                let res = crate::answer(ctx, cfg, r, &mut vec![], (f, id), n, by);
+                res.map_or_else(|e| format!("{e:#}"), |()| format!("answered {id}"))
+            };
             let ack = json!({"callback_query_id": c["id"], "text": text});
             logged(bot.json("answerCallbackQuery", &ack));
         }
@@ -263,6 +270,19 @@ fn outbound(ctx: &Ctx, cfg: &Config, bot: &Bot, events: &[Event], e: &Event) -> 
                 e.str("question").unwrap_or_default()
             );
             bot.say(topic, &q, &json!({"reply_markup": {"inline_keyboard": rows}}))?;
+        }
+        ("run-card", _) => {
+            let (id, sha) = (e.str("id").unwrap_or_default(), e.str("sha").unwrap_or_default());
+            let b = |t: &str, d: String| json!({"text": t, "callback_data": d});
+            let rows = json!([[
+                b("approve", format!("card:{id}:{}", &sha[..12.min(sha.len())])),
+                b("deny", format!("card:{id}:deny"))
+            ]]);
+            bot.say(
+                topic,
+                &crate::card::text(e),
+                &json!({"reply_markup": {"inline_keyboard": rows}}),
+            )?;
         }
         ("config-propose" | "secret-request", _) => {
             let what = e.str("id").or(e.str("name")).unwrap_or_default();
