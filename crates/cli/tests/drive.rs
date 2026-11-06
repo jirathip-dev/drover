@@ -2062,8 +2062,8 @@ fn a_held_lane_is_prompted_once_when_its_blocker_merges() {
     assert_eq!(r.count(typed), 1, "{out} {:?}", r.calls.borrow());
     let rel = &kinds(&c, "released")[0];
     assert_eq!(
-        (rel.data["on"].as_u64(), rel.data["respawn"].as_bool()),
-        (Some(11), Some(false))
+        (&rel.data["on"], rel.data["respawn"].as_bool()),
+        (&json!([11]), Some(false))
     );
     drive(&c, &r);
     assert_eq!(r.count(typed), 1, "woken once");
@@ -2086,6 +2086,34 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     let rel = &kinds(&c, "released")[0];
     assert_eq!(rel.data["respawn"].as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
+}
+
+/// #505: a lane held on two issues is woken only once both have merged.
+#[test]
+fn a_lane_held_on_two_blockers_waits_for_both() {
+    let (c, r) = held(
+        "drive-held-two",
+        &agents(&[("sendmeter-impl-12", "idle", "/x", "w9:sendmeter-impl-12")]),
+    );
+    ev(
+        &c,
+        c.now - 400,
+        "held",
+        json!({"agent": "sendmeter-impl-12", "on": [11, 13]}),
+    );
+    drive(&c, &r);
+    assert!(
+        !r.called("herdr agent prompt sendmeter-impl-12"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(kinds(&c, "released").is_empty());
+    let merged = Event::new(c.now - 30, "sendmeter", Some(13), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    drive(&c, &r);
+    let typed = "herdr agent prompt sendmeter-impl-12 #11, #13 merged; rebase on staging and continue";
+    assert_eq!(r.count(typed), 1, "{:?}", r.calls.borrow());
+    assert_eq!(kinds(&c, "released")[0].data["on"], json!([11, 13]));
 }
 
 // --- #444: a fix round whose lane ended without pushing is driven again ---

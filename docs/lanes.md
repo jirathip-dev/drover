@@ -6,7 +6,7 @@ or the owner-only `design`. No lane runs the fleet: `herdsman drive` does ([Driv
 ## Typical flow
 
 ```sh
-herdsman queue app add 12 13          # ordered queue (mv / rm / block --on N / ls)
+herdsman queue app add 12 13          # ordered queue (mv / rm / block --on N [--on M] / unblock / ls)
 herdsman spawn app 12 impl            # worktree + pane + brief + verified kick
 herdsman spawn app 12 rev             # after the implementer pushed
 herdsman verdict app 12 PASS --sha <head> --file <rev worktree>/verdict.md

@@ -465,10 +465,10 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     // #425: a lane may hold its own issue (`queue <fleet> block --on N <issue>`), never another one.
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
-    let block = r.first() == Some(&"queue") && r.get(2) == Some(&"block") && own.is_some();
+    let block = r.first() == Some(&"queue") && matches!(r.get(2), Some(&("block" | "unblock"))) && own.is_some();
     let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
     if block && r.iter().enumerate().skip(3).any(other) {
-        return Some("REFUSED OWN_ISSUE: a lane may `queue block` only its own issue (#425)".into());
+        return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
     // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest (and #510's
     // `apply`, a rules-file rewrite in the lane's own worktree) is open.

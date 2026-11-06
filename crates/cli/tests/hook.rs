@@ -983,6 +983,8 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 24",
         "herdsman queue sendmeter block 24 --on 23",
+        "herdsman queue sendmeter block --on 23 --on 22 24",
+        "herdsman queue sendmeter unblock 24",
     ] {
         assert_eq!(
             hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
@@ -993,6 +995,7 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 25",
         "cd /tmp && herdsman queue sendmeter block 25 --on 24",
+        "herdsman queue sendmeter unblock --on 24 25",
     ] {
         let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
