@@ -217,7 +217,13 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
     };
     let s = |k: &str| h[k].as_str().unwrap_or_default();
     role(cfg, s("repo"))?;
-    send(ctx, cfg, r, (from, to, s("repo")), (s("title"), s("text")), None)
+    let sent = send(ctx, cfg, r, (from, to, s("repo")), (s("title"), s("text")), None);
+    // #584: a handoff that fails to go out closes its card as failed.
+    if let Err(e) = &sent {
+        let d = json!({"id": ask.str("id"), "to": to, "reason": format!("{e:#}")});
+        emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
+    }
+    sent
 }
 
 /// A handoff from `from` into thread `to` (`new`: a new thread in `repo`): the linked `thread-handoff` row and the text
