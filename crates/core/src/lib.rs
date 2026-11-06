@@ -1,5 +1,6 @@
 //! fleet: agents act only through this CLI; it owns state and refuses rule breaks.
 pub mod access;
+pub mod action;
 pub mod card;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
@@ -486,7 +487,8 @@ fn answer_with(
     }
     let why = via.map_or("answer", |_| "board");
     if let Some(n) = ask.issue {
-        let _ = crate::drive::kick(ctx, r, fleet, n, why); // #304: after the decision is logged
+        let id = format!("{id}-{by}"); // #509: a default changed once is a new trigger
+        let _ = crate::drive::kick_once(ctx, r, (fleet, n), why, Some(&id)); // #304: after the decision is logged
     }
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));

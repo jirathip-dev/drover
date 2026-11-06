@@ -270,6 +270,9 @@ enum Cmd {
         why: String,
         #[arg(long, hide = true)]
         now: bool,
+        /// The triggering event's id: the same id is driven once
+        #[arg(long)]
+        id: Option<String>,
     },
     /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines
     #[command(hide = true)]
@@ -1323,8 +1326,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
                 Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
-                Cmd::Kick { fleet, issue, why, now } => {
-                    crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now))?;
+                Cmd::Kick {
+                    fleet,
+                    issue,
+                    why,
+                    now,
+                    id,
+                } => {
+                    crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
@@ -1453,7 +1462,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => {
                     let pass = verdict == "PASS";
                     gate::verdict(ctx, &cfg, r, out, (&fleet, issue), pass, &sha, &file)?;
-                    kick(&fleet, issue, "verdict");
+                    let id = format!("{sha}-{verdict}");
+                    let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
                 Cmd::Merge {
                     fleet,
@@ -1682,7 +1692,8 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
         let mut it = lane.split(':');
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
-            crate::drive::kick(ctx, r, f, n, why);
+            let id = input["tool_use_id"].as_str().filter(|_| why == "push");
+            crate::drive::kick_once(ctx, r, (f, n), why, id);
         }
     }
     // #511: an impl lane's turn that ends unreported goes on once to report it.
