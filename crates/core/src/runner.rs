@@ -36,6 +36,11 @@ pub trait Runner: Sync {
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
+    /// #529: whether `herdr` runs on this host's own (the service's streamed agent list stands for its `agent list`);
+    /// fakes and other hosts: no.
+    fn local(&self) -> bool {
+        false
+    }
     /// #441: keychain service `svc`'s secret in the main host's OS store (None: not set); fakes and wrappers forward.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         bail!("no secret store on this host (wanted {svc})")
@@ -54,6 +59,9 @@ fn entry(svc: &str) -> Result<keyring::Entry> {
 }
 
 impl Runner for Real {
+    fn local(&self) -> bool {
+        true
+    }
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         self.run_in(prog, args, "")
     }
