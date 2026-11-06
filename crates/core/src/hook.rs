@@ -138,7 +138,7 @@ fn resolve(w: &str, cwd: &str) -> String {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    let cmd = &unquote(cmd);
+    let cmd = &dups(&unquote(cmd));
     let mut cwd = cwd.to_string();
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
@@ -176,9 +176,18 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         if let Some(r) = found.or_else(|| design_spawn(&t, p)) {
             return Some(r);
         }
+        // #570: a redirection's target; `/dev/null`, `/dev/stdout` and `/dev/stderr` write nothing.
+        let targets: Vec<String> = (seg.split('>').skip(1))
+            .filter_map(|s| s.split_whitespace().next())
+            .map(|w| w.replace(['"', '\''], ""))
+            .filter(|w| !["/dev/null", "/dev/stdout", "/dev/stderr"].contains(&w.as_str()))
+            .collect();
+        let writer = t.iter().any(|w| WRITERS.contains(w))
+            || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
         // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
         // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
-        // its own-folder words left out, is still checked.
+        // its own-folder words left out, is still checked. #570: a relative word only as a writer's argument
+        // or a redirection's target.
         let paths = |w: &str| -> Vec<String> {
             (w.split(['=', '>']))
                 .flat_map(|w| match w.strip_prefix('-') {
@@ -186,6 +195,9 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                     None => vec![w],
                 })
                 .filter(|w| !w.is_empty() && !w.starts_with('-'))
+                .filter(|w| {
+                    writer || w.starts_with(['/', '~']) || w.starts_with("$HOME") || targets.iter().any(|t| t == w)
+                })
                 .map(|w| resolve(w, &cwd))
                 .collect()
         };
@@ -202,10 +214,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .collect();
         let seg_hit = protected_path(&rest.join(" "), p);
         if let Some(pp) = hit.or(seg_hit) {
-            let writes = seg.contains('>')
-                || t.iter().any(|w| WRITERS.contains(w))
-                || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
-            if writes {
+            if writer || !targets.is_empty() {
                 return Some(format!(
                     "writing under {pp} is blocked; use `herdsman set` / `herdsman profiles sync`"
                 ));
@@ -213,6 +222,32 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+/// #570: `cmd` without file-descriptor duplications (`2>&1`, `>&2`, `<&3`, `>&-`) and with `&>` as `>`, so
+/// neither splits a segment at its `&` nor reads as a write to a file.
+fn dups(cmd: &str) -> String {
+    let fd = |d: &char| d.is_ascii_digit() || *d == '-';
+    let (mut out, mut it) = (String::new(), cmd.chars().peekable());
+    while let Some(c) = it.next() {
+        match (c, it.peek()) {
+            ('>' | '<', Some('&')) => {
+                it.next();
+                if it.peek().is_some_and(fd) {
+                    while it.next_if(fd).is_some() {}
+                    let n = out.trim_end_matches(|d: char| d.is_ascii_digit());
+                    if n.is_empty() || n.ends_with(char::is_whitespace) {
+                        out.truncate(n.len());
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            ('&', Some('>')) => {}
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// #536: a `CARGO_TARGET_DIR=` or `--target-dir` outside the lane's `build_root` (a `/tmp` one escapes every budget).
