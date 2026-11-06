@@ -87,8 +87,15 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
 }
 
 /// `herdsman lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the
-/// lane's prompt was not confirmed (exit 4, as `spawn`).
-pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<bool> {
+/// lane's prompt was not confirmed (exit 4, as `spawn`). #576: the board's run logs the paired device it came from (`by`).
+pub fn run(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: &str,
+    by: Option<&str>,
+) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let day = ctx.now / 86400;
     let (y, (m, d)) = (civil_year(day), civil_month_day(day));
@@ -106,9 +113,22 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         .and_then(|n| n.parse().ok())
         .context("gh issue create: no number")?;
     writeln!(out, "filed {fleet}#{n}: {title}")?;
-    let op = crate::queue::op("add", &[n], true, None, None, None);
-    writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, None)?)?;
+    let mut op = crate::queue::op("add", &[n], true, None, None, None);
+    if let Some(by) = by {
+        op["by"] = json!(by);
+    }
+    writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, by.map(|_| "web"))?)?;
     crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "lesson"), &crate::spawn::Opts::default())
+}
+
+/// #419: `tick`'s file of `fleet`'s last weekly lesson run (or skip), the time it ran.
+fn at(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
+    ctx.state.with_file_name(format!("lesson-{fleet}.at"))
+}
+
+/// #576: when `tick` last ran (or skipped) `fleet`'s lessons; the next is due a week later.
+pub fn last(ctx: &Ctx, fleet: &str) -> Option<u64> {
+    std::fs::read_to_string(at(ctx, fleet)).ok()?.trim().parse().ok()
 }
 
 /// #419: `tick`'s lesson run, at most once per 7 days per fleet (`lessons = "off"` opts out; a paused fleet waits).
@@ -119,14 +139,10 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         .filter(|(_, f)| f.lessons.as_deref() != Some("off") && !f.paused)
         .map(|x| x.0)
     {
-        let at = ctx.state.with_file_name(format!("lesson-{name}.at"));
-        let last = std::fs::read_to_string(&at)
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok());
-        if last.is_some_and(|t| ctx.now < t + 7 * 86400) {
+        if last(ctx, name).is_some_and(|t| ctx.now < t + 7 * 86400) {
             continue;
         }
-        std::fs::write(&at, ctx.now.to_string())?;
+        std::fs::write(at(ctx, name), ctx.now.to_string())?;
         // #517: a fleet under a week old, or with under 2 FAIL verdicts this week, has no repeated class to find.
         let (week, events) = (ctx.now.saturating_sub(7 * 86400), read(&ctx.state)?);
         let young = events.iter().find(|e| e.fleet == *name).is_none_or(|e| e.ts > week);
@@ -150,7 +166,7 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             crate::events::append(&ctx.state, &e)?;
             continue;
         }
-        if let Err(e) = run(ctx, cfg, r, out, name) {
+        if let Err(e) = run(ctx, cfg, r, out, name, None) {
             writeln!(out, "{name} lesson: {e:#}")?;
         }
     }
