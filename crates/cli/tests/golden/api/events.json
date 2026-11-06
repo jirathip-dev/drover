@@ -31,7 +31,9 @@
         "issues": [
           17
         ],
-        "on": 12,
+        "on": [
+          12
+        ],
         "op": "block"
       },
       "fleet": "sendmeter",
