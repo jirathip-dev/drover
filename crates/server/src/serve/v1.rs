@@ -2,7 +2,7 @@
 //! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
 //! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`.
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
-use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
+use super::{fold, form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, Ev, Events, Fleet, Lane, Queued, Reply, Row, State};
 use crate::events::plain;
 use serde::Serialize;
@@ -52,7 +52,7 @@ impl Server<'_> {
             ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
             ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
             ("GET", Some(t)) if t.starts_with("thread/") => {
-                let ev = read(&ctx.state).unwrap_or_default();
+                let ev = shared(&ctx.state).unwrap_or_default();
                 super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such thread"),
                     |p| out("200 OK", &p),
@@ -112,7 +112,7 @@ impl Server<'_> {
     }
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
-        let (cfg, events) = (Config::load(&ctx.config)?, read(&ctx.state)?);
+        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
         let (st, r) = (fold(&events), &self.cached(ctx.now, 60));
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
@@ -209,7 +209,7 @@ pub(super) fn ask(a: &Event) -> Ask {
 
 /// #259: the events with `since < seq <= until`; over `cap`, none and `refresh`. #266: each as the Events tab says it.
 pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
-    let (ev, cfg) = (read(&ctx.state).unwrap_or_default(), Config::load(&ctx.config).ok());
+    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::load(&ctx.config).ok());
     let after: Vec<_> = ev.iter().filter(|e| e.seq > since && e.seq <= until).collect();
     let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > cap);
     let mut prs = BTreeMap::new();

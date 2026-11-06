@@ -309,7 +309,8 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
 }
 
 /// `swift` for tests/support/webview.swift, its page based at a local server of serve's `/a/<hash>/`
-/// assets (#57: the page links them; a same-origin base lets herd.js fetch horses.svg).
+/// assets (#57: the page links them; a same-origin base lets herd.js fetch horses.svg). #560: it runs under
+/// scripts/ui-lock.sh, one WebKit audit at a time on the host.
 pub fn swift() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
@@ -326,8 +327,8 @@ pub fn swift() -> std::process::Command {
         });
         base
     });
-    let mut c = std::process::Command::new("swift");
-    c.env("HERDSMAN_BASE", base);
+    let mut c = std::process::Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-lock.sh"));
+    c.arg("swift").env("HERDSMAN_BASE", base);
     c
 }
 
