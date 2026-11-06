@@ -811,10 +811,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed.
+    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed; #565: or one fleet's `runtime`.
     let with = Config::load(&ctx.config)
         .ok()
-        .and_then(|c| c.runtime.shed())
+        .and_then(|c| c.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
