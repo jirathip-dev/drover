@@ -351,6 +351,9 @@ impl Runner for Bot {
         Ok(Some("TOKEN123:abc".into()))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if prog != "curl" {
+            return self.herdr.run(prog, args); // #538: a run card's `sh`
+        }
         self.herdr.run(prog, args)?; // the argv, for the token check
         self.sent.borrow_mut().push(input.into());
         let url = input.lines().next().unwrap();
@@ -591,4 +594,58 @@ fn telegram_handles_each_update_and_event_once_even_when_a_call_fails() {
     let err = herdsman::telegram::tick(&open, &cfg, &r, 0).unwrap_err();
     assert!(format!("{err:#}").contains("owner is not"), "{err:#}");
     assert!(r.sent.borrow().is_empty(), "no Bot API call");
+}
+
+/// #538: a run card reaches the thread's topic with [approve] [deny]; the owner's [approve] runs it (its sha in the
+/// tap), [deny] runs nothing.
+#[test]
+fn telegram_approves_and_denies_run_cards() {
+    let c = setup(
+        "cards-telegram-run",
+        "",
+        "[telegram]\nchat = -100\nowner = 42\napi = \"https://bot.test\"\n",
+    );
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let r = Bot {
+        herdr: herdr(&live()).reply("curl", "").reply("sh -c", "on main\n"),
+        updates: Shared::default(),
+        sent: Shared::default(),
+        fail: Shared::default(),
+    };
+    let at = |n: u64| herdsman::Ctx {
+        now: T + n,
+        ..c.clone()
+    };
+    herdsman::telegram::tick(&at(0), &cfg, &r, 0).unwrap();
+    let topic = json!({"thread": "t1", "topic": 5});
+    herdsman::events::append(&c.state, &Event::new(T, "sendmeter", None, "telegram-topic", topic)).unwrap();
+    for cmd in ["git log -1 main", "git log -2 main"] {
+        let args = [
+            "card", "post", "t1", "--cmd", cmd, "--why", "w", "--blast", "none", "--dir", "/srv",
+        ];
+        assert_eq!(run(&at(5), &Fake::default(), &args).0, 0);
+    }
+    herdsman::telegram::tick(&at(10), &cfg, &r, 0).unwrap();
+    let sha = kinds(&c, "run-card")[0].str("sha").unwrap()[..12].to_string();
+    let tap = format!("card:r1:{sha}");
+    let sent = r.sent.borrow().clone();
+    assert!(
+        sent.iter().any(|s| s.contains("run card r1: `git log -1 main`")
+            && s.contains(&format!(r#"\"callback_data\":\"{tap}\",\"text\":\"approve\""#))
+            && s.contains(r#"\"callback_data\":\"card:r1:deny\""#)),
+        "{sent:?}"
+    );
+    let cb =
+        |n: u64, data: &str| json!({"update_id": n, "callback_query": {"id": "cb", "from": {"id": 42}, "data": data}});
+    *r.updates.borrow_mut() = vec![cb(1, &tap), cb(2, "card:r2:deny")];
+    herdsman::telegram::tick(&at(20), &cfg, &r, 0).unwrap();
+    assert_eq!(r.herdr.count("sh -c"), 1, "{:?}", r.herdr.calls.borrow());
+    assert!(r
+        .herdr
+        .called("sh -c cd -- \"$1\" && eval \"$2\" sh /srv git log -1 main"));
+    let settled: Vec<_> = kinds(&c, "run-settled")
+        .iter()
+        .map(|e| (e.str("id").unwrap().to_string(), e.data["approved"].clone()))
+        .collect();
+    assert_eq!(settled, [("r1".into(), json!(true)), ("r2".into(), json!(false))]);
 }
