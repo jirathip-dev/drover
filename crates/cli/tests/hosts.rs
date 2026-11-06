@@ -1355,3 +1355,43 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
     assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
 }
+
+/// #573: the main host runs herdsman through a symlink (`~/.local/bin/herdsman` → `<root>/bin/herdsman`): the update
+/// installs into the real root, and the readback asks the real binary, so a stale one shows though the symlink is current.
+#[test]
+fn a_symlinked_herdsman_updates_and_reads_back_its_real_install_root() {
+    let extra =
+        "\n[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/herdsman\"\nintegration = \"staging\"\n";
+    let mut c = setup("hosts-symlink", "", true, 0);
+    std::fs::write(&c.config, config("") + extra).unwrap();
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    let root = dir.join("share/herdsman");
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    std::fs::create_dir_all(dir.join("local/bin")).unwrap();
+    std::fs::write(root.join("bin/herdsman"), "").unwrap();
+    std::os::unix::fs::symlink(root.join("bin/herdsman"), dir.join("local/bin/herdsman")).unwrap();
+    c.exe = dir.join("local/bin/herdsman").display().to_string();
+    let (real, link) = (root.join("bin/herdsman").display().to_string(), c.exe.clone());
+    let cfg = Config::load(&c.config).unwrap();
+    let r = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
+        .reply(
+            &format!("{SSH}'{link}' '--version'"),
+            &format!("herdsman {}\n", herdsman::VERSION),
+        )
+        .reply(&format!("{SSH}'{real}' '--version'"), "herdsman 0.1.0 (0ld)\n");
+    let (on, home) = (herdsman::hosts::On::new(&r, Some("bazzite")), herdsman::config::home());
+    let home = home.to_str().unwrap(); // the same home there: paths unchanged
+    let rows = herdsman::hosts::health(&c, &cfg, &on, &[], home);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].starts_with("! herdsman — herdsman 0.1.0 (0ld) there"),
+        "{rows:?}"
+    );
+    assert!(herdsman::hosts::update(&c, &cfg, &on, "bazzite", home));
+    let root = format!(
+        "--root '\\''{}'\\'' --force && '\\''{real}'\\'' profiles sync",
+        root.display()
+    );
+    assert!(r.called(&root), "{:#?}", r.calls.borrow());
+}
