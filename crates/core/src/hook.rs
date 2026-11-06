@@ -30,7 +30,9 @@ const GIT_WRITES: &[&str] = &[
     "am",
     "reset",
 ];
-const WRITERS: &[&str] = &["rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd"];
+const WRITERS: &[&str] = &[
+    "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
+];
 
 /// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
@@ -110,11 +112,32 @@ fn own_file(file: &str, p: &Policy) -> bool {
         return false;
     };
     let normal = rel.components().all(|c| matches!(c, Component::Normal(_)));
-    normal && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
+    // A symlink there could point anywhere: writing through it is not writing into the folder.
+    let linked = Path::new(&file)
+        .ancestors()
+        .take_while(|a| *a != Path::new(own))
+        .any(|a| a.symlink_metadata().is_ok_and(|m| m.is_symlink()));
+    normal && !linked && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
+}
+
+/// #499: `w` as an absolute path, resolved against `cwd` (`..` and `.` folded), past a redirection's `2>>`.
+fn resolve(w: &str, cwd: &str) -> String {
+    use std::path::{Component, PathBuf};
+    let w = expand_home(w.trim_start_matches(|c: char| c.is_ascii_digit() || c == '>'));
+    let mut out = PathBuf::new();
+    for c in std::path::Path::new(cwd).join(w).components() {
+        match c {
+            Component::ParentDir => drop(out.pop()),
+            Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out.to_string_lossy().into_owned()
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let cmd = &unquote(cmd);
+    let mut cwd = cwd.to_string();
     if let Some(d) = denied(cmd, &p.deny) {
         return Some(d.reason());
     }
@@ -131,26 +154,50 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .filter(|t| !t.is_empty())
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
+        // #499: a `cd` moves the later segments' cwd, so their relative paths resolve where they run.
+        // Its options (`-P`, `--`) are skipped; `pushd` moves it the same way.
+        if let ["cd" | "pushd", ref args @ ..] = t[..] {
+            if let Some(dir) = args.iter().find(|a| !a.starts_with('-')) {
+                cwd = resolve(dir, &cwd);
+            }
+        }
         let found = gh(&t)
-            .or_else(|| git_push(&t, cwd, p, cur_branch))
+            .or_else(|| git_push(&t, &cwd, p, cur_branch))
             .or_else(|| reviewer_git(&t, p))
             .or_else(|| target_dir(&t, p));
         if let Some(r) = found.or_else(|| design_spawn(&t, p.conductor)) {
             return Some(r);
         }
-        if let Some(pp) = protected_path(seg, p) {
+        // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
+        // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
+        // its own-folder words left out, is still checked.
+        let paths = |w: &str| -> Vec<String> {
+            (w.split(['=', '>']))
+                .flat_map(|w| match w.strip_prefix('-') {
+                    Some(o) => o.char_indices().map(|(i, _)| &o[i..]).collect(),
+                    None => vec![w],
+                })
+                .filter(|w| !w.is_empty() && !w.starts_with('-'))
+                .map(|w| resolve(w, &cwd))
+                .collect()
+        };
+        // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
+        // #504: the shell expands braces, globs, variables and escapes after this check sees the word.
+        let own = |f: &str| {
+            !t.contains(&"ln") && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(f, p)
+        };
+        let hit = (t.iter().flat_map(|w| paths(w)))
+            .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
+            .map(String::as_str);
+        let rest: Vec<&str> = (t.iter().copied())
+            .filter(|w| !paths(w).iter().any(|f| own(f)))
+            .collect();
+        let seg_hit = protected_path(&rest.join(" "), p);
+        if let Some(pp) = hit.or(seg_hit) {
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))
                 || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
-            // #504: a conductor's shell writes its own thread folder too, when every protected word is a file there.
-            let own = || {
-                t.iter()
-                    .map(|w| w.rsplit('>').next().unwrap_or(w))
-                    .filter(|w| protected_path(w, p).is_some())
-                    // The shell expands braces, globs, variables and escapes after this check sees the word.
-                    .all(|w| !expand_home(w).contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(w, p))
-            };
-            if writes && !own() {
+            if writes {
                 return Some(format!(
                     "writing under {pp} is blocked; use `herdsman set` / `herdsman profiles sync`"
                 ));
