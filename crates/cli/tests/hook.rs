@@ -1352,3 +1352,45 @@ fn run_cards_post_from_a_conductor_settle_by_the_owner_and_hard_nos_never_run() 
         ""
     );
 }
+
+/// #537: a conductor runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
+/// for everyone, while a message or argument that only names docker is not a command.
+#[test]
+fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() {
+    let input =
+        |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    let run = |lane: &str, cmd: &str| hook_cfg(&config(), &[("HERDSMAN_LANE", Some(lane))], "impl", input(cmd)).0;
+    for cmd in [
+        "herdsman runners status",
+        "herdsman runners revive vm1",
+        "herdsman runners add 2",
+        "herdsman runners remove vm1 --approved q3",
+        "herdsman runners tokens",
+        "herdsman runners retire-local",
+    ] {
+        assert_eq!(run("synergy:-:conductor", cmd), "", "{cmd}");
+        for lane in ["synergy:12:impl", "synergy:12:rev"] {
+            assert!(run(lane, cmd).contains("REFUSED OWNER_ONLY"), "{lane} {cmd}");
+        }
+    }
+    for lane in ["synergy:-:conductor", "synergy:12:impl"] {
+        for cmd in [
+            "docker ps",
+            "sh -c 'cd /x && docker ps'",
+            "su -c 'x; docker run y'",
+            "gh issue create --body x; docker ps",
+            "git commit -m \"$(docker ps)\"",
+        ] {
+            assert!(run(lane, cmd).contains(&NO_CONTAINERS[10..]), "{lane} {cmd}");
+        }
+        for cmd in [
+            "herdsman thread reply t1 \"restart it:\ndocker compose up; docker ps\"",
+            "gh issue create --title 'docker (colima) down' --body \"steps:\ndocker ps | grep x; podman ps\"",
+            "gh issue create --body='a; docker ps'",
+            "git commit -m 'ci: drop docker; use podman (#1)'",
+            "rg -n 'NO_CONTAINERS|colima' crates",
+        ] {
+            assert_eq!(run(lane, cmd), "", "{lane} {cmd}");
+        }
+    }
+}

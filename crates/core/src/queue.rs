@@ -297,12 +297,49 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
 
-/// (code, why) of drive's refused start of queued issue `n` in the last hour: `skipped this pass` (status, board).
-pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u64) -> Option<(&'a str, &'a str)> {
+/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; #572: not
+/// once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the
+/// group's holders now, or its free slot.
+pub fn skipped(
+    events: &[Event],
+    st: &States,
+    f: Option<&Fleet>,
+    fleet: &str,
+    n: u64,
+    now: u64,
+) -> Option<(String, String)> {
     let s = |e: &&Event| e.kind == "driven" && e.fleet == fleet && e.issue == Some(n) && e.str("step") == Some("start");
-    (state(st, fleet, n) == "queued").then_some(())?;
-    let e = events.iter().rev().find(s).filter(|e| now < e.ts + 3600)?;
-    Some((e.str("code")?, e.str("result")?.split_once(": ").map_or("", |w| w.1)))
+    let is = st.get(&(fleet.to_string(), n)).filter(|s| s.state == "queued")?;
+    let e = events
+        .iter()
+        .rev()
+        .find(s)
+        .filter(|e| now < e.ts + 3600 && e.ts >= is.last_ts)?;
+    let (code, q) = (e.str("code")?, replay(events, fleet));
+    let gs = f.map_or(vec![], |f| groups(&q, events, f, fleet, n));
+    if let (Some(f), "SERIAL_BUSY") = (f, code) {
+        for g in &gs {
+            let h = holders(events, st, f, fleet, &g.name);
+            if h.len() >= g.max {
+                let who = holds(g, &h).split_off(g.name.len() + 2);
+                return Some((format!("skip {code}"), format!("waiting for a {} slot ({who})", g.name)));
+            }
+        }
+        let g = &gs.first()?.name;
+        return Some((format!("{g} slot free"), format!("{g} slot free; starts next pass")));
+    }
+    let mine = |m: u64| {
+        f.is_some_and(|f| {
+            groups(&q, events, f, fleet, m)
+                .iter()
+                .any(|x| gs.iter().any(|g| g.name == x.name))
+        })
+    };
+    let merged = |m: &Event| m.kind == "merged" && m.fleet == fleet && m.ts > e.ts && m.issue.is_some_and(mine);
+    (!events.iter().any(merged)).then_some(())?;
+    let why = e.str("result")?.split_once(": ").map_or("", |w| w.1);
+    let ago = age(now.saturating_sub(e.ts));
+    Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
@@ -333,7 +370,8 @@ pub fn board(
     let mut lines = vec![format!("{fleet}: {} queued, {active} active{serial}", q.len()), head];
     let row = |pos: String, n: u64, last: Option<String>| {
         let s = st.get(&(fleet.to_string(), n));
-        let skip = skipped(events, &st, fleet, n, now).map(|(c, _)| format!("skip {c}"));
+        let f = cfg.and_then(|c| c.fleet.get(fleet));
+        let skip = skipped(events, &st, f, fleet, n, now).map(|s| s.0);
         let lane: String = s
             .and_then(|s| s.lane.clone())
             .or(skip)

@@ -56,6 +56,10 @@ pub struct Dialect {
     /// #298: its `hook_event_name` while it waits on a person (none: "").
     pub blocked: &'static str,
     pub deny: fn(&str) -> Value,
+    /// #511: its `hook_event_name` when a prompt is submitted, and its answer that ends no turn but goes on with
+    /// `reason` (none: "", `None`).
+    pub prompt: &'static str,
+    pub again: Option<fn(&str) -> Value>,
 }
 
 /// Every harness by name, in `NAMES` order.
