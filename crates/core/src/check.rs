@@ -521,7 +521,15 @@ pub fn clean(
             continue;
         }
         let on = On::of(r, Some(e));
-        if seen.contains(wt) || !on.exists(Path::new(wt)) {
+        // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
+        let away = e.str("host").filter(|_| on.machine.is_some());
+        let held = match away.and_then(|h| cfg.hosts.get(h)) {
+            Some(h) if !h.enabled => Some("on a disabled host (not cleaned)"),
+            _ => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
+        };
+        let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
+        let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
+        if seen.contains(wt) || gone() {
             continue;
         }
         let unsafe_lane =
@@ -543,7 +551,14 @@ pub fn clean(
         };
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
-        let shown = (e.str("host").filter(|_| on.machine.is_some())).map_or(wt.into(), |h| format!("{h}:{wt}")); // #416
+        let shown = away.map_or(wt.into(), |h| format!("{h}:{wt}")); // #416
+        if let Some(why) = held {
+            if lane.is_some() {
+                return unsafe_lane(why);
+            }
+            writeln!(out, "keep {shown}: {why}")?;
+            continue;
+        }
         let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
         let keep = if live {
             Some("live agent".to_string())
