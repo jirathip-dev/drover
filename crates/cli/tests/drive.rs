@@ -940,7 +940,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     );
     let status = run(&c, &fake(&working(&c, &[2, 3, 9])), &["status", "sendmeter"]).1;
     assert!(
-        status.contains("skipped this pass: SERIAL_BUSY (db: #9 holds 1/1"),
+        status.contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
         "{status}"
     );
     let board = run(&c, &Fake::default(), &["board", "sendmeter"]).1;
@@ -948,6 +948,81 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     // The second pass: #1 still refused (logged once an hour), nothing else free: a no-op.
     let r = fan_fake(&working(&c, &[2, 3, 9]));
     idle(&c, &r);
+}
+
+/// #572: a `SERIAL_BUSY` skip shows the group's holders now: a merged one drops out, a free slot says so.
+#[test]
+fn a_serial_busy_skip_shows_the_live_holders() {
+    let c = fanout("drive-skip-live", SERIAL, &["9", "1", "4", "--serial"]);
+    let at = |ts: u64, n: u64, kind: &str, d: serde_json::Value| {
+        append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
+    };
+    let spawn = |ts: u64, n: u64| {
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}")});
+        at(ts, n, "spawn", d);
+    };
+    spawn(c.now - 600, 9);
+    let why = "REFUSED SERIAL_BUSY: db: #9 holds 1/1; retry after they merge";
+    at(
+        c.now - 300,
+        1,
+        "driven",
+        json!({"step": "start", "code": "SERIAL_BUSY", "result": why}),
+    );
+    let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let board = || run(&c, &Fake::default(), &["board", "sendmeter"]).1;
+    assert!(
+        status().contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        "{}",
+        status()
+    );
+    at(c.now - 200, 9, "merged", json!({}));
+    let s = status();
+    assert!(s.contains("skipped this pass: db slot free; starts next pass"), "{s}");
+    assert!(board().contains(" #1     queued      db slot free "), "{}", board());
+    spawn(c.now - 100, 4);
+    let s = status();
+    assert!(
+        s.contains("skipped this pass: waiting for a db slot (#4 holds 1/1)"),
+        "{s}"
+    );
+    assert!(!s.contains("#9 hold"), "{s}");
+    assert!(board().contains(" #1     queued      skip SERIAL_BUSY "), "{}", board());
+}
+
+/// #572: another code's skip shows its age; one older than the issue's last state change is gone.
+#[test]
+fn an_old_skip_shows_its_age_until_the_issue_moves() {
+    let c = fanout("drive-skip-age", "", &["12"]);
+    let why = "REFUSED CAP: 2 impl lane(s) open in sendmeter, max_impl = 2";
+    ev(
+        &c,
+        c.now - 720,
+        "driven",
+        json!({"step": "start", "code": "CAP", "result": why}),
+    );
+    let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let s = status();
+    assert!(
+        s.contains("skipped this pass: CAP (2 impl lane(s) open in sendmeter, max_impl = 2) · 12m ago"),
+        "{s}"
+    );
+    // Its lane started and was killed since: back in the queue, the old reason is not current.
+    ev(
+        &c,
+        c.now - 600,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
+    );
+    ev(
+        &c,
+        c.now - 500,
+        "lane-killed",
+        json!({"role": "impl", "agent": "sendmeter-impl-12"}),
+    );
+    let s = status();
+    assert!(s.contains(" queued "), "{s}");
+    assert!(!s.contains("skipped this pass"), "{s}");
 }
 
 /// #103: DISK_LOW stops the pass like HOST_BUSY: #3 is not tried.

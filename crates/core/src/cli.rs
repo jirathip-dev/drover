@@ -870,6 +870,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 serial.dedup();
                 // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
                 let look = crate::snapshot::Snap::read(ctx, r);
+                let skip = |s: &crate::events::IssueState| {
+                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
+                    let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
+                    skip.map(|s| format!("skipped this pass: {}", s.1))
+                };
+                let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
                 let waits = cfg.map(|mut c| {
                     c.fleet.retain(|k, _| fleet.as_ref().is_none_or(|f| f == k));
                     crate::waiting::scan(
@@ -895,16 +901,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "{:<12} {:<6} {:<12} {:<24} {:<5}{} WAITING",
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
-                for s in rows {
+                for (s, skip) in rows.into_iter().zip(skips) {
                     let w = waits
                         .iter()
                         .flatten()
                         .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue)
                         .map(|w| w.1.what.clone())
-                        .or_else(|| {
-                            let skip = queue::skipped(&events, &all, &s.fleet, s.issue, ctx.now);
-                            skip.map(|(c, why)| format!("skipped this pass: {c} ({why})"))
-                        })
+                        .or(skip)
                         .or_else(|| {
                             let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
                             Some(format!("on {}: {}", e.str("host")?, e.str("why")?))
