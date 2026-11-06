@@ -37,9 +37,15 @@ fn host(conclusion: &str) -> Fake {
         )
         .reply("cargo build --release --locked -p herdsman", "")
         .reply("which codesign", "/usr/bin/codesign\n")
-        .reply("codesign --force --sign herdsman-local --identifier herdsman", "")
+        .reply("sh ", "")
         .reply("launchctl kickstart -k gui/", "")
         .reply("systemctl --user restart dev.herdsman.serve.service", "")
+}
+
+/// #568: the build's own script signs it by hash.
+fn sign_script(c: &herdsman::Ctx) -> String {
+    let s = c.state.with_file_name("update/src/scripts/signing-identity.sh");
+    s.to_string_lossy().into()
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
@@ -57,7 +63,7 @@ fn red_ci_installs_nothing() {
         "{out}"
     );
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD");
-    assert!(!r.called("cargo") && !r.called("codesign"), "no build for a red head");
+    assert!(!r.called("cargo") && !r.called("sh "), "no build for a red head");
 }
 
 #[test]
@@ -83,9 +89,7 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     };
     let order = [
         at("cargo build"),
-        at(&format!(
-            "codesign --force --sign herdsman-local --identifier herdsman {new}"
-        )),
+        at(&format!("sh {} sign {new}", sign_script(&c))),
         at(&format!("{new} doctor --config-only")),
         at(&format!("{} profiles sync", live.display())),
         at(if cfg!(target_os = "macos") {
@@ -129,11 +133,11 @@ fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
 #[test]
 fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
     let (c, live) = setup("upd-identity");
-    let r = host("SUCCESS").once_err("codesign --force", 1, "herdsman-local: no identity found");
+    let r = host("SUCCESS").once_err(&format!("sh {} sign", sign_script(&c)), 2, "");
     let (code, out) = run(&c, &r, &["self-update"]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("no identity found") && out.contains("signing-identity.sh"),
+        out.contains("no \"herdsman-local\" identity") && out.contains("signing-identity.sh"),
         "{out}"
     );
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD");
@@ -144,7 +148,7 @@ fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
     assert!(kinds(&c, "self-update-failed")[0]
         .str("reason")
         .unwrap()
-        .contains("no identity found"));
+        .contains("no \"herdsman-local\" identity"));
 }
 
 #[test]

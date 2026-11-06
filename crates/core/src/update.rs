@@ -70,7 +70,7 @@ pub fn self_update(
         writeln!(out, "{}", plan.join("\n"))?;
         return Ok(0);
     }
-    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &new));
+    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &home.join("src"), &new));
     let res = staged.and_then(|()| {
         std::fs::rename(&new, &live).with_context(|| format!("swap into {}", live.display()))?;
         std::fs::write(home.join("sha"), sha)?;
@@ -135,12 +135,18 @@ fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Re
     Ok(())
 }
 
-/// Sign `new` with the stable identity (#556; refused without it) and run its `doctor --config-only` (#539).
-fn gate(r: &dyn Runner, new: &Path) -> Result<()> {
+/// Sign `new` with the stable identity by hash (#556, #568: the build's own `signing-identity.sh sign`; refused
+/// without it) and run its `doctor --config-only` (#539).
+fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
     let n = new.to_string_lossy();
     if ok(r, "which", &["codesign"]).is_ok() {
-        let sign = ["--force", "--sign", "herdsman-local", "--identifier", "herdsman", &n];
-        ok(r, "codesign", &sign).context("sign (identity \"herdsman-local\": sh scripts/signing-identity.sh, once)")?;
+        let script = src.join("scripts/signing-identity.sh");
+        let o = r.run("sh", &crate::runner::argv(&[&script.to_string_lossy(), "sign", &n]))?;
+        match o.code {
+            0 => {}
+            2 => bail!("sign: no \"herdsman-local\" identity → sh scripts/signing-identity.sh, once"),
+            _ => bail!("sign: {}", format!("{}{}", o.stdout, o.stderr).trim()),
+        }
     }
     let o = r.run(&n, &crate::runner::argv(&["doctor", "--config-only"]))?;
     if o.code != 0 {

@@ -1,0 +1,16 @@
+{
+  "response": {
+    "closed": false,
+    "lines": [
+      "Paste code here >"
+    ],
+    "urls": []
+  },
+  "route": "GET /api/v1/setup/<pane>",
+  "schema": {
+    "closed": "boolean",
+    "lines": [],
+    "urls": []
+  },
+  "type": "SetupScreen"
+}
