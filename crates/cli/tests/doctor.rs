@@ -250,6 +250,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall",
         ),
         (
+            // #568: the identity is there, but codesign waits on the key's dialog: the fix sets its partition list.
+            |_, _, r| r.once("codesign -v -R", 3, "").reply("security find-certificate -c herdsman-local", ""),
+            "signature",
+            "→ security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db (asks the login password), then sh scripts/signing-identity.sh sign ",
+        ),
+        (
             |c, _, r| {
                 let k = c.state.with_file_name("webpush/vapid.key");
                 std::fs::set_permissions(k, std::fs::Permissions::from_mode(0o644)).unwrap();
