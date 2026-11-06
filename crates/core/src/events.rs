@@ -436,6 +436,10 @@ pub const PASSIVE: &[&str] = &[
     "stale-marker",
     "spawn-held",
     "outbox",
+    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
+    "intent",
+    "done",
+    "failed",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.

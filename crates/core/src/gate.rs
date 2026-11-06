@@ -679,6 +679,35 @@ pub fn merge(
         writeln!(out, "already merged → {} (PR #{})", s("merge_sha"), s("pr"))?;
         return Ok(());
     }
+    // #509: a merge whose `merged` was never logged: in flight until its timeout, then done or the PR's own state.
+    let landed = |num: &str| -> Result<bool> {
+        Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
+    };
+    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
+    if let Some(a) = crate::action::last(&events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a)) {
+        let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
+        if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(a) {
+            return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
+        }
+        let d = json!({"pr": num, "head": head, "recovered": true});
+        let done = a.kind == "done" || landed(num)?;
+        if a.kind == "intent" {
+            crate::action::finish(&ctx.state, ctx.now, a, ["failed", "done"][usize::from(done)], d)?;
+        }
+        if done {
+            let over = a.data.get("over") == Some(&json!(true));
+            let fast = a.data.get("fast") == Some(&json!(true));
+            return merged(
+                ctx,
+                cfg,
+                r,
+                out,
+                (fleet, issue),
+                &json!({}),
+                (num, head, over, None, fast),
+            );
+        }
+    }
     let branch = branch_of(st.as_ref(), issue);
     let mut pr = if is_main(&f.integration) {
         json!({"baseRefName": f.integration})
@@ -778,8 +807,31 @@ pub fn merge(
         "--body",
         &body,
     ];
+    let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
+    let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
+    let at = (fleet, issue, "merge", head.as_str());
+    // Done meanwhile by another pass: skipped here, logged by the next (above).
+    let intent = crate::action::begin(&ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
-    let mc = json(r, "gh", &["pr", "view", &num, "-R", &f.repo, "--json", "mergeCommit"])?;
+    intent.done(json!({"pr": num, "head": head}))?;
+    merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+/// #509: how long a merge's intent may stay open before the next pass recovers it from the PR.
+const MERGE_SECS: u64 = 600;
+
+/// After the PR merged: log it and its landing, the evidence comment, close the issue, tear its lanes down.
+fn merged(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, issue): (&str, u64),
+    pr: &Value,
+    (num, head, over, secs, fast): (&str, &str, bool, Option<u64>, bool),
+) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
+    let mc = json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "mergeCommit"])?;
     let merge_sha = mc["mergeCommit"]["oid"].as_str().unwrap_or("?").to_string();
     let mut d = json!({"pr": num, "merge_sha": merge_sha, "verdict_sha": head, "into": f.integration});
     if let Some(s) = secs {
@@ -791,7 +843,7 @@ pub fn merge(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     if f.land.is_some() {
         // #350: what `land::watch` and `stats land` read: the landing's mode and how long its gating checks took.
-        let checks = gh::required(&pr["statusCheckRollup"], f.checks(&pr));
+        let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {
             checks
                 .as_array()
