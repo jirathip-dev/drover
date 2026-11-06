@@ -43,7 +43,7 @@ pub fn root(ctx: &Ctx) -> PathBuf {
 }
 
 impl Harness for Claude {
-    fn sync(&self, ctx: &Ctx, role: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
+    fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
@@ -54,9 +54,9 @@ impl Harness for Claude {
             .replace("\"{{FLEET_STATUSLINE}}\"", &line)
             .replace("\"{{TRANSCRIPT_DAYS}}\"", &days.to_string());
         std::fs::write(dir.join("settings.json"), settings)?;
-        std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(role)))?;
+        std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(prompt)))?;
         std::fs::write(dir.join("fleet.md"), usage)?;
-        writeln!(out, "synced {} ({role})", dir.display())?;
+        writeln!(out, "synced {} ({prompt})", dir.display())?;
         Ok(())
     }
 
