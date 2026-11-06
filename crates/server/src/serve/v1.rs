@@ -1,14 +1,21 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), the board's data: `state`, `events?since=N`, `host`,
 //! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
-//! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`. #576: the queue rows' marks
-//! (`qset` sets one), an issue's verdicts and the lessons, for the drover plugins.
+//! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`. #555: the drover plugins' routes
+//! (`herd`, `roles`, `setup/<pane>`; POST `send`, `menu`, `act`, `setup`, `chat-about`, `chat`, `close`) run the old
+//! board's code; every POST takes JSON (or the board's form) and answers `Reply`. #576: the queue rows' marks (`qset`
+//! sets one), an issue's verdicts and the lessons.
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{fold, form, lanes, lock, read, refused, shown, view, Config, Ctx, Refusal, Result, Server};
-use crate::api::{Ask, Digest, Ev, Events, Fleet, IssueView, Lane, LessonFleet, LessonRun, Lessons, Marks, QueueTab};
-use crate::api::{Queued, Reply, Repro, Row, State, Verdict};
+use crate::api::{Ask, ChatDefaults, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun};
+use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
 use crate::events::plain;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use serde::Serialize;
+use serde_json::Value;
+
+/// #555: the paired-only POSTs beside `PAIRED_OPS`: the old board's `/send`, `/answer` (`menu`), `/act`, `/setup` and
+/// a backlog row's [chat about] (`/thread`'s `new`), then `[chat]`'s defaults and a backlog issue's [close].
+const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
 const V1_PAIRED: &[&str] = &["qset", "lesson"];
@@ -37,16 +44,15 @@ impl Server<'_> {
     ) -> Res {
         let f = form(query);
         let (paired, lane) = (auth.is_ok(), p.strip_prefix("/api/v1/lane/"));
+        let setup = p.strip_prefix("/api/v1/setup/").filter(|_| method == "GET");
+        let paired_op = |op: &str| PAIRED_OPS.contains(&op) || LANE_OPS.contains(&op) || V1_PAIRED.contains(&op);
         match (method, p.strip_prefix("/api/v1/")) {
             ("POST", _) if self.addr.is_none() => reply("405 Method Not Allowed", "READ_ONLY", "GET only"),
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             // #501: the devices unread: no unpaired view or 401, the page keeps its last draw and retries.
             (_, Some(x))
                 if busy(auth)
-                    && (lane.is_some()
-                        || ["needs", "lanes", "chat"].contains(&x)
-                        || PAIRED_OPS.contains(&x)
-                        || V1_PAIRED.contains(&x)) =>
+                    && (lane.or(setup).is_some() || ["needs", "lanes", "chat"].contains(&x) || paired_op(x)) =>
             {
                 reply("503 Service Unavailable", "BUSY", "board busy, retrying")
             }
@@ -95,6 +101,14 @@ impl Server<'_> {
                     |p| out("200 OK", &p),
                 )
             }
+            ("GET", Some("herd")) => self.herd(ctx, None).map_or_else(
+                |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
+                |h| out("200 OK", &h),
+            ),
+            ("GET", Some("roles")) => roles(ctx, f.get("fleet").map_or("", String::as_str)).map_or_else(
+                |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
+                |r| out("200 OK", &r),
+            ),
             ("GET", Some("events")) => {
                 let n = |k: &str| f.get(k).and_then(|n| n.parse().ok());
                 out(
@@ -102,7 +116,14 @@ impl Server<'_> {
                     &events(ctx, n("since").unwrap_or(0), n("until").unwrap_or(u64::MAX), 500),
                 )
             }
-            ("GET", _) if lane.is_some() && !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("GET", _) if lane.or(setup).is_some() && !paired => {
+                reply("401 Unauthorized", "UNPAIRED", "pair this device first")
+            }
+            // #555: a setup pane's screen (the old board's `/lane?setup=`).
+            ("GET", _) if setup.is_some() => crate::setup::screen(ctx, self.r, setup.unwrap_or_default()).map_or_else(
+                |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
+                |j| out("200 OK", &serde_json::from_value::<SetupScreen>(j).unwrap_or_default()),
+            ),
             ("GET", _) if lane.is_some() => {
                 let q = form(&format!("{query}&agent={}", lane.unwrap_or_default())); // the path's agent wins
                 let t = self.transcript(ctx, &q).filter(|_| !q.contains_key("setup"));
@@ -111,27 +132,37 @@ impl Server<'_> {
                     |t| ("200 OK", JSON, t.into_bytes()),
                 )
             }
-            ("POST", Some(op)) if (PAIRED_OPS.contains(&op) || V1_PAIRED.contains(&op)) && !paired => {
+            ("POST", Some(op)) if paired_op(op) && !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
-            ("POST", Some(op)) => {
-                let f = form(body.trim())
-                    .into_iter()
-                    .chain([("op".into(), op.into())])
-                    .collect();
-                let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
-                let done = match op {
-                    "qset" => qset(ctx, &f),
-                    "lesson" => self.lesson(ctx, &f, by),
-                    _ => self.op(ctx, f),
+            // #555: the old board's own path (its rate limit and refusals), `Reply`'s code from its line.
+            ("POST", Some(op @ ("send" | "menu" | "act" | "setup" | "chat-about"))) => {
+                let mut f = fields(body);
+                if op == "chat-about" {
+                    f = about(ctx, &f);
+                }
+                let path = ["/send", "/answer", "/act", "/setup", "/thread"]
+                    [LANE_OPS.iter().position(|o| *o == op).unwrap_or(0)];
+                let (status, msg) = self.send(ctx, head, &f, path, &auth.clone().into());
+                let refusal = msg.strip_prefix("REFUSED ").and_then(|m| m.split_once(": "));
+                let code = match &status[..3] {
+                    "200" => "OK",
+                    "429" => "RATE_LIMIT",
+                    _ => refusal.map_or("ERROR", |r| r.0),
                 };
-                done.map_or_else(
-                    |e| match e.downcast_ref::<Refusal>() {
-                        Some(r) => reply("409 Conflict", r.code, r.msg.clone()),
-                        None => reply("400 Bad Request", "ERROR", format!("{e:#}")),
-                    },
-                    |m| reply("200 OK", "OK", m),
-                )
+                let status = if code == "ERROR" { "400 Bad Request" } else { status };
+                reply(status, code, refusal.map_or(msg.as_str(), |r| r.1))
+            }
+            ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
+            ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
+            ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
+            ("POST", Some("lesson")) => {
+                let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
+                done(self.lesson(ctx, &fields(body), by))
+            }
+            ("POST", Some(op)) => {
+                let f = fields(body).into_iter().chain([("op".into(), op.into())]).collect();
+                done(self.op(ctx, f))
             }
             _ => reply("404 Not Found", "NOT_FOUND", format!("no {method} {p} in API v1")),
         }
@@ -165,6 +196,59 @@ impl Server<'_> {
             "{filed}{}",
             if confirmed { "" } else { " (lane prompt not confirmed)" }
         ))
+    }
+
+    /// #555: `[chat]`'s defaults from the fleet's [config] sheet (`mtime` as the form ops send it).
+    fn chat_defaults(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
+        if f.get("mtime").map(String::as_str) != Some(&super::mtime(ctx)) {
+            return refused(
+                "STALE",
+                "fleet.toml changed since the page was rendered; reload and retry",
+            );
+        }
+        let wanted: Vec<_> = ["harness", "model", "effort"]
+            .into_iter()
+            .filter_map(|k| Some((k, f.get(k).filter(|v| !v.is_empty())?.clone())))
+            .collect();
+        if wanted.is_empty() {
+            return refused("BAD_VALUE", "set harness, model or effort");
+        }
+        let line = crate::conductor::chat(ctx, self.r, &wanted)?;
+        self.kick.store(true, super::Relaxed);
+        Ok(line)
+    }
+
+    /// #555: a backlog row's [close]: `gh issue close` on an issue neither queued nor worked on, then the backlog read
+    /// again (it drops out); logs `closed`.
+    fn close(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
+        let (cfg, events) = (Config::load(&ctx.config)?, read(&ctx.state)?);
+        let fleet = f.get("fleet").map_or("", String::as_str);
+        let Some(fc) = cfg.fleet.get(fleet) else {
+            return refused("BAD_VALUE", format!("no fleet `{fleet}`"));
+        };
+        let Some(n) = f.get("issue").and_then(|n| n.parse::<u64>().ok()) else {
+            return refused("BAD_VALUE", "no issue number");
+        };
+        let st = fold(&events);
+        if st.contains_key(&(fleet.to_string(), n))
+            || crate::queue::view(&events, &st, fleet).iter().any(|i| i.issue == n)
+        {
+            return refused(
+                "NOT_BACKLOG",
+                format!("#{n} is queued or has a lane: only a backlog issue closes here"),
+            );
+        }
+        let o = self.r.run(
+            "gh",
+            &crate::runner::argv(&["issue", "close", &n.to_string(), "-R", &fc.repo]),
+        )?;
+        if o.code != 0 {
+            bail!("gh issue close #{n}: {}", o.stderr.trim());
+        }
+        let d = serde_json::json!({"why": "backlog", "via": "web"});
+        crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "closed", d))?;
+        let _ = gh::backlog(ctx, self.r, fc, fleet);
+        Ok(format!("closed #{n}"))
     }
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
@@ -358,6 +442,73 @@ fn lessons(ctx: &Ctx) -> Lessons {
     Lessons {
         fleets: cfg.fleet.iter().map(fleet).collect(),
     }
+}
+
+/// #555: a POST body: a JSON object (a list joined with `,`, `true` as `1`), else the board's form.
+fn fields(body: &str) -> BTreeMap<String, String> {
+    fn flat(v: Value) -> String {
+        match v {
+            Value::String(s) => s,
+            Value::Bool(b) => if b { "1" } else { "" }.into(),
+            Value::Null => String::new(),
+            Value::Array(a) => a.into_iter().map(flat).collect::<Vec<_>>().join(","),
+            v => v.to_string(),
+        }
+    }
+    serde_json::from_str::<serde_json::Map<String, Value>>(body.trim()).map_or_else(
+        |_| form(body.trim()),
+        |m| m.into_iter().map(|(k, v)| (k, flat(v))).collect(),
+    )
+}
+
+/// A form op's result as `Reply`: OK, a refusal's code (409), else ERROR (400).
+fn done(r: Result<String>) -> Res {
+    r.map_or_else(
+        |e| match e.downcast_ref::<Refusal>() {
+            Some(r) => reply("409 Conflict", r.code, r.msg.clone()),
+            None => reply("400 Bad Request", "ERROR", format!("{e:#}")),
+        },
+        |m| reply("200 OK", "OK", m),
+    )
+}
+
+/// #555: [chat about] backlog issue `issue` of `fleet`: a new thread in its repo whose first message names it.
+fn about(ctx: &Ctx, f: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let (fleet, n) = (
+        f.get("fleet").cloned().unwrap_or_default(),
+        f.get("issue").cloned().unwrap_or_default(),
+    );
+    let title = n.parse().ok().and_then(|n| gh::cached_title(ctx, &fleet, n));
+    let text = format!(
+        "Let's talk about #{n}{}",
+        title.map_or(String::new(), |t| format!(": {t}"))
+    );
+    BTreeMap::from([
+        ("op".into(), "new".into()),
+        ("repo".into(), fleet),
+        ("text".into(), text),
+    ])
+}
+
+/// #555: `roles?fleet=`: the fleet's [config] sheet and `[chat]`'s defaults.
+fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
+    let (cfg, events) = (Config::load(&ctx.config)?, read(&ctx.state)?);
+    let fc = cfg.fleet(fleet)?;
+    let c = &cfg.chat;
+    let harness = |h: &&str| Harness {
+        name: (*h).into(),
+        efforts: crate::harness::efforts(h).iter().map(ToString::to_string).collect(),
+    };
+    Ok(Roles {
+        fleet: fleet.into(),
+        config: super::config_sheet(ctx, &cfg, fleet, fc, &fold(&events)),
+        chat: ChatDefaults {
+            harness: c.harness.clone(),
+            model: c.model.clone(),
+            effort: c.effort.clone(),
+            harnesses: crate::harness::NAMES.iter().map(harness).collect(),
+        },
+    })
 }
 
 /// An open ask (`needs-decision`) as `state` lists it; #268: a Queue row's [change] form.

@@ -110,6 +110,19 @@ pub fn cli(r: &dyn Runner, a: &[&str]) -> Result<Out> {
 
 /// The kept events after `since` (shed keeps the last 1,000), read until the stream is quiet for `quiet`.
 pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::Event>> {
+    let mut out = vec![];
+    follow(w, since, Some(quiet), |e| out.extend(e))?;
+    Ok(out)
+}
+
+/// #529: `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after
+/// `since` and each new one, until the stream ends (or is quiet for `quiet`).
+pub fn follow(
+    w: &Wire,
+    since: u64,
+    quiet: Option<Duration>,
+    mut f: impl FnMut(Option<shed_proto::Event>),
+) -> Result<()> {
     let Wire::Socket(p) = w else {
         bail!("shed events: this host's server only");
     };
@@ -119,54 +132,66 @@ pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::E
         ..Default::default()
     };
     s.write_all(lines(Method::Events, json!(params)).as_bytes())?;
-    s.set_read_timeout(Some(quiet))?;
+    s.set_read_timeout(quiet)?;
     let (mut rd, mut head) = (BufReader::new(s), String::new());
     for _ in 0..2 {
         rd.read_line(&mut head)?;
     }
     answer(&head)?;
-    let (mut out, mut l) = (vec![], String::new());
+    f(None);
+    let mut l = String::new();
     while rd.read_line(&mut l).is_ok_and(|n| n > 0) {
-        out.extend(serde_json::from_str(&l).ok());
+        if let Ok(e) = serde_json::from_str(&l) {
+            f(Some(e));
+        }
         l.clear();
     }
-    Ok(out)
+    Ok(())
+}
+
+/// The last shed `seq` taken in (`shed.seq` beside the log).
+pub fn seen(ctx: &Ctx) -> u64 {
+    // #455: berth's name, read once if shed's is missing; the next write is shed's.
+    std::fs::read_to_string(ctx.state.with_file_name("shed.seq"))
+        .or_else(|_| std::fs::read_to_string(ctx.state.with_file_name("berth.seq")))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`); whether it was a lane's.
+pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
+    let (Some(fleet), Some(issue)) = (
+        e.labels.get("fleet"),
+        e.labels.get("issue").and_then(|i| i.parse().ok()),
+    ) else {
+        return Ok(false);
+    };
+    let mut d = match &e.kind {
+        EventKind::State(s) => json!({"state": s.state, "note": s.note}),
+        EventKind::Exited { code } => json!({"state": "gone", "why": "exited", "code": code}),
+        EventKind::Killed => json!({"state": "gone", "why": "killed"}),
+        _ => return Ok(false),
+    };
+    (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
+    if !cfg.fleet.contains_key(fleet) {
+        return Ok(false);
+    }
+    append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
+    Ok(true)
 }
 
 /// #298: drive's intake of shed's state changes since the last pass (`shed.seq` beside the log): each lane's
 /// reported state, exit or kill as a passive `lane-state` event. Only this host's server; the agent list every pass
-/// polls still sees every lane, here and elsewhere.
+/// polls still sees every lane, here and elsewhere. #529: a running service follows the stream and keeps `shed.seq`.
 pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
-    let seq = ctx.state.with_file_name("shed.seq");
-    // #455: berth's name, read once if shed's is missing; the next write is shed's.
-    let since = std::fs::read_to_string(&seq)
-        .or_else(|_| std::fs::read_to_string(ctx.state.with_file_name("berth.seq")))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
-    let got = events(w, since, Duration::from_millis(300))?;
+    let got = events(w, seen(ctx), Duration::from_millis(300))?;
     let mut n = 0;
     for e in &got {
-        let (Some(fleet), Some(issue)) = (
-            e.labels.get("fleet"),
-            e.labels.get("issue").and_then(|i| i.parse().ok()),
-        ) else {
-            continue;
-        };
-        let mut d = match &e.kind {
-            EventKind::State(s) => json!({"state": s.state, "note": s.note}),
-            EventKind::Exited { code } => json!({"state": "exited", "code": code}),
-            EventKind::Killed => json!({"state": "killed"}),
-            _ => continue,
-        };
-        (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
-        if cfg.fleet.contains_key(fleet) {
-            append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
-            n += 1;
-        }
+        n += usize::from(log(ctx, cfg, e)?);
     }
     if let Some(last) = got.iter().map(|e| e.seq).max() {
-        std::fs::write(&seq, last.to_string())?;
+        std::fs::write(ctx.state.with_file_name("shed.seq"), last.to_string())?;
     }
     Ok(n)
 }
@@ -195,5 +220,8 @@ impl Runner for With<'_> {
     }
     fn shed(&self) -> Option<Shed> {
         Some(self.1.clone())
+    }
+    fn local(&self) -> bool {
+        self.0.local()
     }
 }

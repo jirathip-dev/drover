@@ -887,6 +887,30 @@ pub struct Digest {
     pub text: String,
 }
 
+/// #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every
+/// `https://` URL in it (a wrapped one joined), or `closed`.
+pub struct SetupScreen {
+    pub lines: Vec<String>,
+    pub urls: Vec<String>,
+    pub closed: bool,
+}
+
+/// #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s
+/// new-thread defaults (`POST chat` writes them).
+pub struct Roles {
+    pub fleet: String,
+    pub config: ConfigSheet,
+    pub chat: ChatDefaults,
+}
+
+/// #404: `[chat]`'s harness, model and effort (none: the conductor role's), and the `harnesses` it may name.
+pub struct ChatDefaults {
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub harnesses: Vec<Harness>,
+}
+
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
 pub struct Reply {
     pub ok: bool,
