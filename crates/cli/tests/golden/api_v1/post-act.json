@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "BAD_VALUE",
+    "message": "op is stop, kill, clean or close, not ``",
+    "ok": false
+  },
+  "route": "POST /api/v1/act",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}

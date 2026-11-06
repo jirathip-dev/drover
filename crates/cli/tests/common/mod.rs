@@ -702,3 +702,31 @@ impl Runner for Shell<'_> {
         self.0.set_secret(svc, value)
     }
 }
+
+pub const IMPL: &str = "sendmeter-impl-12";
+pub const REV: &str = "sendmeter-rev-9-r1";
+const V1_WS: &str = r#"{"result": {"root_pane": {"pane_id": "w9:p1"}}}"#;
+pub const V1_PERMISSION: &str = "╭──────────────────────────────────────────╮\n│ Bash command                             │\n│   cargo test --all                       │\n│ Do you want to proceed?                  │\n│ ❯ 1. Yes                                 │\n│   2. Yes, and don't ask again for cargo  │\n│      commands in /p/sendmeter            │\n│   3. No, and tell Claude what to do      │\n│      differently (esc)                   │\n╰──────────────────────────────────────────╯\n";
+
+/// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
+/// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
+pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
+    let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
+    let c = ctx(&tmpdir(name), &cfg);
+    for (issue, role, agent, pane) in [(12, "impl", IMPL, "w1:p2"), (9, "rev", REV, "w1:p3")] {
+        let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": pane});
+        herdsman::events::append(
+            &c.state,
+            &herdsman::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
+        )
+        .unwrap();
+    }
+    let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
+    let r = Fake::default()
+        .reply("herdr agent list", &list)
+        .reply("herdr pane read", V1_PERMISSION)
+        .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+        .reply("herdr", V1_WS)
+        .reply("gh issue close", "");
+    (c, r)
+}

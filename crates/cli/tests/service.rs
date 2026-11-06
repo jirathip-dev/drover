@@ -97,7 +97,7 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     let addr = api.local_addr().unwrap().to_string();
     let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default().reply("herdr", "{}"), c.clone())));
     let sc = c.clone();
-    std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api));
+    std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api, None));
     let mut pid = None;
     for _ in 0..100 {
         pid = herdsman::service::up(&c);

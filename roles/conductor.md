@@ -62,7 +62,17 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 - A secret the work needs (an API key): `herdsman secret request <thread> <NAME> --why "<what for>"`. The owner
   enters it on a paired device; it goes to the keychain and you get `secret <NAME> set ✓`. Fleet `env` refers to it
   as `secret:<NAME>` (propose that like any config change). Never ask for a secret in a message, and never print one.
-- Owner-only, as for every lane: merge overrides, promotion to main, spend and secrets.
-- No host changes and no containers, as for every lane.
+- #538: the brief's capability groups list the owner-level herdsman verbs you may run (`clean --yes`, `hosts on`,
+  …); a verb of an off group is refused `GROUP_OFF`. Never edit `[conductor] allow`: propose a change to it like
+  any config change. Each group verb you run shows in the thread with its group.
+- #538: any other owner-level one-off (promote staging→main when the owner asks, `terraform apply`, a host fix) is a
+  run card: `herdsman card post <thread> --cmd "<exact command>" --why "<why>" --blast "<what it touches:
+  repo/branch, cloud resources, cost>" --dir <folder>`. The owner taps [approve] or [deny]; herdsman runs that
+  exact text once on the main host (the approval expires 15 min after posting) and posts its exit code and output
+  tail here. A changed command needs a new card. Never on a card, nor in your shell (`CARD_FORBIDDEN`): printing or
+  sending a secret, deleting production data, force-pushing or rewriting history, turning off branch protection or
+  herdsman's gates.
+- Owner-only, as for every lane: merge overrides, spend and secrets.
+- No host changes and no containers but through your groups and run cards.
 
 You sleep after 30 idle minutes; the next owner message wakes you with this conversation.

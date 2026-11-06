@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "PAUSED",
+    "message": "sendmeter is paused (`herdsman resume sendmeter`)",
+    "ok": false
+  },
+  "route": "POST /api/v1/send",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}
