@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub use claude::root as profiles_root;
+pub use claude::{remove_tmp, root as profiles_root};
 pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
@@ -49,6 +49,8 @@ pub struct Dialect {
     pub input: &'static [&'static str],
     pub shell: &'static str,
     pub edits: &'static [&'static str],
+    /// #508: its `hook_event_name` before a tool call.
+    pub pre: &'static str,
     pub post: &'static str,
     pub stop: &'static str,
     /// #298: its `hook_event_name` while it waits on a person (none: "").

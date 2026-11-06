@@ -225,7 +225,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let mut url = ev.issue.map_or(String::new(), |n| format!("?issue={n}")) + "#" + tab;
     // #130: needs-human says who and why in the title; the body adds the last verdict's first finding.
     let n = ev.issue.filter(|_| ev.kind == "needs-human");
-    let kinds = ["thread-msg", "needs-decision"];
+    let kinds = ["thread-msg", "needs-decision", "ask-owner"];
     let thread = ev.str("thread").filter(|_| kinds.contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
     let evs = if n.is_some() || thread.is_some() {

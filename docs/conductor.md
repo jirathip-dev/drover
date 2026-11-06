@@ -64,6 +64,17 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   The thread shows the ask with its options, the recommended one first. `herdsman answer <fleet> <id> <n>` (the
   tap later) logs the decision, adds `DECISION <id>: <text>` to the thread and types it into the conductor.
   `--thread` with an unknown thread refuses `NO_SUCH_THREAD`.
+- **Lane asks (#541):** an `ask` from an impl, rev, fix or design lane (no `--thread`) goes to its repo's conductor
+  thread first: `[fleet.<n>] ask_thread = "t6"`, else the repo's most recently active thread (archived ones never).
+  It is logged `routed` (no push) and typed into that conductor (woken as by `say`) as a system line the board hides;
+  it stays open on the board and the issue card. No thread (or the conductor not reached: `ask-owner`), the owner
+  gets it as before. The conductor answers with `herdsman answer <fleet> <id> <n> --basis "<quote | q<id>>"`, logged
+  `by: conductor-<thread>` with its `basis`, and only if the ask is a lane ask on its repo, its question and choice
+  name no owner topic (the `OWNER_TOPIC` words), and the basis is 3+ words found verbatim in the issue's spec
+  (Amendments included) or an answered decision id. Else `REFUSED OWNER_ASK: <why>; ask the owner`, and the ask is
+  logged `ask-owner` in the thread: a choice row (the conductor's pick recommended) that pushes like an ask. Each
+  conductor answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
+  owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
 
 - **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
   images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is

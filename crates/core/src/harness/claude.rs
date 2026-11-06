@@ -30,6 +30,7 @@ static DIALECT: Dialect = Dialect {
     input: &["tool_input"],
     shell: "Bash",
     edits: &["Edit", "Write", "MultiEdit", "NotebookEdit"],
+    pre: "PreToolUse",
     post: "PostToolUse",
     stop: "Stop",
     blocked: "Notification",
@@ -268,5 +269,19 @@ fn pending(screen: &str) -> Option<(String, Vec<String>)> {
         ))
     } else {
         Some((question(&lines)?, vec![]))
+    }
+}
+
+/// #536: removes Claude Code's temp dir for worktree `wt`, `<root>/claude-<uid>/<wt, each non-alphanumeric as ->`.
+pub fn remove_tmp(roots: &[PathBuf], wt: &str) {
+    let key: String = wt
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    for root in roots {
+        let ls = std::fs::read_dir(root).into_iter().flatten().flatten();
+        for d in ls.filter(|e| e.file_name().to_string_lossy().starts_with("claude-")) {
+            let _ = std::fs::remove_dir_all(d.path().join(&key));
+        }
     }
 }

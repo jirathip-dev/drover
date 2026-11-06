@@ -237,6 +237,32 @@ fn lanes_share_one_cargo_target_per_repo() {
     );
 }
 
+/// #536: each lane gets its own scratch dir under `build_root`, named for its agent; a reviewer's per round.
+#[test]
+fn each_lane_gets_a_private_scratch_dir_under_build_root() {
+    let cfg = CONFIG.replace("build_root = \"\"", "build_root = \"/c/builds/\"");
+    let c = ctx(&tmpdir("spawn-scratch"), &cfg);
+    let scratch = |role: &str| {
+        words(&plan(&c, &Fake::default(), role)["commands"][2])
+            .into_iter()
+            .find(|w| w.starts_with("HERDSMAN_SCRATCH_TARGET="))
+    };
+    assert_eq!(
+        scratch("impl").as_deref(),
+        Some("HERDSMAN_SCRATCH_TARGET='/c/builds/.scratch/sendmeter-impl-12'")
+    );
+    assert_eq!(
+        scratch("rev").as_deref(),
+        Some("HERDSMAN_SCRATCH_TARGET='/c/builds/.scratch/sendmeter-rev-12-r1'")
+    );
+    let off = ctx(&tmpdir("spawn-scratch-off"), CONFIG);
+    let none = words(&plan(&off, &Fake::default(), "impl")["commands"][2]);
+    assert!(
+        !none.iter().any(|w| w.contains("SCRATCH")),
+        "no build_root, no scratch: {none:?}"
+    );
+}
+
 /// #187: the same fleet and branch always hash to the same port, inside the range; the dry run shows it.
 #[test]
 fn lane_port_is_stable_per_fleet_and_branch() {

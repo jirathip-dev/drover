@@ -847,3 +847,61 @@ fn chat_views_never_blank() {
         );
     }
 }
+
+/// #501: a 401 is checked, never a latch. The sheet's transcript read 401s: `pair/status` saying no shows the Pair UI,
+/// and the next read, answered for a paired device (`X-Paired`), takes it away again; saying yes, none ever shows.
+#[test]
+fn one_401_never_latches_unpaired() {
+    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
+        eprintln!("skipping: no swift/WebKit here");
+        return;
+    }
+    let (c, r) = fixture("pair-recheck");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = paired(&s, &c);
+    let res = req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T);
+    let lane = &res[res.find("\r\n\r\n").unwrap() + 4..];
+    let page = req(&s, "GET", "/?all=1", "", "", T);
+    let d = tmpdir("pair-recheck-png");
+    let file = d.join("page.html");
+    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
+    // [Pair UI shown after the 401, shown after the next read, the "Pair this phone" line, pair/status asked].
+    let scene = |paired: bool| {
+        let js = format!(
+            "let k = 0, asked = 0; window.fetch = async u => u.includes('pair/status') ? (asked++, new Response(JSON.stringify({{paired: {paired}}}))) : \
+             u.startsWith('/lane') ? (k++ ? new Response({lane}, {{headers: {{'X-Paired': '1'}}}}) : new Response('pair this device to read transcripts', {{status: 401}})) : \
+             new Response('', {{status: 404}}); \
+             const vis = () => +!document.querySelector('.pairf').hidden; \
+             open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]')); \
+             setTimeout(() => {{ const a = vis(), u = +!!document.querySelector('.unp'); poll().then(() => {{ window.late = [a, vis(), u, asked]; }}); }}, 200)",
+            lane = json!(lane)
+        );
+        let png = d.join(format!("pair-{paired}.png"));
+        let o = swift()
+            .env("HERDSMAN_WAIT", "1")
+            .args([
+                script,
+                file.to_str().unwrap(),
+                "390",
+                "lanes",
+                "horse",
+                png.to_str().unwrap(),
+                &js,
+            ])
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout).into_owned();
+        assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+        out.split_whitespace()
+            .skip(2)
+            .map(|n| n.parse::<f64>().unwrap() as u8)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        scene(false),
+        [1, 0, 1, 1],
+        "confirmed no: Pair UI, gone after the next paired read"
+    );
+    assert_eq!(scene(true), [0, 0, 0, 1], "status yes: no Pair UI at all");
+}

@@ -345,7 +345,8 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
         .1
     };
     let spawn = |ts, role: &str| {
-        let d = json!({"role": role, "stage": role, "check": role != "impl", "agent": format!("{role}-{ts}")});
+        let w = d.to_string_lossy();
+        let d = json!({"role": role, "stage": role, "check": role != "impl", "agent": format!("{role}-{ts}"), "worktree": w});
         ev(&c, ts, "spawn", d);
     };
     let fail = "FAIL\n\n- non-blocking: off\n";
@@ -386,4 +387,59 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),
         "{png}"
     );
+}
+
+/// #547: only a verify verdict lists screenshots, and only real files inside its lane folder; #499's CI FAIL body
+/// (path strings in a test list) lists none, and the board neither shows nor serves a stored path outside the lanes.
+#[test]
+fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
+    let d = tmpdir("verify-shots");
+    let c = ctx(&d, &config());
+    let lane = d.join("lane");
+    std::fs::create_dir_all(lane.join("shots")).unwrap();
+    for (p, b) in [
+        ("lane/shots/home-390.png", "narrow"),
+        ("lane/a.png", "a"),
+        ("x.png", "outside"),
+    ] {
+        std::fs::write(d.join(p), [b"\x89PNG ".as_slice(), b.as_bytes()].concat()).unwrap();
+    }
+    std::os::unix::fs::symlink(d.join("x.png"), lane.join("link.png")).unwrap();
+    let file = lane.join("verdict.md").to_string_lossy().to_string();
+    let spawn = |ts, role: &str| {
+        let w = lane.to_string_lossy();
+        let d = json!({"role": role, "stage": role, "check": true, "agent": format!("{role}-{ts}"), "worktree": w});
+        ev(&c, ts, "spawn", d);
+    };
+    let verdict = |body: &str| {
+        std::fs::write(&file, body).unwrap();
+        let s = sha("a");
+        let args = ["verdict", "sendmeter", "12", "FAIL", "--sha", &s, "--file", &file];
+        run(&c, &Fake::default().reply("gh api", &s), &args);
+        kinds(&c, "verdict").pop().unwrap().data["files"].clone()
+    };
+    // #499's FAIL body, recorded by rev: `a.png` even exists in the lane, but rev's verdict has no screenshots.
+    let ci = "FAIL\n\n- non-blocking: evidence: cases `/a.png`, `a.png`, `/tmp/a.png`, `./a.png`, `/../t5/a.png`, \
+              `../t5/a.png`, `/link/a.png`\n";
+    spawn(1, "rev");
+    assert_eq!(verdict(ci), json!([]));
+    spawn(2, "verify");
+    let x = d.join("x.png").to_string_lossy().into_owned();
+    let body = format!(
+        "FAIL\n\n- non-blocking: see shots/home-390.png, {x}, ../x.png, shots/../../x.png, link.png, missing.png\n"
+    );
+    let files = verdict(&body);
+    assert_eq!(files.as_array().unwrap().len(), 1, "{files}");
+    assert_eq!(files[0]["name"], "shots/home-390.png");
+    let none = Fake::default();
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let get = |p: &str| {
+        String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
+    };
+    assert!(get("/shot/sendmeter/12/0").ends_with("\u{fffd}PNG narrow"));
+    // An older event that stored a path outside the lane folders: no card shot, and the route answers 404.
+    let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
+    ev(&c, 3, "verdict", old);
+    assert!(herdsman::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
+    assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }

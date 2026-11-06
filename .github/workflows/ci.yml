@@ -24,6 +24,8 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
+      - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
+        run: "! ls -a \"${TMPDIR:-/tmp}\" | grep '^fleet-test-'"
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; budgets hold in a release build)"
         run: cargo test --release --locked --test perf waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log -- --nocapture
       - name: demo export (#39, synthetic data in demo/)

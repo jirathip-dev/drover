@@ -204,8 +204,11 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         .is_some_and(|a| a + 5 >= ev.ts);
     let push = match ev.kind.as_str() {
         _ if watched => "",
-        "needs-decision" if ev.str("kind") == Some("routine") => "",
+        "needs-decision" if ev.str("kind") == Some("routine") || ev.str("routed").is_some() => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
+        // #541: a lane ask put to the owner pushes as an ask; a conductor's answer to one never pushes.
+        "ask-owner" => "needs-decision",
+        "decision" if ev.str("by").is_some_and(|b| b.starts_with("conductor-")) => "",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.
         "thread-msg" if ev.str("from") != Some("conductor") => "",
         k => k,
@@ -242,7 +245,7 @@ pub fn plain(ev: &Event) -> String {
             format!("{who} merged → {} {sha} (PR #{})", s("into"), s("pr"))
         }
         "blocked" => format!("{who} blocked {}: {}", s("code"), s("reason")),
-        "needs-decision" => {
+        "needs-decision" | "ask-owner" => {
             let rec = ev.data["recommend"].as_u64();
             let opts: String = ev.data["options"]
                 .as_array()

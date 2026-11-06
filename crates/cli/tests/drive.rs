@@ -704,17 +704,22 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     assert!(t.elapsed() < Duration::from_secs(1), "GET / waited {:?}", t.elapsed());
     // The pass ends: its summary reaches the board as a toast, and a new tap starts another pass.
     live.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    let (mut seen, mut b) = (String::new(), [0u8; 65_536]);
-    while !seen.contains("event: toast") {
-        let n = live.read(&mut b).unwrap();
-        assert!(n > 0, "the stream closed: {seen}");
-        seen += &String::from_utf8_lossy(&b[..n]);
-    }
+    let mut toast = || {
+        let (mut seen, mut b) = (String::new(), [0u8; 65_536]);
+        while !seen.contains("event: toast") {
+            let n = live.read(&mut b).unwrap();
+            assert!(n > 0, "the stream closed: {seen}");
+            seen += &String::from_utf8_lossy(&b[..n]);
+        }
+        seen
+    };
+    let seen = toast();
     assert!(
         seen.contains("event: toast\ndata: \"sendmeter: started #12\""),
         "{seen}"
     );
     assert!(post().0.contains("drive%20started"), "the flag is cleared");
+    toast(); // #535: that pass ends before the test does, or it writes its dir back after the sweep
 }
 
 /// A PR view whose `mergeable` / `mergeStateStatus` are set (CI green).
