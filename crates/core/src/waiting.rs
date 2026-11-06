@@ -174,8 +174,18 @@ pub fn waiting_on(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
-    if let Some(on) = crate::events::held_on(events, s) {
-        return w("drive", &format!("held until #{on} merges"), s.last_ts, None);
+    let on = crate::events::held_on(events, s);
+    if !on.is_empty() {
+        return w(
+            "drive",
+            &format!(
+                "held until {} merge{}",
+                crate::queue::hashes(&on),
+                ["s", ""][usize::from(on.len() > 1)]
+            ),
+            s.last_ts,
+            None,
+        );
         // #425: drive wakes it then
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
@@ -720,7 +730,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     };
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
-    let held = crate::events::held_on(log.all, s).is_some();
+    let held = !crate::events::held_on(log.all, s).is_empty();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

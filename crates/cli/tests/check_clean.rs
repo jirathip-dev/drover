@@ -760,8 +760,8 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
         .collect();
     assert_eq!(held.len(), 1);
     assert_eq!(
-        (held[0].issue, held[0].str("agent"), held[0].data["on"].as_u64()),
-        (Some(12), Some(LANE), Some(11))
+        (held[0].issue, held[0].str("agent"), &held[0].data["on"]),
+        (Some(12), Some(LANE), &json!([11]))
     );
     c.now = NOW + 6 * 3600;
     let (code, out) = run(&c, &r, &["status"]);

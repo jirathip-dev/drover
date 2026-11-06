@@ -222,7 +222,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 emit(&ctx.state, cfg, e)?;
             }
             // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
-            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_none() {
+            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);

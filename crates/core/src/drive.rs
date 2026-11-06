@@ -629,17 +629,23 @@ fn pass(
     let ev = read(&ctx.state)?;
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
-        let (Some(on), Some((role, lane))) = (crate::events::held_on(&ev, s), s.active_lane()) else {
+        let on = crate::events::held_on(&ev, s);
+        let Some((role, lane)) = s.active_lane().filter(|_| !on.is_empty()) else {
             continue;
         };
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
         let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
-        if st.get(&(fleet.into(), on)).is_none_or(|b| b.state != "merged") || fast && !live || away {
+        let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
+        if on.iter().any(open) || fast && !live || away {
             continue;
         }
-        let text = format!("#{on} merged; rebase on {} and continue", f.integration);
+        let text = format!(
+            "{} merged; rebase on {} and continue",
+            crate::queue::hashes(&on),
+            f.integration
+        );
         let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
         let c = ["spawn", fleet, &n, role, "--supersede"];
         let woke = match pane {
