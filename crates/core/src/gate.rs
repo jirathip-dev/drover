@@ -136,7 +136,9 @@ pub fn verdict(
         let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == cnt);
         s.stage_rounds.get(cnt).copied().unwrap_or_default() + u32::from(new && !form)
     });
-    let shots = crate::verify::shots(&body, Path::new(file));
+    // #547: only verify's own verdict lists screenshots, inside its lane's folder.
+    let lane = at.filter(|_| stage == "verify").and_then(|e| e.str("worktree"));
+    let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
         "stage": stage, "loop": lp, "form_only": form, "spawn_sha": at.and_then(|e| e.str("sha")), "files": shots, "repro": repro});
     emit(

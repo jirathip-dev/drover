@@ -210,6 +210,9 @@ impl Serve {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
+    /// #539: retired by #441, a warning (`Config::warnings`), never a load error; its tokens still back the store's
+    /// missing ones, read-only, until the import and the line's removal.
+    pub accounts_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -224,6 +227,7 @@ pub struct Accounts {
 impl Default for Accounts {
     fn default() -> Self {
         Accounts {
+            accounts_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
@@ -309,6 +313,8 @@ pub struct Fleet {
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
+    /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    pub ask_thread: Option<String>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -567,6 +573,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "spawn-held",
     "cap-near",
     "orphan-issue",
+    "config-warning",
 ];
 
 impl Notify {
@@ -585,6 +592,20 @@ impl Notify {
 }
 
 impl Config {
+    /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s
+    /// `config-warning`; never a load error.
+    pub fn warnings(&self) -> Vec<(&'static str, String)> {
+        let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
+        let f = self.accounts.accounts_env.as_deref();
+        f.map(|f| ("[accounts].accounts_env", run(f))).into_iter().collect()
+    }
+
+    /// #539: secret `name` from the retired `accounts_env` file, for one the store lacks; None without it.
+    pub fn legacy_secret(&self, name: &str) -> Option<String> {
+        let text = std::fs::read_to_string(expand(self.accounts.accounts_env.as_deref()?)).ok()?;
+        crate::usage::env_value(&text, name).filter(|v| !v.is_empty())
+    }
+
     pub fn load(path: &Path) -> Result<Config> {
         let text = std::fs::read_to_string(path).with_context(|| format!("cannot read config {}", path.display()))?;
         Self::parse(&text).with_context(|| format!("invalid config {}", path.display()))
@@ -608,11 +629,6 @@ impl Config {
             .find(|v| !crate::secret::name_ok(v.1))
         {
             bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
-        }
-        if c.accounts.names.contains_key("accounts_env") {
-            bail!(
-                "[accounts].accounts_env is retired (#441): run `herdsman accounts import <file>`, then drop the line"
-            );
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");

@@ -49,6 +49,8 @@ pub struct Dialect {
     pub input: &'static [&'static str],
     pub shell: &'static str,
     pub edits: &'static [&'static str],
+    /// #508: its `hook_event_name` before a tool call.
+    pub pre: &'static str,
     pub post: &'static str,
     pub stop: &'static str,
     /// #298: its `hook_event_name` while it waits on a person (none: "").

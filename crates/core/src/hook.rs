@@ -59,6 +59,12 @@ pub fn after(input: &Value) -> bool {
     dialects().any(|d| d.post == ev || d.stop == ev)
 }
 
+/// #508: a call before a tool runs (a pre-tool event, or Hermes' bare `args` without one), not a prompt or notification.
+pub fn pre_call(input: &Value) -> bool {
+    let ev = input["hook_event_name"].as_str().unwrap_or_default();
+    ev.is_empty() || dialects().any(|d| d.pre == ev)
+}
+
 /// Some(reason) denies a shell (`Bash`, `terminal`) or file-writing call; `cur_branch` resolves HEAD.
 pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
@@ -136,7 +142,15 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             let writes = seg.contains('>')
                 || t.iter().any(|w| WRITERS.contains(w))
                 || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
-            if writes {
+            // #504: a conductor's shell writes its own thread folder too, when every protected word is a file there.
+            let own = || {
+                t.iter()
+                    .map(|w| w.rsplit('>').next().unwrap_or(w))
+                    .filter(|w| protected_path(w, p).is_some())
+                    // The shell expands braces, globs, variables and escapes after this check sees the word.
+                    .all(|w| !expand_home(w).contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(w, p))
+            };
+            if writes && !own() {
                 return Some(format!(
                     "writing under {pp} is blocked; use `herdsman set` / `herdsman profiles sync`"
                 ));

@@ -1,0 +1,8 @@
+# Before `[limits].max_agents` was dropped: ignored with a note.
+[fleet.app]
+repo = "o/app"
+local = "/tmp/app"
+integration = "staging"
+
+[limits]
+max_agents = 4

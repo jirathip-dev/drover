@@ -278,6 +278,66 @@ pub fn handoff_text(e: &Event) -> String {
     e.str("target").map_or(title.into(), |t| format!("{title} → {t}"))
 }
 
+/// #541: the thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active
+/// one (neither archived); none without a conductor role.
+pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
+    role(cfg, fleet).ok()?;
+    let repo = |e: &&'a Event| e.kind == "thread-new" && e.fleet == fleet;
+    let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
+    let ids: Vec<&str> = ids.filter(|id| !archived(events, id)).collect();
+    let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
+    let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
+    ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)
+}
+
+/// #541: lane ask `a` typed into thread `id`'s conductor (started or resumed) as a system line the board hides.
+pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
+    let s = |k| a.str(k).unwrap_or_default();
+    let rec = a.data["recommend"].as_u64();
+    let opts = a.data["options"].as_array().into_iter().flatten().zip(1..);
+    let opts: String = opts
+        .map(|(o, n)| {
+            let r = if rec == Some(n) { " (recommended)" } else { "" };
+            format!(" [{n}] {}{r}", o.as_str().unwrap_or_default())
+        })
+        .collect();
+    let at = a.issue.map_or("the fleet".into(), |n| format!("#{n}"));
+    let text = format!(
+        "lane ask {} on {at} from {} ({}): {}{opts}. Answer it only if the issue spec or a past decision settles it: \
+         `herdsman answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
+         goes to the owner.",
+        s("id"),
+        a.str("agent").unwrap_or("a lane"),
+        s("kind"),
+        s("question"),
+        a.fleet,
+        s("id")
+    );
+    let t = find(&read(&ctx.state)?, id)?.clone();
+    let d = json!({"thread": id, "from": "system", "text": text, "lane_ask": a.str("id")});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
+    deliver(ctx, cfg, r, &t, &format!("[{id}] system: {text}"))
+}
+
+/// #541: lane ask `a` put to the owner as a choice row in thread `id` (once), `rec` (else its own) recommended; it
+/// pushes as an ask.
+pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, why: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    if of(&events, id).any(|e| e.kind == "ask-owner" && e.str("id") == a.str("id")) {
+        return Ok(());
+    }
+    let rec = rec.or_else(|| a.data["recommend"].as_u64());
+    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.data["options"],
+        "recommend": rec, "agent": a.str("agent"), "why": why});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
+}
+
+/// #541: an `ask-owner` row's lane ask.
+pub fn lane_of<'a>(events: &'a [Event], e: &Event) -> Option<&'a Event> {
+    let is = |a: &&Event| a.kind == "needs-decision" && a.fleet == e.fleet && a.str("id") == e.str("id");
+    events.iter().find(is)
+}
+
 /// #413: a one-line row from thread `id` into each thread that handed off to it (an issue filed, an ask answered).
 pub fn flow(ctx: &Ctx, cfg: &Config, id: &str, text: &str) -> Result<()> {
     let events = read(&ctx.state)?;
@@ -566,7 +626,7 @@ pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) ->
     let new_cfg = Config::parse(&new)?;
     let fails = |c: &Ctx| -> Result<Vec<String>> {
         let mut out = vec![];
-        crate::doctor::doctor(c, r, &mut out, true)?;
+        crate::doctor::doctor(c, r, &mut out, true, false)?;
         Ok(serde_json::from_slice::<Vec<String>>(&out)?
             .into_iter()
             .filter(|l| l.starts_with('✗'))
@@ -668,7 +728,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     h.ready(ctx, r, &p)?;
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = crate::spawn::deliver(&on, &p)?;
+    let _secrets = crate::spawn::deliver(&on, cfg, &p)?;
     let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
     let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
     herdr::ok(r, &p.lane_cmd(&new))?;
@@ -788,7 +848,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         "thread-handoff" => Some(
             json!({"ts": e.ts, "from": "system", "text": handoff_text(e), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
         ),
-        "needs-decision" => {
+        "needs-decision" | "ask-owner" => {
             let all = e.data["options"].as_array().cloned().unwrap_or_default();
             let mut opts: Vec<Value> = all
                 .into_iter()
@@ -797,7 +857,8 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
                 .collect();
             let rec = e.data["recommend"].as_u64().unwrap_or(0);
             opts.sort_by_key(|o| o["n"] != rec);
-            let open = events::closed(events, e).is_none();
+            let lane = if e.kind == "ask-owner" { lane_of(events, e)? } else { e };
+            let open = events::closed(events, lane).is_none();
             Some(
                 json!({"ts": e.ts, "from": "conductor", "ask": e.str("id"), "question": e.str("question"),
                 "options": opts, "recommend": e.data["recommend"], "open": open}),
@@ -841,9 +902,16 @@ fn render(items: &[Value]) -> String {
 
 /// The conductor spoke (a message or an ask) since the owner last read or wrote.
 pub fn unread(events: &[Event], id: &str) -> bool {
-    let seen = |e: &&Event| matches!(e.kind.as_str(), "thread-msg" | "thread-read" | "needs-decision");
+    let seen = |e: &&Event| {
+        matches!(
+            e.kind.as_str(),
+            "thread-msg" | "thread-read" | "needs-decision" | "ask-owner"
+        )
+    };
     let last = of(events, id).rfind(seen);
-    last.is_some_and(|e| e.kind == "needs-decision" || e.str("from") == Some("conductor"))
+    last.is_some_and(|e| {
+        matches!(e.kind.as_str(), "needs-decision" | "ask-owner") || e.str("from") == Some("conductor")
+    })
 }
 
 /// Log `thread-read` for thread `t` if the conductor spoke since the owner last read or wrote (`thread show`, the board).
