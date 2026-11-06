@@ -157,7 +157,7 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
         .as_u64()
         .filter(|_| d["op"] == "block" || d["op"] == "unblock");
     let s = n.and_then(|n| events::fold(&events).remove(&(fleet.into(), n)));
-    let on = q.iter().find(|i| Some(i.issue) == n).map(|i| i.blocked_by.clone());
+    let on = q.iter().find(|i| Some(i.issue) == n).map(|i| i.blockers.clone());
     let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": on})));
     emit(
         &ctx.state,

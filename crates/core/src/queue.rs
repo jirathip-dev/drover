@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
-    pub blocked_by: Vec<u64>,
+    pub blockers: Vec<u64>,
+    /// The first of `blockers` still open, set by `view`: the frozen board (#552) and /api/v1 rows show one.
+    pub blocked_by: Option<u64>,
     /// #294: the serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
     pub serial: Vec<String>,
     /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
@@ -25,9 +27,9 @@ pub struct Item {
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | unblock | set (`needs`).
-pub fn op(op: &str, issues: &[u64], top: bool, before: Option<u64>, after: Option<u64>) -> Value {
+pub fn op(op: &str, issues: &[u64], top: bool, before: Option<u64>, after: Option<u64>, on: Option<u64>) -> Value {
     let mut d = json!({"op": op, "issues": issues});
-    for (k, v) in [("before", before), ("after", after)] {
+    for (k, v) in [("before", before), ("after", after), ("on", on)] {
         if let Some(v) = v {
             d[k] = json!(v);
         }
@@ -62,7 +64,8 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 .iter()
                 .map(|&n| Item {
                     issue: n,
-                    blocked_by: vec![],
+                    blockers: vec![],
+                    blocked_by: None,
                     serial: serial.clone(),
                     needs: strs(&d["needs"]),
                     check: d["check"] == true,
@@ -73,7 +76,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 .collect();
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
-                    m.blocked_by.clone_from(&old.blocked_by);
+                    m.blockers.clone_from(&old.blockers);
                     m.check |= old.check;
                     m.design |= old.design;
                     m.repro |= old.repro;
@@ -101,7 +104,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
             let on = nums(&d["on"]);
             let i = pos(q, n)?;
             if op == "unblock" {
-                q[i].blocked_by.retain(|b| !on.is_empty() && !on.contains(b));
+                q[i].blockers.retain(|b| !on.is_empty() && !on.contains(b));
                 return Ok(());
             }
             ensure!(!on.is_empty(), "block needs --on");
@@ -110,10 +113,10 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 let mut path = vec![b];
                 while let Some(x) = path.pop() {
                     ensure!(x != n, "#{b} cannot block #{n}: #{b} already waits on #{n}");
-                    path.extend(q.iter().filter(|i| i.issue == x).flat_map(|i| &i.blocked_by));
+                    path.extend(q.iter().filter(|i| i.issue == x).flat_map(|i| &i.blockers));
                 }
-                if !q[i].blocked_by.contains(&b) {
-                    q[i].blocked_by.push(b);
+                if !q[i].blockers.contains(&b) {
+                    q[i].blockers.push(b);
                 }
             }
         }
@@ -257,14 +260,10 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
     let open = replay(events, fleet)
         .into_iter()
         .filter(|i| !matches!(state(st, fleet, i.issue), "merged" | "closed"));
-    open.map(|i| Item {
-        blocked_by: i
-            .blocked_by
-            .iter()
-            .copied()
-            .filter(|&b| state(st, fleet, b) != "merged")
-            .collect(),
-        ..i
+    open.map(|mut i| {
+        i.blockers.retain(|&b| state(st, fleet, b) != "merged");
+        i.blocked_by = i.blockers.first().copied();
+        i
     })
     .collect()
 }
@@ -280,7 +279,7 @@ pub fn next(events: &[Event], fleet: &str) -> (i32, String) {
         return (0, n);
     }
     match free.first() {
-        Some(i) if !i.blocked_by.is_empty() => (2, format!("#{} is blocked by {}", i.issue, hashes(&i.blocked_by))),
+        Some(i) if !i.blockers.is_empty() => (2, format!("#{} is blocked by {}", i.issue, hashes(&i.blockers))),
         _ => (1, format!("{fleet}: queue empty")),
     }
 }
@@ -293,7 +292,7 @@ pub fn hashes(ns: &[u64]) -> String {
 /// Every unblocked queued issue with no lane, in queue order: drive tries each, `next` is the first.
 pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     let st = fold(events);
-    let free = |i: &Item| state(&st, fleet, i.issue) == "queued" && i.blocked_by.is_empty();
+    let free = |i: &Item| state(&st, fleet, i.issue) == "queued" && i.blockers.is_empty();
     let q = view(events, &st, fleet);
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
@@ -307,7 +306,7 @@ pub fn skipped<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64, now: u
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blocked_by, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 
@@ -371,7 +370,7 @@ pub fn board(
     };
     for (k, i) in q.iter().enumerate() {
         // #505: several blockers get their own line, the row is full.
-        let on = match &i.blocked_by[..] {
+        let on = match &i.blockers[..] {
             [] => None,
             [b] => Some(format!("on #{b}")),
             bs => Some(format!("on…\n         blocked by {}", hashes(bs))),

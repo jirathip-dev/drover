@@ -1405,7 +1405,7 @@ impl<'a> Server<'a> {
             "mv" => {
                 let n = |k: &str| g(k).parse::<u64>().ok();
                 let issue = n("issue").context("no issue")?;
-                let d = queue::op("mv", &[issue], false, n("before"), n("after"));
+                let d = queue::op("mv", &[issue], false, n("before"), n("after"), None);
                 crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))?;
                 crate::drive::kick(ctx, self.r, fleet, issue, "board");
                 format!(
@@ -1483,7 +1483,7 @@ impl<'a> Server<'a> {
             }
             "bqueue" => {
                 let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
-                let mut d = queue::op("add", &ns, false, None, None);
+                let mut d = queue::op("add", &ns, false, None, None, None);
                 d["check"] = json!(true);
                 crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))? + " (needs-check)"
             }
@@ -1777,7 +1777,7 @@ impl<'a> Server<'a> {
             let items: Vec<(u64, Option<u64>, Option<usize>)> = q
                 .iter()
                 .enumerate()
-                .map(|(k, i)| (i.issue, i.blocked_by.first().copied(), Some(k)))
+                .map(|(k, i)| (i.issue, i.blocked_by, Some(k)))
                 .chain(rest.iter().map(|&n| (n, None, None)))
                 .collect();
             let mut rows = vec![];
@@ -2051,7 +2051,7 @@ impl<'a> Server<'a> {
                 .map(|i| HerdQueued {
                     issue: i.issue,
                     title: gh::cached_title(ctx, f, i.issue),
-                    blocked_by: i.blocked_by.first().copied(),
+                    blocked_by: i.blocked_by,
                     coat: coat(&format!("{f}#{}", i.issue)),
                 })
                 .collect()

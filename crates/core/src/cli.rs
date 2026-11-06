@@ -1410,7 +1410,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 "no serial group `{}` in fleet.{fleet}",
                                 g.unwrap_or_default()
                             );
-                            let mut d = queue::op("add", &issues, top, None, after);
+                            let mut d = queue::op("add", &issues, top, None, after, None);
                             for &i in &issues {
                                 let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
                             }
@@ -1441,7 +1441,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 !["design", "verify", "repro"].contains(&&*key) || on,
                                 "{key} is `on` or `off`"
                             );
-                            let mut d = queue::op("set", &[issue], false, None, None);
+                            let mut d = queue::op("set", &[issue], false, None, None, None);
                             d[key.as_str()] = json!(tags);
                             d
                         }
@@ -1450,8 +1450,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             top,
                             before,
                             after,
-                        } => queue::op("mv", &[issue], top, before, after),
-                        QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None),
+                        } => queue::op("mv", &[issue], top, before, after, None),
+                        QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None, None),
                         QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": on}),
                         QueueCmd::Unblock { issue, on } => json!({"op": "unblock", "issues": [issue], "on": on}),
                         QueueCmd::Ls { .. } => unreachable!(),
