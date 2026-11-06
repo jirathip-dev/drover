@@ -30,6 +30,7 @@ static DIALECT: Dialect = Dialect {
     input: &["tool_input"],
     shell: "Bash",
     edits: &["Edit", "Write", "MultiEdit", "NotebookEdit"],
+    pre: "PreToolUse",
     post: "PostToolUse",
     stop: "Stop",
     blocked: "Notification",

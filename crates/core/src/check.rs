@@ -6,7 +6,7 @@ use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
 use crate::runner::{ok, Runner};
-use crate::spawn::{changes, dirty, OWN_FILES};
+use crate::spawn::{changes, dirty, OWN_FILES, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, herdr};
 use anyhow::{Context, Result};
@@ -71,6 +71,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events)?;
+    // #539: a retired config key still set alerts once per key.
+    for (k, w) in cfg.warnings() {
+        let d = json!({"key": k, "reason": format!("{k} is {w}")});
+        fire(ctx, cfg, out, &events, ("herdsman", None), "config-warning", d)?;
+    }
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
         // #429: integration within `warn_within` of its line cap: once per integration sha.
@@ -488,11 +493,26 @@ pub fn clean(
     let mut failed = 0;
     let mut freed = 0;
     let mut closed = BTreeMap::new();
+    // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
+    let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
+        .flat_map(|(name, f)| {
+            let dirs = std::fs::read_dir(ctx.worktrees.join(f.repo_name()))
+                .into_iter()
+                .flatten()
+                .flatten();
+            dirs.filter_map(move |d| {
+                let dir = d.file_name().into_string().ok()?;
+                let (n, k) = dir.strip_prefix("rev-")?.split_once("-r")?;
+                let (n, _) = (n.parse::<u64>().ok()?, k.parse::<u64>().ok()?);
+                let d = json!({"agent": format!("{name}-{dir}"), "worktree": d.path()});
+                Some(Event::new(ctx.now, name, Some(n), "spawn", d))
+            })
+        })
+        .collect();
     // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
-    for e in events
-        .iter()
-        .rev()
+    for e in (events.iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
+        .chain(&revs)
     {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
@@ -1007,7 +1027,7 @@ fn closed_issues<'a>(
     &memo[fleet]
 }
 
-/// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES`.
+/// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES` and `SHOT_DIRS`.
 pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<()> {
     if !ws.is_empty() && herdr::worktree_remove(r, ws)? {
         return Ok(());
@@ -1017,6 +1037,13 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<(
     }
     for f in OWN_FILES {
         r.remove(&Path::new(wt).join(f)).context(format!("removing {f}"))?;
+    }
+    for d in SHOT_DIRS.iter().map(|d| Path::new(wt).join(d)) {
+        match r.machine {
+            None if d.is_dir() => std::fs::remove_dir_all(&d).context(format!("removing {}", d.display()))?,
+            None => {}
+            Some(_) => drop(ok(r, "rm", &["-rf", &d.to_string_lossy()])?),
+        }
     }
     // #157: on another host the repo checkout's path is its own; git finds it from the worktree.
     let local = match r.machine {
@@ -1226,7 +1253,7 @@ enum Snap {
     Push(anyhow::Error),
 }
 
-/// Stage all but `OWN_FILES`, scan the staged and unpushed diff for a secret (#96, the first as `file:line: masked`),
+/// Stage all but `OWN_FILES` and `SHOT_DIRS`, scan the staged and unpushed diff for a secret (#96, the first as `file:line: masked`),
 /// commit any uncommitted change with `msg` and push HEAD to `w`.
 fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(), Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
@@ -1239,7 +1266,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
     let mut snap = || -> Result<(String, String)> {
         commit = changes(&git(&["status", "--porcelain"])?) > 0;
         git(&["add", "-A"])?;
-        git(&[&["reset", "-q", "--"][..], OWN_FILES].concat())?;
+        git(&[&["reset", "-q", "--"][..], OWN_FILES, SHOT_DIRS].concat())?;
         Ok((
             git(&["diff", "--cached"])?,
             git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?,

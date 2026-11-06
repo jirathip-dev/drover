@@ -19,20 +19,24 @@ fn mode(path: &Path) -> String {
     bits.map_or("missing".into(), |bits| format!("mode {bits:o}"))
 }
 
-pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool) -> Result<i32> {
+pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
-    if let Some((client, server, older)) = crate::timer::herdr_versions(r) {
-        let line = format!("herdr — client {client}, server {server} → herdr update --handoff");
-        row(&mut rows, !older, '!', &line);
-    } else {
-        rows.push("✗ herdr — not on PATH, or no server → herdr".into());
+    // #539 `--config-only`, the pre-install gate: only whether this binary loads the live config (warnings are fine).
+    if !config_only {
+        if let Some((client, server, older)) = crate::timer::herdr_versions(r) {
+            let line = format!("herdr — client {client}, server {server} → herdr update --handoff");
+            row(&mut rows, !older, '!', &line);
+        } else {
+            rows.push("✗ herdr — not on PATH, or no server → herdr".into());
+        }
+        let sample = crate::host::sample(r);
+        let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
+        row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
+        let gh = ok(r, "gh", &["auth", "status"]).is_ok();
+        row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
     }
-    let sample = crate::host::sample(r);
-    let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
-    row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
-    let gh = ok(r, "gh", &["auth", "status"]).is_ok();
-    row(&mut rows, gh, '✗', "gh — auth status → gh auth login");
     match Config::load(&ctx.config) {
+        Ok(cfg) if config_only => config_rows(ctx, &cfg, &mut rows),
         Ok(cfg) => checks(ctx, &cfg, r, &mut rows),
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
     }
@@ -44,8 +48,13 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool) -> Res
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
 }
 
-fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
+fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.push(format!("✓ config — {}", ctx.config.display()));
+    rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
+}
+
+fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
+    config_rows(ctx, cfg, rows);
     if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
         let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
         rows.push(format!(
@@ -130,7 +139,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for (name, var) in &cfg.accounts.names {
         let svc = crate::secret::service("all", var);
         let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
-        row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), '✗', &line);
+        let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
+        row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), bad, &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();

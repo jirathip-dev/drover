@@ -266,23 +266,30 @@ pub fn pause(ctx: &Ctx, out: &mut dyn Write, fleet: &str, paused: bool, via: Opt
 const OWNER_WORDS: &str = "main production prod prods secret secrets token tokens delete deleted deletes deleting \
     deletion spend spends spending spent cost costs costly dependency dependencies scope scopes";
 
+/// `text` names an owner topic: one of `OWNER_WORDS`, or `$`.
+fn owner_topic(text: &str) -> bool {
+    let text = text.to_lowercase();
+    let mut words = text.split(|c: char| !c.is_alphanumeric());
+    text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))
+}
+
 /// `herdsman ask`: log a `needs-decision` for the asking lane (`HERDSMAN_LANE`, else none), notify, print its id.
+/// #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none,
+/// or the conductor not reached, to the owner.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
+    r: &dyn Runner,
     out: &mut dyn Write,
     (fleet, issue): (&str, Option<u64>),
-    q: &str,
-    opts: &[String],
+    (q, opts): (&str, &[String]),
     (rec, kind, thread): (Option<usize>, &str, Option<&str>),
 ) -> Result<()> {
     cfg.fleet(fleet)?;
-    let text = format!("{q} {}", opts.join(" ")).to_lowercase();
-    let mut words = text.split(|c: char| !c.is_alphanumeric());
     if kind == "routine" && rec.is_none() {
         return gate::refused("NO_RECOMMENDATION", "a routine ask needs --recommend <n>");
     }
-    if kind == "routine" && (text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))) {
+    if kind == "routine" && owner_topic(&format!("{q} {}", opts.join(" "))) {
         return gate::refused("OWNER_TOPIC", "this ask touches an owner topic; ask it as --kind owner");
     }
     if q.trim().is_empty() || opts.len() > 4 || rec.is_some_and(|n| n == 0 || n > opts.len()) {
@@ -315,8 +322,90 @@ pub fn ask(
     if let Some(t) = thread {
         d["thread"] = json!(t);
     }
-    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "needs-decision", d))?;
+    let from_lane = lane
+        .rsplit(':')
+        .next()
+        .is_some_and(|r| !r.is_empty() && r != "conductor");
+    let routed = conductor::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
+    if let Some(t) = routed {
+        d["routed"] = json!(t);
+    }
+    let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
+    emit(&ctx.state, cfg, ev.clone())?;
+    if let Some(t) = routed {
+        if let Err(e) = conductor::lane_ask(ctx, cfg, r, t, &ev) {
+            conductor::to_owner(ctx, cfg, t, &ev, None, &format!("conductor not reached: {e:#}"))?;
+        }
+    }
     Ok(writeln!(out, "{id}")?)
+}
+
+/// A choice as its ask has it: option `n`'s text, else the text given.
+fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
+    let n = choice.parse::<usize>().ok();
+    n.and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
+        .unwrap_or(choice)
+}
+
+/// A conductor's answer may not change one this long after it (the owner's [change] may).
+pub const CHANGE: u64 = 30 * 60;
+
+/// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
+/// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
+/// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
+pub fn conductor_answer(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, id): (&str, &str),
+    choice: &str,
+    (t, basis): (&str, &str),
+) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let is = |e: &&Event| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(id);
+    let Some(ask) = events.iter().find(is) else {
+        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
+    };
+    if ask.str("routed").is_none() || conductor::find(&events, t)?.fleet != ask.fleet {
+        return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
+    }
+    let text = chosen(ask, choice);
+    let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let quote = flat(basis.trim_matches(|c: char| c.is_whitespace() || "\"'>“”".contains(c)));
+    let decided = |e: &Event| e.kind == "decision" && e.fleet == fleet && e.str("id") == Some(&quote);
+    let in_spec = || -> Result<bool> {
+        let (Some(n), true) = (ask.issue, quote.split(' ').count() >= 3) else {
+            return Ok(false);
+        };
+        let v = gh::spec(ctx, r, cfg.fleet(fleet)?, fleet, n, false)?;
+        Ok(flat(v["body"].as_str().unwrap_or_default()).contains(&quote))
+    };
+    let why = if owner_topic(&format!("{} {text}", ask.str("question").unwrap_or_default())) {
+        "it names an owner topic"
+    } else if quote.is_empty() {
+        "no --basis"
+    } else if quote != id && events.iter().any(decided) || in_spec()? {
+        ""
+    } else {
+        "--basis is neither a verbatim quote of the issue's spec nor an answered decision id"
+    };
+    if !why.is_empty() {
+        let opts = ask.data["options"].as_array().into_iter().flatten();
+        let rec = (opts.zip(1..)).find(|o| o.0 == text).map(|o| o.1);
+        conductor::to_owner(ctx, cfg, t, ask, rec, why)?;
+        return gate::refused("OWNER_ASK", format!("{why}; ask the owner"));
+    }
+    answer_with(
+        ctx,
+        cfg,
+        r,
+        out,
+        (fleet, id),
+        choice,
+        (&format!("conductor-{t}"), None),
+        Some(&quote),
+    )
 }
 
 /// `herdsman answer` (and the page's needs-you card, with `via`): log the decision, prompt the asking agent.
@@ -329,13 +418,30 @@ pub fn answer(
     choice: &str,
     (by, via): (&str, Option<&str>),
 ) -> Result<()> {
+    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), None)
+}
+
+/// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
+#[allow(clippy::too_many_arguments)]
+fn answer_with(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn runner::Runner,
+    out: &mut dyn Write,
+    (fleet, id): (&str, &str),
+    choice: &str,
+    (by, via): (&str, Option<&str>),
+    basis: Option<&str>,
+) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
     let Some(ask) = events.iter().find(|e| is(e, "needs-decision")) else {
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
     };
     let last = events.iter().rev().find(|e| is(e, "decision"));
-    if let Some(d) = last.filter(|d| d.str("by") != Some("default")) {
+    let conductor = |b: &str| b.starts_with("conductor-");
+    let change = |d: &&Event| d.str("by").is_some_and(conductor) && !conductor(by) && ctx.now < d.ts + CHANGE;
+    if let Some(d) = last.filter(|d| d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
             "ALREADY_ANSWERED",
             format!(
@@ -345,22 +451,34 @@ pub fn answer(
             ),
         );
     }
-    let text = choice
-        .parse::<usize>()
-        .ok()
-        .and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
-        .unwrap_or(choice);
+    let text = chosen(ask, choice);
     if text.trim().is_empty() || text.chars().any(char::is_control) || text.chars().count() > 2000 {
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
+    }
+    // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
+    if ask.data.get("handoff").is_some() {
+        let to = conductor::land(ctx, cfg, r, ask, choice)?;
+        let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
+        return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
     // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
     let design = crate::design::is_ask(ask);
     if design {
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
     }
-    let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+    let mut d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+    if let Some(b) = basis {
+        d["basis"] = json!(b);
+    }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
+    if let (Some(b), Some(t)) = (basis, by.strip_prefix("conductor-")) {
+        let at = ask.issue.map_or(String::new(), |n| format!(" for #{n}"));
+        let text = format!("answered {id}{at}: {text}, because {b}");
+        let d = json!({"thread": t, "from": "system", "text": text, "change": id});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))?;
+    }
     let why = via.map_or("answer", |_| "board");
     if let Some(n) = ask.issue {
         let _ = crate::drive::kick(ctx, r, fleet, n, why); // #304: after the decision is logged

@@ -1,0 +1,7 @@
+# Before #294: the old one-group `serial_paths` form, read into `[[fleet.<n>.serial]]`.
+[fleet.app]
+repo = "o/app"
+local = "/tmp/app"
+integration = "staging"
+serial_paths = ["db/migrations/**"]
+serial_label = "db"

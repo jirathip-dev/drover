@@ -35,10 +35,13 @@ worktree on the lane's host: directly on the main host, over the ssh channel's s
 sources the file; spawn deletes it once the harness has started. A token never reaches argv, the pane's scrollback,
 the event log or a file left behind.
 
-**Import from `tokens.env`.** `accounts_env` is retired; a fleet.toml that still sets it fails to load. Run
+**Import from `tokens.env`.** `accounts_env` is retired (#441). A fleet.toml that still sets it loads with a
+warning (#539): `doctor` shows a `!` row, the board shows a `!` line, and `check` sends one `config-warning` alert.
+Until the import, lanes still read from that file the tokens the store doesn't have. Run
 `herdsman accounts import [FILE]` (owner only; default `~/.config/herdsman/accounts/tokens.env`) once: it copies each
 `[accounts]` variable's value into the store, reads it back and checks its sha256, and prints a `✓` row per account.
-It never deletes the file; do that yourself once lanes run on the store.
+It never deletes the file; do that yourself once lanes run on the store. Then drop the `accounts_env` line
+to clear the warning.
 
 **Fallback and caps.** `herdsman check` reads each Claude lane's pane. When it shows the usage-limit
 banner, it logs `account-capped` with `until`, the banner's reset time (`resets 9am`, `resets Nov 4, 8am`,

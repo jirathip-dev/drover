@@ -364,7 +364,11 @@ pub fn waiting_on(
                 |e: &&Event| e.str("step") == Some("review") && !matches!(e.str("code"), None | Some("EXIT" | "ERROR"));
             if let Some(e) = tried.filter(refused) {
                 let why = crate::drive::words(e.str("code"), "review", e.str("result").unwrap_or_default());
-                what = format!("waiting for a reviewer slot: {why}");
+                what = if why.contains(crate::drive::OLD) {
+                    why
+                } else {
+                    format!("waiting for a reviewer slot: {why}")
+                };
             }
             w(
                 "drive",
@@ -706,7 +710,9 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
         for a in e.data.get("actions").and_then(Value::as_array).into_iter().flatten() {
             let code = a["code"].as_str().unwrap_or_default();
             let wait = HOST_WAIT.contains(&code) || code == "CAP" && e.fleet == s.fleet;
-            if e.fleet == s.fleet && a["issue"] == s.issue || s.state == "queued" && wait {
+            // #534: a LANE_LIVE loop on a finished lane drives nothing.
+            let old = a["words"].as_str().is_some_and(|w| w.contains(crate::drive::OLD));
+            if e.fleet == s.fleet && a["issue"] == s.issue && !old || s.state == "queued" && wait {
                 since = since.max(e.ts);
             }
         }

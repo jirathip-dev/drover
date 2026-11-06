@@ -251,6 +251,7 @@ fn hook_with_pre_rename_home_prints_only_its_json_decision() {
     let lane = [("HERDSMAN_LANE", "s:12:impl")];
     let decide = |h: &Path| run_in(h, &["hook", "--role", "impl"], &lane, &input.to_string());
     let clean = tmpdir("migrate-hook-clean");
+    seed(&clean, "herdsman");
     let (code, want, _) = decide(&clean);
     assert_eq!(code, 0);
     let h = tmpdir("migrate-hook");

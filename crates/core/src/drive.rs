@@ -301,7 +301,13 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("SPAWN_PENDING") => crate::waiting::SLOT.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
-        Some("LANE_LIVE") => "a lane is already on it".into(),
+        Some("LANE_LIVE") => match why.strip_prefix("finished (").and_then(|w| w.split_once(')')) {
+            Some((st, _)) => format!(
+                "an old {} ({st}) is in the way: replacing it",
+                if step == "review" { "reviewer" } else { "lane" }
+            ),
+            None => "a lane is already on it".into(),
+        },
         Some("ROUND_LIMIT" | "UPDATE_LIMIT") => "out of rounds: needs you".into(),
         Some("EXIT" | "ERROR") => format!("failed: {result}"),
         Some(c) => format!("held back ({c})"),
@@ -771,6 +777,11 @@ fn pass(
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
+            // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
+            if code == Some("LANE_LIVE") && args[0] == "spawn" && last_words(fleet).contains(OLD) {
+                let a = [&args[..], &["--supersede"]].concat();
+                code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
+            }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
                 let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
@@ -890,10 +901,18 @@ fn no_proof(
     Ok(Some(code))
 }
 
+/// #534: the words of a `LANE_LIVE` on a finished lane.
+pub(crate) const OLD: &str = "is in the way: replacing it";
+
+/// The words of the fleet's last action this pass.
+fn last_words(fleet: &str) -> String {
+    let last = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["words"].to_string()));
+    last.unwrap_or_default()
+}
+
 /// #214: the merge just tried was refused or failed on a conflict (its words say so).
 fn conflicted(fleet: &str, code: Code) -> bool {
-    let last = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["words"].to_string()));
-    let w = last.unwrap_or_default().to_lowercase();
+    let w = last_words(fleet).to_lowercase();
     code == Some("NOT_MERGEABLE") || code.is_some() && (w.contains("not mergeable") || w.contains("conflict"))
 }
 

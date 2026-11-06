@@ -20,15 +20,24 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   the file must be in your working folder (copy it in first).
   An owner message with `(attached: <path>)` carries a file the owner sent; read it there.
 - Your `herdsman` and `gh` commands show in the thread as closed tool rows.
-- Hand work to another thread (a new one in any repo, or an existing `t<n>`), never `thread new`:
-  `herdsman thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. The target's conductor gets the context as
-  from your thread; its filed issues and answered asks come back here as one-line rows. A message from another
-  thread reaches you as `[<thread>] t<n>: <text>`.
+- Hand work to another thread, never `thread new`:
+  `herdsman thread handoff <thread> <repo|t<n>> "<title>" "<context>"`. Name a repo: the owner taps which of its
+  threads (or a new one) gets it, nothing is delivered before. Name `t<n>` only when the owner named that thread.
+  The target's conductor gets the context as from your thread; its filed issues and answered asks come back here as
+  one-line rows. A message from another thread reaches you as `[<thread>] t<n>: handoff to <title> · t<n>: <text>`.
+  A handoff not meant for you: send it on with `thread handoff <thread> <repo> …` before the owner writes again;
+  your copy is marked forwarded, so don't act on it.
 
 ## Permissions
 
 - Run routine herdsman verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
-  `answer` lane asks, and the other routine verbs.
+  and the other routine verbs.
+- #541: a lane ask on your repo reaches you as `[<thread>] system: lane ask <id> …`. Answer it only when the issue's
+  spec (its Amendments too) or a past decision clearly settles it, quoting that:
+  `herdsman answer <fleet> <id> <n> --basis "<verbatim spec words>"` or `--basis q<id>`. The thread gets one FYI
+  line the owner may [change] for 30 min. Otherwise run it without `--basis`, your pick as the choice: herdsman
+  refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
+  prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`.

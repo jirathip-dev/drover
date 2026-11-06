@@ -60,7 +60,14 @@ function files(id: string, m: Msg): string {
   }).join('');
 }
 
-/** An ask: its question, then the choice rows (recommended first) and an "other" box; answered, the ✓ line. */
+/** An ask's choice rows (recommended first; #492: a handoff card's past 5 behind `more`) and an "other" box. */
+function choices(a: NonNullable<Msg['ask']>, dis: string): string {
+  const rows = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
+  const btn = ([o, n]: readonly [string, number]) => `<button type=button name=choice value=${n}${dis}><span>${n}. ${esc(o)}${or(n === a.recommend, ' <small>(recommended)</small>', '')}</span></button>`;
+  return `<form class=chq data-id="${esc(a.id)}" data-fleet="${esc(a.fleet)}">${rows.slice(0, 5).map(btn).join('')}${or(rows.length > 5, `<details class=more><summary>more (${rows.length - 5})</summary>${rows.slice(5).map(btn).join('')}</details>`, '')}<div class=oth><input name=text aria-label="other answer" placeholder="other: type an answer"${dis}><button${dis}>send</button></div></form>`;
+}
+
+/** An ask: its question, then its choice rows; answered, the ✓ line. */
 function ask(now: number, m: Msg, dis: string): string {
   const a = m.ask!;
   let body = `<div class=md><p class=qid>${esc(a.id)}${or(m.routine, ' · routine', '')}</p>${prose(a.question)}</div>`;
@@ -68,11 +75,7 @@ function ask(now: number, m: Msg, dis: string): string {
     const d = m.answer, what = d.n == null ? `other: "${esc(d.choice)}"` : `${d.n}. ${esc(d.choice)}`;
     const who = d.by === 'default' ? 'by: default' : d.by == null || d.by === 'owner' ? 'you' : esc(d.by);
     body += `<p class=ans>✓ ${what} <span class=m>· ${who} · ${tm(now, d.ts)}</span></p>`;
-  } else if (m.open) {
-    const rows = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
-    const btn = ([o, n]: readonly [string, number]) => `<button type=button name=choice value=${n}${dis}><span>${n}. ${esc(o)}${or(n === a.recommend, ' <small>(recommended)</small>', '')}</span></button>`;
-    body += `<form class=chq data-id="${esc(a.id)}" data-fleet="${esc(a.fleet)}">${rows.map(btn).join('')}<div class=oth><input name=text aria-label="other answer" placeholder="other: type an answer"${dis}><button${dis}>send</button></div></form>`;
-  }
+  } else if (m.open) body += choices(a, dis);
   return block(now, 'ai', 'conductor', a.question, body, a.ts);
 }
 
@@ -86,7 +89,8 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
     case 'note': {
       const r = m.retry ? ' r' : '', rt = m.retry ? ` <button type=button class=rty data-n=${m.seq}${dis}>retry</button>` : '';
       const si = m.signin == null ? '' : ` <button type=button data-su="${esc(m.signin)}" data-host="${esc(m.host)}"${dis}>sign in</button>`;
-      b = `<p class="qs note${r}">${lk}${esc(m.text)}${si}${rt}</p>`;
+      const ch = m.ask && m.open ? `<details class=chg><summary>change</summary>${choices(m.ask, dis)}</details>` : ''; // #541: a conductor's answer, 30 min
+      b = `<p class="qs note${r}">${lk}${esc(m.text)}${si}${rt}</p>${ch}`;
       break;
     }
     case 'handoff': b = `<p class=qs>${lk}· ${esc(m.text)}</p>`; break;

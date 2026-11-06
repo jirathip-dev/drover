@@ -32,9 +32,27 @@ fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &
     events.iter().filter(move |e| e.str("thread") == Some(id))
 }
 
-/// Its open asks (`ask --thread`): they wait in the thread, never in the needs-you stack.
+/// Its open asks (`ask --thread`): they wait in the thread, never in the needs-you stack; #541: and the lane asks put
+/// to the owner here, while open.
 fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
-    of(events, id).find(|e| e.kind == "needs-decision" && closed(events, e).is_none())
+    let lane = |e: &Event| (e.kind == "ask-owner").then(|| conductor::lane_of(events, e)).flatten();
+    of(events, id).find(|e| {
+        let a = if e.kind == "needs-decision" { Some(*e) } else { lane(e) };
+        a.is_some_and(|a| closed(events, a).is_none())
+    })
+}
+
+/// #541: a conductor's FYI line on lane ask `id`: its ask, while the owner may still [change] it (the conductor's
+/// answer the last, under `CHANGE` old).
+fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
+    let id = e.str("change")?;
+    let is = |d: &&Event| d.kind == "decision" && d.fleet == e.fleet && d.str("id") == Some(id);
+    let d = events.iter().rfind(is)?;
+    let by = d.str("by").unwrap_or_default();
+    (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
+    events
+        .iter()
+        .find(|a| a.kind == "needs-decision" && a.fleet == e.fleet && a.str("id") == Some(id))
 }
 
 /// #407: a queued message's id, and its files.
@@ -147,27 +165,42 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
         let main = cfg.hosts.iter().find(|h| h.1.machine.is_none());
         let m = match (e.kind.as_str(), e.str("from").unwrap_or_default()) {
             // #387: a signed-out line's [sign in]: the harness's login in a setup terminal on the main host (#303).
+            ("thread-msg", _) if e.data.get("lane_ask").is_some() => continue,
             ("thread-msg", "system") => Msg {
+                ask: change(ctx, events, e).map(super::v1::ask),
+                open: change(ctx, events, e).is_some(),
                 retry: e.str("line").is_some(),
                 signin: e.str("signin").map(Into::into),
                 host: main.map_or("local", |h| h.0.as_str()).into(),
                 ..m("note", s("text"))
             },
             ("thread-msg", _) if s("text").starts_with("DECISION ") => continue,
-            ("thread-handoff", _) => m("handoff", s("title")),
+            ("thread-handoff", _) => m("handoff", conductor::handoff_text(e)),
             ("thread-msg", f) => {
                 let file = |f: &Value| FileRef {
                     name: f["name"].as_str().unwrap_or_default().into(),
                     size: f["size"].as_u64().unwrap_or(0),
                 };
+                let fwd = if conductor::forwarded(events, e) {
+                    " (forwarded)"
+                } else {
+                    ""
+                };
                 Msg {
                     from: f.into(),
                     files: files_of(e).map(file).collect(),
-                    ..m("msg", s("text"))
+                    ..m("msg", s("text") + fwd)
                 }
             }
             ("thread-cmd", _) => m("cmd", s("cmd")),
             ("needs-decision", _) => ask(events, e, m("ask", s("question"))),
+            ("ask-owner", _) => {
+                let Some(mut a) = conductor::lane_of(events, e).cloned() else {
+                    continue;
+                };
+                a.data["recommend"] = e.data["recommend"].clone();
+                ask(events, &a, m("ask", s("question")))
+            }
             ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
                 from: s("id"),
                 open: !crate::propose::stale(ctx, e), // #460: stale, it can no longer apply

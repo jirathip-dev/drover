@@ -381,3 +381,40 @@ fn bad_config_and_hermes_profiles() {
     );
     assert_eq!(code, 0, "{out}");
 }
+
+/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) before the import and after
+/// it, until the line is dropped. Before the import the file still serves the token, so the account row warns too.
+#[test]
+fn retired_accounts_env_warns_until_the_line_is_dropped() {
+    let (c, d) = setup("doc-retired", "claude");
+    let env = d.join("tokens.env");
+    write(&env, &format!("TOKEN_MAIN={TOKEN}\n"), 0o600);
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let line_ = format!("accounts_env = \"{}\"\n", env.display());
+    let old = text.replace("[accounts]\n", &format!("[accounts]\n{line_}"));
+    std::fs::write(&c.config, &old).unwrap();
+    let warn = format!(
+        "! config — [accounts].accounts_env is retired (#441): run `herdsman accounts import {}`, then drop the line",
+        env.display()
+    );
+
+    let r = good();
+    r.store.borrow_mut().clear();
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.lines().any(|l| l == warn), "{out}");
+    assert!(line(&out, "account main").starts_with('!'), "{out}");
+    assert!(!out.contains(TOKEN), "{out}");
+
+    let env = env.display().to_string();
+    assert_eq!(run(&c, &r, &["accounts", "import", &env]).0, 0);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.lines().any(|l| l == warn), "imported, the line still warns: {out}");
+    assert!(line(&out, "account main").starts_with('✓'), "{out}");
+
+    std::fs::write(&c.config, &text).unwrap();
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains('!'), "{out}");
+}
