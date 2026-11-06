@@ -416,6 +416,9 @@ pub fn checks(e: &Event) -> bool {
 pub const PASSIVE: &[&str] = &[
     "lane-state",
     "lesson-prompted",
+    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
+    "turn-end",
+    "turn-prompted",
     "budget-freed",
     "wip-saved",
     "wip-blocked",
@@ -459,6 +462,10 @@ pub const PASSIVE: &[&str] = &[
     "stale-marker",
     "spawn-held",
     "outbox",
+    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
+    "intent",
+    "done",
+    "failed",
 ];
 
 /// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.

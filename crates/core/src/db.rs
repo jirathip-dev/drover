@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS leases (key TEXT PRIMARY KEY, pid INTEGER NOT NULL, h
 CREATE TABLE IF NOT EXISTS devices (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS push (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE NOT NULL, ts INTEGER NOT NULL,
-    json TEXT NOT NULL);";
+    json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);";
 
 pub fn file(state: &Path) -> PathBuf {
     SCRATCH
@@ -142,6 +143,47 @@ fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
         })
     })
     .collect()
+}
+
+/// #509: in one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take`
+/// accepts it. Returns it and whether they were.
+pub fn claim(
+    state: &Path,
+    evs: &[Event],
+    id: &str,
+    take: &dyn Fn(Option<&Event>) -> bool,
+) -> Result<(Option<Event>, bool)> {
+    with(state, true, (None, false), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "type IN ('intent', 'done', 'failed') AND json_extract(json, '$.action_id') = ?1";
+        let mut q = tx.prepare(&format!(
+            "SELECT seq, json FROM events WHERE {q} ORDER BY seq DESC LIMIT 1"
+        ))?;
+        let last = q
+            .query_row([id], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))
+            .optional()?;
+        drop(q);
+        let last = last
+            .map(|(seq, j)| {
+                anyhow::Ok(Event {
+                    seq,
+                    ..serde_json::from_str(&j)?
+                })
+            })
+            .transpose()?;
+        let took = take(last.as_ref());
+        for ev in evs.iter().filter(|_| took) {
+            insert(&tx, ev, None, false)?;
+        }
+        tx.commit()?;
+        Ok((last, took))
+    })
+}
+
+/// #509: mark trigger `id` processed; false if it already was.
+pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
+    let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";
+    with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
 }
 
 /// #343: the live log's size, and the rotation that moves events out of `read` (kept for `history`).

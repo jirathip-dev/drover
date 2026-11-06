@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "ERROR",
+    "message": "no issue: cannot parse integer from empty string",
+    "ok": false
+  },
+  "route": "POST /api/v1/qset",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}
