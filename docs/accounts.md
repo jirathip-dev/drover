@@ -16,15 +16,19 @@ herdsman never waits on it: a keychain read or write gets 5 s, then fails with
 
 ## The one-time fix
 
-`herdsman doctor` reads every account item and prints, for each one that prompts:
+An item's partition list says which code may read it without a dialog. `security` creates items with only
+`apple-tool:`, and an ad-hoc signed herdsman matches none of Apple's partitions, only its own `cdhash:<hash>` (the
+`CDHash=` of `codesign -dvvv $(which herdsman)`). `herdsman doctor` reads every `herdsman/*` item's list from
+`security dump-keychain -a` (no secret is read, so no dialog) and prints, for each one that lacks this build's cdhash:
 
 ```
-✗ account A — herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A prompts for Keychain access → security set-generic-password-partition-list -S apple-tool:,apple:,unsigned: -s herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A -a herdsman
+✗ keychain herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A — prompts for Keychain access (partition list lacks cdhash:<hash>) → security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:,cdhash:<hash> -s herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A -a herdsman
 ```
 
-Run the command after the arrow in a terminal (it asks for the login keychain password): the item's partition list then
-admits unsigned and ad-hoc signed builds, so the next rebuild reads it without a dialog. `scripts/install-gate.sh` runs
-these fixes after each install and prints the ones it could not run (no terminal) for you to run once by hand.
+An account item that still times out on a read gets the same fix on an `account … prompts for Keychain access` row.
+Run the command after the arrow in a terminal (it asks for the login keychain password): the item then admits this
+build without a dialog. Each rebuild has a new cdhash, so `scripts/install-gate.sh` runs the installed binary's doctor
+after every install, runs these fixes, and prints the ones it could not run (no terminal) for you to run once by hand.
 
 A message to a thread whose delivery is stuck waits at most 30 s behind it, then shows `not delivered` instead of
 hanging.

@@ -88,6 +88,7 @@ fn setup(name: &str) -> herdsman::Ctx {
 fn herdr() -> Fake {
     Fake::default()
         .reply("hostname -s", "mini\n")
+        .reply("codesign -dvvv", "CDHash=abc\n")
         .reply("herdr agent list", &agents(&[]))
         .reply(
             "herdr workspace create",
@@ -123,7 +124,7 @@ fn a_hung_keychain_is_keychain_locked_in_5_s_with_a_system_row_and_one_alert() {
     let r = herdr();
     let log = say(&c, &Hung(&r), "hello");
     let row = format!(
-        r#""text":"✗ not delivered: REFUSED KEYCHAIN_LOCKED: approve herdsman in the Keychain dialog on mini, or run security set-generic-password-partition-list -S apple-tool:,apple:,unsigned: -s {SVC_A} -a herdsman""#
+        r#""text":"✗ not delivered: REFUSED KEYCHAIN_LOCKED: approve herdsman in the Keychain dialog on mini, or run security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:,cdhash:abc -s {SVC_A} -a herdsman""#
     );
     assert!(log.contains(&row), "{log}");
     assert_eq!(sleeps(&r), 5, "5 s on the clock, then refused: {:?}", r.calls.borrow());
@@ -159,12 +160,54 @@ fn doctor_prints_a_prompting_items_fix() {
         &d,
         &(CONFIG.to_string() + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n"),
     );
-    let r = Fake::default();
+    let r = Fake::default().reply("codesign -dvvv", "CDHash=abc\n");
     let out = run(&c, &Hung(&r), &["doctor"]).1;
     let want = format!(
-        "✗ account A — {SVC_A} prompts for Keychain access → security set-generic-password-partition-list -S apple-tool:,apple:,unsigned: -s {SVC_A} -a herdsman"
+        "✗ account A — {SVC_A} prompts for Keychain access → security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:,cdhash:abc -s {SVC_A} -a herdsman"
     );
     assert!(out.lines().any(|l| l == want), "{out}");
+}
+
+/// `security dump-keychain -a` for item A (another app's item first) with partition list `parts`.
+fn dump(parts: &str) -> String {
+    format!(
+        "keychain: \"/Users/x/Library/Keychains/login.keychain-db\"\nclass: \"genp\"\nattributes:\n    \"svce\"<blob>=\"other\"\naccess: 1 entries\n    entry 0:\n        authorizations (1): partition_id\n        don't-require-password\n        description: apple:\n\
+         keychain: \"/Users/x/Library/Keychains/login.keychain-db\"\nclass: \"genp\"\nattributes:\n    \"acct\"<blob>=\"herdsman\"\n    \"svce\"<blob>=\"{SVC_A}\"\naccess: 2 entries\n    entry 0:\n        authorizations (1): encrypt\n        don't-require-password\n        description: {SVC_A}\n        applications: <null>\n    entry 1:\n        authorizations (1): partition_id\n        don't-require-password\n        description: {parts}\n        applications: <null>\n"
+    )
+}
+
+#[test]
+fn doctor_flags_an_item_whose_partition_list_lacks_this_build_without_reading_it() {
+    let d = tmpdir("keychain-partition");
+    let c = ctx(
+        &d,
+        &(CONFIG.to_string() + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n"),
+    );
+    // The build before this one is in the list; this one (abc) is not, so a read would pop the dialog.
+    let r = Fake::default().reply("codesign -dvvv", "CDHash=abc\n").reply(
+        "security dump-keychain -a",
+        &dump("apple-tool:, apple:, unsigned:, cdhash:old"),
+    );
+    let out = run(&c, &Hung(&r), &["doctor"]).1;
+    let want = format!(
+        "✗ keychain {SVC_A} — prompts for Keychain access (partition list lacks cdhash:abc) → security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:,cdhash:abc -s {SVC_A} -a herdsman"
+    );
+    assert!(out.lines().any(|l| l == want), "{out}");
+    assert_eq!(
+        out.matches(SVC_A).count(),
+        2,
+        "one row, no read that would prompt: {out}"
+    );
+    assert_eq!(sleeps(&r), 0, "{:?}", r.calls.borrow());
+    // Once the list admits this build, there is no keychain row and the item is read.
+    let r = Fake::default().reply("codesign -dvvv", "CDHash=abc\n").reply(
+        "security dump-keychain -a",
+        &dump("apple-tool:, apple:, unsigned:, cdhash:abc"),
+    );
+    r.store.borrow_mut().insert(SVC_A.into(), "tok".into());
+    let out = run(&c, &r, &["doctor"]).1;
+    assert!(!out.contains("prompts for Keychain access"), "{out}");
+    assert!(out.contains(&format!("account A — {SVC_A} in the store")), "{out}");
 }
 
 fn log_kinds(c: &herdsman::Ctx) -> Vec<String> {
