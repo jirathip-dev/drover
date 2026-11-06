@@ -270,6 +270,12 @@ enum Cmd {
         #[arg(long, default_value = ".herdsman/rules.md")]
         rules: std::path::PathBuf,
     },
+    /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
+    #[command(hide = true)]
+    LessonCheck {
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
     /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
     Setup {
@@ -655,6 +661,12 @@ enum LessonCmd {
         #[arg(long, default_value_t = 7)]
         days: u64,
     },
+    /// Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)
+    Apply {
+        fleet: String,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -667,8 +679,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`).
-pub const HELP_AGENT_MAX: usize = 309;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`).
+pub const HELP_AGENT_MAX: usize = 313;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -828,6 +840,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -1392,6 +1405,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..
                 } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                Cmd::Lesson {
+                    cmd: Some(LessonCmd::Apply { fleet, rules }),
+                    ..
+                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &rules)?,
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
                     if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
