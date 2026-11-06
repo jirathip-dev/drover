@@ -1,0 +1,33 @@
+name: board-freeze
+# #552: the old board takes bug fixes only; a PR touching its UI files needs `board-fix` in its issue's spec.
+on:
+  pull_request:
+    branches: [staging]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  board-freeze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: board UI files need a board-fix issue (the issue is the branch's issue-N, else the body's Closes #N)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          n=$(grep -oE '^issue-[0-9]+' <<<"$HEAD_REF" | cut -d- -f2 || true)
+          [ -n "$n" ] || n=$(grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' <<<"$BODY" | head -1 | grep -oE '[0-9]+' || true)
+          : > spec.md
+          [ -z "$n" ] || gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json body,comments --jq '.body, (.comments[]
+            | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.body | startswith("**Amendment")))
+            | .body)' > spec.md
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" | scripts/board-freeze.sh spec.md

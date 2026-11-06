@@ -3,6 +3,11 @@
 `herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
 `last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
+Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
+UI goes to cooee core, new workflow UI to the drover plugins; both read `/api/v1`, which stays open. CI's
+`board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
+`crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
+
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
 Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
 slot within ~1 s). A watcher thread checks the

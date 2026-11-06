@@ -15,6 +15,7 @@ only through it, and it refuses anything that breaks a rule.
 - **The pipeline is configurable.** The default is impl → rev → gates → merge; yours is validated as a
   full loop when the config loads and drawn on the board.
 - **A phone board.** `herdsman serve` is a PWA: queue, lanes, host, events, and web push for what needs you.
+  Frozen for features (#552): bug fixes only; new UI goes to cooee and the drover plugins, over `/api/v1`.
 
 ## Quick start
 ```sh
