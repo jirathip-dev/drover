@@ -509,6 +509,8 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #584: an ask nobody waits on (no live asking lane) closes as expired after this many hours.
+    pub ask_expire_hours: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
     /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
@@ -575,6 +577,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            ask_expire_hours: 24,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
             transcript_days: 30,
