@@ -14,6 +14,9 @@ adapter: a herdr CLI change touches that file only.
 gh auth status
 herdr --version
 cargo install --path crates/cli --locked --root ~/.local/share/herdsman
+# macOS (#556): sign with one local identity, so the keychain's "Always Allow" outlasts every reinstall.
+sh scripts/signing-identity.sh   # once: creates "herdsman-local" in the login keychain
+codesign --force --sign "herdsman-local" --identifier "herdsman" ~/.local/share/herdsman/bin/herdsman
 echo 'export PATH="$HOME/.local/share/herdsman/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
@@ -116,6 +119,7 @@ ok=$(gh run list --branch staging --commit "$sha" --json conclusion -q '.[0].con
 git checkout -q --detach "$sha"
 cargo install --path crates/cli --locked --root ~/.local/share/herdsman/next
 # #539: swap only if the new binary's `doctor --config-only` loads the live fleet.toml; else keep the old one, exit 1.
+# #556: it also signs the new binary with "herdsman-local" (scripts/signing-identity.sh, once).
 new=~/.local/share/herdsman/next/bin/herdsman
 scripts/install-gate.sh "$new" ~/.local/share/herdsman/bin/herdsman
 echo "$sha" > ~/.local/share/herdsman/sha

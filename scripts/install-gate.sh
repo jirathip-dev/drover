@@ -11,13 +11,11 @@ if ! out=$("$new" doctor --config-only 2>&1); then
   echo "fix: edit the config as the ✗ line says, then rerun the install"
   exit 1
 fi
-mkdir -p "$(dirname "$dest")" && cp "$new" "$dest.new" && mv "$dest.new" "$dest"
-# #548: an ad-hoc signed rebuild is a new app to the Keychain, so every herdsman/* item asks again; the installed
-# binary's doctor names each item whose partition list lacks its cdhash (or that prompts) with its one-time fix
-# (security asks for the login keychain password on a terminal and fails fast without one; then the fix is printed
-# to run by hand).
-if command -v security >/dev/null 2>&1; then
-  "$dest" doctor 2>/dev/null | sed -n 's/.* prompts for Keychain access.* → //p' | while read -r fix; do
-    sh -c "$fix" </dev/null || echo "keychain: run once in a terminal: $fix"
-  done
+mkdir -p "$(dirname "$dest")" && cp "$new" "$dest.new" || exit 1
+# #556: sign with the one local identity, so every build keeps the keychain's "Always Allow"; without it the
+# install goes on ad-hoc signed and `herdsman doctor` shows the signature row red with the setup command.
+if command -v codesign >/dev/null; then
+  codesign --force --sign "herdsman-local" --identifier herdsman "$dest.new" ||
+    echo "herdsman install-gate: not signed; run scripts/signing-identity.sh once, then reinstall"
 fi
+mv "$dest.new" "$dest"

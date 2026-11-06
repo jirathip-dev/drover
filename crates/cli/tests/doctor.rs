@@ -88,6 +88,7 @@ fn good() -> Fake {
         .reply("tailscale serve status", "|-- / proxy http://127.0.0.1:7777\n")
         .reply("launchctl print gui/", "state = running\n")
         .reply("systemctl --user is-active", "active\n")
+        .reply("codesign -v -R", "")
 }
 
 fn line<'a>(out: &'a str, check: &str) -> &'a str {
@@ -114,11 +115,12 @@ fn all_good_exits_zero_and_never_writes() {
         "serve",
         "tailscale",
         "launchd",
+        "signature",
         "phone",
     ] {
-        // The launchd job is macOS only; Linux has no row for it.
-        if check == "launchd" && !cfg!(target_os = "macos") {
-            assert!(!out.contains(" launchd — "), "{out}");
+        // The launchd job and the signature are macOS only; Linux has no row for them.
+        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
+            assert!(!out.contains(&format!(" {check} — ")), "{out}");
             continue;
         }
         assert!(line(&out, check).starts_with('✓'), "{out}");
@@ -242,6 +244,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "no plist runs herdsman serve",
         ),
         (
+            // #556: an ad-hoc signed build (or no "herdsman-local" identity) fails codesign's requirement test.
+            |_, _, r| r.once("codesign -v -R", 3, ""),
+            "signature",
+            "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall",
+        ),
+        (
             |c, _, r| {
                 let k = c.state.with_file_name("webpush/vapid.key");
                 std::fs::set_permissions(k, std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -285,7 +293,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
-        if check == "launchd" && !cfg!(target_os = "macos") {
+        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
             continue;
         }
         let (c, d) = setup(&format!("doc-fail-{i}"), "claude");

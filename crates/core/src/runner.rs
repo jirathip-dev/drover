@@ -131,37 +131,9 @@ fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T 
     got.map_or_else(|| locked(r, svc), Ok)
 }
 
-/// #548: the one-time fix that lets the herdsman with code hash `cdhash` read `svc` without a prompt: its partition
-/// list admits that build (amendment A: an ad-hoc signed rebuild matches only its own `cdhash:`).
-pub fn keychain_fix(cdhash: Option<&str>, svc: &str) -> String {
-    let cd = cdhash.map(|h| format!(",cdhash:{h}")).unwrap_or_default();
-    format!("security set-generic-password-partition-list -S apple-tool:,apple:,unsigned:{cd} -s {svc} -a herdsman")
-}
-
-/// #548: this binary's code hash (`codesign`'s `CDHash=`); None: unsigned or no `codesign` (not macOS).
-pub fn cdhash(r: &dyn Runner) -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let o = r.run("codesign", &argv(&["-dvvv", &exe.to_string_lossy()])).ok()?;
-    let all = o.stdout + &o.stderr;
-    all.lines().find_map(|l| l.strip_prefix("CDHash=")).map(String::from)
-}
-
-/// #548: each `herdsman/` item's partition list in `security dump-keychain -a` output: (service, `apple-tool:, …`).
-pub fn partitions(dump: &str) -> Vec<(String, String)> {
-    let (mut out, mut svc, mut next) = (Vec::new(), None, false);
-    for l in dump.lines().map(str::trim) {
-        if l.starts_with("keychain: ") {
-            (svc, next) = (None, false);
-        } else if let Some(s) = l.strip_prefix("\"svce\"<blob>=\"").and_then(|s| s.strip_suffix('"')) {
-            svc = s.starts_with("herdsman/").then(|| s.to_string());
-        } else if l.ends_with("): partition_id") {
-            next = true;
-        } else if let (true, Some(p), Some(s)) = (next, l.strip_prefix("description: "), &svc) {
-            out.push((s.clone(), p.to_string()));
-            next = false;
-        }
-    }
-    out
+/// #556: the one-time fix for `svc`: the owner's "Always Allow", which lasts across builds signed by "herdsman-local".
+pub fn keychain_fix(svc: &str) -> String {
+    format!("Always Allow for {svc}, once (it lasts while herdsman is signed by \"herdsman-local\")")
 }
 
 fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
@@ -169,8 +141,8 @@ fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
     crate::gate::refused(
         "KEYCHAIN_LOCKED",
         format!(
-            "approve herdsman in the Keychain dialog on {host}, or run {}",
-            keychain_fix(cdhash(r).as_deref(), svc)
+            "approve herdsman in the Keychain dialog on {host}: {}",
+            keychain_fix(svc)
         ),
     )
 }
