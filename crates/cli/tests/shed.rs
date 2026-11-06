@@ -710,7 +710,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
         states,
         [
             (Some(12), Some("done"), Some("sendmeter-impl-12")),
-            (Some(12), Some("exited"), Some("sendmeter-impl-12"))
+            (Some(12), Some("gone"), Some("sendmeter-impl-12"))
         ]
     );
     assert_eq!(
@@ -789,4 +789,65 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     );
     shed::intake(&c, &cfg, &b.shed().wire).unwrap();
     assert_eq!(b.last("events")["since"], 9, "shed's file wins once it exists");
+}
+
+/// #529: the service follows shed's stream: each lane's state is logged as it comes (an exit: gone), `shed.seq`
+/// kept, and the stream's end is logged as down.
+#[test]
+fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
+    let ev = |seq: u64, kind: Value| {
+        let mut e = json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
+        e
+    };
+    let events = vec![
+        ev(3, json!({"event": "state", "state": "working"})),
+        ev(4, json!({"event": "exited", "code": 137})),
+    ];
+    let b = Server::new(shed::proto::VERSION, events);
+    let d = tmpdir("shed-service");
+    let c = ctx(&d, &shed_config(&b.sock, ""));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr", "{}")));
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman_service::run(sc, r, || 1_000_000, api, None));
+    let logged = |kind: &str| -> Vec<herdsman::events::Event> {
+        let all = herdsman::events::read(&c.state).unwrap_or_default();
+        all.into_iter().filter(|e| e.kind == kind).collect()
+    };
+    let t0 = std::time::Instant::now();
+    while logged("lane-state").len() < 2 {
+        assert!(t0.elapsed().as_secs() < 2, "{:?}", logged("lane-state"));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let states: Vec<_> = logged("lane-state")
+        .iter()
+        .map(|e| (e.issue, e.str("state").map(String::from)))
+        .collect();
+    assert_eq!(
+        states,
+        [(Some(12), Some("working".into())), (Some(12), Some("gone".into()))]
+    );
+    assert_eq!(logged("lane-state")[1].str("why"), Some("exited"));
+    assert_eq!(
+        std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
+        "4"
+    );
+    // The fake server ends the stream after 3 s: down, with the passes on the polled list.
+    while !logged("lane-stream").iter().any(|e| e.str("state") == Some("down")) {
+        assert!(t0.elapsed().as_secs() < 5, "{:?}", logged("lane-stream"));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let s: Vec<_> = logged("lane-stream")
+        .iter()
+        .map(|e| (e.str("runtime").map(String::from), e.str("state").map(String::from)))
+        .collect();
+    assert_eq!(
+        s[..2],
+        [
+            (Some("shed".into()), Some("live".into())),
+            (Some("shed".into()), Some("down".into()))
+        ]
+    );
 }

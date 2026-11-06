@@ -335,3 +335,149 @@ fn a_rules_file_over_30_lines_fails_the_check() {
     );
     assert_eq!(code, 0, "{out}");
 }
+
+/// #510: CI's `lesson-check`: a failing shadow check passes the build and shows would-fail (with file:line) in the job
+/// summary; the same check active fails it; a hand-written line is not run.
+#[test]
+fn a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail() {
+    let d = tmpdir("lesson-shadow-ci");
+    std::fs::create_dir_all(d.join(".herdsman")).unwrap();
+    std::fs::write(d.join("a.rs"), "fn a() {}\nlet x = cfg.unwrap();\n").unwrap();
+    let summary = d.join("summary.md");
+    let check = |mark: &str| {
+        let rules = format!(
+            "- don't unwrap config (enforced by: no-unwrap `! grep -Hn unwrap a.rs`, {mark} since 2026-11-01)\n\
+             - don't hand (enforced by: hand `echo hand-ran; false`)\n"
+        );
+        std::fs::write(d.join(".herdsman/rules.md"), rules).unwrap();
+        let _ = std::fs::remove_file(&summary);
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+            .arg("lesson-check")
+            .env("GITHUB_STEP_SUMMARY", &summary)
+            .current_dir(&d)
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&o.stdout).into_owned();
+        (
+            o.status.code().unwrap(),
+            out,
+            std::fs::read_to_string(&summary).unwrap_or_default(),
+        )
+    };
+    let (code, out, sum) = check("shadow");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        sum.contains("would-fail (shadow) no-unwrap") && sum.contains("a.rs:2:let x = cfg.unwrap();"),
+        "{sum}"
+    );
+    assert!(!out.contains("hand") && !sum.contains("hand"), "{out}");
+    let (code, out, _) = check("active");
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("FAIL no-unwrap") && out.contains("a.rs:2:"), "{out}");
+    // Nothing fails: no summary written.
+    std::fs::write(d.join("a.rs"), "fn a() {}\n").unwrap();
+    let (code, out, sum) = check("shadow");
+    assert_eq!((code, out.as_str(), sum.as_str()), (0, "", ""));
+}
+
+const DAY: u64 = 86400;
+
+/// #510: `lesson apply` (and the digest) on fixture histories: promote after 7 days or 10 PRs with a catch, fix or
+/// remove on a false positive, retire after 30 days without a catch, the owner's PR-body lines first; a hand-written
+/// line is untouched even when the owner names it.
+#[test]
+fn lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_checks() {
+    let mut c = ctx(&tmpdir("lesson-apply"), CONFIG);
+    c.now = 400 * DAY; // 1971-02-05
+    let line = |name: &str, mark: &str| format!("- don't {name} (enforced by: {name} `false`, {mark})\n");
+    let hand = "- don't hand (enforced by: hand `false`)\n- don't nap (enforced by: none)\n";
+    let rules = [
+        line("caught", "shadow since 1971-01-20"),
+        line("quick", "shadow since 1971-02-03"),
+        line("young", "shadow since 1971-02-03"),
+        line("noisy", "shadow since 1971-01-20"),
+        line("idle", "shadow since 1971-01-01"),
+        line("quiet", "shadow since 1971-01-25"),
+        line("unrun", "shadow since 1971-01-01"),
+        line("owned", "shadow since 1971-02-04"),
+        line("oldactive", "active since 1970-12-01"),
+        line("steady", "active since 1970-12-01"),
+        hand.into(),
+    ]
+    .concat();
+    // (check, PRs on day, of which caught)
+    for (name, day, prs, hits) in [
+        ("caught", 390, 3, 1),
+        ("quick", 398, 10, 1),
+        ("young", 398, 3, 1),
+        ("noisy", 390, 3, 2),
+        ("idle", 366, 5, 0),
+        ("quiet", 390, 4, 0),
+        ("caught", 380, 4, 4), // before its shadow date: not counted
+    ] {
+        for i in 0..prs {
+            let hit: Vec<&str> = if i < hits { vec![name] } else { vec![] };
+            ev(
+                &c,
+                day * DAY + i,
+                Some(100 + i),
+                "lesson-shadow",
+                json!({"ran": [name], "hits": hit}),
+            );
+        }
+    }
+    let fp = json!({"verdict": "FAIL", "body": "FAIL\n\nfalse positive: noisy\n"});
+    ev(&c, 395 * DAY, Some(7), "verdict", fp);
+    let r = Fake::default()
+        .reply(
+            "gh pr list -R jirathip-dev/sendmeter --state all --search lessons: in:title --json body",
+            "Closes #90\npromote owned\nretire oldactive\nretire hand\n",
+        )
+        .reply(
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.herdsman/rules.md",
+            &rules,
+        );
+    let (code, out) = run(&c, &r, &["lesson", "digest", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "- caught: shadow since 1971-01-20, 3 PRs, 1 caught, 0 false positives → promote",
+        "- quick: shadow since 1971-02-03, 10 PRs, 1 caught, 0 false positives → promote",
+        "- young: shadow since 1971-02-03, 3 PRs, 1 caught, 0 false positives → keep shadow",
+        "- noisy: shadow since 1971-01-20, 3 PRs, 2 caught, 1 false positives → fix or remove",
+        "- idle: shadow since 1971-01-01, 5 PRs, 0 caught, 0 false positives → retire",
+        "- quiet: shadow since 1971-01-25, 4 PRs, 0 caught, 0 false positives → keep shadow",
+        "- unrun: shadow since 1971-01-01, 0 PRs, 0 caught, 0 false positives → keep shadow",
+        "- owned: shadow since 1971-02-04, 0 PRs, 0 caught, 0 false positives → promote",
+        "- oldactive: active since 1970-12-01, 0 PRs, 0 caught, 0 false positives → retire",
+        "- steady: active since 1970-12-01, 0 PRs, 0 caught, 0 false positives → keep active",
+    ] {
+        assert!(out.contains(want), "missing {want:?}:\n{out}");
+    }
+    assert!(!out.contains("- hand:") && !out.contains("- nap:"), "{out}");
+
+    let file = c.state.with_file_name("rules.md");
+    std::fs::write(&file, &rules).unwrap();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["lesson", "apply", "sendmeter", "--rules", file.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    let want = [
+        line("caught", "active since 1971-02-05"),
+        line("quick", "active since 1971-02-05"),
+        line("young", "shadow since 1971-02-03"),
+        line("noisy", "shadow since 1971-01-20"),
+        line("quiet", "shadow since 1971-01-25"),
+        line("unrun", "shadow since 1971-01-01"),
+        line("owned", "active since 1971-02-05"),
+        line("steady", "active since 1970-12-01"),
+        hand.into(),
+    ]
+    .concat();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), want);
+    assert!(
+        out.contains("noisy: shadow since 1971-01-20, 3 PRs, 2 caught, 1 false positives → fix or remove"),
+        "{out}"
+    );
+}

@@ -70,7 +70,9 @@ board's agent status read these states.
 
 Each drive pass (not the fast step) reads shed's `events` stream since the last `seq` it saw (kept in `shed.seq`
 beside the event log), stopping once the stream is quiet for 0.3 s. Every lane's `state`, `exited` and `killed`
-event is logged as a passive `lane-state` event (`agent`, `state`, `note` or `code`, `shed_seq`). Only this host's
+event is logged as a passive `lane-state` event (`agent`, `state`, `note` or `code`, `shed_seq`); #529: an exit or
+kill is `state: gone` (`why`: `exited` or `killed`). A running `herdsman service` follows the stream instead, as it
+comes (docs/service.md). Only this host's
 server is read. When it does not answer, drive prints `shed events: …` and carries on: the agent list it polls each
 pass still covers every lane, here and on other hosts. shed keeps only its last 1,000 events, so a long gap loses
 the older ones, and the poll still sees the current state.

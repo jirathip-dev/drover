@@ -162,6 +162,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SecretCmd,
     },
+    /// #538: run cards: an owner-level command a conductor posts in its thread; herdsman runs it once on the owner's [approve]
+    Card {
+        #[command(subcommand)]
+        cmd: CardCmd,
+    },
     /// The open asks, oldest first, with age
     Asks {
         #[command(flatten)]
@@ -262,6 +267,12 @@ enum Cmd {
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
+    /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
+    #[command(hide = true)]
+    LessonCheck {
         #[arg(long, default_value = ".herdsman/rules.md")]
         rules: std::path::PathBuf,
     },
@@ -490,6 +501,38 @@ enum SecretCmd {
 }
 
 #[derive(Subcommand)]
+enum CardCmd {
+    /// Post a run card in a thread: the exact command, why, what it touches and its folder; CARD_FORBIDDEN for a hard no
+    Post {
+        thread: String,
+        /// The exact command (an approval covers only this text)
+        #[arg(long = "cmd")]
+        command: String,
+        /// Why it should run
+        #[arg(long)]
+        why: String,
+        /// What it touches: repo/branch, cloud resources, cost
+        #[arg(long)]
+        blast: String,
+        /// The folder it runs in on the main host
+        #[arg(long)]
+        dir: String,
+        /// Seconds before the run is killed
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Owner only: run a card's command once (within 15 min of its post); its exit code and output tail go to the thread
+    Approve {
+        id: String,
+        /// The command's sha (a prefix) the owner saw; CARD_CHANGED unless it matches
+        #[arg(long)]
+        sha: Option<String>,
+    },
+    /// Owner only: deny a card; nothing runs
+    Deny { id: String },
+}
+
+#[derive(Subcommand)]
 enum QueueCmd {
     /// Append issues to the queue (or put them on top / after N)
     Add {
@@ -618,6 +661,12 @@ enum LessonCmd {
         #[arg(long, default_value_t = 7)]
         days: u64,
     },
+    /// Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)
+    Apply {
+        fleet: String,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -630,8 +679,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`).
-pub const HELP_AGENT_MAX: usize = 294;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`).
+pub const HELP_AGENT_MAX: usize = 313;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -791,6 +840,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -1170,6 +1220,30 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     SecretCmd::Ls => crate::secret::ls(ctx, out)?,
                     SecretCmd::Rm { fleet, name } => crate::secret::rm(ctx, &cfg, r, &fleet, &name)?,
                 },
+                Cmd::Card { cmd } => {
+                    let line = match cmd {
+                        CardCmd::Post {
+                            thread,
+                            command,
+                            why,
+                            blast,
+                            dir,
+                            timeout,
+                        } => {
+                            let c = crate::card::Card {
+                                cmd: &command,
+                                why: &why,
+                                blast: &blast,
+                                dir: &dir,
+                                timeout,
+                            };
+                            crate::card::post(ctx, &cfg, &thread, &c)?
+                        }
+                        CardCmd::Approve { id, sha } => crate::card::settle(ctx, &cfg, r, &id, true, sha.as_deref())?,
+                        CardCmd::Deny { id } => crate::card::settle(ctx, &cfg, r, &id, false, None)?,
+                    };
+                    writeln!(out, "{line}")?;
+                }
                 Cmd::Hosts { cmd } => match cmd {
                     None => crate::hosts::list(ctx, &cfg, r, out, false)?,
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
@@ -1331,6 +1405,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..
                 } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                Cmd::Lesson {
+                    cmd: Some(LessonCmd::Apply { fleet, rules }),
+                    ..
+                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &rules)?,
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
                     if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
@@ -1564,6 +1642,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         deny: deny_list(&cfg, fleet),
         conductor,
         own,
+        groups: cfg.conductor.groups().into_iter().map(String::from).collect(),
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
     };
     let cur = |d: &str| {
@@ -1582,8 +1661,13 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         coauthor_warn(ctx, r, &dir, "HEAD");
     }
     // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    // #538: a group verb's row names its group.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
-        lane_event(ctx, "thread-cmd", json!({"thread": thread, "cmd": cmd}));
+        let mut d = json!({"thread": thread, "cmd": cmd});
+        if let Some(g) = hook::group_of(cmd) {
+            d["group"] = json!(g);
+        }
+        lane_event(ctx, "thread-cmd", d);
     }
     Ok(())
 }

@@ -28,10 +28,25 @@ impl Runtime for Herdr {
         r.run("herdr", a)
     }
     fn agents(&self, r: &dyn Runner) -> Result<Vec<Value>> {
-        let v: Value =
-            serde_json::from_str(&ok_on(self, r, &argv(&["agent", "list"]))?).context("herdr agent list: not JSON")?;
-        Ok(v["result"]["agents"].as_array().cloned().unwrap_or_default())
+        match streamed().filter(|_| r.local()) {
+            Some(v) => Ok(v),
+            None => poll(r),
+        }
     }
+}
+
+/// #529: the service's agent list, kept from herdr's event stream while it is up; `None`: `herdr agent list` is polled.
+pub static STREAMED: std::sync::Mutex<Option<Vec<Value>>> = std::sync::Mutex::new(None);
+
+fn streamed() -> Option<Vec<Value>> {
+    STREAMED.lock().ok()?.clone()
+}
+
+/// `herdr agent list`, run.
+pub fn poll(r: &dyn Runner) -> Result<Vec<Value>> {
+    let v: Value =
+        serde_json::from_str(&ok_on(&Herdr, r, &argv(&["agent", "list"]))?).context("herdr agent list: not JSON")?;
+    Ok(v["result"]["agents"].as_array().cloned().unwrap_or_default())
 }
 
 /// #298: shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -377,6 +392,9 @@ pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
 pub fn agent_list(r: &dyn Runner) -> Option<String> {
     if r.shed().is_some() {
         return list(r, "agent").ok().map(|v| v.to_string());
+    }
+    if let Some(v) = streamed().filter(|_| r.local()) {
+        return Some(json!({"result": {"agents": v}}).to_string());
     }
     exec(r, &argv(&["agent", "list"]))
         .ok()
