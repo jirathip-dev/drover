@@ -255,6 +255,9 @@ impl Runner for Memo<'_> {
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.0.shed()
     }
+    fn local(&self) -> bool {
+        self.0.local()
+    }
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         self.0.secret(svc)
     }
