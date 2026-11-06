@@ -686,7 +686,7 @@ pub fn merge(
     let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
     if let Some(a) = crate::action::last(&events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a)) {
         let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
-        if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(a) {
+        if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(r, a) {
             return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
         }
         let d = json!({"pr": num, "head": head, "recovered": true});
@@ -811,7 +811,7 @@ pub fn merge(
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
     let at = (fleet, issue, "merge", head.as_str());
     // Done meanwhile by another pass: skipped here, logged by the next (above).
-    let intent = crate::action::begin(&ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
+    let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))

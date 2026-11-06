@@ -4,6 +4,7 @@
 //! from the step's own inputs, so a drive pass, a kick and a per-issue worker (#345) share them.
 use crate::events::{append, Event};
 use crate::gate::{refuse, Refusal};
+use crate::runner::Runner;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -72,6 +73,7 @@ pub fn finish(state: &Path, now: u64, intent: &Event, kind: &str, mut d: Value) 
 /// whose process died, is recovered: `probe` checks the real world, `Some` outcome is `done`, `None` is `failed` and
 /// this caller acts.
 pub fn begin(
+    r: &dyn Runner,
     state: &Path,
     now: u64,
     (fleet, issue, step, key): (&str, u64, &str, &str),
@@ -97,7 +99,7 @@ pub fn begin(
     if last.kind == "done" {
         return Ok(Seen::Done(last));
     }
-    if last.ts + secs > now && !dead(&last) {
+    if last.ts + secs > now && !dead(r, &last) {
         return Ok(Seen::Busy(last));
     }
     if let Some(mut d) = probe(&last)? {
@@ -120,14 +122,9 @@ pub fn begin(
 }
 
 /// An intent's process, on this host, is gone (a crash): no need to wait out its timeout.
-pub fn dead(e: &Event) -> bool {
+pub fn dead(r: &dyn Runner, e: &Event) -> bool {
     let pid = e.data.get("pid").and_then(Value::as_u64).map(|p| p.to_string());
-    let gone = |p: String| {
-        std::process::Command::new("kill")
-            .args(["-0", &p])
-            .output()
-            .is_ok_and(|o| !o.status.success())
-    };
+    let gone = |p: String| r.run("kill", &["-0".into(), p]).is_ok_and(|o| o.code != 0);
     e.str("host") == Some(&crate::db::host()) && pid.is_some_and(gone)
 }
 

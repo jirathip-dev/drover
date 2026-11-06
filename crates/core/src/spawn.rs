@@ -813,7 +813,8 @@ pub fn spawn(
     };
     let (key, secs) = (format!("{role}@{round}"), SPAWN_SECS + 300); // the start's windows, then the clone and fetch
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
-    let intent = crate::action::begin(&ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
+    let intent =
+        crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
         let old = crate::hosts::On::of(base, was);
