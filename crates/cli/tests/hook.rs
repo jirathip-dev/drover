@@ -543,7 +543,7 @@ fn a_conductor_writes_its_own_thread_folder() {
 #[test]
 fn a_conductor_copies_into_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
-    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let (st, c) = (d.join("state"), d.join("state/conductor"));
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/tmp",
