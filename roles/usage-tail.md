@@ -38,7 +38,7 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 
 ## Lessons
 
-`herdsman lesson <fleet>` (conductors and the owner only; a conductor runs it when the owner says "correct") files `lessons: <fleet> week of <date>`, queues it on top and spawns a `lesson` lane (the impl role's harness unless `[fleet.<n>.role.lesson]` sets one). `herdsman tick` runs it every 7 days per fleet: `lessons = "weekly"` (default) or `"off"` in `[fleet.<n>]`. Any lane may read `herdsman lesson digest <fleet> [--days 7]`.
+`herdsman lesson <fleet>` (conductors and the owner only; a conductor runs it when the owner says "correct") files `lessons: <fleet> week of <date>`, queues it on top and spawns a `lesson` lane (the impl role's harness unless `[fleet.<n>.role.lesson]` sets one). `herdsman tick` runs it every 7 days per fleet: `lessons = "weekly"` (default) or `"off"` in `[fleet.<n>]`. Any lane may read `herdsman lesson digest <fleet> [--days 7]`. #510: a lesson check starts in shadow (`shadow since <date>` on its rules line: reported, never failing); `herdsman lesson apply <fleet>` in the lesson lane promotes or retires it by its history, never touching hand-written lines.
 A conductor may run `herdsman timer install` (only that host verb; logged `timer-install`, `by` its lane) when `herdsman doctor` reports the timer outdated or missing; any other lane is `REFUSED CONDUCTOR_ONLY`.
 `.herdsman/rules.md` in a repo: at most 30 "don't X" lines (CI's cap check fails over that), each naming its enforcer or `none`; every impl and rev brief carries it. Follow it.
 

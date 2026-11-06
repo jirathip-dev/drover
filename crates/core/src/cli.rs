@@ -265,6 +265,12 @@ enum Cmd {
         #[arg(long, default_value = ".herdsman/rules.md")]
         rules: std::path::PathBuf,
     },
+    /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
+    #[command(hide = true)]
+    LessonCheck {
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
     /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
     Setup {
@@ -618,6 +624,12 @@ enum LessonCmd {
         #[arg(long, default_value_t = 7)]
         days: u64,
     },
+    /// Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)
+    Apply {
+        fleet: String,
+        #[arg(long, default_value = ".herdsman/rules.md")]
+        rules: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -791,6 +803,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -1331,6 +1344,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..
                 } => write!(out, "{}", crate::lesson::digest(ctx, &cfg, r, &fleet, days)?)?,
+                Cmd::Lesson {
+                    cmd: Some(LessonCmd::Apply { fleet, rules }),
+                    ..
+                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &rules)?,
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
                     if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
