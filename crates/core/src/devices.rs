@@ -148,10 +148,13 @@ pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
     if d.created + 600 <= ctx.now {
         return refused("EXPIRED", "that pairing code expired: tap Pair on the phone again");
     }
-    let label = {
+    let (label, hash, ip) = {
         (d.code, d.created, d.used) = (None, ctx.now, ctx.now);
-        d.label.clone()
+        (d.label.clone(), d.hash.clone(), d.ip.clone())
     };
+    // #501: a browser pairing again replaces its older row (same label but the hash suffix, same address).
+    let kind = |l: &str| l.rsplit_once(' ').map_or(l, |p| p.0).to_string();
+    all.retain(|o| o.hash == hash || o.code.is_some() || o.ip != ip || kind(&o.label) != kind(&label));
     store(ctx, &all)?;
     append(
         &ctx.state,
@@ -189,14 +192,62 @@ pub fn cancel(ctx: &Ctx, cookie: &str) -> Result<()> {
 pub const YEAR: u64 = 365 * 86_400;
 /// The paired (approved) device whose token the `Cookie` header carries (`hd=`), used within a `YEAR` (#288); marks it used at most hourly (#122).
 pub fn find(ctx: &Ctx, cookie: &str) -> Option<Device> {
-    let tok = token(cookie)?;
+    check(ctx, cookie).ok()
+}
+
+/// #501: `find`, else why not: `no cookie`, `unknown token`, `expired`, or `db error: <kind>` (no devices read).
+pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
+    let tok = token(cookie).ok_or("no cookie")?;
     let _g = lock();
-    let mut all = load(ctx);
-    let ok = |d: &Device| d.code.is_none() && d.used + YEAR > ctx.now && same(&d.hash, &tok);
-    let i = all.iter().position(ok)?;
+    let mut all =
+        crate::db::try_list::<Device>(&ctx.state, "devices").map_err(|e| format!("db error: {}", kind(&e)))?;
+    let i = all
+        .iter()
+        .position(|d| d.code.is_none() && same(&d.hash, &tok))
+        .ok_or("unknown token")?;
+    if all[i].used + YEAR <= ctx.now {
+        return Err("expired".into());
+    }
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
     let _ = stale.then(|| store(ctx, &all));
-    Some(all.swap_remove(i))
+    Ok(all.swap_remove(i))
+}
+
+/// #501: one `serve.log` line per 401 or 503 the board answers: `auth <unix secs> <status> <method> <route>: <reason>`
+/// (the route without its query; never a token).
+pub fn denied(ctx: &Ctx, status: &str, method: &str, route: &str, why: &str) {
+    let line = format!("auth {} {status} {method} {route}: {why}\n", ctx.now);
+    let mut o = std::fs::OpenOptions::new();
+    let f = o
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(ctx.state.with_file_name("serve.log"));
+    let _ = f.and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
+/// #501: the board's (401, 503) answers in `serve.log` over the last 24 h.
+pub fn denials(ctx: &Ctx) -> (usize, usize) {
+    let log = std::fs::read_to_string(ctx.state.with_file_name("serve.log")).unwrap_or_default();
+    let codes: Vec<_> = (log.lines())
+        .filter_map(|l| {
+            let mut w = l.strip_prefix("auth ")?.split(' ');
+            w.next()?.parse::<u64>().ok().filter(|t| t + 86_400 > ctx.now)?;
+            w.next()
+        })
+        .collect();
+    let n = |c| codes.iter().filter(|x| **x == c).count();
+    (n("401"), n("503"))
+}
+
+/// A database error's kind: SQLite's code (`DatabaseBusy`, `NotADatabase`), else the I/O error's.
+fn kind(e: &anyhow::Error) -> String {
+    match e.downcast_ref::<rusqlite::Error>() {
+        Some(rusqlite::Error::SqliteFailure(f, _)) => format!("{:?}", f.code),
+        _ => e
+            .downcast_ref::<io::Error>()
+            .map_or("other".into(), |e| e.kind().to_string()),
+    }
 }
 
 /// SHA-256, lowercase hex.

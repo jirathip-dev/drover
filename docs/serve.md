@@ -157,7 +157,14 @@ hook refuses `serve approve`, `serve unpair` and `serve devices --revoke` (`REFU
 are open, 2 per peer address (behind `tailscale serve`, a loopback peer, the `X-Forwarded-For` address or
 `Tailscale-User-Login`; trusted from loopback only), and a new code never repeats an open one. A re-tap of
 Pair replaces the browser's own open request, and the panel's `[cancel]` (`/pair/cancel`) drops it. Only the token's SHA-256 is kept, in `<state>/serve/devices.json`
-(0600); the Host tab's ALERTS group lists paired devices with a Remove button.
+(0600); the Host tab's ALERTS group lists paired devices with a Remove button. Approving a browser that pairs again
+(same device label but its hash suffix, same address) replaces its older row (#501).
+A 401 never latches the page unpaired (#501): it asks `GET /pair/status` (`{"paired": bool}`, no secrets) and only
+a "no" shows the Pair UI; any later answer to a paired device (its `X-Paired: 1` header) takes it away again. A
+database error reading the devices answers 503 `board busy, retrying` (API v1: `BUSY`), never 401: the page retries
+a send once after 2 s and says "reconnecting". Each 401 and 503 is one `serve.log` line, `auth <unix secs> <status>
+<method> <route>: <reason>` (`no cookie`, `unknown token`, `expired`, `db error: <kind>`; never the token), and
+`herdsman doctor` shows the last 24 h's counts.
 The panel reads `Waiting for approval on the Mac: herdsman serve approve <code>`. An unpaired page,
 while any device is paired, adds "Safari and the home-screen app pair separately" (iOS keeps their cookies apart). An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.
@@ -339,7 +346,7 @@ transcript, and the paired ops: answer, drive, override, extend, park, unpair, o
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
 | `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`; answers `{ok, code, message}` |
 
-Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 403 `FORBIDDEN`, 405
+Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
 choice (localStorage): `state.theme` is the board's default, and no route writes it. The service worker
 never caches `api/`. A breaking change is `/api/v2/`.

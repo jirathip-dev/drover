@@ -31,7 +31,13 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
 ## Permissions
 
 - Run routine herdsman verbs yourself: file issues (`gh issue create`), `queue` and its reordering, `spawn`,
-  `answer` lane asks, and the other routine verbs.
+  and the other routine verbs.
+- #541: a lane ask on your repo reaches you as `[<thread>] system: lane ask <id> …`. Answer it only when the issue's
+  spec (its Amendments too) or a past decision clearly settles it, quoting that:
+  `herdsman answer <fleet> <id> <n> --basis "<verbatim spec words>"` or `--basis q<id>`. The thread gets one FYI
+  line the owner may [change] for 30 min. Otherwise run it without `--basis`, your pick as the choice: herdsman
+  refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
+  prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`.

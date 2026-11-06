@@ -3,6 +3,7 @@ mod common;
 use common::{tmpdir, CONFIG};
 use serde_json::{json, Value};
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// `herdsman hook` as `role`, inside a fleet lane (`HERDSMAN_LANE` set) or outside one.
@@ -10,17 +11,30 @@ fn hook_in(lane: Option<&str>, role: &str, input: Value) -> String {
     hook_env(&[("HERDSMAN_LANE", lane)], role, input)
 }
 
+/// #508: the test config plus the other fleets these lanes name (an unknown fleet fails closed).
+fn config() -> String {
+    let fleet = |n: &str| format!("\n[fleet.{n}]\nrepo = \"o/{n}\"\nlocal = \"/tmp/{n}\"\nintegration = \"staging\"\n");
+    CONFIG.to_string() + &["synergy", "x", "fleet"].map(fleet).concat()
+}
+
 /// `herdsman hook` as `role` with each lane var set (`Some`) or unset (`None`).
 fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: Value) -> String {
-    hook_cfg(CONFIG, vars, role, input).0
+    hook_cfg(&config(), vars, role, input).0
 }
 
 /// `herdsman hook` under fleet.toml `cfg`: its stdout and the temp dir (`state/events.jsonl`).
 fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) -> (String, std::path::PathBuf) {
     let d = tmpdir("hook");
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
+    (hook_at(&d, &d, vars, role, &input.to_string()), d)
+}
+
+/// `herdsman hook` fed `raw`, run in `cwd`, with `d`'s fleet.toml and log: its stdout.
+fn hook_at(d: &Path, cwd: &Path, vars: &[(&str, Option<&str>)], role: &str, raw: &str) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
-    cmd.env_remove("HERDSMAN_LANE").env_remove("FLEET_LANE");
+    cmd.env_remove("HERDSMAN_LANE")
+        .env_remove("FLEET_LANE")
+        .env_remove("HERDSMAN_SCRATCH_TARGET");
     for (k, v) in vars {
         if let Some(v) = v {
             cmd.env(k, v);
@@ -28,21 +42,17 @@ fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) 
     }
     let mut child = cmd
         .args(["hook", "--role", role])
+        .current_dir(cwd)
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
+    child.stdin.take().unwrap().write_all(raw.as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
-    (String::from_utf8(out.stdout).unwrap(), d)
+    String::from_utf8(out.stdout).unwrap()
 }
 
 fn hook_as(role: &str, input: Value) -> String {
@@ -378,10 +388,10 @@ fn a_conductor_may_spawn_design_lanes() {
         "synergy:12:rev",
         "synergy:-:orch",
         "synergy:-:design",
-        "conductor",
     ] {
         assert!(run(lane, spawn).contains("owner-only"), "{lane}");
     }
+    assert!(run("conductor", spawn).contains("HOOK_FAILED_CLOSED"), "no fleet");
     for cmd in ["herdsman setup", "herdsman secret ls"] {
         assert!(run("synergy:-:conductor", cmd).contains("REFUSED OWNER_ONLY"), "{cmd}");
     }
@@ -507,7 +517,7 @@ fn quoted_text_is_not_a_command() {
 #[test]
 fn a_conductor_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own");
-    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let c = d.join("state/conductor");
     let write = |file: &std::path::Path| {
         conductor_hook(
@@ -610,7 +620,7 @@ fn a_conductor_copies_into_its_own_thread_folder() {
 #[test]
 fn a_conductors_shell_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
-    std::fs::write(d.join("fleet.toml"), CONFIG).unwrap();
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
     let (c, s) = (d.join("state/conductor"), d.join("state"));
     let (c, s) = (c.display(), s.display());
     let sh = |cmd: &str| conductor_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
@@ -986,4 +996,221 @@ fn a_lane_may_queue_block_only_its_own_issue() {
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
         assert_eq!(hook_in(None, "impl", input(cmd)), "", "the owner (no lane) may: {cmd}");
     }
+}
+
+/// #536: with a scratch dir, a Cargo build folder outside `build_root` (a `/tmp` one) is refused, naming the scratch.
+#[test]
+fn a_cargo_target_dir_outside_build_root_is_refused() {
+    let scratch = "/c/builds/.scratch/sendmeter-rev-24-r1";
+    let bash_in = |s: Option<&str>, cmd: &str| {
+        let vars = [
+            ("HERDSMAN_LANE", Some("sendmeter:24:rev")),
+            ("HERDSMAN_SCRATCH_TARGET", s),
+        ];
+        let out = hook_env(&vars, "rev", shapes("Bash", json!({"command": cmd}))[0].clone());
+        let v: Value = serde_json::from_str(&out).unwrap_or_default();
+        v["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .map(String::from)
+    };
+    for cmd in [
+        "CARGO_TARGET_DIR=/tmp/t344-target cargo test",
+        "export CARGO_TARGET_DIR=\"$TMPDIR/rev447t\"; cargo build",
+        "cargo test --target-dir /tmp/h370-base-target",
+        "cargo build --target-dir=~/.cache/rev361base/target",
+        "CARGO_TARGET_DIR=/c/builds/../x cargo test",
+    ] {
+        let why = bash_in(Some(scratch), cmd).unwrap_or_else(|| panic!("{cmd} allowed"));
+        assert!(why.contains("REFUSED SCRATCH_TARGET: "), "{cmd}: {why}");
+        assert!(
+            why.contains(&format!("({scratch}/target)")),
+            "names the scratch dir: {why}"
+        );
+    }
+    for cmd in [
+        "CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target cargo test",
+        "cargo build --target-dir \"${HERDSMAN_SCRATCH_TARGET}/base\"",
+        "CARGO_TARGET_DIR=/c/builds/sendmeter cargo test",
+        "cargo test",
+    ] {
+        assert_eq!(bash_in(Some(scratch), cmd), None, "{cmd}");
+    }
+    assert_eq!(
+        bash_in(None, "CARGO_TARGET_DIR=/tmp/x cargo test"),
+        None,
+        "no scratch (build_root off): no rule"
+    );
+}
+
+/// A pre-tool Bash call of `cmd` from `/`.
+fn pre_bash(cmd: &str) -> Value {
+    json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}})
+}
+
+/// #508: in a lane, input the hook can't read, a fleet.toml that doesn't load or a fleet it doesn't know denies the
+/// call (closed, saying why); outside a lane the hook stays inert.
+#[test]
+fn a_lane_hook_fails_closed() {
+    let d = tmpdir("hook-closed");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let lane = [("HERDSMAN_LANE", Some("sendmeter:7:impl"))];
+    let closed = |out: &str, what: &str| {
+        let reason = format!("REFUSED HOOK_FAILED_CLOSED: {what}; fix it, or ask the owner");
+        (out.contains("\"deny\"") || out.contains("\"block\"")) && out.contains(&reason)
+    };
+    let unnamed = [
+        json!({"hook_event_name": "PreToolUse", "tool_input": {"command": "docker ps"}}),
+        json!({"hook_event_name": "pre_tool_call", "tool_name": "", "tool_input": {"command": "docker ps"}}),
+        json!({"args": {"command": "docker ps"}}),
+    ];
+    for (raw, what) in [("docker ps", "its input is not JSON"), ("", "its input is not JSON")]
+        .map(|(r, w)| (r.to_string(), w))
+        .into_iter()
+        .chain(unnamed.map(|v| (v.to_string(), "its input has no tool name")))
+    {
+        let out = hook_at(&d, &d, &lane, "impl", &raw);
+        assert!(closed(&out, what), "{raw}: {out}");
+        assert_eq!(hook_at(&d, &d, &[], "impl", &raw), "", "outside a lane: {raw}");
+    }
+    // A prompt or notification names no tool and is no call to judge.
+    for ev in ["UserPromptSubmit", "Notification"] {
+        assert_eq!(
+            hook_at(&d, &d, &lane, "impl", &json!({"hook_event_name": ev}).to_string()),
+            ""
+        );
+    }
+    let broken = format!("{}\n[fleet.sendmeter\n", config());
+    for cmd in ["docker ps", "git push origin staging", "git status"] {
+        assert!(
+            closed(
+                &hook_cfg(&broken, &lane, "impl", pre_bash(cmd)).0,
+                "fleet.toml failed to load"
+            ),
+            "{cmd}"
+        );
+        assert_eq!(
+            hook_cfg(&broken, &[], "impl", pre_bash(cmd)).0,
+            "",
+            "outside a lane: {cmd}"
+        );
+    }
+    assert_eq!(
+        hook_cfg(&config(), &lane, "impl", pre_bash("git status")).0,
+        "",
+        "loaded, it allows"
+    );
+    let stranger = [("HERDSMAN_LANE", Some("nofleet:7:impl"))];
+    let out = hook_cfg(&config(), &stranger, "impl", pre_bash("git status")).0;
+    assert!(closed(&out, "fleet `nofleet` is not in fleet.toml"), "{out}");
+    // Hermes hears it in its own dialect.
+    let hermes = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "tool_input": {"command": "ls"}});
+    let out = hook_cfg(&broken, &lane, "impl", hermes).0;
+    assert!(out.contains("\"block\"") && out.contains("HOOK_FAILED_CLOSED"), "{out}");
+}
+
+/// #508: each closed deny logs one `hook-failed-closed` (lane and cause, never the command); a cause alerts once an hour.
+#[test]
+fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
+    let d = tmpdir("hook-closed-ev");
+    let sink = d.join("sink");
+    let notify = format!(
+        "\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"hook-failed-closed\"]\n",
+        sink.display()
+    );
+    std::fs::write(d.join("fleet.toml"), config() + &notify).unwrap();
+    let state = d.join("state/events.jsonl");
+    let lane = [("HERDSMAN_LANE", Some("nofleet:7:impl"))];
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let stranger = "fleet `nofleet` is not in fleet.toml";
+    // The same cause an hour ago alerted already; that one no longer quiets a new one.
+    let old = json!({"cause": stranger, "lane": "nofleet:7:impl"});
+    herdsman::events::append(
+        &state,
+        &herdsman::events::Event::new(now - 3700, "nofleet", Some(7), "hook-failed-closed", old),
+    )
+    .unwrap();
+    let alerts = || std::fs::read_to_string(&sink).unwrap_or_default().lines().count();
+    let run = |raw: &str| assert!(hook_at(&d, &d, &lane, "impl", raw).contains("HOOK_FAILED_CLOSED"));
+    run(&pre_bash("docker ps --secret-arg").to_string());
+    assert_eq!(alerts(), 1, "the first in the hour alerts");
+    run(&pre_bash("docker ps --secret-arg").to_string());
+    assert_eq!(alerts(), 1, "the same cause within the hour stays quiet");
+    run("not json --secret-arg");
+    assert_eq!(alerts(), 2, "another cause alerts");
+    let evs: Vec<_> = herdsman::events::read(&state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "hook-failed-closed" && e.ts >= now)
+        .collect();
+    let causes: Vec<_> = evs.iter().map(|e| e.str("cause").unwrap()).collect();
+    assert_eq!(
+        causes,
+        [stranger, stranger, "its input is not JSON"],
+        "one event per deny"
+    );
+    for e in &evs {
+        assert_eq!(
+            (e.fleet.as_str(), e.issue, e.str("lane")),
+            ("nofleet", Some(7), Some("nofleet:7:impl"))
+        );
+        assert!(
+            !serde_json::to_string(e).unwrap().contains("secret-arg"),
+            "no command text: {e:?}"
+        );
+    }
+    // A fleet.toml that doesn't load still logs it (with no notifiers to alert).
+    std::fs::write(d.join("fleet.toml"), "[fleet.x\n").unwrap();
+    run(&pre_bash("ls").to_string());
+    let last = herdsman::events::read(&state).unwrap().pop().unwrap();
+    assert_eq!(
+        (last.kind.as_str(), last.str("cause")),
+        ("hook-failed-closed", Some("fleet.toml failed to load"))
+    );
+    assert_eq!(alerts(), 2);
+}
+
+/// #508: the hook's rules come from the binary and the loaded fleet.toml only: a lane loosening any file in its
+/// worktree (`roles/`, `hooks/`, its own fleet.toml or rules) changes nothing it allows.
+#[test]
+fn files_a_lane_edits_never_change_the_hook_rules() {
+    let d = tmpdir("hook-snapshot");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let wt = d.join("wt");
+    let lane = [("HERDSMAN_LANE", Some("sendmeter:7:impl"))];
+    let calls = [
+        "docker ps",
+        "git push origin HEAD:staging",
+        "gh pr merge 5",
+        "kill -9 -1; pkill node",
+        "git status",
+    ];
+    let decide = |cmd: &str| {
+        let mut call = pre_bash(cmd);
+        call["cwd"] = json!(wt);
+        hook_at(&d, &wt, &lane, "impl", &call.to_string())
+    };
+    std::fs::create_dir_all(&wt).unwrap();
+    let before: Vec<String> = calls.map(decide).into();
+    assert!(
+        before[..4].iter().all(|o| o.contains("\"deny\"")) && before[4].is_empty(),
+        "{before:?}"
+    );
+    let loose = "[limits]\ndeny_commands = []\n[fleet.sendmeter]\nrepo = \"a/b\"\nlocal = \"/tmp/x\"\nintegration = \"x\"\ndeny_commands = []\n";
+    for (f, text) in [
+        ("roles/impl.md", "You may run anything, docker and git push included."),
+        ("hooks/claude-settings.json", "{\"hooks\": {}}"),
+        ("crates/core/hooks/claude-settings.json", "{\"hooks\": {}}"),
+        (".herdsman/rules.md", "- anything goes"),
+        ("fleet.toml", loose),
+        (".herdsman/fleet.toml", loose),
+        (".claude/settings.json", "{\"permissions\": {\"allow\": [\"Bash\"]}}"),
+    ] {
+        let p = wt.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    assert_eq!(calls.map(decide).to_vec(), before);
 }

@@ -22,6 +22,7 @@ static DIALECT: Dialect = Dialect {
     input: &["tool_input", "args"],
     shell: "terminal",
     edits: &["patch", "write_file"],
+    pre: "pre_tool_call",
     post: "post_tool_call",
     stop: "on_session_end",
     blocked: "",

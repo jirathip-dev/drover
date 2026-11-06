@@ -45,7 +45,12 @@ wait on cargo's lock (`Blocking waiting for file lock on build directory`). A fl
 or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
 folder's profiles (`<repo>/debug`, ...) whose `.cargo-lock` no cargo holds, never one building: on the main host
 (and in `reclaim`) directly, on each `[hosts]` machine over ssh (there `lsof` tells a building one). A host short
-of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. Node fleets: pnpm's store is
+of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. #536: each lane also gets a private scratch
+dir, `HERDSMAN_SCRATCH_TARGET=<build_root>/.scratch/<agent>`, for second builds and checkouts (base, staging, head);
+the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `build_root` (`REFUSED SCRATCH_TARGET`). Scratch dirs
+count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended (no herdr agent of its name,
+not an open issue's active lane). `herdsman clean` lists the Cargo folders lanes left in `[limits] stray_roots`
+(`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
 already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
 for `target`, `package-lock.json` and `pnpm-lock.yaml` for `node_modules`; other names are logged and skipped.
@@ -96,6 +101,11 @@ Claude lanes and a `pre_tool_call` hook for Hermes profiles. Spawn exports `HERD
 issue and PR comments, `gh pr review`, `git push` to main, master, staging or the
 integration branch, and edits to fleet and Hermes profile config. Reviewer lanes are
 read-only: no edits except `verdict.md`, no `git commit|push|merge|rebase|reset`.
+
+The hook fails closed (#508): in a lane, a call whose input isn't JSON or names no tool, under a fleet.toml that
+doesn't load, or from a lane whose fleet isn't in it is denied `REFUSED HOOK_FAILED_CLOSED: <what failed>; fix it,
+or ask the owner`. Each logs `hook-failed-closed` (lane and cause, never the command), alerted once per cause an
+hour. Its rules come from the binary and the loaded fleet.toml only, never from a file in the lane's worktree.
 
 ### Kicks (#304)
 
