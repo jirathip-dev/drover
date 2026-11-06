@@ -146,6 +146,17 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
         row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), bad, &line);
     }
+    // #556: signed by the one local identity, the keychain's "Always Allow" outlasts a reinstall.
+    if cfg!(target_os = "macos") {
+        let req = [
+            "-v",
+            "-R",
+            "=certificate leaf[subject.CN] = \"herdsman local\"",
+            &ctx.exe,
+        ];
+        let line = format!("signature — {} signed by \"herdsman local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall", ctx.exe);
+        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+    }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();
     for binary in harnesses {

@@ -2,6 +2,7 @@
 //! retired-key change; this build loads it. `check` and the board warn; the install gate refuses a binary that can't.
 mod common;
 use common::*;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -78,6 +79,14 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let dest = d.join("bin/herdsman");
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     std::fs::write(&dest, "old").unwrap();
+    // #556: a fake `codesign` logs how the install signs (the real one would reach for the keychain).
+    let fake = d.join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    let log = d.join("codesign.log");
+    let sh = format!("#!/bin/sh\necho \"$@\" >> '{}'\n", log.display());
+    std::fs::write(fake.join("codesign"), sh).unwrap();
+    std::fs::set_permissions(fake.join("codesign"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
     let gate = |config: &str| {
         let cfg = d.join("fleet.toml");
         std::fs::write(&cfg, config).unwrap();
@@ -86,6 +95,7 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
             .args([Path::new(new), &dest])
             .env("FLEET_CONFIG", &cfg)
             .env("FLEET_STATE", d.join("state/events.jsonl"))
+            .env("PATH", &path)
             .output()
             .unwrap()
     };
@@ -94,8 +104,14 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     assert_eq!(o.status.code(), Some(1), "{out}");
     assert!(out.contains("kept ") && out.contains("✗ config — "), "{out}");
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    assert!(!log.exists(), "a refused build is never signed");
 
     let o = gate(RETIRED);
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
+    let signed = format!(
+        "--force --sign herdsman local --identifier herdsman {}.new\n",
+        dest.display()
+    );
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);
 }
