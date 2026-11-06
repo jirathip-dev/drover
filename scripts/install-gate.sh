@@ -15,7 +15,7 @@ mkdir -p "$(dirname "$dest")" && cp "$new" "$dest.new" || exit 1
 # #556: sign with the one local identity, so every build keeps the keychain's "Always Allow"; without it the
 # install goes on ad-hoc signed and `herdsman doctor` shows the signature row red with the setup command.
 if command -v codesign >/dev/null; then
-  codesign --force --sign "herdsman local" --identifier herdsman "$dest.new" ||
+  codesign --force --sign "herdsman-local" --identifier herdsman "$dest.new" ||
     echo "herdsman install-gate: not signed; run scripts/signing-identity.sh once, then reinstall"
 fi
 mv "$dest.new" "$dest"

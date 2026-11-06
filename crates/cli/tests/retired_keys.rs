@@ -110,7 +110,7 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
     let signed = format!(
-        "--force --sign herdsman local --identifier herdsman {}.new\n",
+        "--force --sign herdsman-local --identifier herdsman {}.new\n",
         dest.display()
     );
     assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);

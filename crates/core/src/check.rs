@@ -306,6 +306,27 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
+    // #548: a keychain read that timed out on a dialog (a thread's row, a lane's spawn refusal) alerts once per
+    // episode; a start or spawn on an account since ends it.
+    let mut locked: Option<&Event> = None;
+    for e in &events {
+        if matches!(e.kind.as_str(), "conductor-start" | "spawn") && e.data.get("account").is_some_and(|a| !a.is_null())
+        {
+            locked = None;
+        } else if locked.is_none()
+            && e.kind != "keychain-locked"
+            && e.data
+                .values()
+                .any(|v| v.as_str().is_some_and(|t| t.contains("KEYCHAIN_LOCKED")))
+        {
+            locked = Some(e);
+        }
+    }
+    if let Some(e) = locked {
+        let why = "the Keychain is waiting on a dialog: accounts and secrets can't be read → run `herdsman doctor` for the fix";
+        let d = json!({"key": e.ts, "reason": why});
+        fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-locked", d)?;
+    }
     // #389: a remote lane's outbox line drive has not delivered in 5 min; once per lane and line.
     for (e, lane, ts) in crate::outbox::stale(r, &events, ctx.now) {
         let why = format!(

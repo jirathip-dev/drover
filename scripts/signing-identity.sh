@@ -1,9 +1,9 @@
 #!/bin/sh
-# signing-identity [KEYCHAIN] (#556): create the self-signed code-signing identity "herdsman local" once, in the
+# signing-identity [KEYCHAIN] (#556): create the self-signed code-signing identity "herdsman-local" once, in the
 # login keychain. install-gate.sh signs every installed herdsman with it, so the designated requirement stays the
 # same across builds and the owner's one "Always Allow" on the Keychain dialog lasts. Run it, then reinstall.
 set -eu
-name="herdsman local"
+name="herdsman-local"
 kc=${1:-$HOME/Library/Keychains/login.keychain-db}
 if security find-certificate -c "$name" "$kc" >/dev/null 2>&1; then
   echo "signing-identity: \"$name\" is already in $kc"

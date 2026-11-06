@@ -244,7 +244,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "no plist runs herdsman serve",
         ),
         (
-            // #556: an ad-hoc signed build (or no "herdsman local" identity) fails codesign's requirement test.
+            // #556: an ad-hoc signed build (or no "herdsman-local" identity) fails codesign's requirement test.
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
             "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall",
