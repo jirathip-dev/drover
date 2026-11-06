@@ -1,0 +1,17 @@
+{
+  "response": {
+    "fleets": [
+      {
+        "fleet": "sendmeter",
+        "last": null,
+        "lessons": "weekly",
+        "next": 1000000
+      }
+    ]
+  },
+  "route": "GET /api/v1/lessons",
+  "schema": {
+    "fleets": []
+  },
+  "type": "Lessons"
+}

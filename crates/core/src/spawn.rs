@@ -898,6 +898,25 @@ pub fn spawn(
         Some((code, why)) => return refused(code, why),
         None => {}
     }
+    // #509: its intent, keyed by the issue's last spawn as this caller saw it: a racing spawn of the same round skips;
+    // one a crash left open is done if its lane was logged or came up, else this one starts it.
+    let step = ["spawn", "supersede"][usize::from(o.supersede && !dup.is_empty())];
+    let round = events
+        .iter()
+        .rfind(|e| e.is("spawn", fleet, issue))
+        .map_or(0, |e| e.seq);
+    let probe = |i: &Event| -> Result<Option<Value>> {
+        let logged = read(&ctx.state)?
+            .into_iter()
+            .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
+        let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
+        let up = up.is_some_and(|a| !host::live_in(&a, &p.agent, &p.worktree).is_empty());
+        Ok((logged || up).then(|| json!({"agent": p.agent})))
+    };
+    let (key, secs) = (format!("{role}@{round}"), SPAWN_SECS + 300); // the start's windows, then the clone and fetch
+    let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
+    let intent =
+        crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
         let old = crate::hosts::On::of(base, was);
@@ -1083,7 +1102,8 @@ pub fn spawn(
         if start.code != 0 {
             let taken = herdr::failed_with(&start, "agent_name_taken");
             if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
-                return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
+                adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({}))?;
+                return intent.done(json!({"agent": p.agent, "adopted": pane})).map(|()| true);
             }
             // #182: any failure closes the pane, so no unlogged pane is left to refuse the next pass LANE_LIVE.
             let why = if late {
@@ -1174,6 +1194,7 @@ pub fn spawn(
                     event("lane-closed", c)?;
                 }
             }
+            intent.done(json!({"agent": p.agent, "pane": pane}))?; // #509: a crash before the next line: adopted
             event("spawn", d)?; // #107: logged even when the kick failed, so the running lane is tracked
             if let Some(sp) = gone {
                 let from = entry(sp.str("harness"), sp.str("account"));

@@ -35,6 +35,36 @@ pub struct Config {
     pub service: ServiceCfg,
     /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
     pub chat: Chat,
+    /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
+    pub ci_runners: Option<CiRunners>,
+}
+
+/// #537: the repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap;
+/// `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
+#[derive(Debug, Deserialize)]
+pub struct CiRunners {
+    pub provider: String,
+    pub repo: String,
+    pub label: String,
+    pub size: String,
+    #[serde(default)]
+    pub ttl_hours: u64,
+    #[serde(default)]
+    pub snapshots: bool,
+    pub slots: u64,
+    pub max_vms: u64,
+    pub usd_day: f64,
+    #[serde(default)]
+    pub vms: Vec<String>,
+    pub local_label: Option<String>,
+    pub local_stop: Option<String>,
+    /// The VMs' runner service (the recipe's `{service}`).
+    #[serde(default = "ci_service")]
+    pub service: String,
+}
+
+fn ci_service() -> String {
+    "ci-runner".into()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -616,6 +646,8 @@ pub const WEBPUSH_ON: &[&str] = &[
     "orphan-issue",
     "config-warning",
     "keychain-locked",
+    "runners-low",
+    "runners-ok",
 ];
 
 impl Notify {

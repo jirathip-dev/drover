@@ -1,0 +1,14 @@
+{
+  "response": {
+    "days": 7,
+    "fleet": "sendmeter",
+    "text": "# Lessons digest: sendmeter, last 7 days\n\n## Review FAIL findings (blocking, with proof)\n\n## The owner in conductor threads\n\n- t1: Let's talk about #30\n\n## By the owner (overrides, extends, parks, answers against the recommendation)\n\n\n## Reverts on integration\n\n"
+  },
+  "route": "GET /api/v1/lessons/<fleet>/digest",
+  "schema": {
+    "days": "number",
+    "fleet": "string",
+    "text": "string"
+  },
+  "type": "Digest"
+}
