@@ -907,6 +907,7 @@ dependencies = [
  "herdsman-server",
  "herdsman-service",
  "hkdf 0.13.0",
+ "keyring",
  "p256",
  "rusqlite",
  "serde_json",
