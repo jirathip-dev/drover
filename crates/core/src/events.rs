@@ -395,6 +395,9 @@ pub fn checks(e: &Event) -> bool {
 pub const PASSIVE: &[&str] = &[
     "lane-state",
     "lesson-prompted",
+    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
+    "turn-end",
+    "turn-prompted",
     "budget-freed",
     "wip-saved",
     "wip-blocked",

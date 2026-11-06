@@ -704,28 +704,49 @@ fn pass(
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
             // #517: a lesson lane's one prompt to end with `done --no-change`.
-            let sp = crate::events::last_spawn(&events, &w.lane);
-            let (dsh, pane) = (
-                sp.and_then(|e| e.str("harness")) == Some("dsh"),
-                sp.and_then(|e| e.str("pane")),
-            );
-            let on = crate::hosts::On::of(r, sp);
-            let sent = crate::herdr::reply(
-                &on,
-                dsh,
-                &w.lane,
-                pane.unwrap_or_default(),
-                &crate::lesson::prompt(fleet, s.issue),
-            );
+            let sent = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue));
             writeln!(
                 out,
                 "{fleet} #{n} lesson lane prompted: {}",
-                if sent.is_ok() { "sent" } else { "not sent" }
+                if sent { "sent" } else { "not sent" }
             )?;
-            let d = json!({"agent": w.lane, "sent": sent.is_ok()});
+            let d = json!({"agent": w.lane, "sent": sent});
             append(
                 &ctx.state,
                 &Event::new(ctx.now, fleet, Some(s.issue), "lesson-prompted", d),
+            )?;
+        } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
+            // #511: a `done` with nothing new pushed is nudged once; a `working` lane gone idle is told to go on.
+            let (state, text) = if w.what == waiting::TURN_NUDGE {
+                let text = "herdsman: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+                    PR). Push and open the PR, then `herdsman turn done`; or `herdsman turn blocked --why <reason>`.";
+                ("done", text)
+            } else {
+                (
+                    "working",
+                    "herdsman: continue the task; end the turn with `herdsman turn …`.",
+                )
+            };
+            let sent = tell(r, &events, &w.lane, text);
+            writeln!(
+                out,
+                "{fleet} #{n} turn {state}: {}",
+                if sent { "prompted" } else { "not sent" }
+            )?;
+            let d = json!({"agent": w.lane, "state": state, "sent": sent});
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(s.issue), "turn-prompted", d),
+            )?;
+        } else if w.who == "drive" && w.what.starts_with(waiting::TURN_BLOCKED) && !fast {
+            // #511: a lane that reports itself blocked is the owner's: a card with its reason.
+            let why = &w.what[waiting::TURN_BLOCKED.len()..];
+            writeln!(out, "{fleet} #{n} needs-human: lane blocked: {why}")?;
+            let d = json!({"code": "LANE_BLOCKED", "reason": format!("lane blocked: {why}"), "agent": w.lane});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
             )?;
         } else if w.who == "drive" && w.what == waiting::LESSON_CLOSE && !fast {
             crate::lesson::done(ctx, cfg, r, out, (fleet, s.issue), "no repeated class")?;
@@ -908,6 +929,14 @@ fn no_proof(
     Ok(Some(code))
 }
 
+/// #517 #511: type `text` into `lane`'s pane (its last spawn's); true if sent.
+fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> bool {
+    let sp = crate::events::last_spawn(events, lane);
+    let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
+    let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
+    crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, text).is_ok()
+}
+
 /// #534: the words of a `LANE_LIVE` on a finished lane.
 pub(crate) const OLD: &str = "is in the way: replacing it";
 
@@ -1074,9 +1103,13 @@ fn handoff(
         let building = matches!(s.state.split('(').next(), Some("impl" | "fix"));
         let ci = gh::ci(&gh::required(&pr["statusCheckRollup"], &f.required_checks));
         // #445: a recorded `done --no-change` is due at once; a check that runs only once labelled never blocks it.
-        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some();
+        // #511: so is a head its lane reported `done` at; any reported turn is idle.
+        let turn = waiting::turn(ev, s);
+        let done = s.reviewed(head) && waiting::fix_done(ev, fleet, s.issue).is_some()
+            || turn.is_some_and(|t| t.str("state") == Some("done"));
         let unlabelled = f.merge_label.as_deref().is_some_and(|l| !gh::has_label(&pr, l));
-        let idle = done || (w.who == "none" || w.what.contains(waiting::NO_PUSH)) && ctx.now >= w.since + 120;
+        let quiet = w.who == "none" || w.what.contains(waiting::NO_PUSH) || turn.is_some();
+        let idle = done || quiet && ctx.now >= w.since + 120;
         if !(idle && building && (done || unlabelled || ci != "pending") && pr["state"] == "OPEN") || head.is_empty() {
             continue;
         }
