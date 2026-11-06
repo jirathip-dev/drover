@@ -1,0 +1,51 @@
+{
+  "response": {
+    "asks": [],
+    "blocked": [
+      {
+        "activity": null,
+        "menu": {
+          "command": "cargo test --all",
+          "countdown": null,
+          "h": "7788131338726848967",
+          "options": [
+            "Yes",
+            "Yes, and don't ask again for cargo",
+            "No, and tell Claude what to do"
+          ],
+          "question": "Do you want to proceed?",
+          "reason": "",
+          "title": "Bash command"
+        },
+        "name": "sendmeter-rev-9-r1",
+        "push": true,
+        "tail": null,
+        "who": "sendmeter · #9 · sendmeter-rev-9-r1"
+      }
+    ],
+    "choosing": 0,
+    "issues": [],
+    "live": true,
+    "mtime": "1793969430121521119",
+    "now": 1000000,
+    "pair": true,
+    "paired": true,
+    "rw": true,
+    "snap": 0
+  },
+  "route": "GET /api/v1/needs",
+  "schema": {
+    "asks": [],
+    "blocked": [],
+    "choosing": "number",
+    "issues": [],
+    "live": "boolean",
+    "mtime": "string",
+    "now": "number",
+    "pair": "boolean",
+    "paired": "boolean",
+    "rw": "boolean",
+    "snap": "number"
+  },
+  "type": "NeedsTab"
+}

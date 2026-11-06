@@ -1,0 +1,168 @@
+{
+  "response": {
+    "error": null,
+    "failed": false,
+    "live": true,
+    "now": 1000000,
+    "pair": true,
+    "paired": true,
+    "rw": true,
+    "sections": [
+      {
+        "name": "blocked",
+        "repos": [
+          {
+            "lanes": [
+              {
+                "act": "blocked",
+                "activity": "",
+                "ago": "100s",
+                "atone": "r",
+                "blocked": {
+                  "activity": null,
+                  "menu": {
+                    "command": "cargo test --all",
+                    "countdown": null,
+                    "h": "7788131338726848967",
+                    "options": [
+                      "Yes",
+                      "Yes, and don't ask again for cargo",
+                      "No, and tell Claude what to do"
+                    ],
+                    "question": "Do you want to proceed?",
+                    "reason": "",
+                    "title": "Bash command"
+                  },
+                  "name": "sendmeter-rev-9-r1",
+                  "push": true,
+                  "tail": null,
+                  "who": "sendmeter · #9 · sendmeter-rev-9-r1"
+                },
+                "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                "dead": false,
+                "facts": "rev · round 1 · claude · 100s",
+                "gone": false,
+                "grow": "blocked",
+                "head": "#9",
+                "issue": 9,
+                "name": "sendmeter-rev-9-r1",
+                "now": null,
+                "pr": {
+                  "ci": null,
+                  "form": null,
+                  "pr": null,
+                  "rounds": 0,
+                  "run": null,
+                  "verdict": null,
+                  "vtone": ""
+                },
+                "repo": "jirathip-dev/sendmeter",
+                "role": "rev",
+                "shown": "blocked",
+                "state": "blocked",
+                "thread": null,
+                "tone": "r",
+                "why": null,
+                "why_tone": ""
+              }
+            ],
+            "name": "sendmeter"
+          }
+        ],
+        "tone": "r"
+      },
+      {
+        "name": "working",
+        "repos": [
+          {
+            "lanes": [
+              {
+                "act": "impl",
+                "activity": "",
+                "ago": "100s",
+                "atone": "g",
+                "blocked": null,
+                "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",
+                "dead": false,
+                "facts": "impl · round 0 · claude · 100s",
+                "gone": false,
+                "grow": "impl",
+                "head": "#12",
+                "issue": 12,
+                "name": "sendmeter-impl-12",
+                "now": null,
+                "pr": {
+                  "ci": null,
+                  "form": null,
+                  "pr": null,
+                  "rounds": 0,
+                  "run": null,
+                  "verdict": null,
+                  "vtone": ""
+                },
+                "repo": "jirathip-dev/sendmeter",
+                "role": "impl",
+                "shown": "working",
+                "state": "working",
+                "thread": null,
+                "tone": "g",
+                "why": null,
+                "why_tone": ""
+              }
+            ],
+            "name": "sendmeter"
+          }
+        ],
+        "tone": "g"
+      },
+      {
+        "name": "idle",
+        "repos": [
+          {
+            "lanes": [
+              {
+                "act": "idle",
+                "activity": "",
+                "ago": "0s",
+                "atone": "m",
+                "blocked": null,
+                "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
+                "dead": false,
+                "facts": "conductor · hermes · opus · 0s",
+                "gone": true,
+                "grow": "impl",
+                "head": "",
+                "issue": null,
+                "name": "Let's talk about #30 · t1",
+                "now": null,
+                "pr": null,
+                "repo": "jirathip-dev/sendmeter",
+                "role": "conductor",
+                "shown": "asleep",
+                "state": "asleep",
+                "thread": "t1",
+                "tone": "m",
+                "why": null,
+                "why_tone": ""
+              }
+            ],
+            "name": "sendmeter"
+          }
+        ],
+        "tone": "a"
+      }
+    ]
+  },
+  "route": "GET /api/v1/lanes",
+  "schema": {
+    "error": "null",
+    "failed": "boolean",
+    "live": "boolean",
+    "now": "number",
+    "pair": "boolean",
+    "paired": "boolean",
+    "rw": "boolean",
+    "sections": []
+  },
+  "type": "LanesTab"
+}
