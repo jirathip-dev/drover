@@ -7,5 +7,7 @@ This week's lessons for `{fleet}`, worked by a `lesson` lane (#419).
 4. Prove each new check fails on a real past mistake from the digest: the command and its output go in the PR body.
 5. `.herdsman/rules.md` stays at most 30 lines, each naming its enforcer (or `none`); a rule code now enforces is
    deleted in the same PR.
+6. New checks start in shadow (`shadow since <date>` on their rules line); `herdsman lesson apply {fleet}` promotes or
+   retires the existing ones by their history (#510). Hand-written rules lines are never changed.
 
 No class qualifies: `herdsman done --no-change "no repeated class" {fleet} <this issue>`; herdsman closes this issue.

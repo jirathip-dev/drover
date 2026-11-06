@@ -420,6 +420,8 @@ fn only_a_conductor_runs_lesson() {
             "{lane} reads the digest"
         );
     }
+    // #510: the lesson lane promotes and retires its checks in its own worktree.
+    assert_eq!(run("synergy:12:lesson", "herdsman lesson apply synergy"), "");
 }
 
 /// #574: only a conductor (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
