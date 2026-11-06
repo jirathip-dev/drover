@@ -9,7 +9,7 @@ closes it through one adapter, `crates/core/src/herdr.rs`. There are two runtime
 
 ```toml
 [runtime]
-kind = "shed"               # "herdr" (default) or "shed"
+kind = "shed"               # "herdr" (default), "shed" or "shed-acp" (ACP lanes, below)
 # socket = "~/x/shed.sock"    # default: shed's per-user socket
 # acp = "claude-acp"          # ACP mode: run this installed ACP agent instead of the harness's terminal UI
 # acp_policy = "ask"          # ACP permission requests: ask (default), allow or deny
@@ -77,16 +77,63 @@ the older ones, and the poll still sees the current state.
 
 ## ACP mode
 
-With `acp = "<agent id>"` a lane runs that ACP agent (install it with `shed agents add <id>` on each host) as a
-structured session, not a terminal UI. herdsman uses shed's CLI for the two steps shed itself owns: `shed run
---acp <id> --policy <acp_policy> --name … --label … --cwd …` builds the agent's bridge, and `shed send` frames each
-prompt. The kick waits for `ACP session ready`, sends the brief, and waits for `working`, `blocked` or `done`. No
-Enter is pressed after a prompt. Everything else (read, wait, kill, list) is the same socket call as above.
+With `acp = "<agent id>"` a lane runs that ACP agent (install it with `shed agents add <id>` on this host) as a
+structured session, not a terminal UI. `kind = "shed-acp"` (#565) is the same with `acp = "claude-acp"` and
+`acp_policy = "allow"` as defaults. It may be set for one fleet only, so a pilot leaves every other fleet on herdr:
 
-Read before using it: the ACP agent does not run the harness's own hooks, so **herdsman's tool guard does not apply
-in ACP mode**. With `acp_policy = "ask"` (the default) a tool call leaves the lane `blocked` until someone runs
-`shed approve`; `allow` lets the agent run every tool, with only GitHub branch protection (`herdsman protection`)
-left to stop a push to a protected branch. See shed's `docs/acp.md` for how each agent logs in.
+```toml
+[fleet.herdsman.runtime]
+kind = "shed-acp"
+```
+
+A fleet's `[fleet.<n>.runtime]` decides where its new lanes start, over the global `[runtime]`. herdsman reaches
+shed (the agent list, drive's event intake) when either names it.
+
+herdsman uses shed's CLI for the two steps shed owns. `shed run --acp <id> --policy <acp_policy> --name … --cwd …
+--label … -- <adapter>` builds the agent's bridge, and `shed send` frames each prompt. The kick waits for `ACP session
+ready`, sends the brief's text as the session's first prompt, and waits for `working`, `blocked` or `done`. Later
+prompts (a DECISION line, a nudge, a reply from the board) go through `shed send` too, because the terminal itself is
+an ACP one. No Enter is pressed after a prompt. Everything else (read, wait, kill, list) is the same socket call as
+above.
+
+**Labels.** An ACP lane has the shed lane labels (`fleet`, `issue`, `role`, `harness`) and the generic ones cooee's
+Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `role` (`impl`, `fix` for a fix round,
+`rev`, `design`), `round=<n>` and `url=<issue URL>`. It also has `drover.fleet`, `drover.issue`, `drover.role` and
+`drover.round`. No token is ever in a label, an event, the brief or the adapter's command line.
+
+**The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
+lane's exports (`HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env`, `HERDSMAN_ACCOUNT`). That shell sources the
+0600 secrets file `deliver` wrote, so the role's account token reaches the adapter as `CLAUDE_CODE_OAUTH_TOKEN`, the
+same way a pane gets it. It also sets `CLAUDE_CONFIG_DIR` to the lane's synced Claude profile
+(`~/.config/herdsman/claude/<profile>`) and the role's model as `ANTHROPIC_MODEL`, and unsets `$SHED`. The
+claude-acp adapter runs Claude Code with its user, project and local settings, so the profile's `settings.json`
+applies:
+
+- its `PreToolUse` hook is `herdsman hook`, the same guard as in a pane, so protected pushes, `gh pr merge`,
+  comments, containers, `pkill`/`killall`, protected paths and the reviewer's read-only rule are all refused;
+- its `permissions.defaultMode = "bypassPermissions"` is what the pane's `--dangerously-skip-permissions` does, so
+  tools do not wait on `shed approve` (the hook still runs first);
+- its `CLAUDE.md` is the role's prompt and the usage doc (the pane's `--append-system-prompt-file`).
+
+The lane's state is the session's own: the bridge reports `working`, `blocked` and `done` from the ACP turn, and the
+hook does not report it, since `$SHED` is unset. drive logs these as `lane-state` events, and nothing is read off a
+screen. The board's lane sheet and `/api/v1` read the lane through shed's `read`, which for an ACP terminal is its
+ACP event history (prompts, tool calls with their status, replies), not a screen capture.
+
+**Fail closed (#508).** A lane that herdsman's hook would not guard does not start: spawn, and its dry run, refuse
+`ACP_UNGUARDED` before anything is made. That happens when the harness and adapter pair is not one known to run the
+hook (today only `claude` with `claude-acp`), when the profile's `settings.json` has no herdsman `PreToolUse` hook
+(run `herdsman profiles sync`), when the role has no `[accounts]` token (its config folder is the profile, which holds
+no login), or when the lane is placed on another host (`shed run --acp` runs on its own host only). shed's
+`--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
+yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
+
+**Proof (2026-11-06, the mini).** shed 0.0.0 with claude-acp 0.101.0. A session in a scratch repo had herdsman's
+hook as its project settings' `PreToolUse` hook and `HERDSMAN_LANE=herdsman:565:impl`. It was asked to run
+`git push origin staging`, `pkill -f …` and `gh pr merge 1`. Each tool call ended `failed` with herdsman's refusal
+(`pushing to staging is blocked`, `REFUSED NO_BROAD_KILL`, `merging is gated`), and `hook-denied` was logged for
+the pkill. A lane's settings come from user settings (`CLAUDE_CONFIG_DIR`) rather than project settings; the
+adapter loads both the same way. The tests in `crates/cli/tests/shed.rs` cover spawn's wiring of that environment.
 
 ## Setup
 

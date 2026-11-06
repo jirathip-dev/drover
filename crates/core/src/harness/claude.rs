@@ -54,7 +54,11 @@ impl Harness for Claude {
             .replace("\"{{FLEET_STATUSLINE}}\"", &line)
             .replace("\"{{TRANSCRIPT_DAYS}}\"", &days.to_string());
         std::fs::write(dir.join("settings.json"), settings)?;
-        std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(role)))?;
+        let role_md = format!("{}\n\n{usage}", role_prompt(role));
+        std::fs::write(dir.join("role.md"), &role_md)?;
+        // #565: an ACP lane (the profile as `CLAUDE_CONFIG_DIR`, `bypassPermissions` as the CLI's flag) reads its role
+        // as user memory, since the adapter takes no `--append-system-prompt-file`.
+        std::fs::write(dir.join("CLAUDE.md"), role_md)?;
         std::fs::write(dir.join("fleet.md"), usage)?;
         writeln!(out, "synced {} ({role})", dir.display())?;
         Ok(())
