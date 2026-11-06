@@ -534,7 +534,9 @@ fn premerge(
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
-    if checks.is_empty() {
+    let rules = std::fs::read_to_string(f.local_path().join(".herdsman/rules.md")).unwrap_or_default();
+    // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
+    if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
     }
     let (wt, into) = (
@@ -551,6 +553,9 @@ fn premerge(
         let clean = git(r, &wt, &["merge", "--no-ff", "--no-edit", head]).is_ok();
         let t = std::time::Instant::now();
         let fail = clean.then(|| run_checks(r, &wt, &base, &checks)).flatten();
+        if clean && fail.is_none() {
+            crate::lesson::record(ctx, r, &wt, (fleet, issue))?;
+        }
         let secs = t.elapsed().as_secs();
         let _ = tree(&["remove", "--force", &wts]);
         if !clean {
