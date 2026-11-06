@@ -144,7 +144,33 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let svc = crate::secret::service("all", var);
         let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
         let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
-        row(rows, r.secret(&svc).is_ok_and(|v| v.is_some()), bad, &line);
+        let got = r.secret(&svc);
+        // #548: an item the Keychain guards with a dialog gets its one-time fix.
+        if got.as_ref().is_err_and(|e| {
+            e.downcast_ref::<crate::gate::Refusal>()
+                .is_some_and(|f| f.code == "KEYCHAIN_LOCKED")
+        }) {
+            let fix = crate::runner::keychain_fix(&svc);
+            row(
+                rows,
+                false,
+                '✗',
+                &format!("account {name} — {svc} prompts for Keychain access → approve herdsman in the Keychain dialog: {fix}"),
+            );
+            continue;
+        }
+        row(rows, got.is_ok_and(|v| v.is_some()), bad, &line);
+    }
+    // #556: signed by the one local identity, the keychain's "Always Allow" outlasts a reinstall.
+    if cfg!(target_os = "macos") {
+        let req = [
+            "-v",
+            "-R",
+            "=certificate leaf[subject.CN] = \"herdsman-local\"",
+            &ctx.exe,
+        ];
+        let line = format!("signature — {} signed by \"herdsman-local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall", ctx.exe);
+        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();

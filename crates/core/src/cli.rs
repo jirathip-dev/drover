@@ -1045,6 +1045,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;
+            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
+            let pass = if fast {
+                crate::hosts::Pass::fast(r)
+            } else {
+                crate::hosts::Pass::new(r, None)
+            };
+            let r: &dyn Runner = match cmd {
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                _ => r,
+            };
             let kick = |f: &str, n, why| {
                 let _ = crate::drive::kick(ctx, r, f, n, why);
             };
@@ -1203,7 +1214,28 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             Some(l) => ("none", format!("waiting on {l} (working){note}")),
                             None => ("drive", format!("next in the queue: drive starts it{note}")),
                         };
-                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, None);
+                        // #558: why drive hasn't started it yet, never `?`.
+                        let why = match crate::drive::last_pass(ctx, &s.fleet) {
+                            _ if s.lane.is_some() => None,
+                            _ if f.paused => Some(format!("paused: herdsman resume {}", s.fleet)),
+                            None => Some(format!(
+                                "drive hasn't passed this fleet yet: herdsman drive {}",
+                                s.fleet
+                            )),
+                            Some(t) => {
+                                let late = ctx.now.saturating_sub(t);
+                                let stuck = if late > 600 {
+                                    ": tick stuck? herdsman doctor"
+                                } else {
+                                    ""
+                                };
+                                Some(format!(
+                                    "drive's next pass (last {} ago){stuck}",
+                                    crate::events::age(late)
+                                ))
+                            }
+                        };
+                        let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, why);
                         let lane = s.lane.unwrap_or_default();
                         rows.push(crate::waiting::Waiting {
                             fleet,

@@ -11,4 +11,11 @@ if ! out=$("$new" doctor --config-only 2>&1); then
   echo "fix: edit the config as the ✗ line says, then rerun the install"
   exit 1
 fi
-mkdir -p "$(dirname "$dest")" && cp "$new" "$dest.new" && mv "$dest.new" "$dest"
+mkdir -p "$(dirname "$dest")" && cp "$new" "$dest.new" || exit 1
+# #556: sign with the one local identity, so every build keeps the keychain's "Always Allow"; without it the
+# install goes on ad-hoc signed and `herdsman doctor` shows the signature row red with the setup command.
+if command -v codesign >/dev/null; then
+  codesign --force --sign "herdsman-local" --identifier herdsman "$dest.new" ||
+    echo "herdsman install-gate: not signed; run scripts/signing-identity.sh once, then reinstall"
+fi
+mv "$dest.new" "$dest"

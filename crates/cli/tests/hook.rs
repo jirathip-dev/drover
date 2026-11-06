@@ -538,6 +538,84 @@ fn a_conductor_writes_its_own_thread_folder() {
     }
 }
 
+/// #499: from the shell too, a conductor copies into its own thread folder, but not herdsman's files there, another
+/// thread's or the log; relative targets resolve against the cwd (and its `cd`s) for every lane.
+#[test]
+fn a_conductor_copies_into_its_own_thread_folder() {
+    let d = tmpdir("hook-own-sh");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let (st, c) = (d.join("state"), d.join("state/conductor"));
+    let run = |lane: &str, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/tmp",
+            "tool_input": {"command": cmd}});
+        let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+            .args(["hook", "--role", lane.rsplit(':').next().unwrap()])
+            .env_remove("FLEET_LANE")
+            .env("HERDSMAN_LANE", lane)
+            .env("HERDSMAN_THREAD", "t6")
+            .env("FLEET_CONFIG", d.join("fleet.toml"))
+            .env("FLEET_STATE", st.join("events.jsonl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.to_string().as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
+    let cond = "synergy:-:conductor";
+    // A symlink already in the folder (pointing at the state dir) is no way out of it.
+    std::fs::create_dir_all(c.join("t6")).unwrap();
+    std::os::unix::fs::symlink("../..", c.join("t6/link")).unwrap();
+    for cmd in [
+        format!("cp a.png {own}/a.png"),
+        format!("mv /tmp/b.png {own}/ui/b.png"),
+        format!("sips -s format png a.jpg -o {own}/a.png"),
+        format!("cat a.svg > {own}/a.svg"),
+        format!("cd {own} && cp /tmp/a.png ./a.png"),
+        format!("sips -s format png a.jpg -o{own}/a.png"),
+        format!("cp -vt{own}/ui a.png"),
+    ] {
+        assert_eq!(run(cond, &cmd), "", "{cmd}");
+    }
+    let st = st.display();
+    for (lane, cmd) in [
+        (cond, format!("cp a.png {own}/.thread.md")),
+        (cond, format!("cp a.png {own}/.brief.md")),
+        (cond, format!("cp a.png {other}/")),
+        (cond, format!("cp a.png {own}/../t5/a.png")),
+        (cond, format!("cd {own} && cp a.png ../t5/a.png")),
+        (cond, format!("cd {own} && cp /tmp/a.png ./.thread.md")),
+        (cond, format!("cd {st} && cp a.png ./events.jsonl")),
+        ("synergy:7:impl", format!("cd {st} && cp a.png ./events.jsonl")),
+        (cond, format!("cd -P {st} && cp a.png events.jsonl")),
+        (cond, format!("cd -- {st} && cp a.png events.jsonl")),
+        (cond, format!("pushd {st} && cp a.png events.jsonl")),
+        ("synergy:7:impl", format!("pushd {st} && cp a.png events.jsonl")),
+        ("synergy:7:impl", format!("cp a.png {own}/a.png")),
+        (cond, format!("cp --target-directory={st}/ a.png")),
+        (cond, format!("dd if=a of={st}/events.jsonl")),
+        (cond, format!("cp a.png {own}/a.png && echo x>{st}/events.jsonl")),
+        ("synergy:7:impl", format!("cp --target-directory={st}/ a.png")),
+        ("synergy:7:impl", format!("dd if=a of={st}/events.jsonl")),
+        (cond, format!("cp -t{st}/ a.png {own}/a.png")),
+        (cond, format!("sips -s format png a.jpg -o{st}/events.jsonl {own}/x")),
+        (cond, format!("cd {st}/conductor && cp -t6/x a.png")),
+        (cond, format!("cd {st} && cp -t. a.png {own}/a.png")),
+        (cond, format!("ln -s ../../events.jsonl {own}/x")),
+        (cond, format!("cd {own} && ln -s ../../events.jsonl x")),
+        (cond, format!("cp a.png {own}/link/a.png")),
+        (cond, format!("echo hi > {own}/link")),
+    ] {
+        assert!(run(lane, &cmd).contains("is blocked"), "{lane}: {cmd}");
+    }
+}
+
 /// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
 #[test]
 fn a_conductors_shell_writes_its_own_thread_folder() {
