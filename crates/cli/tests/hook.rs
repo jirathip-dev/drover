@@ -618,6 +618,42 @@ fn a_conductor_copies_into_its_own_thread_folder() {
     }
 }
 
+/// #570: from a cwd in the state folder, `2>&1` and a redirection to `/dev/null` write no file there; a real
+/// relative target outside the conductor's own folder still does.
+#[test]
+fn fd_duplications_write_no_file() {
+    let d = tmpdir("hook-dups");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let (st, own) = (d.join("state"), d.join("state/conductor/t6"));
+    std::fs::create_dir_all(&own).unwrap();
+    let sh = |cwd: &Path, cmd: &str| {
+        conductor_hook(
+            &d,
+            json!({"tool_name": "Bash", "cwd": cwd, "tool_input": {"command": cmd}}),
+        )
+    };
+    for cwd in [&own, &st] {
+        for cmd in [
+            "echo x 2>&1 | tail -1",
+            "herdsman queue cooee add $n >/dev/null 2>&1",
+            "herdsman spawn cooee $n impl &>/dev/null",
+            "echo x >&2; echo y 1>/dev/stderr 2>/dev/stdout <&0",
+        ] {
+            assert_eq!(sh(cwd, cmd), "", "{}: {cmd}", cwd.display());
+        }
+    }
+    for (cwd, cmd) in [
+        (&st, "echo x > ./a"),
+        (&st, "echo x 2>&1 >./a"),
+        (&st, "echo x &>a"),
+        (&st, "echo x >&a"),
+        (&own, "echo x 2>&1 > ../a"),
+        (&own, "echo x >/dev/null > ../t5/a"),
+    ] {
+        assert!(sh(cwd, cmd).contains("is blocked"), "{}: {cmd}", cwd.display());
+    }
+}
+
 /// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
 #[test]
 fn a_conductors_shell_writes_its_own_thread_folder() {
@@ -983,6 +1019,8 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 24",
         "herdsman queue sendmeter block 24 --on 23",
+        "herdsman queue sendmeter block --on 23 --on 22 24",
+        "herdsman queue sendmeter unblock 24",
     ] {
         assert_eq!(
             hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
@@ -993,6 +1031,7 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 25",
         "cd /tmp && herdsman queue sendmeter block 25 --on 24",
+        "herdsman queue sendmeter unblock --on 24 25",
     ] {
         let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
