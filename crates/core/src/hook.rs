@@ -1,6 +1,7 @@
 //! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
-use crate::config::Deny;
+use crate::config::{Config, Deny};
 use crate::harness::dialects;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +21,50 @@ pub struct Policy {
     pub groups: Vec<String>,
     /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
+}
+
+/// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
+/// its rules file (`HERDSMAN_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Rules {
+    /// main, master, staging and every fleet's integration branch.
+    pub branches: Vec<String>,
+    /// #216/#256: the fleet's `deny_commands` under the lane host's rules, plus #502's broad-kill ban.
+    pub deny: Vec<Deny>,
+    pub groups: Vec<String>,
+    pub reviewer: bool,
+    /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
+    pub builds: bool,
+}
+
+impl Rules {
+    pub fn resolve(cfg: &Config, fleet: &str, role: &str, host: &str) -> Rules {
+        let f = cfg.fleet.get(fleet);
+        let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
+        let mut deny = match cfg.hosts.get(host) {
+            Some(h) => h.deny(d),
+            None => d,
+        };
+        // #502: no fleet or host drops the broad-kill ban.
+        deny.extend(broad_kill());
+        let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
+        branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
+        let family = f.map(|f| f.family(role));
+        Rules {
+            branches,
+            deny,
+            groups: cfg.conductor.groups().into_iter().map(String::from).collect(),
+            reviewer: family == Some("rev"),
+            builds: role != "lesson" && family == Some("impl"),
+        }
+    }
+}
+
+/// #592: lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
+pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
+    let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
+    let now = serde_json::to_value(Rules::resolve(cfg, fleet, role, host)).ok();
+    sp.data.get("rules").is_some_and(|r| now.as_ref() != Some(r))
 }
 
 /// git subcommands that make commits or move refs; denied to reviewers.

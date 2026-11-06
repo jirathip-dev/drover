@@ -676,6 +676,11 @@ pub fn scan(
         if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd) = ("none", format!("host offline: {h}"), None);
         }
+        // #592: a live remote lane's rules, frozen at spawn, that fleet.toml now resolves otherwise: a respawn takes them.
+        let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
+            w.what += " · rules stale";
+        }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
         let m = w.what.starts_with("PASS · CI running").then(gone).flatten();
         w.what = m.map_or(w.what, |m| format!("PASS · {m}"));

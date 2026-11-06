@@ -87,6 +87,16 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
 
+## A remote lane's hook rules (#592)
+
+Only the main host has a fleet.toml. Spawn resolves a remote lane's hook rules there (protected branches, the fleet's
+`deny_commands` under the host's `[hosts.<name>]` rules, the reviewer flag) and writes them to
+`<worktree>.rules.json` on the lane's host, exported as `HERDSMAN_RULES`. The hook there reads only that file (the lane
+may not edit it); a missing or unreadable one fails closed `HOOK_FAILED_CLOSED`. It holds no notifier, token or env
+value. The rules are frozen at spawn: after a config change that alters them, the board marks the lane `rules stale`
+until a respawn. A fleet.toml left on a remote host is no longer read: `herdsman doctor` shows
+`! stale fleet.toml on <host>: no longer read`; remove it by hand (herdsman never does).
+
 ## Asks, answers and verdicts from another host (#275, #389)
 
 A lane on another host never connects to the main host: it holds no key, token or ssh route to it. Spawn exports

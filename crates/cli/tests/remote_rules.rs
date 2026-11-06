@@ -147,3 +147,100 @@ fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
         assert!(docker.contains("NO_CONTAINERS"), "{toml:?}: {docker}");
     }
 }
+
+/// `herdsman hook` in a remote lane whose `HERDSMAN_RULES` names `rules`, its host's fleet.toml knowing its fleet.
+fn hook_with_rules(remote: &Path, rules: &Path) -> String {
+    let env = BTreeMap::from([
+        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("HERDSMAN_HOST".to_string(), "bazzite".to_string()),
+        ("HERDSMAN_RULES".to_string(), rules.display().to_string()),
+    ]);
+    hook_there(&env, remote, Some(CONFIG), "git status")
+}
+
+#[test]
+fn a_missing_or_unreadable_rules_file_fails_closed_naming_it() {
+    let remote = tmpdir("remote-rules-closed");
+    let rules = remote.join("issue-12.rules.json");
+    for text in [None, Some("not json"), Some("{\"branches\": 3}")] {
+        let _ = std::fs::remove_file(&rules);
+        if let Some(t) = text {
+            std::fs::write(&rules, t).unwrap();
+        }
+        let out = hook_with_rules(&remote, &rules);
+        let why = format!(
+            "REFUSED HOOK_FAILED_CLOSED: rules file {} is unreadable (",
+            rules.display()
+        );
+        assert!(out.contains("\"deny\"") && out.contains(&why), "{text:?}: {out}");
+    }
+}
+
+#[test]
+fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
+    let c = setup("remote-rules-secrets");
+    let extra = "\n[fleet.sendmeter.env]\nPLAIN = \"plain-env-value\"\nAPI = \"secret:API_KEY\"\n\
+                 \n[[fleet.sendmeter.notify]]\ncmd = \"curl https://api.telegram.org/botSEKRIT/send\"\n";
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, text + extra).unwrap();
+    let r = remote_fake().stored("herdsman/sendmeter/API_KEY", "tok-VALUE-123");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
+    let inputs = r.inputs.borrow();
+    let rules = inputs
+        .iter()
+        .find(|i| i.0.ends_with(&format!("'{wt}.rules.json'")))
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&rules.1).unwrap();
+    let keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+    assert_eq!(keys, ["branches", "builds", "deny", "groups", "reviewer"]);
+    for secret in [
+        "SEKRIT",
+        "telegram",
+        "plain-env-value",
+        "API_KEY",
+        "tok-VALUE-123",
+        "secret:",
+    ] {
+        assert!(!rules.1.contains(secret), "{secret}: {}", rules.1);
+    }
+    // The lane's own rules are as protected as fleet.toml.
+    let remote = tmpdir("remote-rules-edit");
+    let file = tmpdir("remote-rules-wt").join("issue-12.rules.json");
+    std::fs::write(&file, &rules.1).unwrap();
+    let env = BTreeMap::from([
+        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("HERDSMAN_RULES".to_string(), file.display().to_string()),
+    ]);
+    let edit = hook_there(&env, &remote, None, &format!("echo '{{}}' > {}", file.display()));
+    assert!(
+        edit.contains(&format!("writing under {} is blocked", file.display())),
+        "{edit}"
+    );
+}
+
+#[test]
+fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
+    let c = setup("remote-rules-stale");
+    let r = remote_fake();
+    assert_eq!(
+        run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
+        0
+    );
+    let (_, board) = run(&c, &r, &["board", "sendmeter"]);
+    assert!(!board.contains("rules stale"), "{board}");
+    // A config apply that leaves its rules alone marks nothing.
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, text.replace("stall_minutes = 30", "stall_minutes = 40")).unwrap();
+    let (_, board) = run(&c, &r, &["board", "sendmeter"]);
+    assert!(!board.contains("rules stale"), "{board}");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, text + "deny_commands_add = [\"terraform apply\"]\n").unwrap();
+    let (_, board) = run(&c, &r, &["board", "sendmeter"]);
+    assert!(board.contains("rules stale"), "{board}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    let (_, board) = run(&c, &r, &["board", "sendmeter"]);
+    assert!(!board.contains("rules stale"), "{board}");
+}

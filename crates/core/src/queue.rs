@@ -400,6 +400,13 @@ pub fn board(
         // #478: its own line too: an active lane on a host the last look could not reach.
         let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
         let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
+        let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
+        let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
+        let warn = if stale {
+            "\n         rules stale: respawn to apply".into()
+        } else {
+            String::new()
+        } + &warn;
         let last = last.unwrap_or_else(|| if ev.is_empty() { "-".into() } else { ev.into() });
         format!(
             "{pos:>2} #{n:<5} {:<11} {lane:<20} {eff:<5} {a:<4} {last}{warn}",

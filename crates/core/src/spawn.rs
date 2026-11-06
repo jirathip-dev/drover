@@ -163,6 +163,11 @@ impl Plan {
         PathBuf::from(format!("{}.env", self.worktree.display()))
     }
 
+    /// #592: a remote lane's hook rules, beside its worktree on its host.
+    pub fn rules_file(&self) -> PathBuf {
+        PathBuf::from(format!("{}.rules.json", self.worktree.display()))
+    }
+
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
         harness::get(&self.harness).start_cmd(ctx, self, pane)
     }
@@ -739,6 +744,9 @@ pub fn spawn(
                 Some(url) => p.env.insert("HERDSMAN_SERVICE".into(), url.clone()),
                 None => p.env.insert("HERDSMAN_OUTBOX".into(), "1".into()),
             };
+            // #592: its host keeps no fleet.toml: its hook reads the rules this host resolves (written below).
+            p.env
+                .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -1028,6 +1036,11 @@ pub fn spawn(
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
     let _secrets = deliver(&on, cfg, &p)?;
+    let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
+    let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
+    if let Some(rl) = &rules {
+        on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
+    }
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
     let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
         Err(e) if format!("{e:#}").contains("workspace_not_found") => {
@@ -1181,6 +1194,9 @@ pub fn spawn(
             }
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
                 d["sha"] = json!(h);
+            }
+            if let Some(rl) = &rules {
+                d["rules"] = json!(rl); // #592: the board marks the lane `rules stale` once fleet.toml resolves others
             }
             let until = p.resting.as_ref().map(|r| crate::usage::date(base, r.1, "+%H:%M"));
             d["resting"] = json!(p.resting.as_ref().zip(until).map(|(r, t)| format!("{} {t})", r.0)));

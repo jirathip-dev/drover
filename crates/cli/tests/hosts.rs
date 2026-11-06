@@ -643,6 +643,20 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     );
 }
 
+/// #592: a remote host's old fleet.toml is flagged, never removed; none there, no row.
+#[test]
+fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
+    let c = setup("hosts-stale-conf", "", true, 0);
+    let r = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(!out.contains("stale fleet.toml"), "{out}");
+    let conf = c.config.display().to_string();
+    let r = r.reply(&format!("{SSH}'sh' '-c' 'test -e \"$1\"' 'sh' '{conf}'"), "");
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains("\n! stale fleet.toml on bazzite: no longer read"), "{out}");
+    assert!(!r.calls.borrow().iter().any(|l| l.contains("'rm'") && l.contains(&conf)));
+}
+
 #[test]
 fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     let c = setup("hosts-sick", "", true, 0);
