@@ -113,6 +113,15 @@ enum Cmd {
         #[arg(long, value_name = "WHY")]
         no_change: String,
     },
+    /// An impl lane's end of turn, for its own issue; logs `turn-end` and drive acts on it at once
+    Turn {
+        /// done (pushed, ready for review) | blocked (--why) | need-input (`ask` first) | working (mid-task)
+        #[arg(value_parser = ["done", "blocked", "need-input", "working"])]
+        state: String,
+        /// Why: the blocker, the question, what is left
+        #[arg(long, required_if_eq("state", "blocked"))]
+        why: Option<String>,
+    },
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
@@ -693,8 +702,12 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
     let lane_write = matches!(
         cli.cmd,
-        Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. }
+        Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. } | Cmd::Turn { .. }
     );
+    // #511: the stop hook on the lane's own host sees the turn reported, wherever it is logged.
+    if let (Cmd::Turn { .. }, Ok(lane)) = (&cli.cmd, std::env::var("HERDSMAN_LANE")) {
+        let _ = std::fs::write(hook::turn_mark(&ctx.state, &lane), "turn");
+    }
     let mut sent: Vec<String> = args.into_iter().skip(1).collect();
     for i in 1..sent.len() {
         if sent[i - 1] == "--file" {
@@ -752,7 +765,7 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
     let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
     let (f, n) = match cli.map(|c| c.cmd) {
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
-        Ok(Cmd::LaneEvent { .. }) => return None,
+        Ok(Cmd::LaneEvent { .. } | Cmd::Turn { .. }) => return None,
         Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
         Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
             (fleet, issue.to_string())
@@ -1327,6 +1340,23 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
                     crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
+                Cmd::Turn { state, why } => {
+                    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+                    let mut it = lane.splitn(3, ':');
+                    let (Some(f), Some(Ok(n)), Some(role)) = (it.next(), it.next().map(str::parse), it.next()) else {
+                        bail!("`herdsman turn` is a lane's own verb: HERDSMAN_LANE names no <fleet>:<issue>:<role>");
+                    };
+                    if cfg.fleet(f)?.family(role) != "impl" {
+                        bail!("a {role} lane reports no turn: impl, fix and update lanes do");
+                    }
+                    let d = json!({"state": state, "why": why, "role": role});
+                    emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
+                    writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
+                    if state == "need-input" {
+                        writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
+                    }
+                    kick(f, n, "turn");
+                }
                 Cmd::Lesson {
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..
@@ -1513,6 +1543,17 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
             crate::drive::kick(ctx, r, f, n, why);
         }
+    }
+    // #511: an impl lane's turn that ends unreported goes on once to report it.
+    let mut it = lane.split(':');
+    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
+    let builds = || {
+        let cfg = Config::load(&ctx.config).ok();
+        role != "lesson" && cfg.is_some_and(|c| c.fleet.get(fleet).is_some_and(|f| f.family(role) == "impl"))
+    };
+    if let Some(v) = hook::turn_end(&input, &hook::turn_mark(&ctx.state, &lane), builds) {
+        writeln!(out, "{v}")?;
+        return Ok(());
     }
     // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();

@@ -2,6 +2,7 @@
 use crate::config::Deny;
 use crate::harness::dialects;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 pub struct Policy {
     pub branches: Vec<String>,
@@ -628,6 +629,38 @@ pub fn reported(input: &Value) -> Option<&'static str> {
         Some(_) => "blocked",
         None => "working",
     })
+}
+
+/// #511: what the stop hook tells an impl lane whose turn ended unreported.
+pub const TURN_ASK: &str =
+    "herdsman: end your turn with `herdsman turn done|blocked|need-input|working [--why <text>]` \
+(done: pushed and ready for review; blocked: --why names the blocker; need-input: after `herdsman ask`; working: \
+stopped mid-task)";
+
+/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `herdsman turn`
+/// ran, `asked` once the stop hook told it.
+pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
+    state.with_file_name(format!("turn-{}", lane.replace([':', '/'], "-")))
+}
+
+/// #511: an impl lane (`builds`) whose turn ends with no `herdsman turn` since its last prompt goes on once with
+/// `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
+pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
+    let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
+    let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
+    if d.prompt == ev {
+        let _ = std::fs::write(mark, "prompt");
+        return None;
+    }
+    let seen = std::fs::read_to_string(mark).unwrap_or_default();
+    let again = d
+        .again
+        .filter(|_| !matches!(seen.as_str(), "turn" | "asked") && input["stop_hook_active"] != true)?;
+    if !builds() {
+        return None;
+    }
+    let _ = std::fs::write(mark, "asked");
+    Some(again(TURN_ASK))
 }
 
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).
