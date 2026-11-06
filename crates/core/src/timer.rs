@@ -197,34 +197,45 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
 }
 
-/// `herdsman tick`: `check`, then `drive` (under #92's lock), remote build trims, then an hourly alert per red Services row.
-/// A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and exits 1.
+/// `herdsman tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
+/// red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and
+/// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
         let f = std::fs::OpenOptions::new().write(true).open(&log);
         let _ = f.and_then(|f| f.set_len(0));
     }
+    let mark = ctx.state.with_file_name("tick.step");
+    let pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
     let loaded = Config::load(&ctx.config);
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
-        herdr::status(r).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
-        crate::check::check(ctx, cfg, r, out)?;
+        pass.step("herdr status");
+        herdr::status(&pass).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
+        pass.step("check");
+        crate::check::check(ctx, cfg, &pass, out)?;
+        pass.step("drive");
+        let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
         // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
+        // #561: after drive, so no spawn or merge waits on it.
         let at = ctx.state.with_file_name("clean.at");
         let last = std::fs::read_to_string(&at)
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok());
         if last.is_none_or(|t| ctx.now >= t + 3600) {
+            pass.step("clean");
             let _ = std::fs::write(&at, ctx.now.to_string());
-            if let Err(e) = crate::check::clean(ctx, cfg, r, out, None, (None, None), true) {
+            if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None), true) {
                 writeln!(out, "clean: {e:#}")?;
             }
         }
-        let driven = drive::drive(ctx, cfg, r, out, None, false, false);
-        crate::check::trim_hosts(cfg, r, out)?; // #485: maintenance after drive, never before it
-        crate::lesson::weekly(ctx, cfg, r, out)?; // #419
+        pass.step("trim");
+        crate::check::trim_hosts(cfg, &pass, out)?; // #485: maintenance after drive, never before it
+        pass.step("lesson");
+        crate::lesson::weekly(ctx, cfg, &pass, out)?; // #419
         driven
     });
+    let _ = std::fs::remove_file(&mark);
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {
         Err(e) if e.downcast_ref::<crate::gate::Refusal>().is_some() => writeln!(out, "tick: {e}")?,
@@ -241,6 +252,35 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         alert(ctx, &cfg, &events, "service-red", &item, &why)?;
     }
     Ok(0)
+}
+
+/// #561: a tick still running 10 min after it started (its `tick.step`): `tick-stuck` once, naming the step and the
+/// child it waits on. The fast step looks, since a stuck tick cannot.
+pub fn stuck(ctx: &Ctx, cfg: &Config) -> Result<()> {
+    let Ok(text) = std::fs::read_to_string(ctx.state.with_file_name("tick.step")) else {
+        return Ok(());
+    };
+    let m: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let Some(since) = m["since"].as_u64().filter(|t| ctx.now >= t + 600) else {
+        return Ok(());
+    };
+    if read(&ctx.state)?
+        .iter()
+        .any(|e| e.kind == "tick-stuck" && e.data["key"] == since)
+    {
+        return Ok(());
+    }
+    let (step, child) = (
+        m["step"].as_str().unwrap_or("?"),
+        m["child"].as_str().unwrap_or_default(),
+    );
+    let child = if child.is_empty() { "none" } else { child };
+    let why = format!(
+        "tick running {} min, in {step}; waiting on: {child}",
+        (ctx.now - since) / 60
+    );
+    let d = serde_json::json!({"key": since, "step": step, "child": child, "reason": why});
+    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "tick-stuck", d))
 }
 
 /// #237: reinstall each own job `drift` finds missing or outdated, read it back, log `timer-repaired`; alert when

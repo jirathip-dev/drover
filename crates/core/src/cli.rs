@@ -1045,6 +1045,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;
+            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
+            let pass = if fast {
+                crate::hosts::Pass::fast(r)
+            } else {
+                crate::hosts::Pass::new(r, None)
+            };
+            let r: &dyn Runner = match cmd {
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                _ => r,
+            };
             let kick = |f: &str, n, why| {
                 let _ = crate::drive::kick(ctx, r, f, n, why);
             };

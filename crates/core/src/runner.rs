@@ -17,6 +17,10 @@ pub trait Runner: Sync {
     fn run_in(&self, prog: &str, args: &[String], _input: &str) -> Result<Out> {
         self.run(prog, args)
     }
+    /// #561: `run_in`, its child killed (exit 124) once `limit` has passed; fakes answer at once.
+    fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> Result<Out> {
+        self.run_in(prog, args, input)
+    }
     /// Pause between polls/retries; fakes skip it.
     fn sleep(&self, secs: u64) {
         std::thread::sleep(std::time::Duration::from_secs(secs));
@@ -55,6 +59,9 @@ impl Runner for Real {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         self.within(prog, args, input, limit(prog, args))
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
+        self.within(prog, args, input, Some(limit))
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
