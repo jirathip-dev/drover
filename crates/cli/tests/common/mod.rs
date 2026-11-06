@@ -237,6 +237,36 @@ pub fn agents(rows: &[(&str, &str, &str, &str)]) -> String {
 
 pub const NO_AGENTS: &str = r#"{"result":{"agents":[]}}"#;
 
+/// #535: the dirs `tmpdir` made on this thread; removed when it ends. libtest runs each test
+/// on its own thread, so a test's dirs go when it ends, pass or fail.
+struct Made(std::cell::RefCell<Vec<PathBuf>>);
+
+impl Drop for Made {
+    fn drop(&mut self) {
+        for d in self.0.borrow().iter() {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+}
+
+thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
+
+/// Every dir `tmpdir` made in this process, swept again at exit: a test's background
+/// threads (a server's sampler, drive's workers) can write one back after its test ends.
+static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+extern "C" fn sweep() {
+    if let Ok(all) = ALL.try_lock() {
+        for d in all.iter() {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+}
+
+extern "C" {
+    fn atexit(f: extern "C" fn()) -> std::ffi::c_int;
+}
+
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     let d = std::env::temp_dir().join(format!(
@@ -246,6 +276,10 @@ pub fn tmpdir(name: &str) -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
+    MADE.with(|m| m.0.borrow_mut().push(d.clone()));
+    static AT_EXIT: std::sync::Once = std::sync::Once::new();
+    AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
+    ALL.lock().unwrap().push(d.clone());
     d
 }
 
