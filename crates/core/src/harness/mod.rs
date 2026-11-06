@@ -131,6 +131,14 @@ pub trait Harness: Sync {
     fn env(&self) -> &'static [&'static str] {
         &[]
     }
+    /// #565: the ACP adapter (its `shed agents` id) known to run this harness's hooks (generic: none, unguarded).
+    fn acp(&self) -> Option<&'static str> {
+        None
+    }
+    /// #565: the env its ACP adapter reads its config folder (`profile`) and model from.
+    fn acp_env(&self, _profile: &Path, _model: Option<&str>) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
     /// How its lanes sign in (generic: unknown).
     fn credential(&self) -> Credential {
         Credential::None
@@ -211,6 +219,11 @@ pub fn get(name: &str) -> &'static dyn Harness {
         "dsh" => &dsh::Dsh,
         _ => &Generic,
     }
+}
+
+/// #565: a `shed-acp` runtime's default adapter: the first harness's that runs its hooks.
+pub fn default_acp() -> Option<&'static str> {
+    all().find_map(|h| h.1.acp())
 }
 
 /// The herdsman hook's command line, as Claude settings and Hermes config/allowlist name it.

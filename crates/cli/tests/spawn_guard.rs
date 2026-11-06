@@ -449,7 +449,10 @@ fn start_timeout_without_harness_closes_pane_and_retries_once() {
     assert_eq!(r.count("sleep 5"), 2 * 24, "a 120 s window each, never one read");
     assert!(!r.called("herdr agent rename"));
     assert!(
-        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
         "nothing but the intent (#376) logged"
     );
 }
@@ -655,7 +658,10 @@ fn agent_name_taken_elsewhere_is_refused_as_before() {
     assert_eq!(exit, 1, "{out}");
     assert!(!r.called("herdr agent rename"));
     assert!(
-        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
         "nothing but the intent (#376) logged"
     );
 }
@@ -722,7 +728,10 @@ fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
     assert_eq!(exit, 1, "{out}");
     assert!(r.called("herdr pane close w9:p1"), "{:?}", r.calls.borrow());
     assert!(
-        read(&c.state).unwrap().iter().all(|e| e.kind == "spawn-started"),
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
         "nothing but the intent (#376) logged"
     );
     // The pane is gone: the next pass spawns, no LANE_LIVE.

@@ -125,10 +125,16 @@ enum Cmd {
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Ask {
-        fleet: String,
-        issue: String,
-        question: String,
+        #[command(subcommand)]
+        cmd: Option<AskCmd>,
+        #[arg(required = true)]
+        fleet: Option<String>,
+        #[arg(required = true)]
+        issue: Option<String>,
+        #[arg(required = true)]
+        question: Option<String>,
         /// One choice (at most 4)
         #[arg(long = "option", value_name = "TEXT")]
         options: Vec<String>,
@@ -146,13 +152,17 @@ enum Cmd {
     Answer {
         fleet: String,
         id: String,
-        choice: String,
+        #[arg(required_unless_present = "typed", conflicts_with = "typed")]
+        choice: Option<String>,
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
         by: String,
         /// A conductor's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id
         #[arg(long, value_name = "QUOTE|ID")]
         basis: Option<String>,
+        /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
+        #[arg(long, value_name = "LINE")]
+        typed: Option<String>,
     },
     /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
     Report { id: Option<String> },
@@ -270,6 +280,9 @@ enum Cmd {
         why: String,
         #[arg(long, hide = true)]
         now: bool,
+        /// The triggering event's id: the same id is driven once
+        #[arg(long)]
+        id: Option<String>,
     },
     /// CI: formatted lines of src/**/*.rs against `line_cap` in --config; exit 1 over it or a --rules file over 30 lines
     #[command(hide = true)]
@@ -450,6 +463,21 @@ struct Scope {
     /// Machine-readable output
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Subcommand)]
+enum AskCmd {
+    /// Close an ask its own thread's conductor replaced; logged `ask-withdrawn`
+    Withdraw {
+        fleet: String,
+        id: String,
+        /// The conductor withdrawing it: conductor-<thread>
+        #[arg(long)]
+        by: String,
+        /// The ask that replaces it
+        #[arg(long = "for", value_name = "ID")]
+        new: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -836,10 +864,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed.
+    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed; #565: or one fleet's `runtime`.
     let with = Config::load(&ctx.config)
         .ok()
-        .and_then(|c| c.runtime.shed())
+        .and_then(|c| c.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
@@ -888,7 +916,11 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
     let (f, n) = match cli.map(|c| c.cmd) {
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
         Ok(Cmd::LaneEvent { .. } | Cmd::Turn { .. }) => return None,
-        Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
+        Ok(Cmd::Ask {
+            fleet: Some(fleet),
+            issue: Some(issue),
+            ..
+        }) => (fleet, issue),
         Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
             (fleet, issue.to_string())
         }
@@ -1236,25 +1268,38 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
                 }
                 Cmd::Ask {
-                    fleet,
-                    issue,
-                    question,
+                    cmd: Some(AskCmd::Withdraw { fleet, id, by, new }),
+                    ..
+                } => crate::withdraw(ctx, &cfg, out, (&fleet, &id), &by, new.as_deref())?,
+                Cmd::Ask {
+                    fleet: Some(fleet),
+                    issue: Some(issue),
+                    question: Some(question),
                     options,
                     recommend: n,
                     kind,
                     thread,
+                    ..
                 } => {
                     let at = lane(&issue)?;
                     let how = (n, kind.as_str(), thread.as_deref());
                     crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
+                // #584: the owner's typed line, whoever runs it.
                 Cmd::Answer {
                     fleet,
                     id,
-                    choice,
+                    typed: Some(line),
+                    ..
+                } => crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line)?,
+                Cmd::Answer {
+                    fleet,
+                    id,
+                    choice: Some(choice),
                     by,
                     basis,
+                    ..
                 } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
                     // #541: a conductor answers lane asks on its repo only with a basis.
                     Some(t) => {
@@ -1354,8 +1399,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
                 Cmd::Drive { fleet, fast } => crate::drive::drive(ctx, &cfg, r, out, fleet.as_deref(), false, fast)?,
-                Cmd::Kick { fleet, issue, why, now } => {
-                    crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now))?;
+                Cmd::Kick {
+                    fleet,
+                    issue,
+                    why,
+                    now,
+                    id,
+                } => {
+                    crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
@@ -1488,7 +1539,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => {
                     let pass = verdict == "PASS";
                     gate::verdict(ctx, &cfg, r, out, (&fleet, issue), pass, &sha, &file)?;
-                    kick(&fleet, issue, "verdict");
+                    let id = format!("{sha}-{verdict}");
+                    let _ = crate::drive::kick_once(ctx, r, (&fleet, issue), "verdict", Some(&id));
                 }
                 Cmd::Merge {
                     fleet,
@@ -1538,7 +1590,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &rules)?,
                 Cmd::Lesson { fleet, .. } => {
                     let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
-                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet)? {
+                    if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
                         return Ok(4);
                     }
                 }
@@ -1717,7 +1769,8 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
         let mut it = lane.split(':');
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
-            crate::drive::kick(ctx, r, f, n, why);
+            let id = input["tool_use_id"].as_str().filter(|_| why == "push");
+            crate::drive::kick_once(ctx, r, (f, n), why, id);
         }
     }
     // #511: an impl lane's turn that ends unreported goes on once to report it.

@@ -3,6 +3,7 @@
   "cleanupPeriodDays": "{{TRANSCRIPT_DAYS}}",
   "attribution": { "commit": "", "pr": "" },
   "includeCoAuthoredBy": false,
+  "permissions": { "defaultMode": "bypassPermissions" },
   "enabledPlugins": {
     "typescript-lsp@claude-plugins-official": false,
     "pyright-lsp@claude-plugins-official": false,

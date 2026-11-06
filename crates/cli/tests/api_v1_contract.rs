@@ -14,7 +14,7 @@ use std::path::Path;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Every POST answers `Reply`: the form ops (`serve.rs` `write`, `PAIRED_OPS`) and #555's.
+/// Every POST answers `Reply`: the form ops (`serve.rs` `write`, `PAIRED_OPS`), #555's and #576's.
 const POSTS: &[&str] = &[
     "mv",
     "pause",
@@ -38,6 +38,8 @@ const POSTS: &[&str] = &[
     "chat-about",
     "chat",
     "close",
+    "qset",
+    "lesson",
 ];
 
 /// The JSON shape of `v`: each scalar's type name, an object's keys, a list's elements merged.
@@ -161,7 +163,8 @@ fn every_route_keeps_its_fixtures_shape() {
     macro_rules! gets {
         ($(($name:literal, $path:expr, $ty:ty)),*) => {$(
             let route = format!("GET /api/v1/{}", $name);
-            check($name.split('/').next().unwrap(), &route, (stringify!($ty), schema::<$ty>()), get(&$path), &mut fails);
+            let file = $name.split('/').filter(|s| !s.starts_with('<')).collect::<Vec<_>>().join("-");
+            check(&file, &route, (stringify!($ty), schema::<$ty>()), get(&$path), &mut fails);
         )*};
     }
     gets!(
@@ -176,7 +179,14 @@ fn every_route_keeps_its_fixtures_shape() {
         ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), Chat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
-        ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen)
+        ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),
+        ("issue/<fleet>/<n>", "/api/v1/issue/sendmeter/12", IssueView),
+        ("lessons", "/api/v1/lessons", Lessons),
+        (
+            "lessons/<fleet>/digest",
+            "/api/v1/lessons/sendmeter/digest?days=7",
+            Digest
+        )
     );
     // Each POST's `Reply` (a refusal is the same shape as an OK).
     let m = get("/api/v1/state")["mtime"].clone();
