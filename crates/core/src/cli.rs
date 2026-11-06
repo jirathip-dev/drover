@@ -540,12 +540,19 @@ enum QueueCmd {
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
     },
-    /// Hold an issue until another one is merged
+    /// Hold an issue until others are merged; each `--on` adds a blocker
     Block {
         issue: u64,
-        /// The blocking issue
+        /// A blocking issue (repeatable)
+        #[arg(long, value_name = "ISSUE", required = true)]
+        on: Vec<u64>,
+    },
+    /// Drop blockers of an issue: those `--on` names, else all
+    Unblock {
+        issue: u64,
+        /// A blocker to drop (repeatable)
         #[arg(long, value_name = "ISSUE")]
-        on: u64,
+        on: Vec<u64>,
     },
     /// List the queue in order
     Ls {
@@ -630,8 +637,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`).
-pub const HELP_AGENT_MAX: usize = 294;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +4 for #505's `queue unblock`).
+pub const HELP_AGENT_MAX: usize = 298;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -997,9 +1004,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
             for r in rows.as_array().into_iter().flatten().filter(|_| !json) {
-                let mut on = r["blocked_by"]
-                    .as_u64()
-                    .map_or(String::new(), |b| format!("  blocked by #{b}"));
+                let b: Vec<u64> = serde_json::from_value(r["blocked_by"].clone())?;
+                let mut on = String::new();
+                if !b.is_empty() {
+                    on = format!("  blocked by {}", queue::hashes(&b));
+                }
                 if r["serial"] == true {
                     on += "  serial";
                 }
@@ -1401,7 +1410,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 "no serial group `{}` in fleet.{fleet}",
                                 g.unwrap_or_default()
                             );
-                            let mut d = queue::op("add", &issues, top, None, after, None);
+                            let mut d = queue::op("add", &issues, top, None, after);
                             for &i in &issues {
                                 let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
                             }
@@ -1432,7 +1441,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 !["design", "verify", "repro"].contains(&&*key) || on,
                                 "{key} is `on` or `off`"
                             );
-                            let mut d = queue::op("set", &[issue], false, None, None, None);
+                            let mut d = queue::op("set", &[issue], false, None, None);
                             d[key.as_str()] = json!(tags);
                             d
                         }
@@ -1441,9 +1450,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             top,
                             before,
                             after,
-                        } => queue::op("mv", &[issue], top, before, after, None),
-                        QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None, None),
-                        QueueCmd::Block { issue, on } => queue::op("block", &[issue], false, None, None, Some(on)),
+                        } => queue::op("mv", &[issue], top, before, after),
+                        QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None),
+                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": on}),
+                        QueueCmd::Unblock { issue, on } => json!({"op": "unblock", "issues": [issue], "on": on}),
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
                     // #412: a conductor's design mark: the design's approval asks in its thread too.

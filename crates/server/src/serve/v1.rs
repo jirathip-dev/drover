@@ -139,7 +139,7 @@ impl Server<'_> {
             state: st
                 .get(&(f.clone(), i.issue))
                 .map_or("queued".into(), |s| s.state.clone()),
-            blocked_by: i.blocked_by,
+            blocked_by: i.blocked_by.first().copied(),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {

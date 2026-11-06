@@ -96,7 +96,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         .and_then(|n| n.parse().ok())
         .context("gh issue create: no number")?;
     writeln!(out, "filed {fleet}#{n}: {title}")?;
-    let op = crate::queue::op("add", &[n], true, None, None, None);
+    let op = crate::queue::op("add", &[n], true, None, None);
     writeln!(out, "{}", crate::queue_change(ctx, cfg, fleet, op, None)?)?;
     crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "lesson"), &crate::spawn::Opts::default())
 }
