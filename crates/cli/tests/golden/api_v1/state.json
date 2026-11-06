@@ -1,0 +1,144 @@
+{
+  "response": {
+    "age": null,
+    "alerts": [
+      {
+        "detail": "off: no webpush notifier",
+        "fix": "",
+        "name": "push",
+        "tone": "a"
+      }
+    ],
+    "asks": [],
+    "fleets": [
+      {
+        "color": "g",
+        "name": "sendmeter",
+        "paused": false,
+        "repo": "jirathip-dev/sendmeter"
+      }
+    ],
+    "hosts": [
+      {
+        "detail": "this host",
+        "fix": "",
+        "name": "bazzite",
+        "tone": "g"
+      }
+    ],
+    "lanes": [
+      {
+        "fleet": "sendmeter",
+        "harness": "claude",
+        "issue": 12,
+        "model": null,
+        "name": "sendmeter-impl-12",
+        "role": "impl",
+        "shown": "working",
+        "since": 999900,
+        "state": "working",
+        "title": null,
+        "tone": "g"
+      },
+      {
+        "fleet": "sendmeter",
+        "harness": "claude",
+        "issue": 9,
+        "model": null,
+        "name": "sendmeter-rev-9-r1",
+        "role": "rev",
+        "shown": "blocked",
+        "since": 999900,
+        "state": "blocked",
+        "title": null,
+        "tone": "r"
+      },
+      {
+        "fleet": "sendmeter",
+        "harness": "hermes",
+        "issue": null,
+        "model": "opus",
+        "name": "Let's talk about #30 · t1",
+        "role": "conductor",
+        "shown": "asleep",
+        "since": 1000000,
+        "state": "asleep",
+        "title": null,
+        "tone": "m"
+      }
+    ],
+    "mtime": "1793969430121521119",
+    "now": 1000000,
+    "queue": [],
+    "seq": 8,
+    "services": [
+      {
+        "detail": "up 0s · v0.1.0",
+        "fix": "herdsman setup",
+        "name": "board",
+        "tone": "g"
+      },
+      {
+        "detail": "ran never · job missing",
+        "fix": "herdsman timer install",
+        "name": "tick",
+        "tone": "r"
+      },
+      {
+        "detail": "herdsman · last pass never · nothing yet",
+        "fix": "herdsman timer install",
+        "name": "drive sendmeter",
+        "tone": "r"
+      },
+      {
+        "detail": "ran never · job missing",
+        "fix": "herdsman timer install",
+        "name": "fast step",
+        "tone": "r"
+      },
+      {
+        "detail": "last kick never",
+        "fix": "",
+        "name": "kick",
+        "tone": "m"
+      },
+      {
+        "detail": "off: no webpush notifier",
+        "fix": "herdsman push test",
+        "name": "phone alerts",
+        "tone": "a"
+      },
+      {
+        "detail": "not on PATH, or no server",
+        "fix": "herdr",
+        "name": "herdr",
+        "tone": "r"
+      },
+      {
+        "detail": "not measured yet",
+        "fix": "herdsman clean --yes",
+        "name": "fleet disk",
+        "tone": "a"
+      }
+    ],
+    "theme": "farm",
+    "tz": 0
+  },
+  "route": "GET /api/v1/state",
+  "schema": {
+    "age": "null",
+    "alerts": [],
+    "asks": [],
+    "fleets": [],
+    "hosts": [],
+    "lanes": [],
+    "mtime": "string",
+    "now": "number",
+    "queue": [],
+    "seq": "number",
+    "services": [],
+    "theme": "string",
+    "tz": "number"
+  },
+  "type": "State"
+}

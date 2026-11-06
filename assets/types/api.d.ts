@@ -364,6 +364,23 @@ export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
 
 /**
+ * #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every
+ * `https://` URL in it (a wrapped one joined), or `closed`.
+ */
+export type SetupScreen = { lines: Array<string>, urls: Array<string>, closed: boolean, };
+
+/**
+ * #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s
+ * new-thread defaults (`POST chat` writes them).
+ */
+export type Roles = { fleet: string, config: ConfigSheet, chat: ChatDefaults, };
+
+/**
+ * #404: `[chat]`'s harness, model and effort (none: the conductor role's), and the `harnesses` it may name.
+ */
+export type ChatDefaults = { harness?: string | null, model?: string | null, effort?: string | null, harnesses: Array<Harness>, };
+
+/**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
  */
 export type Reply = { ok: boolean, code: string, message: string, };
