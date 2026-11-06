@@ -62,13 +62,42 @@ pub struct Telegram {
 }
 
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
-/// root of the per-thread working folders (default `<state dir>/conductor`).
+/// root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
 pub struct ConductorCfg {
     pub dir: Option<String>,
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
+    pub allow: Option<Vec<String>>,
+}
+
+/// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
+pub const GROUPS: &[(&str, &str)] = &[
+    ("design", "`spawn … design`"),
+    ("clean", "`clean --yes`, `--orphans`, `--lane`"),
+    ("hosts", "`hosts on|off|refresh`"),
+    ("reclaim", "`reclaim`"),
+    ("accounts", "`accounts reset`"),
+    ("runners", "`runners …`"),
+    ("pause", "`pause`, `resume`"),
+    ("set", "`set` a role's harness, model or effort"),
+];
+
+impl ConductorCfg {
+    /// #538: the groups on: `allow`, else every group but `pause` and `set`.
+    pub fn groups(&self) -> Vec<&str> {
+        let default = || {
+            GROUPS
+                .iter()
+                .map(|g| g.0)
+                .filter(|g| !["pause", "set"].contains(g))
+                .collect()
+        };
+        self.allow
+            .as_ref()
+            .map_or_else(default, |a| a.iter().map(String::as_str).collect())
+    }
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -647,6 +676,12 @@ impl Config {
             .any(|n| n.webpush() && n.sub.as_deref().is_none_or(str::is_empty))
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
+        }
+        if let Some(g) = c.conductor.groups().iter().find(|g| !GROUPS.iter().any(|k| k.0 == **g)) {
+            bail!(
+                "conductor.allow: \"{g}\" is no group; one of {:?}",
+                GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()
+            );
         }
         let ch = &c.chat;
         if let Some(h) = ch.harness.as_deref().filter(|h| !crate::harness::NAMES.contains(h)) {
