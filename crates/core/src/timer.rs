@@ -485,6 +485,18 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let why = k.map(|e| format!(" ({} #{})", e.str("why").unwrap_or("?"), e.issue.unwrap_or(0)));
     let d = format!("last kick {}{}", ago(ctx.now, k.map(|e| e.ts)), why.unwrap_or_default());
     rows.push(row("kick", "m", d, ""));
+    // #529: the service's lane event streams; amber while one is down and the passes poll.
+    for rt in [herdr::BIN, "shed"].iter().filter(|_| service.is_some()) {
+        let last = events
+            .iter()
+            .rfind(|e| e.kind == "lane-stream" && e.str("runtime") == Some(rt));
+        let Some(e) = last else { continue };
+        let (t, d) = match e.str("why") {
+            None => ("g", format!("live, since {}", ago(ctx.now, Some(e.ts)))),
+            Some(why) => ("a", format!("down {}: {why} · polling", ago(ctx.now, Some(e.ts)))),
+        };
+        rows.push(row(&format!("{rt} lane events"), t, d, ""));
+    }
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

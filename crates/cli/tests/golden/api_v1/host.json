@@ -1,0 +1,266 @@
+{
+  "response": {
+    "accounts": [],
+    "deepseek": null,
+    "devices": [
+      {
+        "created": 1000000,
+        "hash": "f34cdb3777ac5992ddfd17ea03cdd100bf787556163bc60fcd4f81c5146359ce",
+        "label": "iPhone f34c",
+        "used": 1000000
+      }
+    ],
+    "disk": {
+      "ago": null,
+      "bar": {
+        "n": 0,
+        "pct": "",
+        "t": "g"
+      },
+      "budget": 25.0,
+      "gb": "?"
+    },
+    "fleets": [
+      {
+        "ago": "",
+        "name": "sendmeter",
+        "raw": null,
+        "text": "",
+        "tone": "m",
+        "word": "nothing yet"
+      }
+    ],
+    "hosts": [
+      {
+        "dot": "m",
+        "lanes": 0,
+        "main": false,
+        "n": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+        "name": "bazzite",
+        "rows": [
+          {
+            "b": "?",
+            "bar": {
+              "n": 0,
+              "pct": "",
+              "t": "g"
+            },
+            "bt": "",
+            "k": "load/cpu",
+            "key": "load",
+            "l": 2.5,
+            "notes": [],
+            "of": "/ 2.5",
+            "p": "",
+            "s": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "t": "m",
+            "text": "",
+            "x": ""
+          },
+          {
+            "b": "?",
+            "bar": {
+              "n": 0,
+              "pct": "",
+              "t": "g"
+            },
+            "bt": "",
+            "k": "swap-out",
+            "key": "swap",
+            "l": 2000.0,
+            "notes": [],
+            "of": "/ 2000",
+            "p": "",
+            "s": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "t": "m",
+            "text": "",
+            "x": ""
+          },
+          {
+            "b": "free ? GB",
+            "bar": {
+              "n": 0,
+              "pct": "",
+              "t": "g"
+            },
+            "bt": "",
+            "k": "memory",
+            "key": "mem",
+            "l": 2.0,
+            "notes": [
+              "· ?"
+            ],
+            "of": "",
+            "p": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "s": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "t": "m",
+            "text": "",
+            "x": ""
+          },
+          {
+            "b": "free ? GB",
+            "bar": {
+              "n": 0,
+              "pct": "",
+              "t": "g"
+            },
+            "bt": "",
+            "k": "disk",
+            "key": "disk",
+            "l": 10.0,
+            "notes": [],
+            "of": "",
+            "p": "",
+            "s": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "t": "m",
+            "text": "",
+            "x": ""
+          },
+          {
+            "b": "0",
+            "bar": null,
+            "bt": "",
+            "k": "lanes",
+            "key": "lanes",
+            "l": null,
+            "notes": [
+              "none"
+            ],
+            "of": "",
+            "p": "",
+            "s": ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+            "t": "m",
+            "text": "",
+            "x": ""
+          },
+          {
+            "b": null,
+            "bar": null,
+            "bt": "",
+            "k": "tags",
+            "key": "",
+            "l": null,
+            "notes": [
+              ""
+            ],
+            "of": "",
+            "p": "",
+            "s": "",
+            "t": "m",
+            "text": "",
+            "x": ""
+          }
+        ],
+        "setups": [
+          "claude B",
+          "claude",
+          "gh",
+          "codex"
+        ],
+        "to": "off",
+        "tone": "m",
+        "words": "offline · last seen never"
+      }
+    ],
+    "key": "BKT7jJj_M1RLc3Sry3gJpwQShkvBWXrdd0ASv5G87YWEdwW4Ilz4mHZWJ-tyXnhuHZSZwO3oAPyw4cG9-ZVmZXk",
+    "leftovers": null,
+    "live": true,
+    "mtime": "1793969430121521119",
+    "notify": [],
+    "now": 1000000,
+    "orphans": 0,
+    "push": {
+      "detail": "off: no webpush notifier",
+      "fix": "",
+      "name": "push",
+      "tone": "a"
+    },
+    "rw": true,
+    "services": [
+      {
+        "detail": "up 0s · v0.1.0",
+        "fix": "herdsman setup",
+        "name": "board",
+        "tone": "g"
+      },
+      {
+        "detail": "ran never · job missing",
+        "fix": "herdsman timer install",
+        "name": "tick",
+        "tone": "r"
+      },
+      {
+        "detail": "ran never · job missing",
+        "fix": "herdsman timer install",
+        "name": "fast step",
+        "tone": "r"
+      },
+      {
+        "detail": "not on PATH, or no server",
+        "fix": "herdr",
+        "name": "herdr",
+        "tone": "r"
+      }
+    ],
+    "spawns": {
+      "detail": "starting 0/0",
+      "fix": "",
+      "name": "spawns",
+      "tone": "g"
+    },
+    "subs": [],
+    "telegram": {
+      "chat": false,
+      "on": false,
+      "owner": false,
+      "polled": "",
+      "topics": 0
+    },
+    "theme": {
+      "detail": "",
+      "fix": "",
+      "name": "farm",
+      "tone": "g"
+    }
+  },
+  "route": "GET /api/v1/host",
+  "schema": {
+    "accounts": [],
+    "deepseek": "null",
+    "devices": [],
+    "disk": "null",
+    "fleets": [],
+    "hosts": [],
+    "key": "string",
+    "leftovers": "null",
+    "live": "boolean",
+    "mtime": "string",
+    "notify": [],
+    "now": "number",
+    "orphans": "number",
+    "push": {
+      "detail": "string",
+      "fix": "string",
+      "name": "string",
+      "tone": "string"
+    },
+    "rw": "boolean",
+    "services": [],
+    "spawns": "null",
+    "subs": [],
+    "telegram": {
+      "chat": "boolean",
+      "on": "boolean",
+      "owner": "boolean",
+      "polled": "string",
+      "topics": "number"
+    },
+    "theme": {
+      "detail": "string",
+      "fix": "string",
+      "name": "string",
+      "tone": "string"
+    }
+  },
+  "type": "HostTab"
+}
