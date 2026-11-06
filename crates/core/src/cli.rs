@@ -125,10 +125,16 @@ enum Cmd {
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Ask {
-        fleet: String,
-        issue: String,
-        question: String,
+        #[command(subcommand)]
+        cmd: Option<AskCmd>,
+        #[arg(required = true)]
+        fleet: Option<String>,
+        #[arg(required = true)]
+        issue: Option<String>,
+        #[arg(required = true)]
+        question: Option<String>,
         /// One choice (at most 4)
         #[arg(long = "option", value_name = "TEXT")]
         options: Vec<String>,
@@ -146,13 +152,17 @@ enum Cmd {
     Answer {
         fleet: String,
         id: String,
-        choice: String,
+        #[arg(required_unless_present = "typed", conflicts_with = "typed")]
+        choice: Option<String>,
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
         by: String,
         /// A conductor's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id
         #[arg(long, value_name = "QUOTE|ID")]
         basis: Option<String>,
+        /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
+        #[arg(long, value_name = "LINE")]
+        typed: Option<String>,
     },
     /// Conductors and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
     Amend {
@@ -447,6 +457,21 @@ struct Scope {
     /// Machine-readable output
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Subcommand)]
+enum AskCmd {
+    /// Close an ask its own thread's conductor replaced; logged `ask-withdrawn`
+    Withdraw {
+        fleet: String,
+        id: String,
+        /// The conductor withdrawing it: conductor-<thread>
+        #[arg(long)]
+        by: String,
+        /// The ask that replaces it
+        #[arg(long = "for", value_name = "ID")]
+        new: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -820,10 +845,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed.
+    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed; #565: or one fleet's `runtime`.
     let with = Config::load(&ctx.config)
         .ok()
-        .and_then(|c| c.runtime.shed())
+        .and_then(|c| c.shed())
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
@@ -872,7 +897,11 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
     let (f, n) = match cli.map(|c| c.cmd) {
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
         Ok(Cmd::LaneEvent { .. } | Cmd::Turn { .. }) => return None,
-        Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
+        Ok(Cmd::Ask {
+            fleet: Some(fleet),
+            issue: Some(issue),
+            ..
+        }) => (fleet, issue),
         Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
             (fleet, issue.to_string())
         }
@@ -1220,25 +1249,38 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     spawn::adopt(ctx, &cfg, r, out, (&fleet, issue, &role), &pane, &serde_json::json!({}))?;
                 }
                 Cmd::Ask {
-                    fleet,
-                    issue,
-                    question,
+                    cmd: Some(AskCmd::Withdraw { fleet, id, by, new }),
+                    ..
+                } => crate::withdraw(ctx, &cfg, out, (&fleet, &id), &by, new.as_deref())?,
+                Cmd::Ask {
+                    fleet: Some(fleet),
+                    issue: Some(issue),
+                    question: Some(question),
                     options,
                     recommend: n,
                     kind,
                     thread,
+                    ..
                 } => {
                     let at = lane(&issue)?;
                     let how = (n, kind.as_str(), thread.as_deref());
                     crate::ask(ctx, &cfg, r, out, (&fleet, at), (&question, &options), how)?;
                     at.inspect(|n| kick(&fleet, *n, "ask"));
                 }
+                // #584: the owner's typed line, whoever runs it.
                 Cmd::Answer {
                     fleet,
                     id,
-                    choice,
+                    typed: Some(line),
+                    ..
+                } => crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line)?,
+                Cmd::Answer {
+                    fleet,
+                    id,
+                    choice: Some(choice),
                     by,
                     basis,
+                    ..
                 } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
                     // #541: a conductor answers lane asks on its repo only with a basis.
                     Some(t) => {

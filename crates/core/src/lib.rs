@@ -415,6 +415,90 @@ pub fn conductor_answer(
     )
 }
 
+/// #584: who a typed answer is by.
+const TYPED: &str = "owner (typed)";
+
+/// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
+/// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
+pub fn answer_typed(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn runner::Runner,
+    out: &mut dyn Write,
+    (fleet, id): (&str, &str),
+    line: &str,
+) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
+    // Where the ask waits: its `needs-decision` in its thread, or (#541) its `ask-owner` row.
+    let asked: Vec<&Event> = (events.iter())
+        .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
+        .filter(|e| e.str("thread").is_some())
+        .collect();
+    let said: Vec<&Event> = (events.iter())
+        .filter(|e| e.kind == "thread-msg" && e.str("from") == Some("owner") && e.str("text") == Some(line))
+        .collect();
+    // The ask's first row in `m`'s thread.
+    let at = |m: &Event| {
+        (asked.iter())
+            .filter(|a| a.str("thread") == m.str("thread"))
+            .map(|a| a.seq)
+            .min()
+    };
+    let there: Vec<_> = said.iter().filter_map(|m| Some((m.seq, at(m)?))).collect();
+    let why = if asked.is_empty() {
+        format!("{id} was asked in no thread")
+    } else if said.is_empty() {
+        "no owner message in a thread says that line".into()
+    } else if there.is_empty() {
+        let t: std::collections::BTreeSet<_> = said.iter().filter_map(|m| m.str("thread")).collect();
+        let t = t.into_iter().collect::<Vec<_>>().join(", ");
+        format!("that line is in {t}, not {id}'s thread")
+    } else if !there.iter().any(|(m, a)| m > a) {
+        format!("that line came before {id} was asked")
+    } else {
+        String::new()
+    };
+    if !why.is_empty() {
+        return gate::refused("NOT_TYPED", why);
+    }
+    answer(ctx, cfg, r, out, (fleet, id), line, (TYPED, None))
+}
+
+/// #584: `herdsman ask withdraw`: the ask's own thread's conductor (`by`) closes an ask it replaced (`for`).
+pub fn withdraw(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, id): (&str, &str),
+    by: &str,
+    new: Option<&str>,
+) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let is = |e: &&Event, q: &str| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(q);
+    let Some(ask) = events.iter().find(|e| is(e, id)) else {
+        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
+    };
+    if let Some(q) = new.filter(|q| !events.iter().any(|e| is(&e, q))) {
+        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {q}"));
+    }
+    let t = ask.str("thread").unwrap_or_default();
+    if t.is_empty() || by.strip_prefix("conductor-").unwrap_or(by) != t {
+        return gate::refused("BAD_VALUE", format!("only {id}'s own thread's conductor withdraws it"));
+    }
+    if let Some(w) = events::closed(&events, ask) {
+        return gate::refused("ALREADY_ANSWERED", format!("{id} is closed: {w}"));
+    }
+    let d = json!({"id": id, "by": by, "for": new});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, ask.issue, "ask-withdrawn", d),
+    )?;
+    let to = new.map_or(String::new(), |q| format!(" → {q}"));
+    Ok(writeln!(out, "{fleet} {id}: withdrawn{to}")?)
+}
+
 /// `herdsman answer` (and the page's needs-you card, with `via`): log the decision, prompt the asking agent.
 pub fn answer(
     ctx: &Ctx,
@@ -466,7 +550,7 @@ fn answer_with(
     // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
     if ask.data.get("handoff").is_some() {
         let to = conductor::land(ctx, cfg, r, ask, choice)?;
-        let d = with_via(json!({"id": id, "choice": text, "by": by}), via);
+        let d = with_via(json!({"id": id, "choice": text, "by": by, "to": to}), via);
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
@@ -494,7 +578,8 @@ fn answer_with(
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
-    if let Some(t) = ask.str("thread") {
+    // #584: a typed answer's conductor ran it, the owner's line already in its conversation.
+    if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
         let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
         let q = ask.str("question").unwrap_or_default();
         conductor::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
@@ -588,7 +673,7 @@ pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, 
     for e in open.iter().filter(|_| !as_json) {
         let at = e.issue.map_or("-".into(), |n| format!("#{n}"));
         let s = |k| e.str(k).unwrap_or_default();
-        let why = events::closed(&events, e).map_or(String::new(), |w| format!(" [{w}]"));
+        let why = events::closed_row(&events, e).map_or(String::new(), |w| format!(" [{w}]"));
         writeln!(
             out,
             "{} {} {at} {} {}: {}{why}",
