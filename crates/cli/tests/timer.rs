@@ -70,7 +70,7 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
     assert_eq!(
         run(&c, &r, &["timer", "install", "--no-load"]).1,
-        "= already dev.herdsman.tick\n= already dev.herdsman.fast\n"
+        "= already dev.herdsman.tick\n= already dev.herdsman.fast\n= already dev.herdsman.update\n= already dev.herdsman.clean\n"
     );
     // #212: the fast job runs `drive --fast` every `fast_secs` (60); systemd keeps the interval in its .timer.
     let fast = std::fs::read_to_string(job(&c, "dev.herdsman.fast")).unwrap();
@@ -83,13 +83,13 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     let (code, out) = run(&c, &r, &["timer", "remove"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "✓ removed dev.herdsman.tick\n✓ removed dev.herdsman.fast\n")
+        (0, "✓ removed dev.herdsman.tick\n✓ removed dev.herdsman.fast\n✓ removed dev.herdsman.update\n✓ removed dev.herdsman.clean\n")
     );
     assert!(!job(&c, "dev.herdsman.tick").exists() && !job(&c, "dev.herdsman.fast").exists());
     assert!(r.called("launchctl bootout") || r.called("systemctl --user disable --now dev.herdsman.tick.timer"));
     assert_eq!(
         run(&c, &r, &["timer", "remove"]).1,
-        "= no dev.herdsman.tick job\n= no dev.herdsman.fast job\n"
+        "= no dev.herdsman.tick job\n= no dev.herdsman.fast job\n= no dev.herdsman.update job\n= no dev.herdsman.clean job\n"
     );
 }
 

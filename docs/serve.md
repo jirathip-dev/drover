@@ -305,7 +305,7 @@ sub = "mailto:you@example.com"   # the VAPID `sub` claim; required
 # on = [...]   # default: blocked, stall, lane-dead, ready-unmerged, merged, needs-decision, needs-human, ask-waiting, answer-undelivered, state-write-failed
 ```
 
-It works per fleet too (`[[fleet.<name>.notify]]`), next to the Telegram notifier, which is
+It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier, which is
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
 JWT (12 h) and sent once with `curl -sS --max-time 10 -X POST`, the body on stdin. A 404 or 410
 prunes that device; any other failure logs one `notify-failed` (no retry). Tapping an alert

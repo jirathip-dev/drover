@@ -2,7 +2,8 @@
 
 A Rust CLI that drives a fleet of coding agents over [herdr](https://herdr.dev). It works a GitHub
 issue queue through build → review → merge on its own, with hard gates, host-load admission and a
-live phone board with web push. Harness-neutral (Claude Code, Hermes, dsh).
+live phone board with web push. Harness-neutral (Claude Code, Hermes, dsh); it needs no Hermes to run:
+its own jobs drive, install and clean ([setup](docs/setup.md#4-watchdog)).
 
 ## Why
 

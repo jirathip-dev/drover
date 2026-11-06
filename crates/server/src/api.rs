@@ -476,23 +476,12 @@ pub struct HostTab {
     pub subs: Vec<Sub>,
     pub devices: Vec<Paired>,
     pub notify: Vec<Notifier>,
-    pub telegram: Telegram,
 }
 
 /// #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
 pub struct Notifier {
     pub kind: String,
     pub on: String,
-}
-
-/// #440: the Telegram bridge: `on` with both `chat` and `owner` set, its `topics` (threads) and last poll's age; never
-/// the token or the chat's id.
-pub struct Telegram {
-    pub on: bool,
-    pub chat: bool,
-    pub owner: bool,
-    pub topics: usize,
-    pub polled: String,
 }
 
 /// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
