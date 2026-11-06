@@ -31,6 +31,7 @@ pub mod protection;
 pub mod queue;
 pub mod report;
 pub mod runner;
+pub mod runners;
 pub mod secret;
 pub mod service;
 pub mod setup;
@@ -153,10 +154,13 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     let events = read(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
-    // #425: blocking an issue with a lane holds that lane until the blocker merges.
-    let n = d["issues"][0].as_u64().filter(|_| d["op"] == "block");
+    // #425: blocking an issue with a lane holds that lane until its blockers merge (#505: all of them).
+    let n = d["issues"][0]
+        .as_u64()
+        .filter(|_| d["op"] == "block" || d["op"] == "unblock");
     let s = n.and_then(|n| events::fold(&events).remove(&(fleet.into(), n)));
-    let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": d["on"]})));
+    let on = q.iter().find(|i| Some(i.issue) == n).map(|i| i.blockers.clone());
+    let held = s.and_then(|s| s.active_lane().map(|l| json!({"agent": l.1, "on": on})));
     emit(
         &ctx.state,
         cfg,

@@ -86,6 +86,63 @@ pub const NO_PUSH: &str = ", no push: ";
 pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
 pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
 const RESPAWN_SECS: u64 = 1800;
+/// #511: a build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
+pub const TURN_NUDGE: &str = "reported done, nothing new pushed: nudging it once";
+pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
+pub const TURN_BLOCKED: &str = "reported blocked: ";
+/// #511: a nudged `done` with still no push is blocked after this long (or at its next `done`).
+const NUDGE_SECS: u64 = 600;
+
+/// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.
+pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
+    let sp = last_spawn(events, s.build.as_ref().and_then(|b| s.lanes.get(b))?)?;
+    let extended = events.iter().rfind(|e| e.is("round-extended", &s.fleet, s.issue));
+    let at = extended.map_or(sp.ts, |e| e.ts.max(sp.ts));
+    let role = |e: &&Event| e.str("role") == s.build.as_deref() && e.ts >= at;
+    events
+        .iter()
+        .rev()
+        .filter(|e| e.is("turn-end", &s.fleet, s.issue))
+        .find(role)
+}
+
+/// #511: an idle build lane's row from its reported turn `t` (no push at the head), `stall` secs its idle threshold:
+/// (who, what) and the prompt drive sends (`turn-prompted`) once due.
+fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who, String) {
+    let why = t.str("why").map_or(String::new(), |y| format!(" ({y})"));
+    let state = t.str("state").unwrap_or_default();
+    let told = |e: &&Event| e.kind == "turn-prompted" && e.str("agent") == Some(lane) && e.str("state") == Some(state);
+    let since = |at: u64| move |e: &&Event| told(e) && e.ts >= at;
+    let sp = last_spawn(events, lane).map_or(0, |e| e.ts);
+    match state {
+        "done" => match events.iter().rfind(since(sp)) {
+            None => ("drive", TURN_NUDGE.into()),
+            Some(p) if t.ts > p.ts || now >= p.ts + NUDGE_SECS => {
+                ("drive", format!("{TURN_BLOCKED}done again with nothing pushed"))
+            }
+            Some(p) => (
+                "none",
+                format!("reported done, nothing pushed: nudged {} ago", age(now - p.ts)),
+            ),
+        },
+        "blocked" => (
+            "drive",
+            format!("{TURN_BLOCKED}{}", t.str("why").unwrap_or("no reason given")),
+        ),
+        "need-input" => ("none", format!("reported need-input{why} with no open ask")),
+        _ => match events.iter().rfind(since(t.ts)) {
+            Some(p) => (
+                "none",
+                format!("reported working{why}: prompted to continue {} ago", age(now - p.ts)),
+            ),
+            None if now >= t.ts + stall => ("drive", TURN_GO_ON.into()),
+            None => (
+                "none",
+                format!("reported working{why}: a continue prompt after {}", age(stall)),
+            ),
+        },
+    }
+}
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
 fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
@@ -174,8 +231,18 @@ pub fn waiting_on(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
-    if let Some(on) = crate::events::held_on(events, s) {
-        return w("drive", &format!("held until #{on} merges"), s.last_ts, None);
+    let on = crate::events::held_on(events, s);
+    if !on.is_empty() {
+        return w(
+            "drive",
+            &format!(
+                "held until {} merge{}",
+                crate::queue::hashes(&on),
+                ["s", ""][usize::from(on.len() > 1)]
+            ),
+            s.last_ts,
+            None,
+        );
         // #425: drive wakes it then
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
@@ -567,6 +634,7 @@ pub fn scan(
         // #517: a lesson lane idle with no push and no `done` is prompted once (live), then closed as "no repeated
         // class" once that goes unanswered 30 min (or its lane is gone): never #444's respawn or needs-human.
         let idle = w.what.starts_with("idle without pushing");
+        let waiting_turn = turn(mine, &s);
         if idle && s.build.as_deref() == Some("lesson") && settled() {
             let asked = mine
                 .iter()
@@ -582,6 +650,10 @@ pub fn scan(
                 }
                 _ => LESSON_CLOSE.into(),
             };
+        } else if let Some(t) = waiting_turn.filter(|_| idle && !gone && !unconfirmed) {
+            // #511: a live build lane's reported turn decides, not a guess.
+            (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
+            (w.lane, w.since) = (built, t.ts);
         } else if idle && (gone || unconfirmed) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
@@ -700,7 +772,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     };
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
-    let held = crate::events::held_on(log.all, s).is_some();
+    let held = !crate::events::held_on(log.all, s).is_empty();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

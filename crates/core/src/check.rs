@@ -71,6 +71,20 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     crate::setup::reap(ctx, r, &events)?;
+    // #537: CI runners below `slots × VMs` alert once per drop, `runners-ok` once on the way back.
+    match crate::runners::tick(ctx, cfg, r, &events) {
+        Some(Ok((on, want))) => {
+            let was = |e: &&Event| matches!(e.kind.as_str(), "runners-low" | "runners-ok");
+            let last = events.iter().rev().find(was);
+            if (on < want) != last.is_some_and(|e| e.kind == "runners-low") {
+                let kind = ["runners-ok", "runners-low"][usize::from(on < want)];
+                let d = json!({"key": last.map_or(0, |e| e.ts), "reason": format!("CI runners {on}/{want} online")});
+                fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
+            }
+        }
+        Some(Err(e)) => eprintln!("herdsman check: CI runners: {e:#}"),
+        None => {}
+    }
     // #539: a retired config key still set alerts once per key.
     for (k, w) in cfg.warnings() {
         let d = json!({"key": k, "reason": format!("{k} is {w}")});
@@ -222,7 +236,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 emit(&ctx.state, cfg, e)?;
             }
             // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
-            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_none() {
+            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);

@@ -113,6 +113,15 @@ enum Cmd {
         #[arg(long, value_name = "WHY")]
         no_change: String,
     },
+    /// An impl lane's end of turn, for its own issue; logs `turn-end` and drive acts on it at once
+    Turn {
+        /// done (pushed, ready for review) | blocked (--why) | need-input (`ask` first) | working (mid-task)
+        #[arg(value_parser = ["done", "blocked", "need-input", "working"])]
+        state: String,
+        /// Why: the blocker, the question, what is left
+        #[arg(long, required_if_eq("state", "blocked"))]
+        why: Option<String>,
+    },
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
     Park { fleet: String, issue: u64 },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
@@ -361,6 +370,13 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
+    /// #537: the `[ci_runners]` VMs and their GitHub runners (a conductor's `runners` group, its brief names the verbs);
+    /// each verb logged `runners-*`
+    #[command(hide = true)]
+    Runners {
+        #[command(subcommand)]
+        cmd: RunnersCmd,
+    },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
     /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
@@ -598,12 +614,19 @@ enum QueueCmd {
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
     },
-    /// Hold an issue until another one is merged
+    /// Hold an issue until others are merged; each `--on` adds a blocker
     Block {
         issue: u64,
-        /// The blocking issue
+        /// A blocking issue (repeatable)
+        #[arg(long, value_name = "ISSUE", required = true)]
+        on: Vec<u64>,
+    },
+    /// Drop blockers of an issue: those `--on` names, else all
+    Unblock {
+        issue: u64,
+        /// A blocker to drop (repeatable)
         #[arg(long, value_name = "ISSUE")]
-        on: u64,
+        on: Vec<u64>,
     },
     /// List the queue in order
     Ls {
@@ -668,6 +691,37 @@ enum HostsCmd {
 }
 
 #[derive(Subcommand)]
+enum RunnersCmd {
+    /// The GitHub runners, each VM's state and a health line (`9/9 online`)
+    Status,
+    /// A fresh registration token and a runner-service restart on that VM
+    Revive { vm: String },
+    /// Create N VMs to the spec, within `max_vms` and the $/day cap (past it: RUNNERS_CAP, an owner ask)
+    Add {
+        #[arg(default_value_t = 1)]
+        n: u64,
+        /// The owner ask that approved going past the cap
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
+    /// Drain (no job running), deregister, then delete a VM; or deregister one idle runner by name
+    Remove {
+        target: String,
+        /// The owner ask that approved removing the last online VM (RUNNERS_LAST)
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
+    /// Push a fresh registration token to every VM now (`check` repeats it every 30 min) and report the refresher
+    Tokens,
+    /// Stop and deregister this host's self-hosted runners (`local_label`, `local_stop`)
+    RetireLocal {
+        /// The owner ask that approved it while VM runners are below expected (RUNNERS_LOW)
+        #[arg(long, value_name = "ID")]
+        approved: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum LessonCmd {
     /// The fleet's recent mistakes as plain text: rev FAIL findings, the owner's thread lines and `by: owner` events, reverts
     Digest {
@@ -694,8 +748,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`).
-pub const HELP_AGENT_MAX: usize = 313;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`).
+pub const HELP_AGENT_MAX: usize = 322;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -770,8 +824,12 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     }
     let lane_write = matches!(
         cli.cmd,
-        Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. }
+        Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. } | Cmd::Turn { .. }
     );
+    // #511: the stop hook on the lane's own host sees the turn reported, wherever it is logged.
+    if let (Cmd::Turn { .. }, Ok(lane)) = (&cli.cmd, std::env::var("HERDSMAN_LANE")) {
+        let _ = std::fs::write(hook::turn_mark(&ctx.state, &lane), "turn");
+    }
     let mut sent: Vec<String> = args.into_iter().skip(1).collect();
     for i in 1..sent.len() {
         if sent[i - 1] == "--file" {
@@ -829,7 +887,7 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
     let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
     let (f, n) = match cli.map(|c| c.cmd) {
         Err(e) => return Some(format!("unparsable: {}", e.kind())),
-        Ok(Cmd::LaneEvent { .. }) => return None,
+        Ok(Cmd::LaneEvent { .. } | Cmd::Turn { .. }) => return None,
         Ok(Cmd::Ask { fleet, issue, .. }) => (fleet, issue),
         Ok(Cmd::Done { fleet, issue, .. } | Cmd::Verdict { fleet, issue, .. } | Cmd::Kick { fleet, issue, .. }) => {
             (fleet, issue.to_string())
@@ -911,6 +969,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 serial.dedup();
                 // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
                 let look = crate::snapshot::Snap::read(ctx, r);
+                let skip = |s: &crate::events::IssueState| {
+                    let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
+                    let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
+                    skip.map(|s| format!("skipped this pass: {}", s.1))
+                };
+                let skips: Vec<_> = rows.iter().map(|s| skip(s)).collect();
                 let waits = cfg.map(|mut c| {
                     c.fleet.retain(|k, _| fleet.as_ref().is_none_or(|f| f == k));
                     crate::waiting::scan(
@@ -936,16 +1000,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "{:<12} {:<6} {:<12} {:<24} {:<5}{} WAITING",
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
-                for s in rows {
+                for (s, skip) in rows.into_iter().zip(skips) {
                     let w = waits
                         .iter()
                         .flatten()
                         .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue)
                         .map(|w| w.1.what.clone())
-                        .or_else(|| {
-                            let skip = queue::skipped(&events, &all, &s.fleet, s.issue, ctx.now);
-                            skip.map(|(c, why)| format!("skipped this pass: {c} ({why})"))
-                        })
+                        .or(skip)
                         .or_else(|| {
                             let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
                             Some(format!("on {}: {}", e.str("host")?, e.str("why")?))
@@ -1075,9 +1136,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
             for r in rows.as_array().into_iter().flatten().filter(|_| !json) {
-                let mut on = r["blocked_by"]
-                    .as_u64()
-                    .map_or(String::new(), |b| format!("  blocked by #{b}"));
+                let b: Vec<u64> = serde_json::from_value(r["blocked_by"].clone())?;
+                let mut on = String::new();
+                if !b.is_empty() {
+                    on = format!("  blocked by {}", queue::hashes(&b));
+                }
                 if r["serial"] == true {
                     on += "  serial";
                 }
@@ -1400,6 +1463,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::remote_orphans(&cfg, r, out, orphans && yes)?;
                     }
                 }
+                Cmd::Runners { cmd } => {
+                    use crate::runners::Verb;
+                    let (verb, id) = match cmd {
+                        RunnersCmd::Status => (Verb::Status, None),
+                        RunnersCmd::Revive { vm } => (Verb::Revive(vm), None),
+                        RunnersCmd::Add { n, approved } => (Verb::Add(n), approved),
+                        RunnersCmd::Remove { target, approved } => (Verb::Remove(target), approved),
+                        RunnersCmd::Tokens => (Verb::Tokens, None),
+                        RunnersCmd::RetireLocal { approved } => (Verb::RetireLocal, approved),
+                    };
+                    crate::runners::run(ctx, &cfg, r, out, verb, id.as_deref())?;
+                }
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent, host } => check::close(ctx, &cfg, r, out, &agent, host.as_deref())?,
@@ -1435,6 +1510,23 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     emit(&ctx.state, &cfg, e)?;
                     writeln!(out, "recorded {fleet}#{issue} fix-done: {no_change}")?;
                     crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
+                }
+                Cmd::Turn { state, why } => {
+                    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+                    let mut it = lane.splitn(3, ':');
+                    let (Some(f), Some(Ok(n)), Some(role)) = (it.next(), it.next().map(str::parse), it.next()) else {
+                        bail!("`herdsman turn` is a lane's own verb: HERDSMAN_LANE names no <fleet>:<issue>:<role>");
+                    };
+                    if cfg.fleet(f)?.family(role) != "impl" {
+                        bail!("a {role} lane reports no turn: impl, fix and update lanes do");
+                    }
+                    let d = json!({"state": state, "why": why, "role": role});
+                    emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
+                    writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
+                    if state == "need-input" {
+                        writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
+                    }
+                    kick(f, n, "turn");
                 }
                 Cmd::Lesson {
                     cmd: Some(LessonCmd::Digest { fleet, days }),
@@ -1556,7 +1648,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             after,
                         } => queue::op("mv", &[issue], top, before, after, None),
                         QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None, None),
-                        QueueCmd::Block { issue, on } => queue::op("block", &[issue], false, None, None, Some(on)),
+                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": on}),
+                        QueueCmd::Unblock { issue, on } => json!({"op": "unblock", "issues": [issue], "on": on}),
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
                     // #412: a conductor's design mark: the design's approval asks in its thread too.
@@ -1626,6 +1719,17 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
             crate::drive::kick(ctx, r, f, n, why);
         }
+    }
+    // #511: an impl lane's turn that ends unreported goes on once to report it.
+    let mut it = lane.split(':');
+    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
+    let builds = || {
+        let cfg = Config::load(&ctx.config).ok();
+        role != "lesson" && cfg.is_some_and(|c| c.fleet.get(fleet).is_some_and(|f| f.family(role) == "impl"))
+    };
+    if let Some(v) = hook::turn_end(&input, &hook::turn_mark(&ctx.state, &lane), builds) {
+        writeln!(out, "{v}")?;
+        return Ok(());
     }
     // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();

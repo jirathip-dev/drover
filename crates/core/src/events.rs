@@ -360,13 +360,15 @@ pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
 }
 
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since).
-pub fn held_on(events: &[Event], s: &IssueState) -> Option<u64> {
+/// #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
+pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
     let e = events
         .iter()
         .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e))?;
-    e.data.get("on").filter(|_| e.kind == "held")?.as_u64()
+        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
+    e.filter(|e| e.kind == "held")
+        .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
 }
 
 /// #500: a design lane's spawn: never the issue's build or check lane.
@@ -393,6 +395,9 @@ pub fn checks(e: &Event) -> bool {
 pub const PASSIVE: &[&str] = &[
     "lane-state",
     "lesson-prompted",
+    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
+    "turn-end",
+    "turn-prompted",
     "budget-freed",
     "wip-saved",
     "wip-blocked",

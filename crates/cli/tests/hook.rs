@@ -618,6 +618,42 @@ fn a_conductor_copies_into_its_own_thread_folder() {
     }
 }
 
+/// #570: from a cwd in the state folder, `2>&1` and a redirection to `/dev/null` write no file there; a real
+/// relative target outside the conductor's own folder still does.
+#[test]
+fn fd_duplications_write_no_file() {
+    let d = tmpdir("hook-dups");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let (st, own) = (d.join("state"), d.join("state/conductor/t6"));
+    std::fs::create_dir_all(&own).unwrap();
+    let sh = |cwd: &Path, cmd: &str| {
+        conductor_hook(
+            &d,
+            json!({"tool_name": "Bash", "cwd": cwd, "tool_input": {"command": cmd}}),
+        )
+    };
+    for cwd in [&own, &st] {
+        for cmd in [
+            "echo x 2>&1 | tail -1",
+            "herdsman queue cooee add $n >/dev/null 2>&1",
+            "herdsman spawn cooee $n impl &>/dev/null",
+            "echo x >&2; echo y 1>/dev/stderr 2>/dev/stdout <&0",
+        ] {
+            assert_eq!(sh(cwd, cmd), "", "{}: {cmd}", cwd.display());
+        }
+    }
+    for (cwd, cmd) in [
+        (&st, "echo x > ./a"),
+        (&st, "echo x 2>&1 >./a"),
+        (&st, "echo x &>a"),
+        (&st, "echo x >&a"),
+        (&own, "echo x 2>&1 > ../a"),
+        (&own, "echo x >/dev/null > ../t5/a"),
+    ] {
+        assert!(sh(cwd, cmd).contains("is blocked"), "{}: {cmd}", cwd.display());
+    }
+}
+
 /// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
 #[test]
 fn a_conductors_shell_writes_its_own_thread_folder() {
@@ -983,6 +1019,8 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 24",
         "herdsman queue sendmeter block 24 --on 23",
+        "herdsman queue sendmeter block --on 23 --on 22 24",
+        "herdsman queue sendmeter unblock 24",
     ] {
         assert_eq!(
             hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
@@ -993,6 +1031,7 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     for cmd in [
         "herdsman queue sendmeter block --on 23 25",
         "cd /tmp && herdsman queue sendmeter block 25 --on 24",
+        "herdsman queue sendmeter unblock --on 24 25",
     ] {
         let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
@@ -1298,4 +1337,46 @@ fn run_cards_post_from_a_conductor_settle_by_the_owner_and_hard_nos_never_run() 
         run(Some("synergy:-:conductor"), "herdsman thread reply t1 'never printenv'"),
         ""
     );
+}
+
+/// #537: a conductor runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
+/// for everyone, while a message or argument that only names docker is not a command.
+#[test]
+fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() {
+    let input =
+        |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+    let run = |lane: &str, cmd: &str| hook_cfg(&config(), &[("HERDSMAN_LANE", Some(lane))], "impl", input(cmd)).0;
+    for cmd in [
+        "herdsman runners status",
+        "herdsman runners revive vm1",
+        "herdsman runners add 2",
+        "herdsman runners remove vm1 --approved q3",
+        "herdsman runners tokens",
+        "herdsman runners retire-local",
+    ] {
+        assert_eq!(run("synergy:-:conductor", cmd), "", "{cmd}");
+        for lane in ["synergy:12:impl", "synergy:12:rev"] {
+            assert!(run(lane, cmd).contains("REFUSED OWNER_ONLY"), "{lane} {cmd}");
+        }
+    }
+    for lane in ["synergy:-:conductor", "synergy:12:impl"] {
+        for cmd in [
+            "docker ps",
+            "sh -c 'cd /x && docker ps'",
+            "su -c 'x; docker run y'",
+            "gh issue create --body x; docker ps",
+            "git commit -m \"$(docker ps)\"",
+        ] {
+            assert!(run(lane, cmd).contains(&NO_CONTAINERS[10..]), "{lane} {cmd}");
+        }
+        for cmd in [
+            "herdsman thread reply t1 \"restart it:\ndocker compose up; docker ps\"",
+            "gh issue create --title 'docker (colima) down' --body \"steps:\ndocker ps | grep x; podman ps\"",
+            "gh issue create --body='a; docker ps'",
+            "git commit -m 'ci: drop docker; use podman (#1)'",
+            "rg -n 'NO_CONTAINERS|colima' crates",
+        ] {
+            assert_eq!(run(lane, cmd), "", "{lane} {cmd}");
+        }
+    }
 }
