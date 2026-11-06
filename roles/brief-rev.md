@@ -11,3 +11,6 @@
   `non-blocking` note. `herdsman verdict` refuses a FAIL with an unproven blocker (`NO_PROOF`).
 - Required in verdict.md: a `Reviewed head: <40-hex>` line, the sha actually checked out (`git rev-parse HEAD`).
 - Required in verdict.md: a `Tests checked against anti-patterns: yes` (or `no`) line.
+- A second build or checkout (base, staging, head) goes under `$HERDSMAN_SCRATCH_TARGET` only (builds with
+  `CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target`, checkouts in `$HERDSMAN_SCRATCH_TARGET/<name>`), never `/tmp`
+  or `$TMPDIR`; it is deleted when your lane ends.

@@ -430,6 +430,8 @@ pub struct Limits {
     /// `build_budget_gb` drive trims its unlocked profiles.
     pub build_root: String,
     pub build_budget_gb: f64,
+    /// #536: where `herdsman clean` looks for stray Cargo build folders and Claude Code's per-worktree temp dirs.
+    pub stray_roots: Vec<String>,
     /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
     pub min_free_mem_gb: f64,
     /// Default reasoning effort for roles that set none.
@@ -498,6 +500,7 @@ impl Default for Limits {
             worktree_budget_gb: 25.0,
             build_root: "~/.cache/herdsman/target".into(),
             build_budget_gb: 20.0,
+            stray_roots: vec!["/tmp".into(), "$TMPDIR".into()],
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,

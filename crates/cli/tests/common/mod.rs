@@ -25,6 +25,7 @@ review_rounds = 3
 stall_minutes = 30
 max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
 build_root = ""           # #438: no shared CARGO_TARGET_DIR (and no trim of the real one) unless a test sets it
+stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
 "#;
 
 /// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).

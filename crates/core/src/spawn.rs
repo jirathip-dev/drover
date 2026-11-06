@@ -321,6 +321,10 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         .collect();
     let port = lane_port(f.port_range.as_deref(), &format!("{fleet}/{branch}"), &taken);
     let title = lane_title(&head, &crate::gh::cached_title(ctx, fleet, issue).unwrap_or_default());
+    let env = shared_target(cfg, f, &agent)
+        .chain(f.env.clone())
+        .chain(f.shared_cache.clone())
+        .collect();
     Ok(Plan {
         agent,
         role: role.into(),
@@ -337,10 +341,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         kick,
         lane,
         account,
-        env: shared_target(cfg, f)
-            .chain(f.env.clone())
-            .chain(f.shared_cache.clone())
-            .collect(),
+        env,
         port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
@@ -352,11 +353,17 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
 }
 
 /// #438: one Cargo build folder per host and repo, `[limits] build_root`'s `<repo>`; a fleet's own setting replaces it.
-fn shared_target(cfg: &Config, f: &Fleet) -> impl Iterator<Item = (String, String)> {
+/// #536: plus the lane's private scratch, `<build_root>/.scratch/<agent>`, for second builds and checkouts.
+fn shared_target(cfg: &Config, f: &Fleet, agent: &str) -> impl Iterator<Item = (String, String)> {
     let root = cfg.limits.build_root.trim_end_matches('/');
     let d = format!("{root}/{}", f.repo_name());
-    (!root.is_empty()).then(|| ("CARGO_TARGET_DIR".into(), d)).into_iter()
+    let s = format!("{root}/{SCRATCH}/{agent}");
+    let vars = [("CARGO_TARGET_DIR".into(), d), ("HERDSMAN_SCRATCH_TARGET".into(), s)];
+    (!root.is_empty()).then_some(vars).into_iter().flatten()
 }
+
+/// #536: the folder under `build_root` holding each lane's scratch.
+pub const SCRATCH: &str = ".scratch";
 
 /// #92: a fix round may dispute a finding; the next, fresh reviewer decides.
 const PUSHBACK: &str = "If a finding is wrong or out of scope, say so in your report with file:line proof; \
