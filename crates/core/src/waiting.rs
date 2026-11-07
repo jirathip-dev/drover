@@ -249,7 +249,9 @@ pub fn waiting_on(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
-    let on = crate::events::held_on(events, s);
+    let mut on = crate::events::held_on(events, s);
+    // #665: a blocker that merged holds nothing; drive releases the hold on its next pass.
+    on.retain(|b| !log.all.iter().any(|e| e.is("merged", f, *b)));
     if !on.is_empty() {
         return w(
             "drive",
@@ -291,7 +293,7 @@ pub fn waiting_on(
     let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
     let spawned = last_spawn(events, &lane).filter(|_| active);
     let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
-    let rest = |e: &&Event| e.is("account-capped", f, n) || e.is("agent-unavailable", f, n); // #302
+    let rest = |e: &&Event| crate::access::rests(&e.kind) && e.is(&e.kind, f, n); // #302, #640
     if let Some(c) = events.iter().filter(since_spawn).find(rest) {
         let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
         let what = "account capped, waiting for drive to respawn on a free one";

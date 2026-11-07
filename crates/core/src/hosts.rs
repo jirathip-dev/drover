@@ -1,7 +1,7 @@
 //! #157 multi-host lanes (docs/hosts.md): `[hosts.<name>]`, their detected tags, where a new lane goes, and a lane's host
 //! as a Runner: herdr gets `--machine`, every other tool runs over `ssh`. No `[hosts]` = this host only, as before.
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
-use crate::events::{age, append, closed, emit, fold, last_spawn, read, Event, IssueState};
+use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
 use crate::gate::refused;
 use crate::harness;
 use crate::host::{self, Host};
@@ -411,8 +411,9 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
     let remote: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let new = |e: &&Event| e.kind == "needs-decision" && Some(e.ts) > upto;
+    let open = open_asks(&remote); // #632: one pass, not one per ask
     for e in remote.iter().filter(new) {
-        let skip = e.ts + max_age < ctx.now || closed(&remote, e).is_some(); // answered or merged there
+        let skip = e.ts + max_age < ctx.now || !open.iter().any(|o| std::ptr::eq(*o, e)); // answered or merged there
         let done = e.issue.and_then(|i| states.get(&(e.fleet.clone(), i)));
         let from = format!("{name}:{}", e.str("id").unwrap_or_default());
         if skip || done.is_some_and(IssueState::done) || events.iter().any(|m| m.str("from") == Some(&from)) {
@@ -504,7 +505,13 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
     let low = || host::free_gb(on).filter(|g| *g < min);
     let mut gb = low()?;
     // #438: short of disk, the shared build folder's idle profiles go first; then the disk is read again.
-    if crate::check::trim_on(on, cfg, 0.0, &mut std::io::sink()).unwrap_or(0) > 0 {
+    // #634: never a live lane's (a remote trim never reaches `.scratch`); unknown lanes: no trim.
+    let live = match on.machine {
+        None => crate::check::live_lanes(ctx, cfg, on).ok(),
+        Some(_) => Some(crate::check::Live::new()),
+    };
+    let trim = |l| crate::check::trim_on(on, cfg, 0.0, l, &mut std::io::sink()).unwrap_or(0);
+    if live.as_ref().is_some_and(|l| trim(l) > 0) {
         gb = low()?;
     }
     let st = fold(&events);

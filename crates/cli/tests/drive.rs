@@ -2753,3 +2753,55 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     drive(&c, &r);
     assert_eq!(passes(), 1, "a removed fleet gets no pass");
 }
+
+/// #665: #12 held until #11 merges, its lane ended (PASS, no active lane). #11 merges and #12's PR conflicts:
+/// the next pass releases the hold and spawns the update round, and `waiting` stops saying "held".
+#[test]
+fn a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated() {
+    let c = setup("drive-held-merged-conflict");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    let head = sha("a1");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("held"), "{out}");
+}
+
+/// #665: a pass ran after #11 merged and #12 still says held: the release logs `hold-stale` once, both numbers.
+#[test]
+fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
+    let c = setup("drive-hold-stale");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let pass = Event::new(c.now - 1500, "sendmeter", None, "drive-pass", json!({}));
+    append(&c.state, &pass).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    drive(&c, &r);
+    drive(&c, &r);
+    let stale = kinds(&c, "hold-stale");
+    assert_eq!(stale.len(), 1, "logged once");
+    assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
+}
