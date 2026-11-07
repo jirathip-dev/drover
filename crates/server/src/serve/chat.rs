@@ -237,6 +237,8 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
     let dir = conductor::dir(ctx, cfg, id).display().to_string();
     let home = crate::config::home().display().to_string();
     ThreadPage {
+        id: id.into(),
+        archived: conductor::archived(events, id),
         older: (k > 0).then(|| msgs[k].seq),
         started: t.ts,
         dir: dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}")),

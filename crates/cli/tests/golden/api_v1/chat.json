@@ -64,7 +64,9 @@
         "ds": "sendmeter · hermes · opus · awake",
         "id": "t1",
         "page": {
+          "archived": false,
           "dir": "<tmp>/state/conductor/t1",
+          "id": "t1",
           "msgs": [
             {
               "answer": null,

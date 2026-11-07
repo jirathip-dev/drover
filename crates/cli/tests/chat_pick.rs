@@ -135,7 +135,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     );
     assert!(res.ends_with("t3 started\n"), "{res}");
     assert_eq!(kind(&c, "thread-new")[2].str("harness"), Some("claude"));
-    assert!(chat(&s, &cookie).contains("<b>Board</b><span class=ds><i class=dt></i>sendmeter · claude · opus"));
+    assert!(chat(&s, &cookie).contains("<b>Board</b><small class=tid>· t3</small></div><span class=ds><i class=dt></i>sendmeter · claude · opus"));
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
     let r = host(NO_AGENTS);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    assert!(chat(&s, &cookie).contains("<b>Before #404</b><span class=ds>sendmeter · claude · opus</span>"));
+    assert!(chat(&s, &cookie).contains("<b>Before #404</b><small class=tid>· t1</small></div><span class=ds>sendmeter · claude · opus</span>"));
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     assert_eq!(kind(&c, "conductor-start")[0].str("harness"), Some("claude"));
 }
