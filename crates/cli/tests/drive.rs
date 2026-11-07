@@ -2748,3 +2748,29 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     drive(&c, &r);
     assert_eq!(passes(), 1, "a removed fleet gets no pass");
 }
+
+/// #665: #12 held until #11 merges, its lane ended (PASS, no active lane). #11 merges and #12's PR conflicts:
+/// the next pass releases the hold and spawns the update round, and `waiting` stops saying "held".
+#[test]
+fn a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated() {
+    let c = setup("drive-held-merged-conflict");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    let head = sha("a1");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("held"), "{out}");
+}
