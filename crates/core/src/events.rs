@@ -182,7 +182,9 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
     // A merged issue keeps its merge; a closed one (it never merged) what closed it.
     let ends = |e: &Event, s: &IssueState| match s.state.as_str() {
         "merged" => e.kind == "merged",
-        _ => e.kind == "closed" || e.kind == "clean" && e.str("why") != Some("merged"),
+        _ => {
+            matches!(e.kind.as_str(), "closed" | "closed-other") || e.kind == "clean" && e.str("why") != Some("merged")
+        }
     };
     let moved = |e: &&Event| match e.issue {
         Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
@@ -426,7 +428,6 @@ pub const PASSIVE: &[&str] = &[
     "drive-pass",
     "kick",
     "amended",
-    "closed-other",
     "conflict-predicted",
     "heads-up",
     "lane-closed",
@@ -458,13 +459,14 @@ pub const PASSIVE: &[&str] = &[
 ];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
-const ORDER: [&str; 7] = [
+const ORDER: [&str; 8] = [
     "answered",
     "withdrawn",
     "delivered",
     "failed",
     "expired",
     "closed: merged",
+    "closed: issue closed",
     "closed: lane gone",
 ];
 
@@ -503,7 +505,7 @@ impl Asks {
         }
         let (t, v) = match e.kind.as_str() {
             "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => (0, s("id")),
-            "merged" | "clean" if issue.is_some() => (1, issue),
+            "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => (1, issue),
             "spawn" | "lane-killed" => (2, s("agent")),
             _ => return,
         };
@@ -520,7 +522,7 @@ impl Asks {
             }
         }
         // An id can still answer, an issue still merge (over a lane gone), an agent only end an open ask.
-        let floor = [0, 5, 6][usize::from(t)];
+        let floor = [0, 5, 7][usize::from(t)];
         list.retain(|a| self.ends[a].is_none_or(|x| x.0 > floor));
     }
 
@@ -640,6 +642,8 @@ fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static s
             .find(|k| *k == w)
     } else if on("merged") {
         Some("closed: merged")
+    } else if on("closed") || on("closed-other") {
+        Some("closed: issue closed")
     } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
         Some("closed: lane gone")
     } else {
@@ -760,19 +764,31 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                 s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            // #639: an issue closed on GitHub by any other route (`check`).
+            "closed-other" => s.state = "closed".into(),
             // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
-            // #500: a false `LANE_ENDS` park undone: the state before it.
-            "repaired" => s.state = e.str("state").map_or(s.state.clone(), String::from),
+            // #500: a false `LANE_ENDS` park undone: the state before it. #639: back in the queue, its build lane ends.
+            "repaired" => {
+                s.state = e.str("state").map_or(s.state.clone(), String::from);
+                if let Some(b) = s.build.take().filter(|_| s.state == "queued") {
+                    s.lanes.remove(&b);
+                }
+            }
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.
+                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human. #639: a build
+                // lane never reviewed goes back to impl, not to a fix round of a FAIL that never was.
                 if s.state == "needs-human" {
-                    s.state = format!("fix({})", s.rounds);
+                    s.state = if s.verdicts.is_empty() {
+                        "impl".into()
+                    } else {
+                        format!("fix({})", s.rounds)
+                    };
                 }
             }
             // #128: `clean` removes only merged or GitHub-closed lanes (logs before #128 carry no `why`).
