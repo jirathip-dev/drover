@@ -1,12 +1,32 @@
 //! #626: serve's Funnel listener (`[serve] hooks_addr`): `POST /hooks/github` and nothing else; every other path is a
 //! bare 404, so the board stays tailnet-only whatever Funnel maps here (docs/serve.md).
-use super::header;
+use crate::config::Config;
 use crate::runner::Runner;
 use crate::{webhook, Ctx};
+use anyhow::Result;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
+
+/// `herdsman serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
+pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
+    let hooks = Config::load(&ctx.config)
+        .map(|c| c.serve.hooks_addr())
+        .unwrap_or_default();
+    let hooks = (!read_only && !hooks.is_empty()).then(|| TcpListener::bind(&hooks).map_err(|e| (hooks, e)));
+    std::thread::scope(|sc| {
+        match hooks {
+            Some(Ok(h)) => {
+                eprintln!("herdsman serve: webhooks on http://{}/hooks/github", h.local_addr()?);
+                sc.spawn(move || listen(ctx, r, &h));
+            }
+            Some(Err((a, e))) => eprintln!("herdsman serve: no webhooks: {a}: {e}"),
+            None => {}
+        }
+        crate::serve::serve(ctx, r, addr, read_only)
+    })
+}
 
 /// Serve `l` for good: a thread per delivery, at most 4 at once (then 503).
 pub fn listen(ctx: &Ctx, r: &dyn Runner, l: &TcpListener) {
@@ -86,4 +106,12 @@ fn status(code: u16, msg: &str) -> Vec<u8> {
     let len = msg.len() + 1;
     format!("HTTP/1.1 {code} {why}\r\nContent-Type: text/plain\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{msg}\n")
         .into_bytes()
+}
+
+fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
+    head.lines().skip(1).find_map(|l| {
+        l.split_once(':')
+            .filter(|(k, _)| k.trim().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.trim())
+    })
 }

@@ -2,7 +2,7 @@
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
-use herdsman::serve::hooks::{listen, reply};
+use herdsman::hooks::{listen, reply};
 use hkdf::hmac::{Hmac, KeyInit, Mac};
 use serde_json::json;
 use std::io::{Read, Write};
