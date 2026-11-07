@@ -51,7 +51,7 @@ fn herdr(list: &str) -> Fake {
 }
 
 /// Post `text` to t1 from a paired phone (its delivery runs before `respond` returns); the event log after.
-fn say(c: &herdsman::Ctx, r: &Fake, text: &str) -> String {
+fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> String {
     let s = Server::new(c, r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
     let body = format!("op=say&t=t1&text={text}");
@@ -105,8 +105,9 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
 #[test]
 fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
     let c = setup("adopt-elsewhere");
-    let r =
-        herdr(&agents(&[("conductor-t1", "idle", "/elsewhere/t1", "w16:p1")])).once_err("herdr agent start", 1, TAKEN);
+    let r = herdr(&agents(&[("conductor-t1", "idle", "/elsewhere/t1", "w16:p1")]))
+        .once_err("herdr agent start", 1, TAKEN)
+        .once_err("herdr agent start", 1, TAKEN);
     let log = say(&c, &r, "hello");
     assert!(log.contains("✗ not delivered: "), "{log}");
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
@@ -116,12 +117,17 @@ fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
 #[test]
 fn a_failed_start_shows_herdrs_message_not_its_json() {
     let c = setup("adopt-message");
-    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT);
+    // #623: it is tried twice (an automatic retry), each waiting 120 s for its agent; one row.
+    let r = herdr(NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once_err("herdr agent start", 1, TIMEOUT);
     let log = say(&c, &r, "hello");
+    assert_eq!(log.matches("✗ not delivered").count(), 1, "{log}");
     assert!(
         log.contains(r#""text":"✗ not delivered: herdr agent start failed: timed out waiting for agent startup""#),
         "{log}"
     );
+    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
 }
 
@@ -187,4 +193,120 @@ fn two_messages_while_a_start_is_in_flight_start_one_conductor_and_reach_it_in_o
     assert_eq!(std::fs::read_to_string(dir.join(".thread.md")).unwrap(), "owner: one\n");
     let typed = r.f.index("herdr agent prompt conductor-t1 [t1] owner: two");
     assert!(typed > r.f.index("herdr agent start"), "{:?}", r.f.calls.borrow());
+}
+
+/// #623: herdr on a loaded host: `agent start` times out once, and the conductor shows in the list only after the
+/// starting thread has slept `after` s (a fake clock). Another thread's `sleep` (a message behind the start) holds
+/// until the test says the first delivery is done.
+struct Late {
+    f: Fake,
+    after: u64,
+    list: String,
+    clock: Mutex<u64>,
+    starter: Mutex<Option<std::thread::ThreadId>>,
+    done: (Mutex<bool>, std::sync::Condvar),
+}
+impl Late {
+    fn new(c: &herdsman::Ctx, after: u64) -> Late {
+        Late {
+            f: herdr(NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT),
+            after,
+            list: agents(&[("conductor-t1", "idle", &folder(c), "w9:p1")]),
+            clock: Mutex::new(0),
+            starter: Mutex::new(None),
+            done: (Mutex::new(false), std::sync::Condvar::new()),
+        }
+    }
+    fn finish(&self) {
+        *self.done.0.lock().unwrap() = true;
+        self.done.1.notify_all();
+    }
+}
+impl herdsman::runner::Runner for Late {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let mut out = self.f.run(prog, args)?;
+        let is = |a: &str, b: &str| prog == "herdr" && args.starts_with(&[a.into(), b.into()]);
+        if is("agent", "start") {
+            self.starter.lock().unwrap().get_or_insert(std::thread::current().id());
+        }
+        if is("agent", "list") && *self.clock.lock().unwrap() >= self.after {
+            out.stdout = self.list.clone();
+        }
+        Ok(out)
+    }
+    fn sleep(&self, secs: u64) {
+        self.f.sleep(secs);
+        let starter = *self.starter.lock().unwrap();
+        if starter.is_none_or(|s| s == std::thread::current().id()) {
+            *self.clock.lock().unwrap() += secs;
+            return;
+        }
+        let mut done = self.done.0.lock().unwrap();
+        while !*done {
+            done = self.done.1.wait(done).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_start_that_times_out_and_whose_agent_comes_up_20_s_later_is_adopted_with_no_workspace_closed() {
+    let c = setup("slow-start");
+    let r = Late::new(&c, 20);
+    let log = say(&c, &r, "hello");
+    assert!(!log.contains("not delivered"), "{log}");
+    assert!(*r.clock.lock().unwrap() >= 20, "{:?}", r.f.calls.borrow());
+    assert!(!r.f.called("herdr workspace close"), "{:?}", r.f.calls.borrow());
+    let s = &starts(&c)[0];
+    assert_eq!(
+        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (Some("w9:p1"), Some("w9"), &serde_json::json!(true))
+    );
+}
+
+#[test]
+fn two_messages_1_s_apart_during_a_slow_start_are_both_delivered_in_order() {
+    let c = setup("slow-two");
+    let r = Late::new(&c, 20);
+    std::thread::scope(|s| {
+        let a = s.spawn(|| say(&c, &r, "one"));
+        while r.starter.lock().unwrap().is_none() {
+            std::thread::yield_now();
+        }
+        let b = s.spawn(|| say(&c, &r, "two"));
+        a.join().unwrap();
+        r.finish();
+        b.join().unwrap();
+    });
+    let log = herdsman::events::jsonl(&c.state).unwrap();
+    assert!(!log.contains("still being delivered"), "{log}");
+    assert!(!log.contains("not delivered"), "{log}");
+    assert_eq!(r.f.count("herdr agent start"), 1, "{:?}", r.f.calls.borrow());
+    let typed = r.f.index("herdr agent prompt conductor-t1 [t1] owner: two");
+    assert!(typed > r.f.index("herdr agent start"), "{:?}", r.f.calls.borrow());
+    assert_eq!(starts(&c).len(), 1);
+}
+
+const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named agent conductor-t1 no longer owns the target terminal"}}"#;
+
+#[test]
+fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
+    let c = setup("stale-name");
+    // Its earlier conductor ran in w9 and is gone now; herdr still holds the name.
+    say(&c, &herdr(NO_AGENTS), "hello");
+    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, LOST);
+    let log = say(&c, &r, "again");
+    assert!(!log.contains("not delivered"), "{log}");
+    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
+    let closed = r.index("herdr workspace close w9").unwrap();
+    assert!(
+        closed
+            < r.calls
+                .borrow()
+                .iter()
+                .rposition(|c| c.starts_with("herdr agent start"))
+                .unwrap()
+    );
+    let s = starts(&c);
+    assert_eq!(s.len(), 2);
+    assert!(s[1].data.get("adopted").is_none(), "{:?}", s[1].data);
 }

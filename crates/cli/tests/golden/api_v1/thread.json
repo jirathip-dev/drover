@@ -1,6 +1,8 @@
 {
   "response": {
+    "archived": false,
     "dir": "<tmp>/state/conductor/t1",
+    "id": "t1",
     "msgs": [
       {
         "answer": null,
@@ -25,7 +27,9 @@
   },
   "route": "GET /api/v1/thread/<t>",
   "schema": {
+    "archived": "boolean",
     "dir": "string",
+    "id": "string",
     "msgs": [],
     "older": "null",
     "started": "number"

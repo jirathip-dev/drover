@@ -370,13 +370,30 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
         k if k.starts_with("run") => {
             let text = block.join("\n");
             let fenced = text.split("```").skip(1).step_by(2);
-            let n = fenced
-                .filter(|p| !p.split_once('\n').map_or("", |x| x.1).trim().is_empty())
-                .count();
-            (n >= 4).then_some("run").ok_or(format!(
-                "`Repro: run` needs both runs (base plus commit 1, then head), each a fenced command and its fenced \
-                 output; it has {n} of 4 fenced blocks"
-            ))
+            let blocks: Vec<&str> = fenced
+                .map(|p| p.split_once('\n').map_or("", |x| x.1).trim())
+                .filter(|b| !b.is_empty())
+                .collect();
+            // #607: the command fenced once or before each run; the outputs are the other blocks, base's first.
+            let outs: Vec<&str> = blocks
+                .iter()
+                .skip(1)
+                .filter(|b| Some(*b) != blocks.first())
+                .copied()
+                .collect();
+            let failed = |o: &str| {
+                let o = o.to_lowercase().replace("; 0 failed", "");
+                ["fail", "panic", "error"].iter().any(|w| o.contains(w))
+            };
+            match outs.first() {
+                Some(base) if outs.len() >= 2 && failed(base) => Ok("run"),
+                Some(_) if outs.len() >= 2 => Err("`Repro: run`'s base plus commit 1 output shows no failure".into()),
+                _ => Err(format!(
+                    "`Repro: run` needs the test command fenced, then its failing output on the base plus commit 1 \
+                     and its passing output at head, each fenced; it has {} fenced blocks",
+                    blocks.len()
+                )),
+            }
         }
         k if k.starts_with("verify") => {
             let quote = block.iter().filter_map(|l| l.trim_start().strip_prefix('>'));

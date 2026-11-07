@@ -164,6 +164,15 @@ enum Cmd {
         #[arg(long, value_name = "LINE")]
         typed: Option<String>,
     },
+    /// Conductors and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
+    Amend {
+        fleet: String,
+        issue: u64,
+        text: String,
+        /// The ask the owner answered (or a routine ask's default) on this issue that decided it
+        #[arg(long, value_name = "ID")]
+        basis: String,
+    },
     /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
     Report { id: Option<String> },
     /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
@@ -362,6 +371,21 @@ enum Cmd {
         /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
         #[arg(long)]
         orphans: bool,
+        /// The daily job (#557): merged/closed lanes idle 3+ days, at most 10, plus herdr workspaces whose folder is gone
+        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
+        scheduled: bool,
+    },
+    /// Install the herdsman fleet's integration head once its CI is green: build, sign, doctor-gate, swap (#557)
+    SelfUpdate {
+        /// Print what it would do; change nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Stop installing until --resume (logged)
+        #[arg(long, conflicts_with = "resume")]
+        pause: bool,
+        /// Install again after --pause (logged)
+        #[arg(long)]
+        resume: bool,
     },
     /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
     Reclaim {
@@ -758,11 +782,16 @@ enum ProfilesCmd {
         /// Write nothing; exit 1 unless every fleet Hermes profile lists its hook as `✓ allowed`
         #[arg(long)]
         check: bool,
+        /// #592: only this profile, of role family `--role`, without fleet.toml (spawn's, on a lane's remote host)
+        #[arg(long, requires = "role", hide = true)]
+        profile: Option<String>,
+        #[arg(long, requires = "profile", hide = true)]
+        role: Option<String>,
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`).
-pub const HELP_AGENT_MAX: usize = 322;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`).
+pub const HELP_AGENT_MAX: usize = 326;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -771,8 +800,21 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "service", "setup",
-        "stats", "tick", "timer",
+        "accounts",
+        "doctor",
+        "drive",
+        "kick",
+        "pause",
+        "reclaim",
+        "report",
+        "resume",
+        "serve",
+        "service",
+        "setup",
+        "stats",
+        "tick",
+        "timer",
+        "self-update",
     ];
     let subs = cmd
         .get_subcommands()
@@ -796,7 +838,7 @@ pub fn usage_doc() -> String {
         s += &format!("\n`{}`\n  {about}\n", usage.trim());
         for a in sub
             .get_arguments()
-            .filter(|a| a.get_long().is_some_and(|l| l != "help"))
+            .filter(|a| !a.is_hide_set() && a.get_long().is_some_and(|l| l != "help"))
         {
             let h = a.get_help().map(std::string::ToString::to_string).unwrap_or_default();
             s += &format!("  --{}  {h}\n", a.get_long().unwrap());
@@ -1182,6 +1224,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
+        Cmd::Profiles {
+            cmd:
+                ProfilesCmd::Sync {
+                    profile: Some(p),
+                    role: Some(role),
+                    ..
+                },
+        } => {
+            for h in crate::harness::NAMES {
+                crate::harness::get(h).sync(ctx, &role, &p, &usage_doc(), out)?;
+            }
+        }
         Cmd::Service {
             api,
             board,
@@ -1206,14 +1260,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             };
             match cmd {
                 Cmd::Profiles {
-                    cmd: ProfilesCmd::Sync { check: true },
+                    cmd: ProfilesCmd::Sync { check: true, .. },
                 } => {
                     if !spawn::profiles_check(ctx, &cfg, r, out)? {
                         return Ok(1);
                     }
                 }
                 Cmd::Profiles {
-                    cmd: ProfilesCmd::Sync { check: false },
+                    cmd: ProfilesCmd::Sync { check: false, .. },
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
                     // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.
@@ -1280,6 +1334,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     None => crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?,
                 },
+                Cmd::Amend {
+                    fleet,
+                    issue,
+                    text,
+                    basis,
+                } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
                     // #413: every thread a conductor starts is logged with its source.
@@ -1364,6 +1424,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
                     Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
                 },
+                Cmd::SelfUpdate { dry_run, pause, resume } => {
+                    return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
+                }
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
@@ -1387,7 +1450,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .map(|x| x.1)
                         .collect();
                     // #493: a working or next-to-start issue too; one nothing drives says so.
-                    let log = crate::waiting::Log::new(&events);
+                    let (log, st) = (crate::waiting::Log::new(&events), crate::events::fold(&events));
                     for s in crate::waiting::guarded(&events, &cfg) {
                         let (f, pr) = (&cfg.fleet[&s.fleet], crate::gh::cached_pr(ctx, &s.fleet, s.issue));
                         let un = crate::waiting::undriven(&log, &s, f, &pr, &agents, ctx.now);
@@ -1400,7 +1463,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         let (who, what) = match &s.lane {
                             Some(l) => ("none", format!("waiting on {l} (working){note}")),
-                            None => ("drive", format!("next in the queue: drive starts it{note}")),
+                            // #604: its last start refused (a kick's too) says so.
+                            None => match crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now) {
+                                Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
+                                None => ("drive", format!("next in the queue: drive starts it{note}")),
+                            },
                         };
                         // #558: why drive hasn't started it yet, never `?`.
                         let why = match crate::drive::last_pass(ctx, &s.fleet) {
@@ -1471,8 +1538,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     lane,
                     yes,
                     orphans,
+                    scheduled,
                 } => {
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
+                    if scheduled {
+                        return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
+                    }
+                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
@@ -1739,12 +1810,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
     }
     // #511: an impl lane's turn that ends unreported goes on once to report it.
-    let mut it = lane.split(':');
-    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
-    let builds = || {
-        let cfg = Config::load(&ctx.config).ok();
-        role != "lesson" && cfg.is_some_and(|c| c.fleet.get(fleet).is_some_and(|f| f.family(role) == "impl"))
-    };
+    let builds = || lane_rules(ctx, &lane).is_ok_and(|r| r.builds);
     if let Some(v) = hook::turn_end(&input, &hook::turn_mark(&ctx.state, &lane), builds) {
         writeln!(out, "{v}")?;
         return Ok(());
@@ -1767,39 +1833,34 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
         return Ok(());
     }
-    let cfg = match Config::load(&ctx.config) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("herdsman hook: {e:#}");
-            return fail_closed(ctx, out, &input, "fleet.toml failed to load");
-        }
+    let rules = match lane_rules(ctx, &lane) {
+        Ok(r) => r,
+        Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
-    let fleet = lane.split(':').next().unwrap_or_default();
-    if !cfg.fleet.contains_key(fleet) {
-        return fail_closed(ctx, out, &input, &format!("fleet `{fleet}` is not in fleet.toml"));
-    }
-    let branches = protected_branches(&cfg);
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
     let h = home();
-    let paths = vec![
+    let mut paths = vec![
         dir(&ctx.config),
         dir(&ctx.state),
         h.join(".config/fleet-operations").to_string_lossy().into(),
         h.join(".hermes/profiles").to_string_lossy().into(),
     ];
-    // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
+    paths.extend(std::env::var("HERDSMAN_RULES").ok()); // #592: a lane never edits its own rules
+                                                        // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
     let conductor = std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2) == Some("conductor"));
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
-    let own = (conductor && !thread.is_empty() && !thread.contains(['/', '.']))
-        .then(|| crate::conductor::dir(ctx, &cfg, &thread).to_string_lossy().into_owned());
+    let cfg = Config::load(&ctx.config)
+        .ok()
+        .filter(|_| conductor && !thread.is_empty() && !thread.contains(['/', '.']));
+    let own = cfg.map(|cfg| crate::conductor::dir(ctx, &cfg, &thread).to_string_lossy().into_owned());
     let policy = hook::Policy {
-        branches,
+        branches: rules.branches,
         paths,
-        reviewer,
-        deny: deny_list(&cfg, fleet),
+        reviewer: reviewer || rules.reviewer,
+        deny: rules.deny,
         conductor,
         own,
-        groups: cfg.conductor.groups().into_iter().map(String::from).collect(),
+        groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
     };
     let cur = |d: &str| {
@@ -1827,6 +1888,28 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         lane_event(ctx, "thread-cmd", d);
     }
     Ok(())
+}
+
+/// #592: lane `<fleet>:<issue>:<role>`'s hook rules: its rules file (`HERDSMAN_RULES`, a remote lane's) and only it, else
+/// resolved from this host's fleet.toml. Err: the cause the hook fails closed for.
+fn lane_rules(ctx: &Ctx, lane: &str) -> std::result::Result<hook::Rules, String> {
+    if let Some(p) = std::env::var_os("HERDSMAN_RULES") {
+        let p = PathBuf::from(p);
+        let bad = |e: &dyn std::fmt::Display| format!("rules file {} is unreadable ({e})", p.display());
+        let text = std::fs::read_to_string(&p).map_err(|e| bad(&e))?;
+        return serde_json::from_str(&text).map_err(|e| bad(&e));
+    }
+    let cfg = Config::load(&ctx.config).map_err(|e| {
+        eprintln!("herdsman hook: {e:#}");
+        "fleet.toml failed to load".to_string()
+    })?;
+    let mut it = lane.split(':');
+    let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
+    if !cfg.fleet.contains_key(fleet) {
+        return Err(format!("fleet `{fleet}` is not in fleet.toml"));
+    }
+    let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
+    Ok(hook::Rules::resolve(&cfg, fleet, role, &host))
 }
 
 /// #508: deny a lane's call the hook can't judge, logged `hook-failed-closed` (`cause`, never the command).
@@ -1871,34 +1954,17 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     };
 }
 
-/// #216: `fleet`'s `deny_commands` (`[limits]`'s when the fleet is unknown); #256: its host's rules on top;
-/// #502: `pkill` and `killall` always. #508: from the binary and the loaded fleet.toml only, no file a lane edits.
-fn deny_list(cfg: &Config, fleet: &str) -> Vec<crate::config::Deny> {
-    let f = cfg.fleet.get(fleet);
-    let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
-    let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
-    let mut d = match cfg.hosts.get(&host) {
-        Some(h) => h.deny(d),
-        None => d,
-    };
-    // #502: no fleet or host drops the broad-kill ban.
-    d.extend(hook::broad_kill());
-    d
-}
-
-/// main, master, staging and every fleet's integration branch.
-fn protected_branches(cfg: &Config) -> Vec<String> {
-    let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
-    branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
-    branches
-}
-
 /// git `pre-push` hook for dsh lanes: exit 1 refuses a protected-branch push, or any reviewer push.
 fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
-    let cfg = Config::load(&ctx.config).unwrap_or_default();
-    let branches = protected_branches(&cfg);
+    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let rules = lane_rules(ctx, &lane).unwrap_or_else(|_| {
+        let (mut it, host) = (lane.split(':'), std::env::var("HERDSMAN_HOST").unwrap_or_default());
+        let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
+        hook::Rules::resolve(&Config::load(&ctx.config).unwrap_or_default(), fleet, role, &host)
+    });
+    let reviewer = reviewer || rules.reviewer;
     for dst in buf.lines().filter_map(|l| l.split_whitespace().nth(2)) {
         let b = dst.trim_start_matches("refs/heads/");
         if reviewer {
@@ -1908,7 +1974,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             )?;
             return Ok(1);
         }
-        if branches.iter().any(|x| x == b) {
+        if rules.branches.iter().any(|x| x == b) {
             writeln!(
                 out,
                 "herdsman: pushing to `{b}` is blocked; integration branches change only via `herdsman merge`"
@@ -1917,8 +1983,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         }
     }
     // #216: no added script line may run a `deny_commands` entry (CI workflows may use Docker).
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
-    let deny = deny_list(&cfg, lane.split(':').next().unwrap_or_default());
+    let deny = rules.deny;
     for sha in buf.lines().filter_map(|l| l.split_whitespace().nth(1)) {
         let specs = ["*.sh", "*.bash", "*.zsh", "*justfile", "*Justfile", "*Makefile"];
         let mut args = vec!["log", "-p", "--format=", sha, "--not", "--remotes", "--"];

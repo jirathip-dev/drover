@@ -209,13 +209,6 @@
       "tone": "g"
     },
     "subs": [],
-    "telegram": {
-      "chat": false,
-      "on": false,
-      "owner": false,
-      "polled": "",
-      "topics": 0
-    },
     "theme": {
       "detail": "",
       "fix": "",
@@ -248,13 +241,6 @@
     "services": [],
     "spawns": "null",
     "subs": [],
-    "telegram": {
-      "chat": "boolean",
-      "on": "boolean",
-      "owner": "boolean",
-      "polled": "string",
-      "topics": "number"
-    },
     "theme": {
       "detail": "string",
       "fix": "string",

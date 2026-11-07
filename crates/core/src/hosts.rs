@@ -636,6 +636,13 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("herdsman {}", crate::VERSION);
     let line = format!("! herdsman — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
+    // #601: shed there is optional; its failure warns, it never makes the host offline.
+    if let Some(Err(e)) = on
+        .shed()
+        .map(|b| crate::herdr::Runtime::agents(&crate::herdr::Shed(b), on))
+    {
+        bad.push(format!("! shed: {e:#}"));
+    }
     bad
 }
 
@@ -648,14 +655,15 @@ pub fn update(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) -> bool 
     let Some(f) = f.filter(|_| !sha.is_empty() && !events.iter().any(done)) else {
         return false;
     };
-    let exe = rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+    let [exe, conf] =
+        [ctx.exe.clone(), ctx.config.display().to_string()].map(|p| rehome(vec![p], Some(home)).remove(0));
     let root = Path::new(&exe)
         .parent()
         .and_then(Path::parent)
         .unwrap_or(Path::new(&exe));
     let script = format!(
         "cd '{}' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" \
-cargo install --path crates/cli --locked --root '{}' --force && '{exe}' profiles sync",
+cargo install --path crates/cli --locked --root '{}' --force && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}",
         under(&f.local, Some(home)).display(),
         root.display()
     );
