@@ -1845,6 +1845,13 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
 fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #639: a fix round follows a FAIL (an extra round for a lane never reviewed goes back to impl).
+    ev(
+        &c,
+        12,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
+    );
     ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = fake(NO_AGENTS)
