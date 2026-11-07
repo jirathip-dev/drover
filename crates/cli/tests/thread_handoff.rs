@@ -330,8 +330,10 @@ fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
         "{}",
         show(&c, "t1")
     );
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
+    // #621: another tap, on another row too, gets the one delivery (t5), nothing sent again.
+    let (code, again) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, again), (0, out));
+    assert_eq!(kinds(&c, "thread-handoff").len(), 1);
 
     assert_eq!(hand("Webhooks", "retry storms"), 0);
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q2", "5"]);
