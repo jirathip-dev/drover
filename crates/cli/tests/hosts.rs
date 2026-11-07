@@ -1412,10 +1412,11 @@ fn a_symlinked_herdsman_updates_and_reads_back_its_real_install_root() {
         "{rows:?}"
     );
     assert!(herdsman::hosts::update(&c, &cfg, &on, "bazzite", home));
-    let root = format!(
-        "--root '\\''{}'\\'' --force && '\\''{real}'\\'' profiles sync",
-        root.display()
-    );
+    let root = format!("--root '\\''{}'\\'' --force", root.display());
+    let sync = format!("|| '\\''{real}'\\'' profiles sync");
     let calls = r.calls.borrow();
-    assert!(calls.iter().any(|c| c.contains(&root)), "{calls:#?}");
+    assert!(
+        calls.iter().any(|c| c.contains(&root) && c.contains(&sync)),
+        "{calls:#?}"
+    );
 }
