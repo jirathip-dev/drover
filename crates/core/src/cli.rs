@@ -371,6 +371,21 @@ enum Cmd {
         /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
         #[arg(long)]
         orphans: bool,
+        /// The daily job (#557): merged/closed lanes idle 3+ days, at most 10, plus herdr workspaces whose folder is gone
+        #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
+        scheduled: bool,
+    },
+    /// Install the herdsman fleet's integration head once its CI is green: build, sign, doctor-gate, swap (#557)
+    SelfUpdate {
+        /// Print what it would do; change nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Stop installing until --resume (logged)
+        #[arg(long, conflicts_with = "resume")]
+        pause: bool,
+        /// Install again after --pause (logged)
+        #[arg(long)]
+        resume: bool,
     },
     /// Build folders (target, node_modules, .cache, `build_dirs`) of worktrees idle 7 days: preview, then apply on `y`
     Reclaim {
@@ -780,8 +795,21 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts", "doctor", "drive", "kick", "pause", "reclaim", "report", "resume", "serve", "service", "setup",
-        "stats", "tick", "timer",
+        "accounts",
+        "doctor",
+        "drive",
+        "kick",
+        "pause",
+        "reclaim",
+        "report",
+        "resume",
+        "serve",
+        "service",
+        "setup",
+        "stats",
+        "tick",
+        "timer",
+        "self-update",
     ];
     let subs = cmd
         .get_subcommands()
@@ -805,7 +833,7 @@ pub fn usage_doc() -> String {
         s += &format!("\n`{}`\n  {about}\n", usage.trim());
         for a in sub
             .get_arguments()
-            .filter(|a| a.get_long().is_some_and(|l| l != "help"))
+            .filter(|a| !a.is_hide_set() && a.get_long().is_some_and(|l| l != "help"))
         {
             let h = a.get_help().map(std::string::ToString::to_string).unwrap_or_default();
             s += &format!("  --{}  {h}\n", a.get_long().unwrap());
@@ -1379,6 +1407,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
                     Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
                 },
+                Cmd::SelfUpdate { dry_run, pause, resume } => {
+                    return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
+                }
                 Cmd::Timer { action, label, no_load } => {
                     return crate::timer::timer(ctx, &cfg, r, out, (&action, &label, !no_load));
                 }
@@ -1490,8 +1521,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     lane,
                     yes,
                     orphans,
+                    scheduled,
                 } => {
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref()), yes)?;
+                    if scheduled {
+                        return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
+                    }
+                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
