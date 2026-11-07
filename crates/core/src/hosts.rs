@@ -636,6 +636,13 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("herdsman {}", crate::VERSION);
     let line = format!("! herdsman — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
+    // #601: shed there is optional; its failure warns, it never makes the host offline.
+    if let Some(Err(e)) = on
+        .shed()
+        .map(|b| crate::herdr::Runtime::agents(&crate::herdr::Shed(b), on))
+    {
+        bad.push(format!("! shed: {e:#}"));
+    }
     bad
 }
 
