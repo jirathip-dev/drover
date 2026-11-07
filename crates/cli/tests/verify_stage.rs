@@ -545,3 +545,47 @@ fn a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again() {
         (Some("herdsman spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
     );
 }
+
+/// #650: a rev PASS at the head that a merge refused for want of verify, then `kind` (verify-skipped or
+/// verify-no-recipe) at that head and green CI: `waiting` says merge, never "review again", and one drive pass merges.
+fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str) {
+    let (c, head) = passed(name, &config(), false);
+    let why = format!("no verify PASS for head {head}");
+    ev(&c, 40, "blocked", json!({"code": "STALE_VERDICT", "reason": why}));
+    ev(&c, 50, kind, json!({"sha": head, "stage": "verify", "reason": "r"}));
+    let cfg = Config::parse(&config()).unwrap();
+    let evs = read(&c.state).unwrap();
+    let s = &fold(&evs)[&("sendmeter".to_string(), 12)];
+    let pr: serde_json::Value = serde_json::from_str(&pr(&head)).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let w = waiting_on(
+        &herdsman::waiting::Log::new(&evs),
+        &evs,
+        s,
+        Some((&head, 1)),
+        &pr,
+        f,
+        None,
+    );
+    assert_eq!(w.what, format!("PASS · verify {word} · merging next pass"));
+    assert_eq!(w.next_cmd.as_deref(), Some("herdsman merge sendmeter 12"));
+    let r = fake(&head, "src/a.rs\n");
+    drive(&c, &r);
+    assert!(r.called(&format!(
+        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+    )));
+    assert_eq!(state(&c), "merged");
+    assert!(kinds(&c, "spawn")
+        .iter()
+        .all(|e| e.str("role") != Some("rev") || e.ts == 20));
+}
+
+#[test]
+fn a_rev_pass_and_verify_skipped_at_the_head_merge_in_one_drive_pass() {
+    skipped_after_a_refusal_merges_in_one_pass("verify-650-skip", "verify-skipped", "skipped");
+}
+
+#[test]
+fn a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass() {
+    skipped_after_a_refusal_merges_in_one_pass("verify-650-no-recipe", "verify-no-recipe", "no recipe");
+}
