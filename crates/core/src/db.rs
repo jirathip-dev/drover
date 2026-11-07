@@ -192,18 +192,17 @@ pub fn live_bytes(state: &Path) -> Result<u64> {
     with(state, false, 0, |c| Ok(c.query_row(q, [], |r| r.get(0))?))
 }
 
-/// #632: the live events up to `seq`: fewer than a cached `events::log` holds, a rotation archived some.
-pub(crate) fn live_count(state: &Path, seq: u64) -> Result<usize> {
-    let q = "SELECT COUNT(*) FROM events WHERE archived = 0 AND seq <= ?1";
-    with(state, false, 0, |c| Ok(c.query_row(q, [seq], |r| r.get(0))?))
-}
-
 pub(crate) fn archive(state: &Path, seqs: &[u64]) -> Result<()> {
     with(state, true, (), |c| {
         let tx = c.transaction()?;
         for s in seqs {
             tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?;
         }
+        // #560: a new `archived` row: `events::shared` reads the live log afresh.
+        tx.execute(
+            "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
+            [],
+        )?;
         Ok(tx.commit()?)
     })
 }
@@ -223,6 +222,12 @@ pub fn stamp(state: &Path, key: &str) -> Option<u64> {
         Ok(c.query_row(q, [key], |r| r.get(0)).optional()?)
     })
     .ok()?
+}
+
+/// #560: the database file's inode and its last rotation's stamp: a change makes `events::shared` read afresh.
+pub fn version(state: &Path) -> (Option<u64>, Option<u64>) {
+    let ino = std::fs::metadata(file(state)).map(|m| m.ino()).ok();
+    (ino, ino.and_then(|_| stamp(state, "archived")))
 }
 
 /// The newest event's seq (0: none): the page's change check.

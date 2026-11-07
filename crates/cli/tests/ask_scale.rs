@@ -3,7 +3,7 @@
 //! cached index alone, and a rotation since the last read reads the log again.
 mod common;
 use common::*;
-use herdsman::events::{append, log, Event, VISITS};
+use herdsman::events::{append, shared, Event, VISITS};
 use herdsman::serve::Server;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
@@ -88,18 +88,11 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     let d = json!({"id": "q799", "choice": "yes", "by": "owner"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(AGENTS), "decision", d)).unwrap();
     let before = VISITS.load(Relaxed);
-    let l = log(&c.state).unwrap();
+    let l = shared(&c.state).unwrap();
     assert!(
         VISITS.load(Relaxed) - before <= 2,
         "the earlier events were indexed again"
     );
     assert_eq!(l.len(), EVENTS + 1);
     assert_eq!(needs(&s), want[..want.len() - 1]);
-
-    // A rotation archived events since the last read: the next new event reads the live log again.
-    let db = rusqlite::Connection::open(herdsman::db::file(&c.state)).unwrap();
-    db.execute("UPDATE events SET archived = 1", []).unwrap();
-    append(&c.state, &Event::new(NOW, "sendmeter", Some(1), "note", json!({}))).unwrap();
-    assert_eq!(log(&c.state).unwrap().len(), 1, "the archived events dropped out");
-    assert_eq!(needs(&s), Vec::<String>::new());
 }

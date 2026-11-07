@@ -32,8 +32,12 @@ fn codes(d: &serde_json::Value) -> Vec<String> {
 
 /// Spawns succeed; `load` is the 1-min load on 10 cores (≥ 25 is a busy host).
 fn fake(load: &str) -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+    fake_with(load, Fake::default())
+}
+
+/// `fake` after `f`'s own replies.
+fn fake_with(load: &str, f: Fake) -> Fake {
+    f.reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", &format!("{{ {load} {load} {load} }}\n"))
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -416,6 +420,73 @@ fn one_slot_and_nothing_in_flight_still_starts() {
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
 }
 
+/// #560: issue `n` (not queued) built, pushed and its PR open: its review is due. Its worktree's head for `fake_with`.
+fn review_due(c: &herdsman::Ctx, n: u64, f: Fake) -> Fake {
+    let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
+    std::fs::create_dir_all(&wt).unwrap();
+    let d = serde_json::json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": "w9:p1",
+        "worktree": wt, "branch": format!("issue-{n}")});
+    let at = |kind, d| herdsman::events::Event::new(10, "sendmeter", Some(n), kind, d);
+    herdsman::events::append(&c.state, &at("spawn", d)).unwrap();
+    let head = "b".repeat(40);
+    herdsman::events::append(&c.state, &at("pushed", serde_json::json!({"sha": head}))).unwrap();
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let pr = serde_json::json!({"number": 100 + n, "state": "OPEN", "headRefOid": head, "statusCheckRollup": []});
+    let pr = serde_json::json!({"ts": c.now, "branch": format!("issue-{n}"), "pr": pr});
+    std::fs::write(cache.join(format!("pr-sendmeter-{n}.json")), pr.to_string()).unwrap();
+    let git = format!("git -C {}", wt.display());
+    f.reply(&format!("{git} status"), "")
+        .reply(&format!("{git} rev-list"), "0\n")
+        .reply(&format!("{git} rev-parse"), &format!("{head}\n"))
+        .reply(&format!("{git} log"), &format!("{head} {}", c.now - 600))
+}
+
+/// #560: room for one spawn, a fix round and a pushed head both due and a queued issue: the review spawns.
+#[test]
+fn room_for_one_spawn_goes_to_the_review() {
+    let c = fleet("kicks-review-first", 1, 1);
+    fix_due(&c, 21);
+    let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 22), launched(&r, 21), launched(&r, 1)), (1, 0, 0), "{d}");
+}
+
+/// #560: a busy host launches nothing: the review waits `HOST_BUSY` and no start's kick takes the room after it.
+#[test]
+fn a_busy_host_holds_every_spawn_behind_the_review() {
+    let c = fleet("kicks-busy", 6, 2);
+    let f = review_due(&c, 22, Fake::default());
+    let r = fake_with("40.0", f);
+    let d = pass(&c, &r);
+    assert_eq!((launched(&r, 22), launched(&r, 1), launched(&r, 2)), (0, 0, 0), "{d}");
+    let a = d["actions"].as_array().unwrap();
+    assert!(a.iter().any(|a| a["issue"] == 22 && a["code"] == "HOST_BUSY"), "{d}");
+    assert!(a.iter().all(|a| a["step"] != "start"), "no start tried: {d}");
+    // The room back: the review launches first.
+    let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
+    pass(&c, &r);
+    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} "));
+    assert!(at(22).is_some() && at(22) < at(1), "{:?}", r.calls.borrow());
+}
+
+/// #560: a review held for room says how many reviews drive tries before it.
+#[test]
+fn waiting_names_the_reviews_ahead() {
+    let c = fleet("kicks-review-order", 1, 1);
+    let f = (21..=23).fold(Fake::default(), |f, n| review_due(&c, n, f));
+    let r = fake_with("1.0", f);
+    pass(&c, &r);
+    assert_eq!(launched(&r, 21), 1);
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter", "--json"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(r#""what": "review waits behind 1 earlier review","#),
+        "{out}"
+    );
+    assert!(out.contains("review waits behind 2 earlier reviews"), "{out}");
+}
+
 /// #604: a runner whose detached kick runs to its end at once (its own thread, on a host at `load`).
 struct Inline(Fake, herdsman::Ctx, &'static str);
 impl herdsman::runner::Runner for Inline {
@@ -558,4 +629,100 @@ fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
         "{d}"
     );
     assert!(out.contains("sendmeter #1 start: started"), "{out}");
+}
+
+/// #638: fleets `names`, each with `max_parallel_spawns = max` and issues 1..=`issues` queued.
+fn fleets(dir: &str, names: &[&str], max: usize, issues: u64) -> herdsman::Ctx {
+    let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
+    let all: String = names.iter().map(|n| fleet.replace("sendmeter", n)).collect();
+    let limits = limits.replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"));
+    let c = ctx(&tmpdir(dir), &format!("{all}[limits]{limits}"));
+    for n in names {
+        let mut add = vec!["queue".to_string(), n.to_string(), "add".into()];
+        add.extend((1..=issues).map(|i| i.to_string()));
+        let add: Vec<&str> = add.iter().map(String::as_str).collect();
+        assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    }
+    c
+}
+
+/// #638: the fleets a pass's kicks went to, in launch order.
+fn kicked_fleets(r: &Fake) -> Vec<String> {
+    let calls = r.calls.borrow();
+    let kick = |c: &String| {
+        Some(
+            c.strip_prefix("sh -c nohup '/opt/herdsman/bin/herdsman' kick ")?
+                .split(' ')
+                .next()?
+                .to_string(),
+        )
+    };
+    calls.iter().filter_map(kick).collect()
+}
+
+/// #638: three fleets with five ready issues each and six start slots: each pass starts two per fleet, one fleet
+/// at a time, and the fleet that goes first rotates pass by pass.
+#[test]
+fn starts_share_slots_round_robin_across_fleets() {
+    let names = ["alpha", "beta", "gamma"];
+    // #513: starts leave the last slot to in-flight work: seven slots are six for starts.
+    let c = fleets("kicks-638-fair", &names, 7, 5);
+    let mut firsts = vec![];
+    for _ in 0..3 {
+        let r = fake("1.0");
+        let (code, out) = run(&c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        let k = kicked_fleets(&r);
+        for n in names {
+            assert_eq!(k.iter().filter(|f| *f == n).count(), 2, "{n}: {k:?}");
+        }
+        assert_eq!(
+            k[..3].iter().collect::<std::collections::BTreeSet<_>>().len(),
+            3,
+            "one each first: {k:?}"
+        );
+        firsts.push(k[0].clone());
+        // Every kick ends before the next pass: its slot is free again.
+        for l in herdsman::db::leases(&c.state, "spawn-") {
+            herdsman::db::release(&c.state, &l.key, None);
+        }
+    }
+    assert_eq!(firsts, ["alpha", "beta", "gamma"]);
+}
+
+/// #638: a runner recording, at each agent list, whether issue 1's spawn slot is still held.
+struct Watch(Fake, herdsman::Ctx, Shared<Vec<bool>>);
+impl herdsman::runner::Runner for Watch {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "herdr" && args.starts_with(&["agent".into(), "list".into()]) {
+            self.2.borrow_mut().push(marker(&self.1, 1).is_some());
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #638: a kick refused HOST_BUSY gives its slot back at the refusal, not when its whole pass ends.
+#[test]
+fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
+    let c = fleet("kicks-638-busy", 6, 1);
+    pass(&c, &fake("1.0"));
+    assert!(marker(&c, 1).is_some());
+    let r = Watch(fake("40.0"), c.clone(), Shared::default());
+    let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("HOST_BUSY"), "{out}");
+    let seen = r.2.borrow().clone();
+    // Held while the kick starts; free at the look the pass takes after the refusal.
+    assert!(seen.first() == Some(&true) && seen.last() == Some(&false), "{seen:?}");
+}
+
+/// #638: `waiting` names who holds the spawn slots.
+#[test]
+fn waiting_names_the_slot_holders() {
+    let c = fleets("kicks-638-slots", &["alpha", "beta"], 4, 2);
+    pass(&c, &fake("1.0"));
+    let (code, out) = run(&c, &fake("1.0"), &["waiting"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("slots: alpha 2, beta 1\n"), "{out}");
 }

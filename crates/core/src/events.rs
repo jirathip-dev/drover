@@ -551,13 +551,14 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
 }
 
 /// #632: the live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and
-/// folded alone (an archived one since, `rotate`: all again).
+/// folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
     pub events: Vec<Event>,
     pub asks: Asks,
     pub states: States,
     seq: u64,
+    key: (Option<u64>, Option<u64>),
 }
 
 impl std::ops::Deref for Log {
@@ -569,17 +570,19 @@ impl std::ops::Deref for Log {
 
 static LOGS: Mutex<BTreeMap<PathBuf, Arc<Log>>> = Mutex::new(BTreeMap::new());
 
-/// #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq.
-pub fn log(path: &Path) -> Result<Arc<Log>> {
+/// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
+/// each call reads only the events appended since (serve's requests and watcher).
+pub fn shared(path: &Path) -> Result<Arc<Log>> {
     let mut logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
     let l = logs.entry(crate::db::file(path)).or_default();
-    let last = crate::db::last_seq(path);
+    // #560: another file or a rotation since (`db::version`): all again.
+    let (last, key) = (crate::db::last_seq(path), crate::db::version(path));
+    if key != l.key {
+        *l = Arc::new(Log { key, ..Log::default() });
+    }
     // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
     if last == l.seq && last > 0 {
         return Ok(l.clone());
-    }
-    if crate::db::live_count(path, l.seq)? != l.events.len() {
-        *l = Arc::default();
     }
     let new = crate::db::events(path, "archived = 0 AND seq > ?1", l.seq)?;
     let m = Arc::make_mut(l);
