@@ -661,6 +661,33 @@ fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     assert!(!r.calls.borrow().iter().any(|l| l.contains("'rm'") && l.contains(&conf)));
 }
 
+/// #647 amendment A: doctor names the check that failed on a host; `unreachable` only when ssh itself fails.
+#[test]
+fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
+    let c = setup("hosts-doctor-why", "", true, 0);
+    let mut r = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let list = "herdr --machine bazzite agent list";
+    r.replies.retain(|p| p.0 != list);
+    let no = herdsman::runner::Out {
+        code: 1,
+        stderr: "herdr: no server on bazzite".into(),
+        ..Default::default()
+    };
+    r.replies.insert(0, (list.into(), no));
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("\n✗ host bazzite — herdr agent list: ") && out.contains("no server on bazzite"),
+        "{out}"
+    );
+    assert!(!out.contains("unreachable"), "{out}");
+    // ssh itself fails: unreachable, with ssh's error.
+    let mut r = fake(0.1, 0.1);
+    r.replies.retain(|p| !p.0.starts_with(SSH));
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains("\n✗ host bazzite — unreachable (ssh: "), "{out}");
+}
+
 #[test]
 fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     let c = setup("hosts-sick", "", true, 0);
