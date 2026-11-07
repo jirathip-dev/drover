@@ -17,7 +17,9 @@ const KEY: &str = "boat-key-635";
 /// subcommand fails as clap does. `ssh-keyscan` answers for the endpoint it gives.
 const BOAT: &str = r#"#!/bin/sh
 d=$(dirname "$0"); s="$d/sandboxes"; touch "$s"; echo "$*" >> "$d/calls"
-id_ok() { grep -q "^$1 " "$s" || { echo "error: no sandbox $1" >&2; exit 1; }; }
+# As boat does, an empty id is the current sandbox (the one boat runs in): recorded, never an error.
+id_ok() { [ -n "$1" ] || { echo "ACTED ON THE CURRENT SANDBOX" >> "$d/calls"; exit 0; }
+  grep -q "^$1 " "$s" || { echo "error: no sandbox $1" >&2; exit 1; }; }
 set_state() { sed "s/^$1 \([^ ]*\) [^ ]*/$1 \1 $2/" "$s" > "$s.new" && mv "$s.new" "$s"; }
 [ "$1" = --help ] || [ "$BOAT_API_KEY" = "boat-key-635" ] || { echo "error: not logged in" >&2; exit 1; }
 case "$1" in
@@ -30,7 +32,7 @@ list) all=; for a in "$@"; do [ "$a" = --all ] && all=1; done
   printf '{"sandboxes":['; sep=
   while read -r i n st t; do
     [ -n "$all" ] || [ "$st" = running ] || continue
-    e=null; [ "$st" = running ] && e='"10.0.0.7:2222"'
+    e=null; [ "$st" = running ] && e="\"$(cat "$d/endpoint" 2>/dev/null || echo 10.0.0.7:2222)\""
     printf '%s{"id":"%s","name":"%s","state":"%s","type":"%s","sshEndpoint":%s}' "$sep" "$i" "$n" "$st" "$t" "$e"; sep=,
   done < "$s"; printf ']}\n' ;;
 resume) id_ok "$2"; set_state "$2" running ;;
@@ -40,7 +42,8 @@ snapshot) id_ok "$2" ;;
 *) echo "error: unrecognized subcommand '$1'" >&2; exit 2 ;;
 esac
 "#;
-const KEYSCAN: &str = "#!/bin/sh\necho '[10.0.0.7]:2222 ssh-ed25519 AAAAboatkey'\n";
+const KEYSCAN: &str =
+    "#!/bin/sh\necho \"[x]:1 ssh-ed25519 $(cat \"$(dirname \"$0\")/hostkey\" 2>/dev/null || echo AAAAboatkey)\"\n";
 
 /// A recipe's `sh -c` runs for real with the fake `boat` first on PATH; everything else goes to the fake runner.
 struct Boat(Fake, PathBuf);
@@ -149,7 +152,16 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
         let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
         for l in text.lines() {
             let word = l.split_whitespace().next().unwrap_or("#");
-            let known = ["#", "Host", "HostName", "User", "Port", "UserKnownHostsFile"];
+            let known = [
+                "#",
+                "Host",
+                "HostName",
+                "User",
+                "Port",
+                "UserKnownHostsFile",
+                "IdentityFile",
+                "IdentitiesOnly",
+            ];
             assert!(known.contains(&word) || word.starts_with('#'), "not ssh config: {l}");
         }
     }
@@ -161,6 +173,11 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
     let conf = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(
         conf.contains(&format!("UserKnownHostsFile {}", pin.display())),
+        "{conf}"
+    );
+    // Amendment D: a fresh boat sandbox authorizes only boat's own key.
+    assert!(
+        conf.contains("  IdentityFile ~/.ssh/ascii_box_ed25519\n  IdentitiesOnly yes\n"),
         "{conf}"
     );
     // A changed host key on a later start fails closed; the pin is kept.
@@ -185,9 +202,14 @@ fn a_key_stored_under_the_hosts_fleet_is_found() {
     );
     herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     assert!(calls(&bin).contains("new --type small --name boat1"), "{}", calls(&bin));
+    std::fs::write(c.home.join(".ssh/ascii_box_ed25519"), "k").unwrap();
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
         out.contains("✓ cloud boat1 key — herdsman/sendmeter/BOAT_API_KEY"),
+        "{out}"
+    );
+    assert!(
+        out.contains("✓ cloud boat1 identity — ~/.ssh/ascii_box_ed25519"),
         "{out}"
     );
 }
@@ -221,6 +243,10 @@ fn the_rates_are_boats_and_medium_is_default() {
     );
     assert!(out.contains("✓ cloud boat1 key — herdsman/all/BOAT_API_KEY"), "{out}");
     assert!(out.contains("✓ cloud boat1 cli — boat has"), "{out}");
+    assert!(
+        out.contains("✗ cloud boat1 identity — ~/.ssh/ascii_box_ed25519 missing"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -250,4 +276,84 @@ fn doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known
         out.contains("✗ ssh include — `Include config.d/*` reads config.d/herdsman-boat1.known"),
         "{out}"
     );
+}
+
+#[test]
+fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empty_id() {
+    let (c, bin) = setup("boat-empty-id", "small");
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    // Stopped, boat's default list omits it: `--all` still finds it, by its id.
+    herdsman::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
+    herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    // Gone (deleted outside herdsman): stop and destroy are refused, boat never called with an empty id.
+    std::fs::write(bin.join("sandboxes"), "").unwrap();
+    for verb in ["stop", "destroy"] {
+        let e = herdsman::cloud::stop(&c, &cfg, &r, "boat1", verb, "test").unwrap_err();
+        assert!(format!("{e:#}").contains("no sandbox named boat1"), "{e:#}");
+    }
+    let made = calls(&bin);
+    assert!(made.contains("stop bx_0") && made.contains("resume bx_0"), "{made}");
+    assert!(!made.contains("CURRENT"), "{made}");
+    // An override recipe whose own lines have no guard: herdsman refuses on the recipe's empty `id` itself.
+    let recipe = c.config.with_file_name("recipes/boat.toml");
+    std::fs::create_dir_all(recipe.parent().unwrap()).unwrap();
+    let id = r#"boat list --all --json | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id'"#;
+    let bare = format!(
+        "key_env = \"BOAT_API_KEY\"\nid = '''{id}'''\ndestroy = '''boat delete \"$({id})\" --yes'''\n\
+         stop = '''boat stop \"$({id})\"'''\n[rate_usd_hour]\nsmall = 0.018\n"
+    );
+    std::fs::write(&recipe, bare).unwrap();
+    for verb in ["stop", "destroy"] {
+        let e = herdsman::cloud::stop(&c, &cfg, &r, "boat1", verb, "test").unwrap_err();
+        assert!(format!("{e:#}").contains("no sandbox named boat1"), "{e:#}");
+    }
+    let made = calls(&bin);
+    assert!(!made.contains("CURRENT") && !made.contains("delete"), "{made}");
+}
+
+#[test]
+fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
+    let (c, bin) = setup("boat-moved", "small");
+    let cfg = Config::load(&c.config).unwrap();
+    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
+    let conf = || std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
+    let pin = c.home.join(".ssh/herdsman/boat1.known");
+    // Moved while running: bootstrap re-reads `address` before it reaches the host.
+    std::fs::write(bin.join("endpoint"), "10.0.0.8:2200").unwrap();
+    let _ = herdsman::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new());
+    assert!(
+        conf().contains("  HostName 10.0.0.8\n  User user\n  Port 2200\n"),
+        "{}",
+        conf()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&pin).unwrap(),
+        "[10.0.0.8]:2200 ssh-ed25519 AAAAboatkey\n"
+    );
+    // A survey that finds it running and moved again rewrites it too.
+    std::fs::write(bin.join("endpoint"), "10.0.0.9:2201").unwrap();
+    herdsman::hosts::survey(&c, &cfg, &r, true);
+    assert!(
+        conf().contains("  HostName 10.0.0.9\n  User user\n  Port 2201\n"),
+        "{}",
+        conf()
+    );
+    // Recreated (a new host key): a survey never accepts it; bootstrap re-pins it, logged.
+    std::fs::write(bin.join("endpoint"), "10.0.0.10:22").unwrap();
+    std::fs::write(bin.join("hostkey"), "AAAAnewkey").unwrap();
+    herdsman::hosts::survey(&c, &cfg, &r, true);
+    assert!(conf().contains("HostName 10.0.0.9\n"), "{}", conf());
+    assert!(std::fs::read_to_string(&pin).unwrap().contains("AAAAboatkey"));
+    let _ = herdsman::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new());
+    assert!(conf().contains("HostName 10.0.0.10\n"), "{}", conf());
+    assert_eq!(
+        std::fs::read_to_string(&pin).unwrap(),
+        "10.0.0.10 ssh-ed25519 AAAAnewkey\n"
+    );
+    let ev = read(&c.state).unwrap();
+    let repin = ev.iter().find(|e| e.kind == "cloud-repin").expect("cloud-repin logged");
+    assert_eq!(repin.str("was"), Some("ssh-ed25519 AAAAboatkey"));
 }
