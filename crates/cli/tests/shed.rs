@@ -106,7 +106,8 @@ fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Val
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
-        "read" => Ok(json!({"text": format!("screen of {name}")})),
+        // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
+        "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),
         "wait" => {
             let outcome = if name == "slow" { "timeout" } else { "matched" };
@@ -976,4 +977,92 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, doc) = run(&c, &f, &["doctor"]);
     assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
+}
+
+/// #666: shed's CLI where a `shed send` lands: the ACP session's transcript then shows the turn.
+struct Lands<'a>(&'a Fake, Terms);
+
+impl Runner for Lands<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "shed" && args[0] == "send" {
+            let mut t = self.1.lock().unwrap();
+            t.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #666 amendment A: herdsman-rev-603-r2 sat 8 h, its shed session `running` with an empty transcript: the brief never
+/// landed as its first prompt (the spawn's `shed send` was dropped). Past the start window drive sends it again, once.
+#[test]
+fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let lane = "sendmeter-rev-12-r1";
+    b.add(
+        lane,
+        json!({"fleet": "sendmeter", "issue": "12", "role": "rev", "harness": "claude"}),
+    );
+    {
+        let mut terms = b.terms.lock().unwrap();
+        let t = terms.get_mut(lane).unwrap();
+        (t["acp"], t["reported"], t["text"]) = (json!("claude-acp"), Value::Null, json!(""));
+    }
+    let c = ctx(&tmpdir("acp-dropped"), &acp_config(&b.sock, "claude", true));
+    let head = "a".repeat(40);
+    let wt = c.worktrees.join("sendmeter/rev-12-r1");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join(".brief.md"), "# Brief — review #12\n").unwrap();
+    let ev = |ts: u64, kind: &str, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    };
+    ev(
+        10,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
+    );
+    ev(20, "pushed", json!({"sha": head}));
+    let t0 = c.now - 60;
+    ev(
+        t0,
+        "spawn",
+        json!({"role": "rev", "check": true, "agent": lane, "pane": lane, "worktree": wt, "branch": "rev-12-r1",
+            "sha": head, "runtime": "shed", "confirmed": true}),
+    );
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "mergeable": "MERGEABLE", "statusCheckRollup": []});
+    let f = Fake::default()
+        .reply("gh pr view issue-12", &pr.to_string())
+        .reply("git -C", "")
+        .reply("shed send", "");
+    let r = Lands(&f, b.terms.clone());
+    let at = |s: u64| herdsman::Ctx { now: s, ..c.clone() };
+    let sends = || f.count(&format!("shed send {lane}"));
+    let drive = |c: &herdsman::Ctx| {
+        let (code, out) = run(c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+        out
+    };
+    drive(&c);
+    assert_eq!(sends(), 0, "inside the start window");
+    let out = drive(&at(t0 + 601));
+    assert_eq!(sends(), 1, "{out} {:?}", f.calls.borrow());
+    assert!(
+        f.called(&format!("shed send {lane} # Brief — review #12")),
+        "the brief itself"
+    );
+    let ev = herdsman::events::read(&c.state).unwrap();
+    assert!(
+        ev.iter()
+            .any(|e| e.kind == "start-resent" && e.str("agent") == Some(lane)),
+        "{out}"
+    );
+    // It landed this time: the session works on; nothing is sent again, superseded or escalated.
+    drive(&at(t0 + 1202));
+    assert_eq!(sends(), 1);
+    let ev = herdsman::events::read(&c.state).unwrap();
+    assert!(
+        !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
+        "{ev:?}"
+    );
 }
