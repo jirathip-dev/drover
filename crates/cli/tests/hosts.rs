@@ -1500,3 +1500,113 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
         assert!(brief, "the new lane's brief names the wip branch");
     }
 }
+
+/// #664: bazzite's merged lane, its pane id in the log stale (herdr answers `pane_not_found`) while its agent lives on
+/// in pane `w9:p3`: `kill --yes` closes that pane there and sees it gone before printing `killed`, and the next
+/// `clean --yes` removes the worktree.
+#[test]
+fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
+    let c = setup("hosts-kill-664", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    ev(
+        &c,
+        NOW - 100,
+        12,
+        "merged",
+        json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
+    );
+    let live = agents(&[("sendmeter-impl-12", "idle", WT, "w9:p3")]);
+    let gone = r#"{"error":{"code":"pane_not_found"}}"#;
+    let r = fake(1.0, 1.0)
+        .once("herdr --machine bazzite agent list", 0, &live)
+        .once_err("herdr --machine bazzite pane close w9:p1", 1, gone)
+        .reply("herdr --machine bazzite pane close w9:p3", "{}")
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply("herdr --machine bazzite worktree remove --workspace w9", "{}")
+        .reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let (code, out) = run(&c, &r, &["kill", "sendmeter-impl-12", "--yes"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    assert!(out.contains("killed sendmeter-impl-12"), "{out}");
+    let (close, list) = (
+        "herdr --machine bazzite pane close w9:p3",
+        "herdr --machine bazzite agent list",
+    );
+    assert!(r.called(close), "the live pane closes on its host: {calls:?}");
+    assert!(r.count(list) >= 2, "kill confirms the pane is gone: {calls:?}");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
+        "{out}"
+    );
+    assert!(r.called("herdr --machine bazzite worktree remove --workspace w9"));
+}
+
+/// #664: a wip push rejected because a ref of that name exists (`fetch first`) retries once under a new name, never
+/// forced, and the kill succeeds naming that branch.
+#[test]
+fn a_wip_push_whose_ref_exists_retries_under_a_new_name() {
+    let c = setup("hosts-wip-664", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let rejected = " ! [rejected]        HEAD -> wip/sendmeter-impl-12 (fetch first)\nerror: failed to push some refs";
+    let (r, g) = dirty_remote(Fake::default(), None);
+    let r = r
+        .once_err(&format!("{g}'push'"), 1, rejected)
+        .reply("herdr --machine bazzite agent list", NO_AGENTS)
+        .reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let (code, out) = run(&c, &r, &["kill", "sendmeter-impl-12", "--yes"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    let pushes: Vec<_> = calls.iter().filter(|c| c.starts_with(&format!("{g}'push'"))).collect();
+    assert_eq!(pushes.len(), 2, "{calls:?}");
+    assert_ne!(pushes[0], pushes[1], "the retry has a new name");
+    for p in &pushes {
+        assert!(p.contains("'HEAD:refs/heads/wip/sendmeter-impl-12-"), "{p}");
+        assert!(
+            !p.contains("force") && !p.contains("'-f'") && !p.contains("'+"),
+            "never forced: {p}"
+        );
+    }
+    let w = pushes[1].rsplit("refs/heads/").next().unwrap().trim_end_matches('\'');
+    assert!(
+        out.contains(&format!("killed sendmeter-impl-12: work pushed to {w}")),
+        "{out}"
+    );
+    assert!(r.called("herdr --machine bazzite pane close w9:p1"), "{calls:?}");
+}
+
+/// #664: a merged lane's worktree on bazzite whose gitfile points at another host's path is reported
+/// `orphan (wrong host)` with the fix, and nothing there is touched.
+#[test]
+fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
+    let c = setup("hosts-wronghost-664", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    ev(
+        &c,
+        NOW - 100,
+        12,
+        "merged",
+        json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
+    );
+    let gitdir = "/Users/jkmacmini/src/sendmeter/.git/worktrees/issue-12";
+    let r = fake(1.0, 1.0)
+        .reply(&format!("{SSH}'cat' '{WT}/.git'"), &format!("gitdir: {gitdir}\n"))
+        .once(&format!("{SSH}'sh' '-c' 'test -e \"$1\"' 'sh' '{gitdir}'"), 1, "")
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply("herdr --machine bazzite worktree remove --workspace w9", "{}")
+        .reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("orphan (wrong host) bazzite:{WT}")), "{out}");
+    assert!(out.contains(gitdir) && out.contains("fix:"), "{out}");
+    assert!(!r.called("herdr --machine bazzite worktree remove"), "{calls:?}");
+    assert!(!r.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree'")), "{calls:?}");
+    assert!(!r.called(&format!("{SSH}'rm'")), "{calls:?}");
+    assert!(!out.contains("removed"), "{out}");
+}
