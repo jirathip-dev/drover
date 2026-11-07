@@ -454,6 +454,29 @@ pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     }
 }
 
+/// #650: the one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's
+/// last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
+pub fn verified(f: &Fleet, st: Option<&IssueState>, head: &str, over: bool) -> Result<(), Refusal> {
+    let verdicts = st.map(|s| s.verdicts.as_slice()).unwrap_or_default();
+    let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(head);
+    // #173: a 2-check pipeline merges only with a PASS from each at this head.
+    for c in f.flow().checks() {
+        let last = verdicts.iter().rev().filter(at).find(|x| x.2 == c.name);
+        match last.map(|x| x.1.as_str()) {
+            Some("PASS") => {}
+            Some(v) => return Err(refuse("VERDICT_FAIL", format!("{} verdict for {head} is {v}", c.name))),
+            None => return Err(refuse("STALE_VERDICT", format!("no {} PASS for head {head}", c.name))),
+        }
+        let cnt = f.flow().counts(&c.name);
+        let n = st.map_or(0, |s| s.stage_rounds.get(cnt).copied().unwrap_or_default());
+        let (limit, of) = limit(f, cnt, st);
+        if n > limit && !over {
+            return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}{of})")));
+        }
+    }
+    Ok(())
+}
+
 /// Pure merge gate: every check stage's PASS at the head, within its rounds (`over`: past them). Returns the head sha
 /// that may be merged.
 pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Result<String, Refusal> {
@@ -489,21 +512,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     if v != "PASS" {
         return Err(refuse("VERDICT_FAIL", format!("verdict for {head} is {v}")));
     }
-    // #173: a 2-check pipeline merges only with a PASS from each at this head.
-    for c in f.flow().checks() {
-        let last = verdicts.iter().rev().filter(at).find(|x| x.2 == c.name);
-        match last.map(|x| x.1.as_str()) {
-            Some("PASS") => {}
-            Some(v) => return Err(refuse("VERDICT_FAIL", format!("{} verdict for {head} is {v}", c.name))),
-            None => return Err(refuse("STALE_VERDICT", format!("no {} PASS for head {head}", c.name))),
-        }
-        let cnt = f.flow().counts(&c.name);
-        let n = st.map_or(0, |s| s.stage_rounds.get(cnt).copied().unwrap_or_default());
-        let (limit, of) = limit(f, cnt, st);
-        if n > limit && !over {
-            return Err(refuse("ROUND_LIMIT", format!("review rounds ran out ({n}{of})")));
-        }
-    }
+    verified(f, st, &head, over)?;
     ci_green(&pr["statusCheckRollup"], f.checks(pr)).map_err(|m| refuse("CI_NOT_GREEN", format!("{m} at {head}")))?;
     Ok(head)
 }
