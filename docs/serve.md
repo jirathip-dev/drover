@@ -4,7 +4,8 @@
 `last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
-UI goes to cooee core, new workflow UI to the drover plugins; both read `/api/v1`, which stays open. CI's
+UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to the cooee-drover repo; both read `/api/v1`, which
+stays open (README, "How it fits"). CI's
 `board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
 
@@ -335,7 +336,7 @@ fails on any other direct dependency.
 
 ## JSON API v1 (#265)
 
-`herdsman serve` answers JSON under `/api/v1/`, the TypeScript board's (`web/`) every read, and later the native app's. Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
+`herdsman serve` answers JSON under `/api/v1/`, the frozen TypeScript board's (`web/`) every read, and cooee-drover's and cooee core's (below). Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
 transcript, a setup screen, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host, bqueue, cond, and
 #555's send, menu, act, setup, chat-about, chat, close) refuse an unpaired one.
 
@@ -375,9 +376,9 @@ never caches `api/`. A breaking change is `/api/v2/`.
 The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
 `assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
 `crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`. #555: the contract with
-cooee and the drover plugins is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
+cooee core and cooee-drover is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
 `crates/cli/tests/golden/api_v1/` (the route, its Rust type, the type's schema generated from its default, and a recorded
-response; drover's module tests copy them). A response whose shape (keys, each value's JSON type) or a type whose schema
+response; cooee-drover's module tests copy them). A response whose shape (keys, each value's JSON type) or a type whose schema
 changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
@@ -385,6 +386,15 @@ changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo t
 dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is committed and embedded in the binary
 (`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
 build` after a UI edit.
+
+### Who consumes this
+
+- cooee-drover's tabs (Queue, Asks, Fleets), its whole engine view: it reads and acts only through `/api/v1`;
+- cooee core, where it reads it (the lanes it shows as Workflow chats, cooee#33);
+- the frozen `web/` board (#552), until #553's parity rows pass.
+
+The rule: a screen that needs data herdsman doesn't send gets the `/api/v1` field here first, with its fixture in
+`crates/cli/tests/api_v1_contract.rs`, then the consumer reads it. Consumers never derive engine state themselves.
 
 ## Host tab (#141)
 
