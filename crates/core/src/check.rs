@@ -988,19 +988,21 @@ fn save(
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut total = du(&ctx.worktrees);
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
+    let builds = !cfg.limits.build_root.is_empty() && crate::config::expand(&cfg.limits.build_root).is_dir();
+    let live = if over(total) || builds {
+        live_lanes(ctx, cfg, r)?
+    } else {
+        Live::new()
+    };
     if over(total) {
-        let (events, agents) = (read(&ctx.state)?, host::agents(r)?);
+        let events = read(&ctx.state)?;
         let states = fold(&events);
         let mut seen = std::collections::BTreeSet::new();
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
-            .filter(|(e, _)| {
-                !agents
-                    .iter()
-                    .any(|a| a["name"].as_str() == e.str("agent") && a["agent_status"] == "working")
-            })
+            .filter(|(e, _)| !e.str("agent").is_some_and(|a| live.contains(a)))
             .map(|(e, w)| {
                 (
                     e.issue
@@ -1019,7 +1021,10 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
             if bytes > 0 {
                 total = total.saturating_sub(bytes);
-                writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
+                writeln!(
+                    out,
+                    "budget: freed {bytes} bytes of build folders in {wt} (no live agent)"
+                )?;
                 let d = json!({"agent": e.str("agent"), "bytes": bytes});
                 emit(
                     &ctx.state,
@@ -1030,7 +1035,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;
-    trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
+    trim_builds(cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
@@ -1047,7 +1052,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(&on, cfg, cfg.limits.build_budget_gb, out) {
+        if let Err(e) = trim_on(&on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
             writeln!(out, "builds: {name}: {e:#}")?;
             continue;
         }
@@ -1059,6 +1064,19 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
     }
     Ok(())
+}
+
+pub type Live = std::collections::BTreeSet<String>;
+
+/// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or
+/// one spawned in the last `stall_minutes`.
+pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
+    let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
+    let events = read(&ctx.state)?;
+    let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
+    let agents = host::agents(r)?;
+    let names = agents.iter().filter_map(|a| a["name"].as_str());
+    Ok(names.chain(spawned).map(String::from).collect())
 }
 
 /// #536/#651: a lane's scratch (`<build_root>/.scratch/<agent>`) on `on`'s host stays while its agent is working,
@@ -1172,8 +1190,8 @@ fn mtime(d: &Path) -> u64 {
 
 /// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
-/// too, oldest first. Bytes freed.
-pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
+/// too, oldest first; #634: never a `live` lane's. Bytes freed.
+pub fn trim_builds(cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
     let root = crate::config::expand(&cfg.limits.build_root);
     if cfg.limits.build_root.is_empty() || !root.is_dir() {
         return Ok(0);
@@ -1187,6 +1205,7 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
         .map(|p| (p, 3));
+    let lane = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
     let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
     dirs.sort();
     for (_, dir, depth) in dirs {
@@ -1198,10 +1217,14 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
-        let size = du(&dir);
+        if depth > 0 && lane(&dir).is_some_and(|n| live.contains(&n)) {
+            writeln!(out, "keep {}: a live lane", dir.display())?;
+            continue;
+        }
+        let (size, why) = (du(&dir), if depth > 0 { "no live agent" } else { "not building" });
         let verb = if dry { "would trim" } else { "trimmed" };
         if dry || std::fs::remove_dir_all(&dir).is_ok() {
-            writeln!(out, "builds: {verb} {} ({:.2} GB)", dir.display(), gb(size))?;
+            writeln!(out, "builds: {verb} {} ({:.2} GB, {why})", dir.display(), gb(size))?;
             (total, freed) = (total.saturating_sub(size), freed + size);
         }
     }
@@ -1261,9 +1284,9 @@ done
 echo "freed $f""#;
 
 /// The shared build folder on `on`'s host trimmed to `budget` GB; bytes freed.
-pub fn trim_on(on: &On, cfg: &Config, budget: f64, out: &mut dyn Write) -> Result<u64> {
+pub fn trim_on(on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
     if on.machine.is_none() || cfg.limits.build_root.is_empty() {
-        return trim_builds(cfg, budget, out, false);
+        return trim_builds(cfg, budget, live, out, false);
     }
     let kb = format!("{:.0}", budget * 1_048_576.0);
     let o = on.run(
@@ -1287,6 +1310,7 @@ const NOTE: &str = "(logical sizes; APFS clones may free less)";
 /// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let live = live_lanes(ctx, cfg, r)?;
     let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
         let wt = Path::new(e.str("worktree").unwrap_or_default());
@@ -1307,7 +1331,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
-    total += trim_builds(cfg, cfg.limits.build_budget_gb, o, !yes)?;
+    total += trim_builds(cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
