@@ -953,7 +953,11 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
     assert!(!out.contains("HOST_OFFLINE"), "{out}");
     // Past placement, the offline refusal and the duplicate guard: the lane's clone runs there.
-    assert!(f.called(&format!("{ssh}'git' 'clone'")), "{out} {:?}", f.calls.borrow());
+    assert!(
+        f.called(&format!("{ssh}'sh' '-c' 'git clone")),
+        "{out} {:?}",
+        f.calls.borrow()
+    );
     let (code, out) = run(&c, &f, &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("offline") && !out.contains("unreachable"), "{out}");
