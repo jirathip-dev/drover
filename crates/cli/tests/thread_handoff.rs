@@ -706,7 +706,7 @@ fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
 fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
     let c = card("handoff-retry", "add facets");
     let why = "input contains a 1486-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry";
-    // #623: a failed delivery is tried once more, so the tap fails only when both starts do.
+    // #623 retries a failed delivery once: both tries fail.
     let r = herdr(NO_AGENTS)
         .once_err("herdr agent start", 1, why)
         .once_err("herdr agent start", 1, why);
