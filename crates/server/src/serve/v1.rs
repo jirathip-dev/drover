@@ -60,7 +60,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
+            ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
                 let (fleet, n) = x[6..].split_once('/').unwrap_or_default();
@@ -573,4 +573,23 @@ pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
         })
         .collect();
     Events { seq, refresh, list }
+}
+
+/// #630: each host card's workspace roots (`hosts.json`), a `root` row each: path, state and free space.
+fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+    let seen = crate::hosts::cached(ctx);
+    for c in &mut tab.hosts {
+        for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {
+            let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+            let free = r.free_gb.map(|g| format!("{g:.0} GB free"));
+            c.rows.push(crate::api::Cell {
+                k: "root".into(),
+                t: t.into(),
+                text: r.path.clone(),
+                notes: [Some(r.state.clone()), free].into_iter().flatten().collect(),
+                ..crate::api::Cell::default()
+            });
+        }
+    }
+    tab
 }
