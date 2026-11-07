@@ -80,11 +80,44 @@ fn a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro() {
         assert!(out.contains("REFUSED NO_REPRO"), "{block}: {out}");
     }
     let (_, out) = pass(&c, &d, "", BASE_RUN);
-    assert!(out.contains("it has 2 of 4 fenced blocks"), "{out}");
+    assert!(out.contains("it has 2 fenced blocks"), "{out}");
     let (code, out) = pass(&c, &d, "", &format!("{BASE_RUN}{HEAD_RUN}\n## Notes\n\nnone\n"));
     assert_eq!(code, 0, "{out}");
     let v = verdicts(&c);
     assert_eq!((v.len(), v[0].str("repro")), (1, Some("run")));
+}
+
+/// #607: rev-601-r1's shape: the command fenced once, then the base plus commit 1 output, then the head output.
+const ONE_COMMAND: &str = "Repro: run\n```\ncargo test --locked -p herdsman --test shed a_remote_host\n```\n\
+At base + commit 1 (4c43ddc55), failing:\n```\nshed connect failed (1)\ntest result: FAILED. 0 passed; 1 failed\n```\n\
+Same command at head 5c77f77, passing:\n```\ntest a_remote_host ... ok\ntest result: ok. 1 passed; 0 failed\n```\n";
+
+#[test]
+fn one_command_fence_with_both_outputs_is_recorded() {
+    let (c, d) = setup("repro-one-command", CONFIG, true);
+    let (code, out) = pass(&c, &d, "", ONE_COMMAND);
+    assert_eq!(code, 0, "{out}");
+    let v = verdicts(&c);
+    assert_eq!(
+        (v.len(), v[0].str("verdict"), v[0].str("repro")),
+        (1, Some("PASS"), Some("run"))
+    );
+}
+
+#[test]
+fn a_run_block_needs_two_outputs_and_a_failing_base() {
+    let (c, d) = setup("repro-two-outputs", CONFIG, true);
+    let cmd = "Repro: run\n```\ncargo test meter_total\n```\n";
+    let ok = "```\ntest result: ok. 1 passed; 0 failed\n```\n";
+    let cases = [
+        (format!("{cmd}{cmd}{ok}"), "it has 3 fenced blocks"),
+        (format!("{cmd}{ok}{ok}"), "base plus commit 1 output shows no failure"),
+    ];
+    for (block, why) in cases {
+        let (code, out) = pass(&c, &d, "", &block);
+        assert_eq!((code, verdicts(&c).len()), (3, 0), "{block}: {out}");
+        assert!(out.contains("REFUSED NO_REPRO") && out.contains(why), "{block}: {out}");
+    }
 }
 
 #[test]
