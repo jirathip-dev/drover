@@ -28,10 +28,9 @@ Calls go one way, left to right; nothing on the right depends on what is to its 
 
 - **herdsman** (this repo) is the engine: queue, drive, lanes, reviews, gates, merge. It is to be renamed
   drover (#456).
-- **[cooee](https://github.com/jirathip-dev/cooee)** is the app: chats, and shed sessions, which include the
-  lanes as Workflow chats (cooee#33).
-- **[cooee-drover](https://github.com/jirathip-dev/cooee-drover)** is cooee's Queue, Asks and Fleets tabs. They
-  read and act through herdsman's `/api/v1` and reimplement nothing.
+- **cooee** is the app: chats, and shed sessions, which include the lanes as Workflow chats (cooee#33).
+- **cooee-drover** is cooee's Queue, Asks and Fleets tabs. They read and act through herdsman's `/api/v1` and
+  reimplement nothing.
 - The old board (`herdsman serve`) is frozen (#552) and retires once #553's parity rows pass on the owner's phone.
 
 A new Queue-tab feature's data comes from herdsman's `/api/v1`, so herdsman changes first: it adds the field to
