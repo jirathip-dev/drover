@@ -48,6 +48,13 @@ fn fake(load: &str) -> Fake {
         .reply("git -C", "")
 }
 
+/// #604: the pass's kicks still starting when it ended (the fake's kicks never run; none `spawns_launched`).
+fn pending(d: &serde_json::Value) -> u64 {
+    assert_eq!(d["spawns_launched"], 0, "{d}");
+    let a = d["actions"].as_array().unwrap();
+    a.iter().filter(|a| a["outcome"] == "pending").count() as u64
+}
+
 fn launched(r: &Fake, n: u64) -> usize {
     r.count(&format!(
         "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} --why drive --now"
@@ -81,7 +88,7 @@ fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
         r.calls.borrow()
     );
     assert!((1..=10).all(|n| launched(&r, n) == 1 && marker(&c, n).is_some()));
-    assert_eq!(d["spawns_launched"], 10, "{d}");
+    assert_eq!(pending(&d), 10, "{d}");
     assert!(d["secs"].is_number());
 }
 
@@ -91,7 +98,7 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
     let r = fake("1.0");
     let d = pass(&c, &r);
     // #513: starts leave the last slot to in-flight work.
-    assert_eq!(d["spawns_launched"], 2, "{d}");
+    assert_eq!(pending(&d), 2, "{d}");
     assert!((1..=2).all(|n| launched(&r, n) == 1) && (3..=5).all(|n| launched(&r, n) == 0));
     let held = d["actions"]
         .as_array()
@@ -167,7 +174,7 @@ fn a_pass_counts_starting_spawns_against_serial_and_cap() {
     let c = fleet_with("kicks-cap", 6, "max_impl = 1", 3, &[]);
     let r = fake("1.0");
     let d = pass(&c, &r);
-    assert_eq!(d["spawns_launched"], 1, "{d}");
+    assert_eq!(pending(&d), 1, "{d}");
     assert_eq!(codes(&d), ["", "CAP"], "CAP ends the fleet's starts: {d}");
 }
 
@@ -254,7 +261,7 @@ fn six_dead_markers_never_hold_a_new_spawn() {
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
     let r = fake("1.0");
     let d = pass(&c, &r);
-    assert_eq!((launched(&r, 1), d["spawns_launched"].as_u64()), (1, Some(1)), "{d}");
+    assert_eq!((launched(&r, 1), Some(pending(&d))), (1, Some(1)), "{d}");
     assert_eq!(stale(&c).len(), 6);
     assert!((11..=16).all(|n| marker(&c, n).is_none()));
 }
@@ -383,7 +390,7 @@ fn fix_rounds_launch_before_starts_and_starts_keep_one_slot_free() {
     let (fixes, starts) = ([at(21), at(22)], (1..=10).filter_map(at).collect::<Vec<_>>());
     assert!(fixes.iter().all(Option::is_some), "{d}");
     assert!(starts.iter().all(|s| fixes.iter().all(|f| f < &Some(*s))), "{d}");
-    assert_eq!((starts.len(), d["spawns_launched"].as_u64()), (3, Some(5)), "{d}");
+    assert_eq!((starts.len(), Some(pending(&d))), (3, Some(5)), "{d}");
 }
 
 /// #513: five starts still starting: a due fix round takes the reserved sixth slot; a start does not.
@@ -407,4 +414,148 @@ fn one_slot_and_nothing_in_flight_still_starts() {
     let r = fake("1.0");
     let d = pass(&c, &r);
     assert_eq!((launched(&r, 1), launched(&r, 2)), (1, 0), "{d}");
+}
+
+/// #604: a runner whose detached kick runs to its end at once (its own thread, on a host at `load`).
+struct Inline(Fake, herdsman::Ctx, &'static str);
+impl herdsman::runner::Runner for Inline {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+    fn detach(&self, _: &str, args: &[String], _: &std::path::Path) -> anyhow::Result<u32> {
+        let (c, a, load) = (self.1.clone(), args.to_vec(), self.2);
+        std::thread::spawn(move || {
+            let a: Vec<&str> = a.iter().map(String::as_str).collect();
+            run(&c, &fake(load), &a)
+        })
+        .join()
+        .unwrap();
+        Ok(0)
+    }
+}
+
+fn act(d: &serde_json::Value, n: u64) -> serde_json::Value {
+    d["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|a| a["issue"] == n)
+        .cloned()
+        .unwrap()
+}
+
+/// #604: a kick refused HOST_BUSY inside its pass is logged as that refusal, never `launched`/`started`.
+#[test]
+fn a_kick_refused_host_busy_is_logged_refused_not_launched() {
+    let c = fleet("kicks-604-busy", 6, 1);
+    let r = Inline(fake("1.0"), c.clone(), "40.0");
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("sendmeter #1 start: REFUSED HOST_BUSY: "), "{out}");
+    assert!(!out.contains("launched") && !out.contains("pending"), "{out}");
+    let ev = read(&c.state).unwrap();
+    let d = serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone());
+    let a = act(&d, 1);
+    assert_eq!(
+        (&a["outcome"], &a["code"]),
+        (&serde_json::json!("waiting"), &serde_json::json!("HOST_BUSY")),
+        "{d}"
+    );
+    assert_eq!(d["spawns_launched"], 0, "{d}");
+    let e = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
+    assert!(!herdsman::drive::result(e).1.contains("started 1"), "{d}");
+    // `waiting` names the refusal for the queued issue.
+    let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("HOST_BUSY"), "{out}");
+}
+
+/// #604: a kick still running when its pass ends is logged `pending`; its refusal then updates that action.
+#[test]
+fn a_kick_running_past_its_pass_is_pending_then_updated() {
+    let c = fleet("kicks-604-pending", 6, 1);
+    let (code, out) = run(&c, &fake("1.0"), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("sendmeter #1 start: pending") && !out.contains("launched"),
+        "{out}"
+    );
+    let last = || {
+        let ev = read(&c.state).unwrap();
+        let e = ev
+            .iter()
+            .rfind(|e| e.kind == "drive-pass" && e.data.get("kick").is_none_or(|k| k.is_null()));
+        serde_json::Value::Object(e.unwrap().data.clone())
+    };
+    let d = last();
+    assert_eq!(
+        (&act(&d, 1)["outcome"], &d["spawns_launched"]),
+        (&serde_json::json!("pending"), &serde_json::json!(0)),
+        "{d}"
+    );
+    let (code, out) = run(
+        &c,
+        &fake("40.0"),
+        &["kick", "sendmeter", "1", "--why", "drive", "--now"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let d = last();
+    let a = act(&d, 1);
+    assert_eq!(
+        (&a["outcome"], &a["code"]),
+        (&serde_json::json!("waiting"), &serde_json::json!("HOST_BUSY")),
+        "{d}"
+    );
+    assert_eq!(d["spawns_launched"], 0, "{d}");
+}
+
+/// #604: every start refused by the same host gate for 30 min alerts `host-busy <host>: <why>` once per episode.
+#[test]
+fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
+    let c = fleet("kicks-604-alert", 6, 1);
+    let pass = |ts| {
+        let a = serde_json::json!([{"issue": 3, "step": "start", "outcome": "waiting", "code": "HOST_BUSY",
+            "why": "mini: memory pressure warn; retry later or pass --force"}]);
+        let e = herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
+        herdsman::events::append(&c.state, &e).unwrap();
+    };
+    let alerts = || {
+        read(&c.state)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "host-busy")
+            .count()
+    };
+    pass(c.now - 1200);
+    pass(c.now - 60);
+    assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
+    assert_eq!(alerts(), 0, "busy 20 min");
+    let later = herdsman::Ctx {
+        now: c.now + 600,
+        ..c.clone()
+    };
+    pass(c.now + 540);
+    let (code, out) = run(&later, &Fake::default(), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("host-busy mini: memory pressure warn"), "{out}");
+    run(&later, &Fake::default(), &["check"]);
+    assert_eq!(alerts(), 1, "once per episode");
+}
+
+/// #604: a kick that logs its `spawn` inside its pass counts as launched and reads `started`.
+#[test]
+fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
+    let c = fleet("kicks-604-ok", 6, 1);
+    let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0"), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.is("spawn", "sendmeter", 1)), "{out}");
+    let d = serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone());
+    assert_eq!(
+        (&act(&d, 1)["outcome"], &d["spawns_launched"]),
+        (&serde_json::json!("started"), &serde_json::json!(1)),
+        "{d}"
+    );
+    assert!(out.contains("sendmeter #1 start: started"), "{out}");
 }
