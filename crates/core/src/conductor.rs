@@ -13,8 +13,12 @@ use std::io::Write;
 /// A conductor whose thread is quiet this long (and that is not working) closes on the next `check`.
 pub const IDLE: u64 = 30 * 60;
 
+/// #620: how many times `of` walked the log (a scan's cost is the log's length).
+pub static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// The thread's events: its messages, asks, starts and sleeps.
-fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &'a Event> {
+pub fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &'a Event> {
+    SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     events.iter().filter(move |e| e.str("thread") == Some(id))
 }
 
@@ -264,7 +268,8 @@ fn forwards(events: &[Event], from: &str) -> Option<u64> {
             && e.str("from")
                 .is_some_and(|f| !matches!(f, "conductor" | "system") && !is_id(f))
     };
-    let got = |e: &&Event| e.kind == "thread-msg" && e.str("from").is_some_and(is_id) && !forwarded(events, e);
+    let sent = forwarded(events);
+    let got = |e: &&Event| e.kind == "thread-msg" && e.str("from").is_some_and(is_id) && !sent.contains(&e.seq);
     of(events, from)
         .rev()
         .take_while(|e| !owner(e))
@@ -272,10 +277,13 @@ fn forwards(events: &[Event], from: &str) -> Option<u64> {
         .map(|e| e.seq)
 }
 
-/// #492: a received handoff row its thread sent on (a later handoff from that thread `forwards` it).
-pub fn forwarded(events: &[Event], row: &Event) -> bool {
-    let id = row.str("thread").unwrap_or_default();
-    of(events, id).any(|e| e.data.get("forwards").and_then(Value::as_u64) == Some(row.seq))
+/// #492: the seqs of the received handoff rows their thread sent on (a later handoff from that thread `forwards`
+/// them). #620: one pass over the log; a row's check is a lookup.
+pub fn forwarded(events: &[Event]) -> std::collections::BTreeSet<u64> {
+    events
+        .iter()
+        .filter_map(|e| e.data.get("forwards").and_then(Value::as_u64))
+        .collect()
 }
 
 /// #492: a handoff row's text: its title and the target as `<title> · <id>`.
@@ -889,6 +897,7 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
 /// The thread as items: messages (`from`, `text`) and asks (`ask`, `question`, numbered `options` with the
 /// recommended one first, `open`).
 pub fn items(events: &[Event], id: &str) -> Vec<Value> {
+    let sent = forwarded(events);
     let item = |e: &Event| match e.kind.as_str() {
         "thread-msg" => {
             let mut m = json!({"ts": e.ts, "from": e.str("from"), "text": e.str("text")});
@@ -898,7 +907,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             if let Some((w, t)) = link(e) {
                 m["link"] = json!(format!("{w} {t}"));
             }
-            if forwarded(events, e) {
+            if sent.contains(&e.seq) {
                 m["text"] = json!(format!("{} (forwarded)", e.str("text").unwrap_or_default()));
             }
             Some(m)
