@@ -1,0 +1,3 @@
+{"args":["verdict","sendmeter","12","FAIL","--sha","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","--file","/var/folders/4k/fbv06j2j5bbd3h4wgbwk1ccm0000gn/T/fleet-test-api-issue-61952-0/lane/verdict.md"],"lane":"herdsman:576:rev","ts":1793984375064}
+{"args":["verdict","sendmeter","12","PASS","--sha","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","--file","/var/folders/4k/fbv06j2j5bbd3h4wgbwk1ccm0000gn/T/fleet-test-api-issue-61952-0/lane/verdict.md"],"lane":"herdsman:576:rev","ts":1793984375068}
+{"args":["verdict","sendmeter","12","PASS","--sha","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","--file","/var/folders/4k/fbv06j2j5bbd3h4wgbwk1ccm0000gn/T/fleet-test-api-issue-61952-0/lane/verdict.md"],"lane":"herdsman:576:rev","ts":1793984375072}
