@@ -701,19 +701,40 @@ fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
     assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
 }
 
+/// #648: #623 retries a failed first try within the tap: it exits 0 and its retry is the one delivery.
+#[test]
+fn a_failed_first_try_of_a_handoff_tap_is_retried_and_delivered_once() {
+    let c = card("handoff-retry-once", "add facets");
+    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, "timed out waiting for agent startup");
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
+    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
+    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
+    assert!(!show(&c, "t1").contains("not delivered"), "{}", show(&c, "t1"));
+}
+
 /// #621: a tap whose delivery fails shows its full error in t1; the retry delivers it, still one copy and one row.
 #[test]
 fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
     let c = card("handoff-retry", "add facets");
     let why = "input contains a 1486-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry";
-    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, why);
+    // #623 retries a failed delivery once: both tries fail.
+    let r = herdr(NO_AGENTS)
+        .once_err("herdr agent start", 1, why)
+        .once_err("herdr agent start", 1, why);
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");
     assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
+    // #648: nothing reached t2's conductor; its one logged row is what the retry delivers.
+    assert!(
+        kinds(&c, "conductor-start").is_empty(),
+        "{:?}",
+        kinds(&c, "conductor-start")
+    );
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
     assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
+    assert_eq!(r.count("herdr agent start"), 3, "{:?}", r.calls.borrow());
     let md = c.state.with_file_name("conductor").join("t2/.thread.md");
     assert_eq!(
         std::fs::read_to_string(md).unwrap(),
