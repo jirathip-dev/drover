@@ -650,7 +650,7 @@ pub struct DriveAct {
 }
 
 /// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow`
-/// (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
+/// (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by` (`blocked_on`); titles; the open card: the
 /// pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
 /// answer not delivered), the decision taken by default
 /// (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
@@ -668,6 +668,8 @@ pub struct QueueRow {
     pub check: bool,
     pub groups: Vec<String>,
     pub blocked_by: Option<u64>,
+    /// #667: its open blockers in another fleet or repo, as `owner/repo#N`.
+    pub blocked_on: Vec<String>,
     pub title: Option<String>,
     pub stage: Vec<Stage>,
     pub lane: String,

@@ -1861,6 +1861,13 @@ impl<'a> Server<'a> {
                             .map(|g| g.name.clone())
                             .collect(),
                         blocked_by,
+                        blocked_on: k.map_or(vec![], |k| {
+                            let repo = |b: &String| match b.split_once('#') {
+                                Some((x, n)) if !x.contains('/') => cfg.fleet.get(x).map(|x| format!("{}#{n}", x.repo)),
+                                _ => None,
+                            };
+                            q[k].ext.iter().map(|b| repo(b).unwrap_or_else(|| b.clone())).collect()
+                        }),
                         title: titles(ctx, f, n),
                         stage: s.map_or(vec![], |s| stages(fc, s, head)),
                         lane: lane.into(),

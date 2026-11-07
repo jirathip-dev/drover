@@ -718,7 +718,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
                 continue;
             }
         }
-        let why = format!("blocked by {}", queue::hashes(on));
+        let why = format!("blocked by {on}");
         writeln!(out, "{} #{} repaired: back to queued ({why})", s.fleet, s.issue)?;
         let d = json!({"state": "queued", "reason": why});
         emit(
@@ -826,6 +826,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
+    ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
             writeln!(out, "{fleet} land: {e:#}")?;
@@ -1438,6 +1439,39 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         (d["pr"], d["by"]) = (json!(num), json!("external"));
         writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
+    }
+    Ok(())
+}
+
+/// #667: each open blocker of the fleet's queue in another fleet or repo, read on GitHub at most once per 5 min
+/// (`gh issue view`, cached): one read closed logs `blocker-closed`, and the queue drops it.
+fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
+        .into_iter()
+        .flat_map(|i| i.ext)
+        .collect();
+    for b in refs {
+        let Some((repo, n)) = b.rsplit_once('#') else { continue };
+        let repo = match cfg.fleet.get(repo) {
+            Some(f) => &f.repo,
+            None => repo,
+        };
+        let p = gh::cache_path(ctx, "blocker", &b.replace(['/', '#'], "-"), 0);
+        let ts = crate::usage::load::<Value>(&p).and_then(|c| c["ts"].as_u64());
+        if ts.is_some_and(|t| ctx.now < t + 300) {
+            continue;
+        }
+        let v = crate::runner::json(r, "gh", &["issue", "view", n, "-R", repo, "--json", "state"]);
+        gh::store(&p, &json!({"ts": ctx.now}))?;
+        if v.is_ok_and(|v| v["state"] == "CLOSED") {
+            writeln!(out, "{fleet}: blocker {b} closed")?;
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, None, "blocker-closed", json!({"ref": b})),
+            )?;
+        }
     }
     Ok(())
 }
