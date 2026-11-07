@@ -549,7 +549,7 @@
 548 atlas #2683 fix(1) r1 u0 x0 | drive Some("herdsman spawn atlas 2683 impl --supersede") | drive Some("herdsman spawn atlas 2683 impl --supersede") | VERDICT_FAIL
 549 herdsman #59 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn herdsman 59 rev") | VERDICT_FAIL
 550 atlas #2683 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn atlas 2683 rev") | VERDICT_FAIL
-551 herdsman #71 blocked r1 u0 x0 | drive Some("herdsman spawn herdsman 71 rev --supersede") | drive Some("herdsman spawn herdsman 71 rev --supersede") | ok
+551 herdsman #71 blocked r1 u0 x0 | drive Some("herdsman merge herdsman 71") | drive Some("herdsman spawn herdsman 71 rev --supersede") | ok
 552 herdsman #71 review(2) r1 u0 x0 | drive Some("herdsman verdict herdsman 71 PASS --sha 34a75e71533f9b4966796a547f2115fa362c07a7 --file /v.md") | none None | ok
 553 herdsman #71 ready r2 u0 x0 | drive Some("herdsman merge herdsman 71") | drive Some("herdsman merge herdsman 71") | ok
 554 herdsman #71 merged r2 u0 x0 | none None | none None | ok
@@ -800,7 +800,7 @@
 799 herdsman #105 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn herdsman 105 rev") | ok
 800 herdsman #97 review(3) r2 u0 x0 | drive Some("herdsman verdict herdsman 97 PASS --sha 82efb383bf05d3fdd4a65691ec2815d5e416db40 --file /v.md") | none None | ok
 801 herdsman #99 review(4) r3 u0 x0 | drive Some("herdsman verdict herdsman 99 PASS --sha 4de8ca5bdb74838aee93ed4861e4304d005ec8f5 --file /v.md") | none None | ok
-802 herdsman #104 blocked r2 u0 x0 | drive Some("herdsman spawn herdsman 104 rev --supersede") | drive Some("herdsman spawn herdsman 104 rev --supersede") | ok
+802 herdsman #104 blocked r2 u0 x0 | drive Some("herdsman merge herdsman 104") | drive Some("herdsman spawn herdsman 104 rev --supersede") | ok
 803 herdsman #104 review(3) r2 u0 x0 | drive Some("herdsman verdict herdsman 104 PASS --sha ebe4ad296f45bf71be2e410d9b19918debfbe476 --file /v.md") | none None | ok
 804 herdsman #96 review(3) r2 u0 x0 | drive Some("herdsman verdict herdsman 96 PASS --sha d204e01884fee496f0ce9f94a84d81e97f5156cf --file /v.md") | none None | VERDICT_FAIL
 805 herdsman #103 review(3) r2 u0 x0 | drive Some("herdsman verdict herdsman 103 PASS --sha b1f704d2b47ba0e25cbdd1de4275312096c8360f --file /v.md") | none None | ok
@@ -1142,10 +1142,10 @@
 1141 herdsman #151 review(1) r0 u0 x0 | drive Some("herdsman verdict herdsman 151 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1142 atlas #2622 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn atlas 2622 rev") | VERDICT_FAIL
 1143 herdsman #151 ready r1 u0 x0 | drive Some("herdsman merge herdsman 151") | drive Some("herdsman merge herdsman 151") | ok
-1144 herdsman #150 blocked r1 u0 x0 | drive Some("herdsman spawn herdsman 150 rev --supersede") | drive Some("herdsman spawn herdsman 150 rev --supersede") | ok
+1144 herdsman #150 blocked r1 u0 x0 | drive Some("herdsman merge herdsman 150") | drive Some("herdsman spawn herdsman 150 rev --supersede") | ok
 1145 herdsman #151 merged r1 u0 x0 | none None | none None | ok
 1146 herdsman #151 merged r1 u0 x0 | none None | none None | ok
-1147 herdsman #150 blocked r1 u0 x0 | drive Some("herdsman spawn herdsman 150 rev --supersede") | drive Some("herdsman spawn herdsman 150 rev --supersede") | ok
+1147 herdsman #150 blocked r1 u0 x0 | drive Some("herdsman merge herdsman 150") | drive Some("herdsman spawn herdsman 150 rev --supersede") | ok
 1148 atlas #2910 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2910 rev") | drive Some("herdsman spawn atlas 2910 rev") | NO_VERDICT
 1149 atlas #2782 review(4) r3 u0 x0 | drive Some("herdsman verdict atlas 2782 PASS --sha 9636b8196f12afeb0ceae054d78b85828a1a4d6e --file /v.md") | none None | VERDICT_FAIL
 1150 atlas #2684 review(5) r4 u0 x0 | drive Some("herdsman verdict atlas 2684 PASS --sha 4026e713f186725da6e016be80aae562af3f12c0 --file /v.md") | none None | VERDICT_FAIL

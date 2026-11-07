@@ -145,6 +145,7 @@ ci_start_minutes = 10   # a PR head with no checks this long after its push is C
 ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
 ask_expire_hours = 24     # herdsman check: an ask nobody waits on (no live asking lane) closes as expired
 done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
+idle_merged_minutes = 15  # drive/clean: a merged or closed issue's lane not working this long has its pane closed (work to wip/)
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
 max_pushes_per_pass = 3   # herdsman check pushes at most this many alerts a pass, then one summary
 # fallback_rest_minutes = 60   # #302: an unavailable agent rests this long when its message names no reset
@@ -156,6 +157,7 @@ min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 build_root = "~/.cache/herdsman/target"   # lanes' CARGO_TARGET_DIR is <build_root>/<repo> ("" = one per worktree)
 build_budget_gb = 20      # over it drive (and `reclaim`) removes the shared folder's profiles no cargo is building in; enabled remote hosts: the tick, after drive
+sweep_remote = true       # #651: ended lanes' scratch is swept on every enabled remote host too (false: this host only)
 stray_roots = ["/tmp", "$TMPDIR"]   # `herdsman clean` lists (--yes removes) stray Cargo build folders here, and a removed worktree's Claude temp dir
 min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now

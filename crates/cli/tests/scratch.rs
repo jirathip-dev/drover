@@ -19,6 +19,13 @@ fn spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
     ev(c, issue, "spawn", d);
 }
 
+/// #651: a lane spawned on the remote host `air`.
+fn air_spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
+    let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/.herdr/worktrees/sendmeter/{agent}"),
+                   "pane": "w1:p1", "workspace": "w1", "host": "air", "machine": "air"});
+    ev(c, issue, "spawn", d);
+}
+
 fn merged(c: &herdsman::Ctx, issue: u64) {
     ev(
         c,
@@ -205,4 +212,153 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
         !claude.exists() && other.exists(),
         "only the removed worktree's Claude temp dir goes"
     );
+}
+
+/// #651: a remote host `air` whose build-folder commands run here, in a shell with `home` as `$HOME`, against real
+/// folders: every ssh line naming its build root runs through `sh -c`, `df` answers `free_kb`, the rest (herdr, probes)
+/// is `fake`'s.
+struct Air {
+    fake: Fake,
+    free_kb: u64,
+    home: PathBuf,
+}
+
+const AIR_ROOT: &str = "~/.cache/hs-651-air";
+
+impl herdsman::runner::Runner for Air {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let line = args.iter().position(|a| a == "--").map(|i| args[i + 1..].join(" "));
+        let Some(line) = line.filter(|_| prog == "ssh" && args.iter().any(|a| a == "air")) else {
+            return self.fake.run(prog, args);
+        };
+        self.fake.calls.borrow_mut().push(format!("ssh air -- {line}"));
+        if line.starts_with("'df'") {
+            let df = format!(
+                "Filesystem 1024-blocks Used Available\n/dev/disk3 488000000 1 {}\n",
+                self.free_kb
+            );
+            return Ok(herdsman::runner::Out {
+                stdout: df,
+                ..Default::default()
+            });
+        }
+        if !line.contains(AIR_ROOT) {
+            return self.fake.run(prog, args);
+        }
+        let o = std::process::Command::new("sh")
+            .args(["-c", &line])
+            .env("HOME", &self.home)
+            .output()?;
+        Ok(herdsman::runner::Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// A ctx whose fleet has the remote host `air` (build root `AIR_ROOT` there, absent here); air's `$HOME` and its
+/// `.scratch`.
+fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
+    let d = tmpdir(name);
+    let cfg = CONFIG.replace(
+        "build_root = \"\"",
+        &format!("build_root = \"{AIR_ROOT}\"\nbuild_budget_gb = 1000"),
+    );
+    let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
+    let home = d.join("air-home");
+    let s = home.join(AIR_ROOT.trim_start_matches("~/")).join(".scratch");
+    (c, home, s)
+}
+
+fn tick(c: &herdsman::Ctx, home: &Path, air: &[(&str, &str, &str, &str)], free_kb: u64) -> (Air, String) {
+    let fake = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply("herdr --machine air agent list", &agents(air))
+        .reply(
+            "herdr status",
+            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
+        )
+        .reply("git -C", "");
+    let r = Air {
+        fake,
+        free_kb,
+        home: home.into(),
+    };
+    let (code, out) = run(c, &r, &["tick"]);
+    assert_eq!(code, 0, "{out}");
+    (r, out)
+}
+
+/// #651: one tick on a remote host with three scratch folders (a merged lane whose agent sits `done`, a working lane,
+/// an orphan) removes the merged and orphan ones there, through its runner, and keeps the working one.
+#[test]
+fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
+    let (c, home, s) = air_setup("scratch-remote");
+    air_spawn(&c, 12, "impl", "sendmeter-impl-12");
+    merged(&c, 12);
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    let [ended, working, orphan] =
+        ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(&s, &format!("{a}/debug")));
+    let air = [
+        ("sendmeter-impl-12", "done", "/x", "w1:p1"),
+        ("sendmeter-impl-13", "working", "/x", "w2:p1"),
+    ];
+    let (r, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    assert!(!ended.exists() && !orphan.exists(), "{out}");
+    assert!(working.exists(), "a working lane's scratch stays: {out}");
+    assert!(
+        r.fake
+            .calls
+            .borrow()
+            .iter()
+            .any(|l| l.starts_with("ssh air -- 'sh' '-c'") && l.contains(".scratch")),
+        "swept through air's runner"
+    );
+    for a in ["sendmeter-impl-12", "sendmeter-rev-9-r1"] {
+        assert!(
+            out.contains(&format!("scratch: air: removed {AIR_ROOT}/.scratch/{a} ")),
+            "{out}"
+        );
+    }
+    assert!(out.contains("(lane ended)"), "{out}");
+}
+
+/// #651: under `min_free_gb` a host's scratch of every non-working lane goes, largest first, each logged with the host,
+/// size and reason; a working lane's stays.
+#[test]
+fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
+    let (c, home, s) = air_setup("scratch-low");
+    air_spawn(&c, 13, "impl", "sendmeter-impl-13");
+    air_spawn(&c, 13, "rev", "sendmeter-rev-13-r1");
+    air_spawn(&c, 14, "impl", "sendmeter-impl-14");
+    let sized = |a: &str, kb: usize| {
+        let p = s.join(a);
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(p.join("blob"), vec![1u8; kb * 1024]).unwrap();
+        p
+    };
+    let (small, big, busy) = (
+        sized("sendmeter-impl-13", 64),
+        sized("sendmeter-rev-13-r1", 512),
+        sized("sendmeter-impl-14", 256),
+    );
+    let air = [
+        ("sendmeter-impl-13", "idle", "/x", "w1:p1"),
+        ("sendmeter-rev-13-r1", "done", "/x", "w2:p1"),
+        ("sendmeter-impl-14", "working", "/x", "w3:p1"),
+    ];
+    let (_, out) = tick(&c, &home, &air, 1_048_576);
+    assert!(!small.exists() && !big.exists(), "{out}");
+    assert!(busy.exists(), "a working lane's scratch is never touched: {out}");
+    let at = |a: &str| {
+        out.find(&format!("scratch: air: removed {AIR_ROOT}/.scratch/{a} "))
+            .expect(&out)
+    };
+    assert!(
+        at("sendmeter-rev-13-r1") < at("sendmeter-impl-13"),
+        "largest first: {out}"
+    );
+    assert!(out.contains("(disk low)"), "{out}");
 }

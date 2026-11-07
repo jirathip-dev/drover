@@ -332,6 +332,8 @@ pub struct Fleet {
     /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
+    /// #638: this fleet's share of the spawn slots against the others' (default 1).
+    pub weight: Option<usize>,
     /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
@@ -493,6 +495,8 @@ pub struct Limits {
     /// `build_budget_gb` drive trims its unlocked profiles.
     pub build_root: String,
     pub build_budget_gb: f64,
+    /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
+    pub sweep_remote: bool,
     /// #536: where `herdsman clean` looks for stray Cargo build folders and Claude Code's per-worktree temp dirs.
     pub stray_roots: Vec<String>,
     /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
@@ -507,6 +511,8 @@ pub struct Limits {
     pub idle_reap_minutes: u64,
     /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
     pub done_close_minutes: u64,
+    /// #605: a merged or closed issue's lane not `working` this long has its pane closed (drive's `clean`).
+    pub idle_merged_minutes: u64,
     pub transcript_days: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
@@ -565,6 +571,7 @@ impl Default for Limits {
             worktree_budget_gb: 25.0,
             build_root: "~/.cache/herdsman/target".into(),
             build_budget_gb: 20.0,
+            sweep_remote: true,
             stray_roots: vec!["/tmp".into(), "$TMPDIR".into()],
             min_free_mem_gb: 2.0,
             effort: None,
@@ -572,6 +579,7 @@ impl Default for Limits {
             ask_expire_hours: 24,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
+            idle_merged_minutes: 15,
             transcript_days: 30,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))

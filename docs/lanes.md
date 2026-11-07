@@ -48,8 +48,10 @@ folder's profiles (`<repo>/debug`, ...) whose `.cargo-lock` no cargo holds, neve
 of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. #536: each lane also gets a private scratch
 dir, `HERDSMAN_SCRATCH_TARGET=<build_root>/.scratch/<agent>`, for second builds and checkouts (base, staging, head);
 the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `build_root` (`REFUSED SCRATCH_TARGET`). Scratch dirs
-count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended (no herdr agent of its name,
-not an open issue's active lane). `herdsman clean` lists the Cargo folders lanes left in `[limits] stray_roots`
+count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended. #651: on every enabled host
+(remote ones in the tick, after their trim; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
+while its agent is working, it is an open issue's latest lane of its role, or a herdr agent no spawn names yet holds it.
+Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `herdsman clean` lists the Cargo folders lanes left in `[limits] stray_roots`
 (`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
 already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
 folder of the local checkout into a new lane (never a reopened one) when its lockfile matches: `Cargo.lock`
@@ -74,7 +76,11 @@ refused `SECRET_IN_WIP` when the diff has a secret-looking value), closes the pa
 `lane-killed`. The worktree stays; a killed impl goes back
 to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawnable.
 `herdsman clean <fleet> --lane <agent>` applies `clean`'s safety to one lane and refuses
-`UNSAFE_CLEAN` with the reason.
+`UNSAFE_CLEAN` with the reason. #605: a merged or closed issue's lane whose agent is not `working` for
+`[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`
+way, logged `lane-closed` with `why: merged-idle`, then its worktree removed; the dry run says `would close`. A
+`SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried. A working agent, an open
+issue's lane, a conductor or any other agent in the folder stays `keep …: live agent`.
 
 `--supersede` kills the old agent and logs it. If `herdr agent start` times out but the
 harness came up in the pane, spawn names the agent and logs the lane anyway; if nothing

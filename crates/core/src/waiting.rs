@@ -293,20 +293,29 @@ pub fn waiting_on(
         _ => "",
     };
     // #148: a PASSed item blocked by CI, mergeability or host load is retried as ready on every pass.
-    let block = events
-        .iter()
-        .rev()
-        .find(|e| e.is("blocked", f, n))
-        .and_then(|e| e.str("code"));
+    let blocked = events.iter().rev().find(|e| e.is("blocked", f, n));
+    let block = blocked.and_then(|e| e.str("code"));
     let retry = s.state == "blocked" && s.verdicts.last().is_some_and(|v| v.1 == "PASS");
     // #599: a PASS at the head that goes on to another check waits on that check, whatever the merge refused.
     let here = s
         .verdicts
         .last()
         .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
+    // #650: a head the merge gate's own rule finds verified (each check PASSed, skipped or without a recipe there)
+    // waits on no check: it merges next pass, or names the gate that refused it.
+    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed, false).is_ok();
+    let mut outcomes = s
+        .verdicts
+        .iter()
+        .filter(|v| v.0.eq_ignore_ascii_case(pushed))
+        .map(|v| &v.2);
+    let more = outcomes.next().is_some_and(|c| outcomes.any(|o| o != c));
+    let next_check = next_check.filter(|_| !done);
     let st = match block {
         _ if retry && here && next_check.is_some() => "ready",
         Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
+        Some("STALE_VERDICT") if retry && done => "ready",
+        Some(_) if retry && done && more && how.is_empty() => "refused",
         // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
         Some("STALE_VERDICT") if s.state == "blocked" => "stale",
         // #214: blocked with an open PR is no resting state: a conflict is updated, anything else reviewed again.
@@ -343,13 +352,24 @@ pub fn waiting_on(
                 cmd("spawn", &format!(" {b} --supersede --update")),
             )
         }
+        "refused" => {
+            let why = blocked.and_then(|e| e.str("reason")).unwrap_or_default();
+            let what = format!("PASS · merge refused {}: {why}", block.unwrap_or_default());
+            w("owner", &what, s.last_ts, None)
+        }
         // #212: CI read live by the fast step, which merges a green PASS within a minute.
-        "ready" if gh::ci(&checks) == "green" => w(
-            "drive",
-            "PASS · CI green · merging within 1 min",
-            s.last_ts,
-            cmd("merge", ""),
-        ),
+        "ready" if gh::ci(&checks) == "green" => {
+            // #650: verify passed by drive's skip at this head says so.
+            let skip = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
+            let what = if done && skip("verify-skipped") {
+                "PASS · verify skipped · merging next pass"
+            } else if done && skip("verify-no-recipe") {
+                "PASS · verify no recipe · merging next pass"
+            } else {
+                "PASS · CI green · merging within 1 min"
+            };
+            w("drive", what, s.last_ts, cmd("merge", ""))
+        }
         "ready" => {
             let all = checks.as_array().map(Vec::as_slice).unwrap_or_default();
             let n = all.iter().filter(|c| gh::check_state(c) == "green").count();
@@ -741,6 +761,26 @@ pub fn scan(
                 .map(|l| (s.clone(), w.on(l))),
         );
         out.push((s, w));
+    }
+    // #560: a review held for want of room names its place in drive's order: the reviews due before it go first.
+    let review = |w: &Waiting| {
+        let role = w.next_cmd.as_deref().and_then(|c| c.strip_prefix("herdsman spawn "));
+        let role = role.and_then(|c| c.split(' ').nth(2));
+        role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
+    };
+    let held = |w: &Waiting| {
+        let mine = of.get(&(w.fleet.as_str(), w.issue)).map_or(&[][..], Vec::as_slice);
+        let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
+        tried
+            .and_then(|e| e.str("code"))
+            .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))
+    };
+    let ahead = out
+        .iter_mut()
+        .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && review(w));
+    for (ahead, (_, w)) in ahead.enumerate().filter(|(n, (_, w))| *n > 0 && held(w)) {
+        let s = if ahead == 1 { "" } else { "s" };
+        w.what = format!("review waits behind {ahead} earlier review{s}");
     }
     out
 }
