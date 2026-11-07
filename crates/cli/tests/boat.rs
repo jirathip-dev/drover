@@ -17,9 +17,9 @@ const KEY: &str = "boat-key-635";
 /// subcommand fails as clap does. `ssh-keyscan` answers for the endpoint it gives.
 const BOAT: &str = r#"#!/bin/sh
 d=$(dirname "$0"); s="$d/sandboxes"; touch "$s"; echo "$*" >> "$d/calls"
-[ "$BOAT_API_KEY" = "boat-key-635" ] || { echo "error: not logged in" >&2; exit 1; }
 id_ok() { grep -q "^$1 " "$s" || { echo "error: no sandbox $1" >&2; exit 1; }; }
 set_state() { sed "s/^$1 \([^ ]*\) [^ ]*/$1 \1 $2/" "$s" > "$s.new" && mv "$s.new" "$s"; }
+[ "$1" = --help ] || [ "$BOAT_API_KEY" = "boat-key-635" ] || { echo "error: not logged in" >&2; exit 1; }
 case "$1" in
 --help) printf 'Usage: boat [OPTIONS] [COMMAND]\n\nCommands:\n  new       Create\n  info      Show\n  list      List\n  delete    Delete\n  stop      Stop\n  resume    Resume\n  ssh       SSH\n  snapshot  Save\n  help      Help\n' ;;
 new) shift; t=default; n=
