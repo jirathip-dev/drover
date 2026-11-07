@@ -1494,7 +1494,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Reclaim { apply } => check::reclaim(ctx, &cfg, r, out, stdin, apply)?,
                 Cmd::Stop { agent } => check::stop(ctx, &cfg, r, out, &agent)?,
                 Cmd::Close { agent, host } => check::close(ctx, &cfg, r, out, &agent, host.as_deref())?,
-                Cmd::Kill { agent, yes, host } => check::kill(ctx, &cfg, r, out, (&agent, host.as_deref()), yes, None)?,
+                Cmd::Kill { agent, yes, host } => check::kill(ctx, &cfg, r, out, (&agent, host.as_deref()), yes)?,
                 Cmd::Verdict {
                     fleet,
                     issue,

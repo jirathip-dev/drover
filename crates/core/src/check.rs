@@ -680,7 +680,7 @@ pub fn clean(
             writeln!(out, "would close {agent}'s idle pane {pane} (work to wip/ first)")?;
             live = false;
         } else if left == Some(0) && !refused {
-            match kill(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
+            match kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
                 Ok(()) => live = false,
                 Err(err) => {
                     why_live = format!("pane kept: {err:#}");
@@ -1367,6 +1367,18 @@ pub fn kill(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
+    lane: (&str, Option<&str>),
+    yes: bool,
+) -> Result<()> {
+    kill_as(ctx, cfg, r, out, lane, yes, None)
+}
+
+/// #605: `kill`, logged `lane-closed` with `why` when one is given.
+fn kill_as(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
     (agent, host): (&str, Option<&str>),
     yes: bool,
     why: Option<&str>,
@@ -1464,7 +1476,7 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             .iter()
             .any(|a| a["name"] == agent && a["pane_id"].as_str() == pane)
         {
-            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true, None) {
+            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true) {
                 writeln!(out, "stale pane {h}:{agent}: {e:#}")?;
             }
         } else {
