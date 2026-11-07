@@ -23,6 +23,8 @@ struct Server {
     sock: PathBuf,
     seen: Arc<Mutex<Vec<(String, Value)>>>,
     terms: Terms,
+    /// #662: the kept events `events` streams (those after its `since`); a test adds more as its lanes exit.
+    events: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Server {
@@ -36,14 +38,20 @@ impl Server {
         let _ = std::fs::remove_file(&sock);
         let l = UnixListener::bind(&sock).unwrap();
         let (seen, terms) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(BTreeMap::new())));
-        let (s2, t2, v) = (seen.clone(), terms.clone(), version.to_string());
+        let events = Arc::new(Mutex::new(events));
+        let (s2, t2, v, e2) = (seen.clone(), terms.clone(), version.to_string(), events.clone());
         std::thread::spawn(move || {
             for c in l.incoming().flatten() {
-                let (s, t, v, e) = (s2.clone(), t2.clone(), v.clone(), events.clone());
+                let (s, t, v, e) = (s2.clone(), t2.clone(), v.clone(), e2.clone());
                 std::thread::spawn(move || conn(c, &s, &t, &v, &e));
             }
         });
-        Server { sock, seen, terms }
+        Server {
+            sock,
+            seen,
+            terms,
+            events,
+        }
     }
     fn shed(&self) -> Shed {
         Shed {
@@ -70,7 +78,7 @@ impl Server {
     }
 }
 
-fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, version: &str, events: &[Value]) {
+fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, version: &str, events: &Mutex<Vec<Value>>) {
     let mut w = c.try_clone().unwrap();
     for line in BufReader::new(c).lines().map_while(Result::ok) {
         let q: Request = serde_json::from_str(&line).unwrap();
@@ -85,7 +93,14 @@ fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, versio
         let resp = res.map_or_else(|e| Response::err(id.clone(), e), |v| Response::ok(id.clone(), v));
         writeln!(w, "{}", serde_json::to_string(&resp).unwrap()).unwrap();
         if q.method == "events" {
-            events.iter().for_each(|e| drop(writeln!(w, "{e}")));
+            let since = q.params["since"].as_u64().unwrap_or(0);
+            let new = events
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .filter(|e| e["seq"].as_u64() > Some(since));
+            new.for_each(|e| drop(writeln!(w, "{e}")));
             std::thread::sleep(std::time::Duration::from_secs(3)); // shed never closes the stream
             return;
         }
@@ -976,4 +991,171 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, doc) = run(&c, &f, &["doctor"]);
     assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
+}
+
+/// #662: `git` for real in `dir` (a test repo), failing loudly.
+fn git(dir: &std::path::Path, a: &[&str]) -> String {
+    let o = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "init.defaultBranch=main",
+            "-C",
+        ])
+        .arg(dir)
+        .args(a)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "git {a:?}: {}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout).unwrap().trim().to_string()
+}
+
+/// #662: an ACP lane's runner whose `git` in its worktree (a real repo, the `PathBuf`) is real; the rest is `Cli`'s.
+struct Push<'a>(Cli<'a>, PathBuf);
+
+impl Runner for Push<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "git" && args.len() > 1 && args[0] == "-C" && PathBuf::from(&args[1]) == self.1 {
+            self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
+            let o = std::process::Command::new("git").args(args).output()?;
+            let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
+            return Ok(herdsman::runner::Out {
+                code: o.status.code().unwrap_or(1),
+                stdout: s(o.stdout),
+                stderr: s(o.stderr),
+            });
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+}
+
+const TOKEN_D: &str = concat!("sk", "-ant-oat01-DDDD-secret");
+
+/// #662: the ACP fleet with accounts C then D, and #12's impl lane spawned on C in a real worktree (its `origin` a
+/// bare repo holding `issue-12` at the base commit): (ctx, server, fake, worktree, origin).
+fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
+    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let cfg = acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]")
+        + "D = \"CLAUDE_CODE_OAUTH_TOKEN_D\"\n";
+    let c = acp_ctx(name, &cfg);
+    let (wt, origin) = (c.worktrees.join("sendmeter/issue-12"), c.worktrees.join("origin.git"));
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "--bare"]);
+    git(&wt, &["init", "-q", "-b", "issue-12"]);
+    git(&wt, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&wt, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&wt, &["push", "-q", "origin", "issue-12"]);
+    let f = acp_fake(&["true"])
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_D", TOKEN_D)
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
+    let (code, out) = run(
+        &c,
+        &Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone()),
+        &["spawn", "sendmeter", "12", "impl"],
+    );
+    assert_eq!(code, 0, "{out}");
+    (c, b, f, wt, origin)
+}
+
+/// #662: the lane's shed session ends: its terminal exits, shed's kept events say how (`kind`s after a turn's start).
+fn exits(b: &Server, kinds: &[Value]) {
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let mut ev = b.events.lock().unwrap();
+    let start = ev.len() as u64 * 10;
+    let all = [&[json!({"event": "turn", "prompt": "# Brief"})][..], kinds].concat();
+    for (i, k) in all.iter().enumerate() {
+        let mut e = json!({"seq": start + i as u64 + 1, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
+        ev.push(e);
+    }
+}
+
+fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
+    herdsman::Ctx {
+        now: c.now + secs,
+        ..c.clone()
+    }
+}
+
+fn logged(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    let all = herdsman::events::read(&c.state).unwrap();
+    all.into_iter().filter(|e| e.kind == kind).collect()
+}
+
+#[test]
+fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_worktree_on_another_account() {
+    let (c, b, f, wt, origin) = acp_lane("acp-resume");
+    assert_eq!(logged(&c, "spawn")[0].str("account"), Some("C"));
+    // The lane made two commits (the test, then the fix) and staged more, then its session exited 0 on C's limit.
+    for m in ["test", "fix"] {
+        git(&wt, &["commit", "-q", "--allow-empty", "-m", m]);
+    }
+    std::fs::write(wt.join("more.rs"), "staged").unwrap();
+    git(&wt, &["add", "more.rs"]);
+    let head = git(&wt, &["rev-parse", "HEAD"]);
+    let limit = "Claude AI usage limit reached ∙ resets 5pm";
+    exits(
+        &b,
+        &[
+            json!({"event": "text", "text": limit}),
+            json!({"event": "exited", "code": 0}),
+        ],
+    );
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let (code, out) = run(&at(&c, 300), &cli, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    // Its commits are on the issue branch, its staged file is not; it runs again in the same worktree, on D.
+    assert_eq!(git(&origin, &["rev-parse", "issue-12"]), head, "{out}");
+    assert!(git(&origin, &["ls-tree", "--name-only", "issue-12"]).is_empty());
+    assert_eq!(
+        git(&wt, &["diff", "--cached", "--name-only"]),
+        "more.rs",
+        "the staged change is kept"
+    );
+    let sp = logged(&c, "spawn");
+    assert_eq!(sp.len(), 2, "{out}");
+    assert_eq!(sp[1].str("account"), Some("D"), "{out}");
+    assert_eq!(sp[1].str("worktree"), wt.to_str());
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert!(brief.contains("local commits and staged changes are kept"), "{brief}");
+    // It keeps exiting mid-turn (the adapter crashes): each time it is pushed and resumed, never needs-human.
+    for i in 1..=3 {
+        exits(&b, &[json!({"event": "exited", "code": 1})]);
+        let (code, out) = run(&at(&c, 300 + i * 1900), &cli, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(logged(&c, "spawn").len(), 2 + i as usize, "{out}");
+    }
+    assert!(logged(&c, "needs-human").is_empty());
+    let (_, st) = run(&at(&c, 6000), &cli, &["status", "sendmeter"]);
+    assert!(!st.contains("needs-human"), "{st}");
+}
+
+#[test]
+fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
+    let (c, b, f, wt, _) = acp_lane("acp-cause");
+    exits(&b, &[json!({"event": "exited", "code": 139})]);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let c = at(&c, 300);
+    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let (code, out) = run(&c, &cli, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let dead = logged(&c, "lane-dead");
+    assert_eq!(dead.len(), 1, "{out}");
+    assert_eq!(dead[0].str("cause"), Some("adapter crash"));
+    assert!(dead[0].str("reason").unwrap().contains("adapter crash"), "{dead:?}");
+    let (_, w) = run(&c, &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("lane gone (adapter crash), no push: respawning impl"), "{w}");
 }
