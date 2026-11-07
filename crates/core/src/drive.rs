@@ -945,7 +945,10 @@ fn pass(
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
             let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
-            if step == "verdict" && code.is_none() && args[3] == "PASS" && green {
+            // #599: a PASS that goes on to another check (verify) merges only after that check, next pass.
+            let then = f.flow().next(&s.stage, "PASS").and_then(|t| f.flow().get(t.0));
+            let last = then.is_none_or(|t| t.kind != "check");
+            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && last {
                 merge = true;
                 code = if pr["mergeable"] == "CONFLICTING" {
                     Some("NOT_MERGEABLE")

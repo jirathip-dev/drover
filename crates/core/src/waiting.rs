@@ -299,7 +299,13 @@ pub fn waiting_on(
         .find(|e| e.is("blocked", f, n))
         .and_then(|e| e.str("code"));
     let retry = s.state == "blocked" && s.verdicts.last().is_some_and(|v| v.1 == "PASS");
+    // #599: a PASS at the head that goes on to another check waits on that check, whatever the merge refused.
+    let here = s
+        .verdicts
+        .last()
+        .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
     let st = match block {
+        _ if retry && here && next_check.is_some() => "ready",
         Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
         // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
         Some("STALE_VERDICT") if s.state == "blocked" => "stale",
