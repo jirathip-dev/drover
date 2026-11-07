@@ -249,7 +249,9 @@ pub fn waiting_on(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
-    let on = crate::events::held_on(events, s);
+    let mut on = crate::events::held_on(events, s);
+    // #665: a blocker that merged holds nothing; drive releases the hold on its next pass.
+    on.retain(|b| !log.all.iter().any(|e| e.is("merged", f, *b)));
     if !on.is_empty() {
         return w(
             "drive",

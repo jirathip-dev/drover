@@ -2774,3 +2774,29 @@ fn a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated() {
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(!out.contains("held"), "{out}");
 }
+
+/// #665: a pass ran after #11 merged and #12 still says held: the release logs `hold-stale` once, both numbers.
+#[test]
+fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
+    let c = setup("drive-hold-stale");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let pass = Event::new(c.now - 1500, "sendmeter", None, "drive-pass", json!({}));
+    append(&c.state, &pass).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    drive(&c, &r);
+    drive(&c, &r);
+    let stale = kinds(&c, "hold-stale");
+    assert_eq!(stale.len(), 1, "logged once");
+    assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
+}
