@@ -559,3 +559,89 @@ fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
     );
     assert!(out.contains("sendmeter #1 start: started"), "{out}");
 }
+
+/// #638: fleets `names`, each with `max_parallel_spawns = max` and issues 1..=`issues` queued.
+fn fleets(dir: &str, names: &[&str], max: usize, issues: u64) -> herdsman::Ctx {
+    let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
+    let all: String = names.iter().map(|n| fleet.replace("sendmeter", n)).collect();
+    let limits = limits.replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"));
+    let c = ctx(&tmpdir(dir), &format!("{all}[limits]{limits}"));
+    for n in names {
+        let mut add = vec!["queue".to_string(), n.to_string(), "add".into()];
+        add.extend((1..=issues).map(|i| i.to_string()));
+        let add: Vec<&str> = add.iter().map(String::as_str).collect();
+        assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    }
+    c
+}
+
+/// #638: the fleets a pass's kicks went to, in launch order.
+fn kicked_fleets(r: &Fake) -> Vec<String> {
+    let calls = r.calls.borrow();
+    let kick = |c: &String| {
+        Some(
+            c.strip_prefix("sh -c nohup '/opt/herdsman/bin/herdsman' kick ")?
+                .split(' ')
+                .next()?
+                .to_string(),
+        )
+    };
+    calls.iter().filter_map(kick).collect()
+}
+
+/// #638: three fleets with five ready issues each and six start slots: each pass starts two per fleet, one fleet
+/// at a time, and the fleet that goes first rotates pass by pass.
+#[test]
+fn starts_share_slots_round_robin_across_fleets() {
+    let names = ["alpha", "beta", "gamma"];
+    // #513: starts leave the last slot to in-flight work: seven slots are six for starts.
+    let c = fleets("kicks-638-fair", &names, 7, 5);
+    let mut firsts = vec![];
+    for _ in 0..3 {
+        let r = fake("1.0");
+        let (code, out) = run(&c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        let k = kicked_fleets(&r);
+        for n in names {
+            assert_eq!(k.iter().filter(|f| *f == n).count(), 2, "{n}: {k:?}");
+        }
+        assert_eq!(
+            k[..3].iter().collect::<std::collections::BTreeSet<_>>().len(),
+            3,
+            "one each first: {k:?}"
+        );
+        firsts.push(k[0].clone());
+        // Every kick ends before the next pass: its slot is free again.
+        for l in herdsman::db::leases(&c.state, "spawn-") {
+            herdsman::db::release(&c.state, &l.key, None);
+        }
+    }
+    assert_eq!(firsts, ["alpha", "beta", "gamma"]);
+}
+
+/// #638: a runner recording, at each agent list, whether issue 1's spawn slot is still held.
+struct Watch(Fake, herdsman::Ctx, Shared<Vec<bool>>);
+impl herdsman::runner::Runner for Watch {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "herdr" && args.starts_with(&["agent".into(), "list".into()]) {
+            self.2.borrow_mut().push(marker(&self.1, 1).is_some());
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #638: a kick refused HOST_BUSY gives its slot back at the refusal, not when its whole pass ends.
+#[test]
+fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
+    let c = fleet("kicks-638-busy", 6, 1);
+    pass(&c, &fake("1.0"));
+    assert!(marker(&c, 1).is_some());
+    let r = Watch(fake("40.0"), c.clone(), Shared::default());
+    let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("HOST_BUSY"), "{out}");
+    let seen = r.2.borrow().clone();
+    // Held while the kick starts; free at the look the pass takes after the refusal.
+    assert!(seen.first() == Some(&true) && seen.last() == Some(&false), "{seen:?}");
+}
