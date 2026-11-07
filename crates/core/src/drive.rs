@@ -146,7 +146,11 @@ pub fn summary(fleet: &str, out: &str) -> String {
     let (mut by, mut skip) = (BTreeMap::<&str, Vec<&str>>::new(), vec![]);
     for (head, res) in out.lines().filter_map(|l| l.split_once(": ")) {
         let (step, mut w) = (head.rsplit(' ').next().unwrap_or(head), res.split([' ', ':']));
-        let past = PAST.iter().find(|d| d.starts_with(step)).unwrap_or(&step);
+        let past = if res == "pending" {
+            &"pending"
+        } else {
+            PAST.iter().find(|d| d.starts_with(step)).unwrap_or(&step)
+        };
         let issue = head.split(' ').find(|n| n.starts_with('#'));
         match w.next().filter(|c| ["REFUSED", "exit", "error"].contains(c)) {
             Some(c) => skip.extend(if c == "REFUSED" { w.next() } else { Some(c) }),
@@ -170,8 +174,6 @@ thread_local! {
     /// #304: the one issue a kick drives (`None`: all); `IN_ACT` while a pass runs a command, which then kicks nothing.
     static KICK: Cell<Option<u64>> = const { Cell::new(None) };
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
-    /// #607: the last act's result line (a refusal's why).
-    static RESULT: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
@@ -235,7 +237,10 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         KICK.set(Some(n));
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
         KICK.set(None);
-        drop(pending.take()); // #318: a launched kick's marker goes after its first run
+        // #318: a launched kick's marker goes after its first run; #604: its result then goes to its pass.
+        if pending.take().map(drop).is_some() {
+            update(ctx, r, out, fleet, n)?;
+        }
         let text = String::from_utf8_lossy(&buf).into_owned();
         out.write_all(&buf)?;
         if text.starts_with("drive: ") {
@@ -296,6 +301,98 @@ fn launch(
     let pid = pid.unwrap_or(0);
     crate::db::renew(&ctx.state, &l, &crate::db::Lease { pid, data, ..l.clone() });
     Ok(0)
+}
+
+/// #604: a pass waits this long for its kicks to end before it logs one still running `pending`.
+const SETTLE_SECS: u32 = 20;
+
+/// #604: the spawns a pass's kicks started (their `spawn` logged, the prompt confirmed or not).
+fn launched(acts: &[Value]) -> usize {
+    acts.iter().filter(|a| a["spawned"] == true).count()
+}
+
+/// #604: each `pending` kicked spawn of this pass takes its kick's outcome once that kick ends (waited for up to
+/// `SETTLE_SECS`), else stays `pending`; one line each.
+fn settle(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let key = |f: &str, a: &Value| format!("spawn-{f}-{}.pending", a["issue"]);
+    let open = |all: bool| {
+        let live = |(f, a): (&String, &Value)| a["outcome"] == "pending" && (all || held(ctx, &key(f, a)).is_some());
+        ACTS.with_borrow(|m| m.iter().flat_map(|(f, v)| v.iter().map(move |a| (f, a))).any(live))
+    };
+    if !open(true) {
+        return Ok(());
+    }
+    for _ in 0..SETTLE_SECS {
+        if !open(false) {
+            break;
+        }
+        r.sleep(1);
+    }
+    let ev = read(&ctx.state)?;
+    ACTS.with_borrow_mut(|m| {
+        for (f, acts) in m.iter_mut() {
+            for a in acts.iter_mut().filter(|a| a["outcome"] == "pending") {
+                if held(ctx, &key(f, a)).is_none() {
+                    ended(&ev, f, a, ctx.now);
+                }
+                writeln!(out, "{}", line(f, a))?;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// #604: pending kicked spawn `a` as its kick ended, from the log since `since`: its step's past (`started`) when its
+/// `spawn` was logged, else the kick's own action on the issue (a refusal's code and words).
+fn ended(ev: &[Event], fleet: &str, a: &mut Value, since: u64) {
+    let Some(n) = a["issue"].as_u64() else { return };
+    let step = a["step"].as_str().unwrap_or_default().to_string();
+    let after = |e: &&Event| e.ts >= since && e.fleet == fleet;
+    if ev.iter().filter(after).any(|e| e.is("spawn", fleet, n)) {
+        let past = PAST.iter().find(|d| d.starts_with(&step)).map_or(&*step, |d| d);
+        (a["outcome"], a["words"], a["spawned"]) = (past.into(), past.into(), true.into());
+        return;
+    }
+    let pass = |e: &&Event| e.kind == "drive-pass" && e.data.get("kick") == Some(&json!(n));
+    let mine = ev
+        .iter()
+        .filter(after)
+        .rfind(pass)
+        .and_then(|e| e.data.get("actions")?.as_array());
+    if let Some(k) = mine.and_then(|v| v.iter().rfind(|k| k["issue"] == n)) {
+        for f in ["outcome", "code", "words", "why"] {
+            a[f] = k[f].clone();
+        }
+    } else {
+        (a["outcome"], a["words"]) = ("waiting".into(), "its kick started nothing".into());
+    }
+}
+
+/// #604: once the pass that launched kick `fleet` #`n` is over (`drive.lock` free, at most 120 s), its `pending`
+/// action takes the kick's outcome: that pass is logged again, updated.
+fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -> Result<()> {
+    for _ in 0..120 {
+        if held(ctx, "drive.lock").is_none() {
+            break;
+        }
+        r.sleep(1);
+    }
+    let ev = read(&ctx.state)?;
+    let theirs =
+        |e: &&Event| e.kind == "drive-pass" && e.fleet == fleet && e.data.get("kick").is_none_or(Value::is_null);
+    let Some(e) = ev.iter().rfind(theirs) else {
+        return Ok(());
+    };
+    let mut d = Value::Object(e.data.clone());
+    let acts = d["actions"].as_array_mut();
+    let Some(a) = acts.and_then(|v| v.iter_mut().rfind(|a| a["issue"] == n && a["outcome"] == "pending")) else {
+        return Ok(());
+    };
+    ended(&ev, fleet, a, e.ts);
+    writeln!(out, "{}", line(fleet, a))?;
+    d["spawns_launched"] = launched(d["actions"].as_array().map_or(&[], Vec::as_slice)).into();
+    d["updated"] = ctx.now.into();
+    append(&ctx.state, &Event::new(e.ts, fleet, None, "drive-pass", d))
 }
 
 /// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
@@ -380,7 +477,7 @@ fn line(fleet: &str, a: &Value) -> String {
     match a["code"].as_str() {
         None => format!("{who} {step}: {w}"),
         Some("EXIT" | "ERROR") => format!("{who} {step}: error: {w}"),
-        Some(c) => format!("{who} {step}: REFUSED {c}: {w}"),
+        Some(c) => format!("{who} {step}: REFUSED {c}: {}", a["why"].as_str().unwrap_or(w)),
     }
 }
 
@@ -529,6 +626,7 @@ pub fn drive(
     if fast {
         let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
     }
+    settle(ctx, r, out)?;
     for &name in &fleets {
         let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
         if !fast && KICK.get().is_none() {
@@ -543,7 +641,7 @@ pub fn drive(
             crate::usage::date(r, end, "+%H:%M"),
         );
         let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
-            "spawns_launched": acts.iter().filter(|a| a["kick"] == true && a["code"].is_null()).count(), "actions": acts});
+            "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
@@ -982,8 +1080,8 @@ fn repro_refused(
 ) -> Result<()> {
     let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
     let on = crate::hosts::On::of(r, sp);
-    let last = RESULT.take();
-    let why = last.trim_start_matches("REFUSED NO_REPRO: ");
+    let why = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()?["why"].as_str().map(String::from)));
+    let why = why.unwrap_or_default();
     let told = ev
         .iter()
         .any(|e| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.data["prompted"] == true);
@@ -1467,24 +1565,27 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         return Ok(None);
     }
     let outcome = match code {
+        None if kicks && issue.is_some() => "pending",
         None => PAST.iter().find(|d| d.starts_with(step)).map_or(step, |d| d),
         Some("EXIT" | "ERROR") => "error",
         Some(_) => "waiting",
     };
-    let w = words(code, step, &result);
-    RESULT.set(result.clone());
+    let w = if outcome == "pending" {
+        outcome.into()
+    } else {
+        words(code, step, &result)
+    };
+    let why = code.map(|_| result.split_once(": ").map_or(&*result, |p| p.1));
     ACTS.with_borrow_mut(|a| {
-        a.entry(fleet.into())
-            .or_default()
-            .push(json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "kick": kicks}));
+        a.entry(fleet.into()).or_default().push(
+            json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "why": why, "kick": kicks}),
+        );
     });
-    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
-    // #438: a launched spawn's outcome is its kick's to log (a refusal there must not follow an `ok` here).
-    if kicks && issue.is_some() && code.is_none() {
-        return writeln!(out, "{who} {step}: launched")
-            .map(|()| None)
-            .map_err(Into::into);
+    // #438 #604: a launched spawn's outcome is its kick's: `settle` logs it at the pass's end.
+    if outcome == "pending" {
+        return Ok(None);
     }
+    let who = issue.map_or(fleet.to_string(), |n| format!("{fleet} #{n}"));
     let recent = |e: &Event| e.kind == "driven" && e.fleet == fleet && e.issue == issue && ctx.now < e.ts + 3600;
     let same = |e: &Event| e.str("step") == Some(step) && e.str("code") == code;
     // A repeated refusal is silent too (no cron mail every pass).
