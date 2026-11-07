@@ -48,6 +48,13 @@ fn fake(load: &str) -> Fake {
         .reply("git -C", "")
 }
 
+/// #604: the pass's kicks still starting when it ended (the fake's kicks never run; none `spawns_launched`).
+fn pending(d: &serde_json::Value) -> u64 {
+    assert_eq!(d["spawns_launched"], 0, "{d}");
+    let a = d["actions"].as_array().unwrap();
+    a.iter().filter(|a| a["outcome"] == "pending").count() as u64
+}
+
 fn launched(r: &Fake, n: u64) -> usize {
     r.count(&format!(
         "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} --why drive --now"
@@ -81,7 +88,7 @@ fn a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness() {
         r.calls.borrow()
     );
     assert!((1..=10).all(|n| launched(&r, n) == 1 && marker(&c, n).is_some()));
-    assert_eq!(d["spawns_launched"], 10, "{d}");
+    assert_eq!(pending(&d), 10, "{d}");
     assert!(d["secs"].is_number());
 }
 
@@ -91,7 +98,7 @@ fn kicks_respect_max_parallel_spawns_and_admission() {
     let r = fake("1.0");
     let d = pass(&c, &r);
     // #513: starts leave the last slot to in-flight work.
-    assert_eq!(d["spawns_launched"], 2, "{d}");
+    assert_eq!(pending(&d), 2, "{d}");
     assert!((1..=2).all(|n| launched(&r, n) == 1) && (3..=5).all(|n| launched(&r, n) == 0));
     let held = d["actions"]
         .as_array()
@@ -167,7 +174,7 @@ fn a_pass_counts_starting_spawns_against_serial_and_cap() {
     let c = fleet_with("kicks-cap", 6, "max_impl = 1", 3, &[]);
     let r = fake("1.0");
     let d = pass(&c, &r);
-    assert_eq!(d["spawns_launched"], 1, "{d}");
+    assert_eq!(pending(&d), 1, "{d}");
     assert_eq!(codes(&d), ["", "CAP"], "CAP ends the fleet's starts: {d}");
 }
 
@@ -254,7 +261,7 @@ fn six_dead_markers_never_hold_a_new_spawn() {
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
     let r = fake("1.0");
     let d = pass(&c, &r);
-    assert_eq!((launched(&r, 1), d["spawns_launched"].as_u64()), (1, Some(1)), "{d}");
+    assert_eq!((launched(&r, 1), Some(pending(&d))), (1, Some(1)), "{d}");
     assert_eq!(stale(&c).len(), 6);
     assert!((11..=16).all(|n| marker(&c, n).is_none()));
 }
@@ -383,7 +390,7 @@ fn fix_rounds_launch_before_starts_and_starts_keep_one_slot_free() {
     let (fixes, starts) = ([at(21), at(22)], (1..=10).filter_map(at).collect::<Vec<_>>());
     assert!(fixes.iter().all(Option::is_some), "{d}");
     assert!(starts.iter().all(|s| fixes.iter().all(|f| f < &Some(*s))), "{d}");
-    assert_eq!((starts.len(), d["spawns_launched"].as_u64()), (3, Some(5)), "{d}");
+    assert_eq!((starts.len(), Some(pending(&d))), (3, Some(5)), "{d}");
 }
 
 /// #513: five starts still starting: a due fix round takes the reserved sixth slot; a start does not.
@@ -534,4 +541,21 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
     assert!(out.contains("host-busy mini: memory pressure warn"), "{out}");
     run(&later, &Fake::default(), &["check"]);
     assert_eq!(alerts(), 1, "once per episode");
+}
+
+/// #604: a kick that logs its `spawn` inside its pass counts as launched and reads `started`.
+#[test]
+fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
+    let c = fleet("kicks-604-ok", 6, 1);
+    let (code, out) = run(&c, &Inline(fake("1.0"), c.clone(), "1.0"), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    assert!(ev.iter().any(|e| e.is("spawn", "sendmeter", 1)), "{out}");
+    let d = serde_json::Value::Object(ev.iter().rfind(|e| e.kind == "drive-pass").unwrap().data.clone());
+    assert_eq!(
+        (&act(&d, 1)["outcome"], &d["spawns_launched"]),
+        (&serde_json::json!("started"), &serde_json::json!(1)),
+        "{d}"
+    );
+    assert!(out.contains("sendmeter #1 start: started"), "{out}");
 }
