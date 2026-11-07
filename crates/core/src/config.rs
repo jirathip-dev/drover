@@ -530,7 +530,7 @@ pub struct Limits {
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Deny {
     Cmd(String),
