@@ -54,7 +54,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     let at = |s: &str| chat.find(s).unwrap_or_else(|| panic!("{s} not in {chat}"));
     assert!(at("<b>all repos</b>") < at("<b>acme-api</b>") && at("<b>acme-api</b>") < at("<b>acme-web</b>"));
     assert!(chat.contains(
-        "<a class=\"tr\" href=#chat data-t=\"t4\"><i class=ud>●</i><span class=tt>Rate limits for /v1/search</span>"
+        "<a class=\"tr\" href=#chat data-t=\"t4\"><i class=ud>●</i><span class=tt><span>Rate limits for /v1/search</span><small class=tid>· t4</small></span>"
     ));
     assert!(chat.contains("<b class=r>! choose</b>conductor: Return 429 with `Retry-After` only"));
     assert!(
@@ -942,8 +942,14 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         .1
         .starts_with("t1 sendmeter: Land mode for #12\n"));
     let (chat, _) = frags(&s, &cookie, T + 5);
-    assert!(chat.contains("<span class=tt>Land mode for #12</span>"), "{chat}");
-    assert!(chat.contains("<div><b>Land mode for #12</b>"), "{chat}");
+    assert!(
+        chat.contains("<span class=tt><span>Land mode for #12</span><small class=tid>· t1</small></span>"),
+        "{chat}"
+    );
+    assert!(
+        chat.contains("<div class=tn><b>Land mode for #12</b><small class=tid>· t1</small></div>"),
+        "{chat}"
+    );
     for bad in ["two\nlines", " "] {
         assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
     }

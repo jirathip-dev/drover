@@ -290,6 +290,7 @@ pub fn plain(ev: &Event) -> String {
                 s("id")
             )
         }
+        "host-busy" => format!("host-busy {}: {}", s("host"), s("reason")),
         "decision" => format!("{who} decision {} by {}: {}", s("id"), s("by"), s("choice")),
         "queue" => {
             let n: Vec<String> = ev.data["issues"]
@@ -461,6 +462,7 @@ pub const PASSIVE: &[&str] = &[
     "form-rounds-exhausted",
     "stale-marker",
     "spawn-held",
+    "host-busy",
     "outbox",
     // #584: an ask's other endings, and the one-time sweep.
     "ask-withdrawn",

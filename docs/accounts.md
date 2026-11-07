@@ -30,3 +30,5 @@ and it lasts. An account item that still times out on a read shows in `herdsman 
 
 A message to a thread whose delivery is stuck waits at most 30 s behind it, then shows `not delivered` instead of
 hanging.
+
+Keychain over ssh, a jammed SecurityAgent and a new build's cdhash: see [troubleshooting](troubleshooting.md).

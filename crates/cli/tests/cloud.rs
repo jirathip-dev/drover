@@ -89,6 +89,10 @@ fn fake(mini: f64) -> Fake {
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
         .reply(&rc("start"), "")
         .reply(&rc("status"), "running\n")
         .reply(&rc("address"), "ubuntu@10.0.0.7 2222\nssh-ed25519 AAAAC3fakekey\n")
@@ -536,7 +540,7 @@ fn boot_fake(gh_in: bool) -> Fake {
         .reply(&step("git config --global --get credential"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&step("git clone"), "")
-        .reply(&step("'/opt/herdsman/bin/herdsman' profiles sync"), "");
+        .reply(&step("test ! -e "), "");
     if gh_in {
         f.reply(&step("gh auth status"), "")
     } else {
@@ -616,15 +620,14 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         !r.0.calls.borrow().iter().any(|c| c.contains("--with-token")),
         "no login pane"
     );
+    // #592: no fleet.toml goes there (spawn syncs each lane's profile); with none there, no full sync either.
     let written = r.1.borrow().join("\n");
-    assert!(
-        written.contains("[fleet.sendmeter") && written.contains("jirathip-dev/sendmeter"),
-        "{written}"
-    );
-    assert!(
-        !written.contains("SEKRIT") && !written.contains("accounts_env"),
-        "{written}"
-    );
+    assert!(!written.contains("[fleet") && !written.contains("SEKRIT"), "{written}");
+    let conf = c.config.display().to_string();
+    assert!(r.0.called(&step(&format!(
+        "test ! -e '{conf}' || '/opt/herdsman/bin/herdsman' profiles sync"
+    ))));
+    assert!(out.contains("✓ profiles sync — there"), "{out}");
     let log = herdsman::events::jsonl(&c.state).unwrap();
     assert!(
         log.contains("host-bootstrap") && !log.contains("SEKRIT") && !log.contains(KEY),

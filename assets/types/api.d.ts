@@ -129,9 +129,9 @@ export type QueuedMsg = { q: number, text: string, };
 
 /**
  * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
- * and conductor folder `dir`.
+ * and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
  */
-export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
+export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
 
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
@@ -203,7 +203,7 @@ export type Row = { name: string, tone: string, detail: string, fix: string, };
  * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
  * forms are inert); `mtime` the forms send back.
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, telegram: Telegram, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
@@ -264,12 +264,6 @@ export type Paired = { hash: string, label: string, created: number, used: numbe
  * #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
  */
 export type Notifier = { kind: string, on: string, };
-
-/**
- * #440: the Telegram bridge: `on` with both `chat` and `owner` set, its `topics` (threads) and last poll's age; never
- * the token or the chat's id.
- */
-export type Telegram = { on: boolean, chat: boolean, owner: boolean, topics: number, polled: string, };
 
 /**
  * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml

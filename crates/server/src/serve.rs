@@ -184,22 +184,6 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
         });
-        // #387: the Telegram bridge's long-poll (off without `[telegram] chat`); it moves to Phase C (#345) later.
-        sc.spawn(move || loop {
-            let ctx = &Ctx {
-                now: crate::now(),
-                ..ctx.clone()
-            };
-            let on = Config::load(&ctx.config)
-                .ok()
-                .filter(|c| c.telegram.chat.is_some() && !read_only);
-            let wait = match on.map(|c| crate::telegram::tick(ctx, &c, r, 50)) {
-                Some(Ok(())) => 0,
-                Some(Err(e)) => (eprintln!("herdsman telegram: {e:#}"), 30).1,
-                None => 60,
-            };
-            std::thread::sleep(Duration::from_secs(wait));
-        });
         // #140: drive and the needs-human ops run here, one at a time; the board toasts the result.
         sc.spawn(move || {
             for (c, f, fleet) in rx {
@@ -359,6 +343,8 @@ pub struct Server<'a> {
     snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
+    /// #620: the [chat] tab's fold, by its key (`chat_tab`).
+    chat: Mutex<(serde_json::Value, serde_json::Value)>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -680,6 +666,7 @@ impl<'a> Server<'a> {
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
+            chat: Mutex::default(),
         }
     }
 
@@ -1305,7 +1292,15 @@ impl<'a> Server<'a> {
         match op {
             "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
             "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
-            "clean" => crate::check::clean(ctx, &cfg, self.r, &mut out, Some(&fleet), (None, Some(agent)), yes)?,
+            "clean" => crate::check::clean(
+                ctx,
+                &cfg,
+                self.r,
+                &mut out,
+                Some(&fleet),
+                (None, Some(agent), false),
+                yes,
+            )?,
             "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
@@ -2396,7 +2391,7 @@ impl<'a> Server<'a> {
             detail,
             ..Row::default()
         };
-        // #440: the global notifiers in words and the Telegram bridge, for System's Notifications.
+        // #440: the global notifiers in words, for System's Notifications.
         if let Some(c) = cfg {
             let notifier = |n: &crate::config::Notify| crate::api::Notifier {
                 kind: if n.kind.as_deref() == Some("webpush") {
@@ -2412,20 +2407,6 @@ impl<'a> Server<'a> {
                 },
             };
             d.notify = c.notify.iter().map(notifier).collect();
-            let polled = std::fs::metadata(ctx.state.with_file_name("telegram.json")).and_then(|m| m.modified());
-            let polled = polled.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
-            d.telegram = crate::api::Telegram {
-                on: c.telegram.chat.is_some() && c.telegram.owner.is_some(),
-                chat: c.telegram.chat.is_some(),
-                owner: c.telegram.owner.is_some(),
-                topics: events
-                    .iter()
-                    .filter(|e| e.kind == "telegram-topic")
-                    .filter_map(|e| e.str("thread"))
-                    .collect::<BTreeSet<_>>()
-                    .len(),
-                polled: polled.map_or(String::new(), |t| ago(ctx.now, t.as_secs())),
-            };
         }
         if live {
             // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.

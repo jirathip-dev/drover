@@ -375,17 +375,20 @@ pub fn list(r: &dyn Runner, what: &str) -> Result<Value> {
 }
 
 /// Live agents (`herdr agent list`); #298: with shed, herdr's (if it answers; a cached list's shed rows dropped) and
-/// shed's lanes.
+/// shed's lanes. #601: on another host (shed over ssh) herdr's answer alone proves it up; shed failing there is its
+/// `! shed:` health row (`hosts::health`), never offline.
 pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
     let Some(b) = r.shed() else {
         return Herdr.agents(r);
     };
-    let herdr = Herdr
-        .agents(r)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|a| a["runtime"] != "shed");
-    Ok(herdr.chain(Shed(b).agents(r)?).collect())
+    let remote = matches!(b.wire, shed::Wire::Connect);
+    let herdr = Herdr.agents(r);
+    let sheds = match Shed(b).agents(r) {
+        Err(_) if remote && herdr.is_ok() => vec![],
+        s => s?,
+    };
+    let herdr = herdr.unwrap_or_default().into_iter().filter(|a| a["runtime"] != "shed");
+    Ok(herdr.chain(sheds).collect())
 }
 
 /// `herdr agent list`'s stdout when it ran OK (serve's watcher hashes and caches it); #298: with shed, both lists.
