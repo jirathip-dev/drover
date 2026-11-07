@@ -224,17 +224,26 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let screen = herdr::read(r, p).unwrap_or_default();
                 let name = account.or(sp.str("harness")).unwrap_or_default();
                 let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let rest = |until| json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until});
                 let h = crate::harness::get(harness.unwrap_or_default());
-                if let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now) {
-                    let why = format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now");
-                    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
-                    hits.push((kind, format!("{lane}:{name}"), why));
-                    capped = Some(rest(until));
-                } else if chain && h.signed_out(&screen) {
-                    let why = format!("{name}: {role} lane {lane} is signed out; spawns skip {name} for now");
-                    hits.push(("agent-unavailable", format!("{lane}:{name}:auth"), why));
-                    capped = Some(rest(ctx.now + cfg.limits.fallback_rest_minutes * 60));
+                // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
+                let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
+                    Some(u) => Some((crate::access::confirm(ctx, cfg, r, account, u), "")),
+                    None if h.signed_out(&screen) => {
+                        let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
+                        let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
+                        Some(((kind, none.then_some(rest), "sign-in prompt".into()), ":auth"))
+                    }
+                    None => None,
+                };
+                if let Some(((kind, until, meter), auth)) = seen {
+                    let why = match kind {
+                        "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
+                        "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
+                        _ => format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you sign in or replace its token (an account: then `herdsman accounts reset {name}`)"),
+                    };
+                    hits.push((kind, format!("{lane}:{name}{auth}"), why));
+                    let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
+                    capped = Some((kind, d));
                 }
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
@@ -298,7 +307,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let (Some(serde_json::Value::Object(c)), "account-capped" | "agent-unavailable") = (&capped, kind) {
+            if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
                 c.iter().for_each(|(k, v)| d[k] = v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
