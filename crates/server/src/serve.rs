@@ -359,6 +359,8 @@ pub struct Server<'a> {
     snap: Mutex<(Option<u64>, Arc<Snapshot>)>,
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
+    /// #620: the [chat] tab's fold, by its key (`chat_tab`).
+    chat: Mutex<(serde_json::Value, serde_json::Value)>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -680,6 +682,7 @@ impl<'a> Server<'a> {
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
+            chat: Mutex::default(),
         }
     }
 
