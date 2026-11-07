@@ -183,8 +183,11 @@ pub fn done(
     (fleet, n): (&str, u64),
     why: &str,
 ) -> Result<()> {
+    // #639: a lessons issue drive's queue started as `impl` is one too (its title says so), while it has no PR.
     let st = crate::gate::issue_state(ctx, fleet, n)?;
-    if st.is_none_or(|s| s.build.as_deref() != Some("lesson") || s.rounds > 0) {
+    let filed = || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "));
+    let no_pr = || crate::gh::cached_pr(ctx, fleet, n)["number"].is_null();
+    if st.is_none_or(|s| s.build.as_deref() != Some("lesson") && !(filed() && no_pr()) || s.rounds > 0) {
         return Ok(());
     }
     let repo = &cfg.fleet(fleet)?.repo;
