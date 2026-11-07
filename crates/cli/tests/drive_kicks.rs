@@ -645,3 +645,13 @@ fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
     // Held while the kick starts; free at the look the pass takes after the refusal.
     assert!(seen.first() == Some(&true) && seen.last() == Some(&false), "{seen:?}");
 }
+
+/// #638: `waiting` names who holds the spawn slots.
+#[test]
+fn waiting_names_the_slot_holders() {
+    let c = fleets("kicks-638-slots", &["alpha", "beta"], 4, 2);
+    pass(&c, &fake("1.0"));
+    let (code, out) = run(&c, &fake("1.0"), &["waiting"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("slots: alpha 2, beta 1\n"), "{out}");
+}

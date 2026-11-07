@@ -332,6 +332,8 @@ pub struct Fleet {
     /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
+    /// #638: this fleet's share of the spawn slots against the others' (default 1).
+    pub weight: Option<usize>,
     /// #103: exported into every lane (`~/` expands).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
