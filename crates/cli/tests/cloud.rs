@@ -434,7 +434,19 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
         "{once}"
     );
     // A new address replaces the block (#635: the pinned host key stays the same).
-    let r = fake(0.1).once(&rc("address"), 0, "ubuntu@10.0.0.9 22\nssh-ed25519 AAAAC3fakekey\n");
+    // A moved box answers the new address on every read (start's refresh and the survey's #635 D check).
+    let mut r = fake(0.1);
+    let stdout = "ubuntu@10.0.0.9 22\nssh-ed25519 AAAAC3fakekey\n".into();
+    r.replies.insert(
+        0,
+        (
+            rc("address"),
+            Out {
+                stdout,
+                ..Out::default()
+            },
+        ),
+    );
     herdsman::cloud::start(&c, &cfg, &r, "cloud1").unwrap();
     let now = std::fs::read_to_string(dir.join("herdsman")).unwrap();
     assert!(now.contains("HostName 10.0.0.9") && !now.contains("10.0.0.7"), "{now}");
