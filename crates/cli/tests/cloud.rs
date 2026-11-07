@@ -118,7 +118,7 @@ fn spawn_fake() -> Fake {
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
-            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
+            &format!("{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' https://github.com/jirathip-dev/sendmeter.git"),
             "",
         )
         .reply(&format!("{SSH}'git' '-C'"), "")
@@ -171,6 +171,15 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     // #256: why it went there, and the lane hook's host.
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
     assert!(r.calls.borrow().iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")));
+    // #646: its first use there clones lean: the integration branch only, `wip/*` never fetched.
+    let clone: Vec<_> = (r.calls.borrow().iter())
+        .filter(|c| c.contains("git clone"))
+        .cloned()
+        .collect();
+    assert!(
+        clone.len() == 1 && clone[0].contains("--single-branch") && clone[0].contains("^refs/heads/wip/*"),
+        "{clone:?}"
+    );
 }
 
 #[test]

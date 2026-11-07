@@ -1699,7 +1699,8 @@ fn build(p: &str) -> bool {
 /// build output deleted on origin (a branch delete: never a history rewrite or force-push).
 pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
     let (f, states) = (cfg.fleet(fleet)?, fold(&read(&ctx.state)?));
-    let git = |a: &[&str]| ok(r, "git", &[&["-C", &f.local][..], a].concat());
+    let dir = f.local_path().to_string_lossy().into_owned();
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
     git(&["fetch", "-q", "--prune", "origin"])?;
     let integ = format!("origin/{}", f.integration);
     let refs = git(&[
