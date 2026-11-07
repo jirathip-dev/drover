@@ -716,22 +716,18 @@ fn ci_missing_fires_once_per_head_after_the_grace() {
     assert_eq!(kinds(&c, "ci-missing"), 1);
 }
 
-/// #425: an unheld lane idle without pushing alerts at the stall threshold and again every 2 h, not only once.
+/// #425: an unheld lane idle without pushing alerts at the stall threshold. #666: once, then nothing until it changes.
 #[test]
-fn an_unheld_idle_lane_stalls_again_every_two_hours() {
+fn an_unheld_idle_lane_stalls_once_until_it_changes() {
     let mut c = ctx(&tmpdir("stall-repeat"), CONFIG);
     spawn_ev(&c, NOW - 3600, 12, LANE);
     let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
     assert!(check(&c, &r).contains("stall: no event for 60m"));
-    c.now = NOW + 3600;
-    assert_eq!(check(&c, &r), "", "under 2 h since the first alert");
     c.now = NOW + 7200;
-    assert!(
-        check(&c, &r).contains("stall: no event for 3h"),
-        "2 h later it alerts again"
-    );
-    assert_eq!(check(&c, &r), "");
-    assert_eq!(kinds(&c, "stall"), 2);
+    assert_eq!(check(&c, &r), "", "2 h later: still the same stall");
+    c.now = NOW + 24 * 3600;
+    assert_eq!(check(&c, &r), "", "a day later too");
+    assert_eq!(kinds(&c, "stall"), 1);
 }
 
 /// #425: `queue block` on an issue with a live lane holds it: `held`, status says so, and `check` never stalls it.

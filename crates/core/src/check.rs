@@ -259,7 +259,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
-            // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
+            // #425: a held lane waits by design. #666: an unheld one alerts once until it changes (drive acts on it).
             if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
@@ -277,7 +277,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     ),
                     _ => format!("{role} lane {lane} is {st}"),
                 };
-                let key = format!("{key}:{}", (idle - stall) / 7200);
                 hits.push((
                     "stall",
                     key,
