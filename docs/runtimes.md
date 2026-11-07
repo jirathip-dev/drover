@@ -141,6 +141,10 @@ thread as a `system` line, and never falls back to herdr. The idle sleep kills a
 shed no longer runs is asleep on the next `check`. shed's bridge loads no saved session yet (`session/load`), so the
 next message starts a fresh one pointed at `.thread.md`. A fleet on herdr keeps herdr conductors.
 
+**shed on the timer's PATH (#600).** drive spawns with the timer jobs' PATH, not your shell's. `herdsman timer
+install` puts the folder of the `shed` your shell resolves on it, `herdsman doctor` checks `shed` and each ACP
+adapter's command there, and spawn refuses `SHED_MISSING` (with the PATH it searched) before anything is made.
+
 **Proof (2026-11-06, the mini).** shed 0.0.0 with claude-acp 0.101.0. A session in a scratch repo had herdsman's
 hook as its project settings' `PreToolUse` hook and `HERDSMAN_LANE=herdsman:565:impl`. It was asked to run
 `git push origin staging`, `pkill -f …` and `gh pr merge 1`. Each tool call ended `failed` with herdsman's refusal
