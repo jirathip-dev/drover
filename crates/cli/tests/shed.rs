@@ -1018,7 +1018,7 @@ struct Push<'a>(Cli<'a>, PathBuf);
 
 impl Runner for Push<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        if prog == "git" && args.len() > 1 && args[0] == "-C" && PathBuf::from(&args[1]) == self.1 {
+        if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]) == self.1 {
             self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             let o = std::process::Command::new("git").args(args).output()?;
             let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();

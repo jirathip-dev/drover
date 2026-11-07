@@ -159,7 +159,39 @@ pub fn seen(ctx: &Ctx) -> u64 {
         .unwrap_or(0)
 }
 
-/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`); whether it was a lane's.
+/// #662: an ACP lane's exit causes herdsman resumes it from (same worktree, next account, never `LANE_ENDS`).
+pub const RESUMABLE: [&str; 2] = ["account limit", "adapter crash"];
+
+/// #662: why lane `agent`'s latest session ended, as the `gone` lane-state after its last spawn logged it.
+pub fn exit_cause<'a>(events: &'a [Event], agent: &str) -> Option<&'a str> {
+    let gone = |e: &&Event| e.kind == "lane-state" && e.str("agent") == Some(agent) && e.str("state") == Some("gone");
+    let at = events
+        .iter()
+        .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(agent))?;
+    events[at..].iter().rev().find(gone)?.str("cause")
+}
+
+/// #662: each ACP lane's last output and whether a turn is open (`shed-out.json` beside the log), for its exit cause.
+fn last_out(ctx: &Ctx, agent: &str, f: impl FnOnce(&mut Value)) -> Result<Value> {
+    let path = ctx.state.with_file_name("shed-out.json");
+    let mut all: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    let was = all[agent].take();
+    let mut now = was.clone();
+    f(&mut now);
+    if now.is_null() {
+        all.as_object_mut().map(|m| m.remove(agent));
+    } else {
+        all[agent] = now;
+    }
+    std::fs::write(&path, all.to_string())?;
+    Ok(was)
+}
+
+/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
+/// account limit caps the lane's account); whether it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let (Some(fleet), Some(issue)) = (
         e.labels.get("fleet"),
@@ -167,17 +199,69 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     ) else {
         return Ok(false);
     };
-    let mut d = match &e.kind {
-        EventKind::State(s) => json!({"state": s.state, "note": s.note}),
-        EventKind::Exited { code } => json!({"state": "gone", "why": "exited", "code": code}),
-        EventKind::Killed => json!({"state": "gone", "why": "killed"}),
-        _ => return Ok(false),
-    };
-    (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
     if !cfg.fleet.contains_key(fleet) {
         return Ok(false);
     }
+    // #662: an ACP lane's last output (its tail) and whether a turn is open, kept for its exit cause.
+    let more = match &e.kind {
+        EventKind::Turn { .. } => Some(("", true, false)),
+        EventKind::Text { text } => Some((text.as_str(), true, true)),
+        EventKind::Reply { text, .. } => Some((text.as_str(), false, false)),
+        _ => None,
+    };
+    if let Some((t, turn, add)) = more {
+        last_out(ctx, &e.name, |v| {
+            let all = [v["text"].as_str().filter(|_| add).unwrap_or_default(), t].concat();
+            let tail: String = all
+                .chars()
+                .rev()
+                .take(500)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            *v = json!({"text": tail, "turn": turn});
+        })?;
+        return Ok(false);
+    }
+    let mut d = match &e.kind {
+        EventKind::State(s) => json!({"state": s.state, "note": s.note}),
+        EventKind::Exited { code } => {
+            let out = last_out(ctx, &e.name, |v| *v = Value::Null)?;
+            let pat = cfg.accounts.cap_pattern.as_deref();
+            let pat = pat.unwrap_or(crate::harness::CAP_PATTERN);
+            let cause = if crate::access::banner(pat, out["text"].as_str().unwrap_or_default()) {
+                RESUMABLE[0]
+            } else if *code != Some(0) || out["turn"] == true {
+                RESUMABLE[1]
+            } else {
+                "ended normally"
+            };
+            json!({"state": "gone", "why": "exited", "code": code, "cause": cause})
+        }
+        EventKind::Killed => {
+            last_out(ctx, &e.name, |v| *v = Value::Null)?;
+            json!({"state": "gone", "why": "killed", "cause": "killed"})
+        }
+        _ => return Ok(false),
+    };
+    (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
+    let cause = d["cause"].as_str().map(String::from);
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
+    let sp = (cause.as_deref() == Some(RESUMABLE[0]))
+        .then(|| crate::events::read(&ctx.state))
+        .transpose()?;
+    let sp = sp.as_deref().and_then(|ev| crate::events::last_spawn(ev, &e.name));
+    if let Some((sp, a)) = sp.and_then(|sp| Some((sp, sp.str("account")?))) {
+        let why = format!("{a}: lane {} hit the usage limit; spawns skip {a} for now", e.name);
+        let d = json!({"key": format!("{}:{a}", e.name), "reason": why, "agent": e.name, "account": a,
+            "harness": sp.str("harness"), "host": sp.str("host")});
+        crate::events::emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "account-capped", d),
+        )?;
+    }
     Ok(true)
 }
 

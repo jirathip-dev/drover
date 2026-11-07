@@ -940,7 +940,10 @@ pub fn spawn(
         // #478: its host unreachable: the pane it left is drive's to kill (and save) once that host is back (`check::stale`).
         let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
         // #649: its dirty or unpushed work goes to `wip/` on its host before any pane closes; a failed save refuses.
-        if stale.is_none() {
+        // #662: a lane resumed in its own worktree keeps it as it is (drive pushed its commits; staged stays staged).
+        let cause = crate::shed::exit_cause(&events, &p.agent).filter(|c| crate::shed::RESUMABLE.contains(c));
+        let here = cause.is_some() && owt == wt && old.machine == on.machine;
+        if stale.is_none() && !here {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
         for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
@@ -1006,6 +1009,17 @@ pub fn spawn(
         note = prior
             .filter(|_| gone.is_some() || o.supersede && !dup.is_empty())
             .map(|prev| handover(ctx, r, &events, prev, &p, (fleet, issue, title)));
+        // #662: a lane resumed after its session exited on an account limit or adapter crash continues its work.
+        let cause = prior
+            .filter(|_| o.supersede)
+            .and_then(|sp| crate::shed::exit_cause(&events, sp.str("agent")?));
+        let resume = cause.filter(|c| crate::shed::RESUMABLE.contains(c)).map(|c| {
+            format!(
+                "Resume: your previous session in this worktree stopped mid-turn ({c}). Its local commits and staged \
+                 changes are kept here, and herdsman pushed the commits to `{}`: continue from them and push.",
+                p.branch
+            )
+        });
         // A fix round's brief carries the findings of the latest verdict if it was FAIL.
         let last = events.iter().rev().find(|e| e.is("verdict", fleet, issue));
         let fix = last
@@ -1021,6 +1035,7 @@ pub fn spawn(
             .map(plain)
             .chain(update)
             .chain(note.clone())
+            .chain(resume)
             .chain(wip.as_ref().map(|w| {
                 format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
             }))

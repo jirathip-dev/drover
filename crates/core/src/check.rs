@@ -178,7 +178,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let mut capped = None;
+        let (mut capped, mut cause) = (None, None);
         if let (Some(agents), Some((role, lane))) = (&agents, s.active_lane()) {
             // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
             let spawned = last_spawn(&events, lane);
@@ -208,10 +208,13 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let mine = |e: &Event, sp| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
             let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e, sp)));
             if status.is_none() && !closed {
+                // #662: an ACP lane's exit cause, as shed's events told it.
+                cause = crate::shed::exit_cause(&events, lane);
+                let why = cause.map_or(String::new(), |c| format!(": {c}"));
                 hits.push((
                     "lane-dead",
                     key.clone(),
-                    format!("{role} lane {lane} is gone ({})", s.state),
+                    format!("{role} lane {lane} is gone ({}){why}", s.state),
                 ));
             }
             // A lane on a named account that shows its harness's usage-limit banner caps that account.
@@ -300,6 +303,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let mut d = json!({"key": key, "reason": reason});
             if let (Some(serde_json::Value::Object(c)), "account-capped" | "agent-unavailable") = (&capped, kind) {
                 c.iter().for_each(|(k, v)| d[k] = v.clone());
+            }
+            if let Some(c) = cause.filter(|_| kind == "lane-dead") {
+                d["cause"] = json!(c);
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }
