@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+pub mod hooks;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -146,7 +147,22 @@ pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<(
     let l = TcpListener::bind(addr)?;
     let mode = if read_only { "read-only view" } else { "phone page" };
     eprintln!("herdsman serve: {mode} on http://{}/", l.local_addr()?);
-    serve_on(ctx, r, l, read_only)
+    // #626: the Funnel listener, `/hooks/github` only; a read-only view has none.
+    let hooks = Config::load(&ctx.config)
+        .map(|c| c.serve.hooks_addr())
+        .unwrap_or_default();
+    let hooks = (!read_only && !hooks.is_empty()).then(|| TcpListener::bind(&hooks).map_err(|e| (hooks, e)));
+    std::thread::scope(|sc| {
+        match hooks {
+            Some(Ok(h)) => {
+                eprintln!("herdsman serve: webhooks on http://{}/hooks/github", h.local_addr()?);
+                sc.spawn(move || hooks::listen(ctx, r, &h));
+            }
+            Some(Err((a, e))) => eprintln!("herdsman serve: no webhooks: {a}: {e}"),
+            None => {}
+        }
+        serve_on(ctx, r, l, read_only)
+    })
 }
 
 #[allow(clippy::needless_pass_by_value)] // public API: the listener is handed over and lives as long as the server
