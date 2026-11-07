@@ -113,6 +113,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let _ = gh::spec(ctx, r, f, name, i.issue, false);
         }
     }
+    let events = closed_on_github(ctx, cfg, r, out, events)?;
     // #333: a crashed kick's marker or lock goes on the next check; an issue SPAWN_PENDING has held back in every
     // pass for 15 min alerts once per episode (its fleet's earliest hold is the key).
     crate::drive::markers(ctx, cfg, r, true);
@@ -1431,6 +1432,45 @@ pub fn du(p: &Path) -> u64 {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| du(&e.path())).sum()),
         m => m.map_or(0, |m| m.blocks() * 512),
     }
+}
+
+/// #639: an open issue (queued, in a round, needs-human or parked) closed on GitHub by any route is `closed-other`
+/// within one pass, from the fleet's one cached closed-issue read: no respawn, stall, orphan or ask alert follows, its
+/// asks close and `clean` takes its lanes. A PR merged outside herdsman is drive's (`merged`, by: external). The log
+/// read again.
+fn closed_on_github(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: Vec<Event>,
+) -> Result<Vec<Event>> {
+    let st = fold(&ev);
+    let mut any = false;
+    for (name, f) in &cfg.fleet {
+        let state = |n: u64| st.get(&(name.clone(), n));
+        let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
+            .map(|s| s.issue)
+            .collect();
+        open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+        open.retain(|n| gh::cached_pr(ctx, name, *n)["state"] != "MERGED");
+        let Some(closed) = (!open.is_empty())
+            .then(|| gh::closed(ctx, r, f, name, ctx.now).ok())
+            .flatten()
+        else {
+            continue;
+        };
+        for n in open.into_iter().filter(|n| closed.contains(n)) {
+            writeln!(out, "{name} #{n} closed on GitHub")?;
+            let d = json!({"by": "external", "why": "issue closed on GitHub"});
+            emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
+            any = true;
+        }
+    }
+    if any {
+        return read(&ctx.state);
+    }
+    Ok(ev)
 }
 
 /// The fleet's closed issue numbers, read once per fleet per run; a failed read is reported and counts as none.

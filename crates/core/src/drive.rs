@@ -548,6 +548,7 @@ pub fn drive(
     std::fs::create_dir_all(state_dir(ctx))?;
     let i = usize::from(fast);
     gh::FORCE.set(fast || KICK.get().is_some());
+    gh::CATCHUP.set(if fast { cfg.limits.webhook_poll_minutes * 60 } else { 0 });
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
     let lock = ["drive.lock", "drive-fast.lock"][i];
@@ -616,7 +617,7 @@ pub fn drive(
         }
     }
     if !fast {
-        if let Err(e) = repair(ctx, cfg, r, out) {
+        if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
             writeln!(out, "repair: {e:#}")?;
         }
     }
@@ -686,7 +687,46 @@ pub fn drive(
 /// #500: an issue parked `LANE_ENDS` whose every `lane gone` respawn followed a design lane's adoption (before #500 that
 /// adoption hid the issue's verdict) goes back to the state it had (`repaired`); once installed, none is left to find.
 /// #517: a lesson issue parked `LANE_ENDS` is closed as "no repeated class".
-fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<()> {
+    let events = read(&ctx.state)?;
+    // #639: needs-human, a fix round or an impl whose lane ended, with no PR and open queue blockers, goes back to the
+    // queue, blocked: it starts as a first spawn once they merge.
+    let log = crate::waiting::Log::new(&events);
+    let mut agents: Option<Vec<Value>> = None;
+    for s in fold(&events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
+        let on = log.blockers(&s.fleet, s.issue);
+        if on.is_empty() || !gh::cached_pr(ctx, &s.fleet, s.issue)["number"].is_null() {
+            continue;
+        }
+        if !(matches!(s.state.as_str(), "needs-human" | "impl") || s.state.starts_with("fix")) {
+            continue;
+        }
+        // An impl only once its lane ended (no herdr agent, no spawn starting).
+        if s.state == "impl" {
+            let live = match &mut agents {
+                Some(a) => a,
+                None => agents.insert(crate::hosts::all_agents(cfg, seen)?),
+            };
+            let lane = s
+                .active_lane()
+                .is_some_and(|(_, l)| live.iter().any(|a| a["name"] == l));
+            if lane
+                || pending(ctx)
+                    .iter()
+                    .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
+            {
+                continue;
+            }
+        }
+        let why = format!("blocked by {}", queue::hashes(on));
+        writeln!(out, "{} #{} repaired: back to queued ({why})", s.fleet, s.issue)?;
+        let d = json!({"state": "queued", "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+        )?;
+    }
     let events = read(&ctx.state)?;
     let reset = ["pushed", "verdict", "needs-human", "round-extended"];
     for s in fold(&events)
