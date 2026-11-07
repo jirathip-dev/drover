@@ -713,3 +713,29 @@ fn a_closed_lane_reads_claudes_saved_session() {
     );
     assert_eq!(j["live"], 0);
 }
+
+/// #646: build output never rides a wip snapshot: a 60 MB file under `target-lane/` stays out of the pushed branch
+/// (whatever `.gitignore` says) and is named as skipped, on the kill output and in the wip commit message.
+#[test]
+fn kill_skips_build_output_and_names_it() {
+    let (c, wt) = lane("kill-build");
+    let r = repo(&wt, "");
+    std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
+    std::fs::create_dir_all(format!("{wt}/target-lane/release/deps")).unwrap();
+    let big = std::fs::File::create(format!("{wt}/target-lane/release/deps/libx.rlib")).unwrap();
+    big.set_len(60 << 20).unwrap();
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("skipped") && out.contains("target-lane/"), "{out}");
+    let show = |fmt: &str| {
+        let b = format!("wip/{LANE}-20261031-1200");
+        let o = std::process::Command::new("git")
+            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, &b])
+            .output()
+            .unwrap();
+        String::from_utf8(o.stdout).unwrap()
+    };
+    assert_eq!(show("--format=").trim(), "real.rs");
+    let msg = show("--format=%B");
+    assert!(msg.contains("skipped") && msg.contains("target-lane/"), "{msg}");
+}
