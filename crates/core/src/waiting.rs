@@ -166,14 +166,32 @@ pub fn reviewed_head(t: &str) -> Option<&str> {
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
+    /// #639: each queued issue's blockers not merged yet.
+    pub blocked: Vec<(&'a str, u64, Vec<u64>)>,
 }
 
 impl<'a> Log<'a> {
     pub fn new(all: &'a [Event]) -> Self {
+        let st = fold(all);
+        let fleets: std::collections::BTreeSet<&str> = (all.iter().filter(|e| e.kind == "queue"))
+            .map(|e| e.fleet.as_str())
+            .collect();
+        let blocked = (fleets.into_iter())
+            .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
+            .filter(|(_, i)| !i.blockers.is_empty())
+            .map(|(f, i)| (f, i.issue, i.blockers))
+            .collect();
         Log {
             all,
             asks: open_asks(all),
+            blocked,
         }
+    }
+
+    /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
+    pub fn blockers(&self, fleet: &str, n: u64) -> &[u64] {
+        let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
+        i.map_or(&[], |i| &i.2)
     }
 }
 
@@ -245,6 +263,12 @@ pub fn waiting_on(
         );
         // #425: drive wakes it then
     }
+    // #639: queue blockers hold every lane of the issue (a fix, impl or update respawn too) as they hold its start.
+    let on = log.blockers(f, n);
+    if !on.is_empty() {
+        let what = format!("blocked by {}", crate::queue::hashes(on));
+        return w("drive", &what, s.last_ts, None);
+    }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
     if let Some(g) = fc
         .serial
@@ -293,20 +317,29 @@ pub fn waiting_on(
         _ => "",
     };
     // #148: a PASSed item blocked by CI, mergeability or host load is retried as ready on every pass.
-    let block = events
-        .iter()
-        .rev()
-        .find(|e| e.is("blocked", f, n))
-        .and_then(|e| e.str("code"));
+    let blocked = events.iter().rev().find(|e| e.is("blocked", f, n));
+    let block = blocked.and_then(|e| e.str("code"));
     let retry = s.state == "blocked" && s.verdicts.last().is_some_and(|v| v.1 == "PASS");
     // #599: a PASS at the head that goes on to another check waits on that check, whatever the merge refused.
     let here = s
         .verdicts
         .last()
         .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
+    // #650: a head the merge gate's own rule finds verified (each check PASSed, skipped or without a recipe there)
+    // waits on no check: it merges next pass, or names the gate that refused it.
+    let done = passed.is_some() && crate::gate::verified(fc, Some(s), pushed, false).is_ok();
+    let mut outcomes = s
+        .verdicts
+        .iter()
+        .filter(|v| v.0.eq_ignore_ascii_case(pushed))
+        .map(|v| &v.2);
+    let more = outcomes.next().is_some_and(|c| outcomes.any(|o| o != c));
+    let next_check = next_check.filter(|_| !done);
     let st = match block {
         _ if retry && here && next_check.is_some() => "ready",
         Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
+        Some("STALE_VERDICT") if retry && done => "ready",
+        Some(_) if retry && done && more && how.is_empty() => "refused",
         // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
         Some("STALE_VERDICT") if s.state == "blocked" => "stale",
         // #214: blocked with an open PR is no resting state: a conflict is updated, anything else reviewed again.
@@ -343,13 +376,24 @@ pub fn waiting_on(
                 cmd("spawn", &format!(" {b} --supersede --update")),
             )
         }
+        "refused" => {
+            let why = blocked.and_then(|e| e.str("reason")).unwrap_or_default();
+            let what = format!("PASS · merge refused {}: {why}", block.unwrap_or_default());
+            w("owner", &what, s.last_ts, None)
+        }
         // #212: CI read live by the fast step, which merges a green PASS within a minute.
-        "ready" if gh::ci(&checks) == "green" => w(
-            "drive",
-            "PASS · CI green · merging within 1 min",
-            s.last_ts,
-            cmd("merge", ""),
-        ),
+        "ready" if gh::ci(&checks) == "green" => {
+            // #650: verify passed by drive's skip at this head says so.
+            let skip = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
+            let what = if done && skip("verify-skipped") {
+                "PASS · verify skipped · merging next pass"
+            } else if done && skip("verify-no-recipe") {
+                "PASS · verify no recipe · merging next pass"
+            } else {
+                "PASS · CI green · merging within 1 min"
+            };
+            w("drive", what, s.last_ts, cmd("merge", ""))
+        }
         "ready" => {
             let all = checks.as_array().map(Vec::as_slice).unwrap_or_default();
             let n = all.iter().filter(|c| gh::check_state(c) == "green").count();
@@ -400,10 +444,12 @@ pub fn waiting_on(
         },
         // #217: an extra round whose lane never started (a failed or deferred spawn) is due the same way.
         // #500: so is one a `repaired` false park put back.
+        // #639: never for an issue with no PR: what it waits on shows instead (its lane's push, or its respawn).
         "fix"
-            if matches!(s.last_event.as_str(), "verdict" | "repaired")
-                || unspawned(events, s)
-                || lost(events, s, pushed) =>
+            if !pushed.is_empty()
+                && (matches!(s.last_event.as_str(), "verdict" | "repaired")
+                    || unspawned(events, s)
+                    || lost(events, s, pushed)) =>
         {
             // The FAIL's stage: a check's FAIL, or a gate's CI red (logs before #173 name none: `rev`).
             let v = events.iter().rev().find(|e| e.is("verdict", f, n));
@@ -662,8 +708,11 @@ pub fn scan(
                 }
                 _ => LESSON_CLOSE.into(),
             };
-        } else if let Some(t) = waiting_turn.filter(|_| idle && !gone && !unconfirmed) {
-            // #511: a live build lane's reported turn decides, not a guess.
+        } else if let Some(t) =
+            waiting_turn.filter(|t| idle && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
+        {
+            // #511: a live build lane's reported turn decides, not a guess. #639: a `blocked` one also once its lane
+            // ended (or its spawn was never confirmed): an owner card, never a respawn toward LANE_ENDS.
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
         } else if idle && (gone || unconfirmed) && settled() {
@@ -742,6 +791,26 @@ pub fn scan(
         );
         out.push((s, w));
     }
+    // #560: a review held for want of room names its place in drive's order: the reviews due before it go first.
+    let review = |w: &Waiting| {
+        let role = w.next_cmd.as_deref().and_then(|c| c.strip_prefix("herdsman spawn "));
+        let role = role.and_then(|c| c.split(' ').nth(2));
+        role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
+    };
+    let held = |w: &Waiting| {
+        let mine = of.get(&(w.fleet.as_str(), w.issue)).map_or(&[][..], Vec::as_slice);
+        let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
+        tried
+            .and_then(|e| e.str("code"))
+            .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))
+    };
+    let ahead = out
+        .iter_mut()
+        .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && review(w));
+    for (ahead, (_, w)) in ahead.enumerate().filter(|(n, (_, w))| *n > 0 && held(w)) {
+        let s = if ahead == 1 { "" } else { "s" };
+        w.what = format!("review waits behind {ahead} earlier review{s}");
+    }
     out
 }
 
@@ -789,7 +858,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     };
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
-    let held = !crate::events::held_on(log.all, s).is_empty();
+    let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

@@ -488,7 +488,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
 /// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
-fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
     let settings: Value = std::fs::read_to_string(dir.join("settings.json"))
         .ok()
@@ -760,6 +760,12 @@ pub fn spawn(
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
         herdr::Shed(crate::shed::Shed { wire, ..b })
     });
+    // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
+    if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        let fix = "`herdsman timer install` from a shell where `which shed` finds it";
+        return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
+    }
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
     let n = round(&read(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
@@ -925,23 +931,28 @@ pub fn spawn(
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
     let intent =
         crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
+    let mut wip = None; // #649: where the superseded lane's work went
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
         let listed = host::agents(&old);
+        // #478: its host unreachable: the pane it left is drive's to kill (and save) once that host is back (`check::stale`).
+        let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
+        // #649: its dirty or unpushed work goes to `wip/` on its host before any pane closes; a failed save refuses.
+        if stale.is_none() {
+            wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
+        }
         for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
                 herdr::close(&old, pane)?;
             }
         }
-        // #478: its host unreachable: the pane it left is drive's to kill once that host is back (`check::stale`).
-        let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
         if stale.is_none() {
             crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});
         if let Some(e) = stale {
             (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
         }
@@ -1010,6 +1021,9 @@ pub fn spawn(
             .map(plain)
             .chain(update)
             .chain(note.clone())
+            .chain(wip.as_ref().map(|w| {
+                format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
+            }))
             .map(|t| format!("\n\n{t}"));
         (
             created,

@@ -65,6 +65,27 @@ pub fn read(path: &Path) -> Result<Vec<Event>> {
     crate::db::events(path, "archived = ?1", 0)
 }
 
+/// #560: `read`, kept between calls (serve's requests and watcher): each call reads only the events appended since;
+/// a rotation or another database file reads it all again. The last few databases read are kept.
+pub fn shared(path: &Path) -> Result<std::sync::Arc<Vec<Event>>> {
+    type Kept = (PathBuf, (Option<u64>, Option<u64>), std::sync::Arc<Vec<Event>>);
+    static KEPT: std::sync::Mutex<Vec<Kept>> = std::sync::Mutex::new(Vec::new());
+    let (file, key) = (crate::db::file(path), crate::db::version(path));
+    let mut kept = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut all = match kept.iter().position(|k| k.0 == file && k.1 == key) {
+        Some(i) => kept.remove(i).2,
+        None => std::sync::Arc::new(vec![]),
+    };
+    let last = all.last().map_or(0, |e| e.seq);
+    let new = crate::db::events(path, "archived = 0 AND seq > ?1", last)?;
+    if !new.is_empty() {
+        std::sync::Arc::make_mut(&mut all).extend(new);
+    }
+    kept.truncate(7);
+    kept.insert(0, (file, key, all.clone()));
+    Ok(all)
+}
+
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
 pub fn jsonl(path: &Path) -> Result<String> {
     history(path)?
@@ -180,7 +201,9 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
     // A merged issue keeps its merge; a closed one (it never merged) what closed it.
     let ends = |e: &Event, s: &IssueState| match s.state.as_str() {
         "merged" => e.kind == "merged",
-        _ => e.kind == "closed" || e.kind == "clean" && e.str("why") != Some("merged"),
+        _ => {
+            matches!(e.kind.as_str(), "closed" | "closed-other") || e.kind == "clean" && e.str("why") != Some("merged")
+        }
     };
     let moved = |e: &&Event| match e.issue {
         Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
@@ -424,7 +447,6 @@ pub const PASSIVE: &[&str] = &[
     "drive-pass",
     "kick",
     "amended",
-    "closed-other",
     "conflict-predicted",
     "heads-up",
     "lane-closed",
@@ -475,6 +497,7 @@ fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event
         "failed",
         "expired",
         "closed: merged",
+        "closed: issue closed",
         "closed: lane gone",
     ];
     order.into_iter().find_map(|w| why.iter().find(|x| x.0 == w).copied())
@@ -515,6 +538,8 @@ fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static s
             .find(|k| *k == w)
     } else if on("merged") {
         Some("closed: merged")
+    } else if on("closed") || on("closed-other") {
+        Some("closed: issue closed")
     } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
         Some("closed: lane gone")
     } else {
@@ -540,8 +565,8 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
                 first.entry(at).or_insert(i);
             }
             "needs-decision" => open.push((i, e)),
-            "decision" | "merged" | "clean" | "spawn" | "lane-killed" | "ask-withdrawn" | "ask-delivered"
-            | "ask-failed" | "ask-expired" => {
+            "decision" | "merged" | "closed" | "closed-other" | "clean" | "spawn" | "lane-killed" | "ask-withdrawn"
+            | "ask-delivered" | "ask-failed" | "ask-expired" => {
                 open.retain(|(n, a)| closes(a, e, || first.get(&at).is_some_and(|f| f < n)).is_none());
             }
             _ => {}
@@ -652,19 +677,31 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
                 s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
+            // #639: an issue closed on GitHub by any other route (`check`).
+            "closed-other" => s.state = "closed".into(),
             // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
-            // #500: a false `LANE_ENDS` park undone: the state before it.
-            "repaired" => s.state = e.str("state").map_or(s.state.clone(), String::from),
+            // #500: a false `LANE_ENDS` park undone: the state before it. #639: back in the queue, its build lane ends.
+            "repaired" => {
+                s.state = e.str("state").map_or(s.state.clone(), String::from);
+                if let Some(b) = s.build.take().filter(|_| s.state == "queued") {
+                    s.lanes.remove(&b);
+                }
+            }
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human.
+                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human. #639: a build
+                // lane never reviewed goes back to impl, not to a fix round of a FAIL that never was.
                 if s.state == "needs-human" {
-                    s.state = format!("fix({})", s.rounds);
+                    s.state = if s.verdicts.is_empty() {
+                        "impl".into()
+                    } else {
+                        format!("fix({})", s.rounds)
+                    };
                 }
             }
             // #128: `clean` removes only merged or GitHub-closed lanes (logs before #128 carry no `why`).
