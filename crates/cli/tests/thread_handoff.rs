@@ -330,8 +330,10 @@ fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
         "{}",
         show(&c, "t1")
     );
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
+    // #621: another tap, on another row too, gets the one delivery (t5), nothing sent again.
+    let (code, again) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, again), (0, out));
+    assert_eq!(kinds(&c, "thread-handoff").len(), 1);
 
     assert_eq!(hand("Webhooks", "retry storms"), 0);
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q2", "5"]);
@@ -597,4 +599,120 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
         "{out} {}",
         String::from_utf8_lossy(&o.stderr)
     );
+}
+
+/// #621: herdr types `agent start`'s command into the pane's shell, whose canonical mode takes lines of at most 1,024
+/// bytes: the harness command (after `--`) of each start `r` ran.
+fn starts(r: &Fake) -> Vec<String> {
+    let calls = r.calls.borrow();
+    let start = calls.iter().filter(|c| c.starts_with("herdr agent start"));
+    start.map(|c| c.split_once(" -- ").unwrap().1.to_string()).collect()
+}
+
+/// #621: a 2,400-byte text, in lines like a conductor's proposal.
+fn long_text() -> String {
+    let text: String = (0..300).map(|i| format!("line {i:03}. ")).collect();
+    text[..2400].to_string()
+}
+
+/// #621: a 2,400-byte handoff lands in full as a new thread's first conductor message, and again in full once that
+/// thread's conductor is asleep (its resume); no start's command line passes herdr's 1,024-byte limit.
+#[test]
+fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
+    let c = setup("handoff-long");
+    let r = herdr(NO_AGENTS);
+    let text = long_text();
+    assert_eq!(text.len(), 2400);
+    assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
+    let first = kinds(&c, "thread-msg")
+        .into_iter()
+        .find(|e| e.str("thread") == Some("t2"))
+        .unwrap();
+    let line = format!("handoff to Big plan · t2: {text}");
+    assert_eq!(
+        (first.str("from"), first.str("text")),
+        (Some("t1"), Some(line.as_str()))
+    );
+    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
+
+    // t2's conductor is gone (asleep): the next long handoff resumes it, the text in full in its thread file.
+    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
+    assert_eq!((code, out.as_str()), (0, "t2\n"));
+    assert!(
+        std::fs::read_to_string(&md)
+            .unwrap()
+            .ends_with(&format!("from t1: {line}\n")),
+        "{}",
+        std::fs::read_to_string(&md).unwrap()
+    );
+    let s = starts(&r);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert!(s[1].contains("--resume"), "{}", s[1]);
+    for l in &s {
+        assert!(l.len() <= 1024, "a {}-byte start line: {l}", l.len());
+    }
+}
+
+/// #621: a card from t1 to sendmeter, whose rows are t2 (an existing thread) and a new one.
+fn card(name: &str, text: &str) -> herdsman::Ctx {
+    let c = setup(name);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
+        "t2\n"
+    );
+    let hand = ["thread", "handoff", "t1", "sendmeter", "Facets", text];
+    assert_eq!(run(&c, &Fake::default(), &hand).0, 0);
+    let card = kinds(&c, "needs-decision").pop().unwrap();
+    assert_eq!(card.data["handoff"]["targets"], json!(["t2", "new"]));
+    c
+}
+
+/// #621: the copies of handoff `text` in thread `id` and the `continued in` rows in t1.
+fn copies(c: &herdsman::Ctx, id: &str, text: &str) -> (usize, usize) {
+    let msgs = kinds(c, "thread-msg");
+    let into = msgs
+        .iter()
+        .filter(|e| e.str("thread") == Some(id) && e.str("text").is_some_and(|t| t.ends_with(text)));
+    (
+        into.count(),
+        show(c, "t1").matches(&format!("continued in {id}: ")).count(),
+    )
+}
+
+/// #621: three taps on one handoff card's row (a retry, a double submit) deliver it once; each tap gets the first
+/// delivery's result.
+#[test]
+fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
+    let c = card("handoff-thrice", "add facets");
+    let r = herdr(NO_AGENTS);
+    for _ in 0..3 {
+        let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+        assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
+    }
+    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
+    assert_eq!(kinds(&c, "thread-handoff").len(), 1);
+    assert_eq!(kinds(&c, "decision").len(), 1);
+    assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
+}
+
+/// #621: a tap whose delivery fails shows its full error in t1; the retry delivers it, still one copy and one row.
+#[test]
+fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
+    let c = card("handoff-retry", "add facets");
+    let why = "input contains a 1486-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry";
+    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, why);
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
+    assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
+    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
+    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    assert_eq!(
+        std::fs::read_to_string(md).unwrap(),
+        "from t1: handoff to Search · t2: add facets\n"
+    );
+    assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
 }

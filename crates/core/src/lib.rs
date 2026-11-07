@@ -532,7 +532,9 @@ fn answer_with(
     let last = events.iter().rev().find(|e| is(e, "decision"));
     let conductor = |b: &str| b.starts_with("conductor-");
     let change = |d: &&Event| d.str("by").is_some_and(conductor) && !conductor(by) && ctx.now < d.ts + CHANGE;
-    if let Some(d) = last.filter(|d| d.str("by") != Some("default") && !change(d)) {
+    // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
+    let handoff = ask.data.get("handoff").is_some();
+    if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
             "ALREADY_ANSWERED",
             format!(
@@ -548,10 +550,16 @@ fn answer_with(
         return gate::refused("BAD_VALUE", why);
     }
     // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
-    if ask.data.get("handoff").is_some() {
-        let to = conductor::land(ctx, cfg, r, ask, choice)?;
-        let d = with_via(json!({"id": id, "choice": text, "by": by, "to": to}), via);
-        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
+    if handoff {
+        let (to, fresh) = conductor::land(ctx, cfg, r, ask, choice)?;
+        let text = match last.and_then(|d| d.str("choice")) {
+            Some(first) if !fresh => first,
+            _ => text,
+        };
+        if fresh {
+            let d = with_via(json!({"id": id, "choice": text, "by": by, "to": to}), via);
+            emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
+        }
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
     // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
