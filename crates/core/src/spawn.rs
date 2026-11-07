@@ -163,6 +163,11 @@ impl Plan {
         PathBuf::from(format!("{}.env", self.worktree.display()))
     }
 
+    /// #592: a remote lane's hook rules, beside its worktree on its host.
+    pub fn rules_file(&self) -> PathBuf {
+        PathBuf::from(format!("{}.rules.json", self.worktree.display()))
+    }
+
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
         harness::get(&self.harness).start_cmd(ctx, self, pane)
     }
@@ -739,6 +744,9 @@ pub fn spawn(
                 Some(url) => p.env.insert("HERDSMAN_SERVICE".into(), url.clone()),
                 None => p.env.insert("HERDSMAN_OUTBOX".into(), "1".into()),
             };
+            // #592: its host keeps no fleet.toml: its hook reads the rules this host resolves (written below).
+            p.env
+                .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -917,23 +925,28 @@ pub fn spawn(
     let inputs = json!({"role": role, "agent": p.agent, "worktree": p.worktree});
     let intent =
         crate::action::begin(r, &ctx.state, ctx.now, (fleet, issue, step, &key), inputs, secs, &probe)?.act()?;
+    let mut wip = None; // #649: where the superseded lane's work went
     if o.supersede && !dup.is_empty() {
         let was = last_spawn(&events, &p.agent); // #327: the superseded lane's kill steps run on its own host
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
         let listed = host::agents(&old);
+        // #478: its host unreachable: the pane it left is drive's to kill (and save) once that host is back (`check::stale`).
+        let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
+        // #649: its dirty or unpushed work goes to `wip/` on its host before any pane closes; a failed save refuses.
+        if stale.is_none() {
+            wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
+        }
         for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
                 herdr::close(&old, pane)?;
             }
         }
-        // #478: its host unreachable: the pane it left is drive's to kill once that host is back (`check::stale`).
-        let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
         if stale.is_none() {
             crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();
-        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; ")});
+        let mut d = json!({"role": role, "agent": p.agent, "killed": names, "reason": why.join("; "), "wip": wip});
         if let Some(e) = stale {
             (d["stale_host"], d["stale_pane"]) = (json!(e.str("host")), json!(e.str("pane")));
         }
@@ -1002,6 +1015,9 @@ pub fn spawn(
             .map(plain)
             .chain(update)
             .chain(note.clone())
+            .chain(wip.as_ref().map(|w| {
+                format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
+            }))
             .map(|t| format!("\n\n{t}"));
         (
             created,
@@ -1027,7 +1043,21 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     h.prepare(ctx, &on, &p)?;
+    if on.machine.is_some() {
+        // #592: its host keeps no fleet.toml, so this lane's profile is synced there by name.
+        let exe = home(vec![ctx.exe.clone()]).remove(0);
+        ok(
+            r,
+            &exe,
+            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
+        )?;
+    }
     let _secrets = deliver(&on, cfg, &p)?;
+    let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
+    let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
+    if let Some(rl) = &rules {
+        on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
+    }
     // #327: a workspace gone under us (its last pane closed) is already gone: open the worktree again and go on.
     let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
         Err(e) if format!("{e:#}").contains("workspace_not_found") => {
@@ -1181,6 +1211,9 @@ pub fn spawn(
             }
             if let Some(h) = sha.filter(|h| !h.is_empty()) {
                 d["sha"] = json!(h);
+            }
+            if let Some(rl) = &rules {
+                d["rules"] = json!(rl); // #592: the board marks the lane `rules stale` once fleet.toml resolves others
             }
             let until = p.resting.as_ref().map(|r| crate::usage::date(base, r.1, "+%H:%M"));
             d["resting"] = json!(p.resting.as_ref().zip(until).map(|(r, t)| format!("{} {t})", r.0)));

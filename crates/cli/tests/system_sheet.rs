@@ -126,12 +126,12 @@ fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers(
     let m = measure(&page("sys-all", true), "", "queue", &format!("{{ {js} }}"));
     // Open at providers (hash, scrolled to the top, its chip filled); account A's row; sendmeter's 7 [config] groups,
     // its 2 roles' model pickers and the pipeline graph; one host card, 4 groups, [sign in ▾] without Claude's;
-    // Activity's rows and chips; [enable alerts], one paired device, 5 Notifications groups; Conductor's [edit] link;
+    // Activity's rows and chips; [enable alerts], one paired device, 4 Notifications groups (#557: no Telegram); Conductor's [edit] link;
     // Appearance's 3 lists and 4 themes; nothing left in the tabs and no ALERTS, accounts or deepseek in Hosts; a theme
     // tap applies, the sheet stays; [close] closes and puts the tab's hash back.
     assert_eq!(
         m,
-        [1., 1., 1., 1., 1., 7., 2., 1., 1., 4., 1., 0., 1., 1., 1., 1., 5., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 7., 2., 1., 1., 4., 1., 0., 1., 1., 1., 1., 4., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
         "{m:?}"
     );
 }

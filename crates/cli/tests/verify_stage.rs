@@ -443,3 +443,183 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     assert!(herdsman::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
+
+/// #599: #12's impl lane and a gone rev lane whose verdict.md says PASS at `head`, the PR (CI green) changing
+/// `files`; `recipe`: the head has `.herdsman/verify.md`.
+fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (herdsman::Ctx, Fake, String) {
+    let c = ctx(&tmpdir(name), &config());
+    let head = sha("abc");
+    let rev = c.worktrees.join("sendmeter/rev-12-r1");
+    std::fs::create_dir_all(&rev).unwrap();
+    std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
+    let d = |role: &str, agent: &str| json!({"role": role, "agent": agent, "pane": "w9:p1", "workspace": "w9", "worktree": rev, "branch": "issue-12"});
+    ev(&c, 10, "spawn", d("impl", "sendmeter-impl-12"));
+    let mut r = d("rev", "sendmeter-rev-12-r1");
+    r["stage"] = json!("rev");
+    r["check"] = json!(true);
+    ev(&c, 20, "spawn", r);
+    let mut r = Fake::default()
+        .reply(&format!("git -C {} log", rev.display()), &format!("{head} 20"))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        );
+    if recipe {
+        r = r.reply(RECIPE, "");
+    }
+    r.replies.extend(fake(&head, files).replies);
+    (c, r, head)
+}
+
+/// #599: drive's passes after it records the PASS: no rev lane is ever spawned again at the PASSed head.
+fn after_pass(c: &herdsman::Ctx, r: &Fake, passes: usize) {
+    for _ in 0..passes {
+        drive(c, r);
+    }
+    let revs = kinds(c, "spawn").into_iter().filter(|e| e.str("role") == Some("rev"));
+    assert_eq!(revs.count(), 1, "rev respawned at the PASSed head");
+    assert!(!r.called("herdr agent start sendmeter-rev"));
+}
+
+#[test]
+fn a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_merges() {
+    let (c, r, head) = rev_wrote_pass("verify-599-no-recipe", "web/index.html\n", false);
+    after_pass(&c, &r, 3);
+    let skip = kinds(&c, "verify-no-recipe");
+    assert_eq!(skip.len(), 1, "{:?}", r.calls.borrow());
+    assert_eq!(skip[0].str("sha"), Some(head.as_str()));
+    assert!(kinds(&c, "verify-skipped").is_empty());
+    assert_eq!(state(&c), "merged");
+}
+
+#[test]
+fn a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev() {
+    let (c, r, _) = rev_wrote_pass("verify-599-recipe", "src/a.rs\nweb/src/queue.ts\n", true);
+    after_pass(&c, &r, 3);
+    assert!(
+        r.called("herdr agent start sendmeter-verify-12-r1"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(!r.called("gh pr merge"));
+    assert_eq!(state(&c), "verify(1)");
+}
+
+#[test]
+fn a_pass_drive_records_outside_ui_paths_logs_verify_skipped_and_merges() {
+    let (c, r, head) = rev_wrote_pass("verify-599-skip", "src/a.rs\n", true);
+    after_pass(&c, &r, 3);
+    let skip = kinds(&c, "verify-skipped");
+    assert_eq!(skip.len(), 1, "{:?}", r.calls.borrow());
+    assert_eq!(skip[0].str("sha"), Some(head.as_str()));
+    assert_eq!(state(&c), "merged");
+}
+
+/// #599: an issue a merge already refused for want of a verify PASS (logs from before the fix) waits on verify at
+/// its PASSed head, never "review again".
+#[test]
+fn a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again() {
+    let cfg = Config::parse(&config()).unwrap();
+    let a = sha("a");
+    let e = |ts, kind, d| Event::new(ts, "sendmeter", Some(12), kind, d);
+    let evs = vec![
+        e(1, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"})),
+        e(
+            2,
+            "spawn",
+            json!({"role": "rev", "stage": "rev", "check": true, "agent": "r1"}),
+        ),
+        e(
+            3,
+            "verdict",
+            json!({"verdict": "PASS", "sha": a, "stage": "rev", "loop": "rev"}),
+        ),
+        e(
+            4,
+            "blocked",
+            json!({"code": "STALE_VERDICT", "reason": format!("no verify PASS for head {a}")}),
+        ),
+    ];
+    assert_eq!(
+        next(&cfg, &evs, &a),
+        (Some("herdsman spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
+    );
+}
+
+/// #650: a rev PASS at the head that a merge refused for want of verify, then `kind` (verify-skipped or
+/// verify-no-recipe) at that head and green CI: `waiting` says merge, never "review again", and one drive pass merges.
+fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str) {
+    let (c, head) = passed(name, &config(), false);
+    let why = format!("no verify PASS for head {head}");
+    ev(&c, 40, "blocked", json!({"code": "STALE_VERDICT", "reason": why}));
+    ev(&c, 50, kind, json!({"sha": head, "stage": "verify", "reason": "r"}));
+    let cfg = Config::parse(&config()).unwrap();
+    let evs = read(&c.state).unwrap();
+    let s = &fold(&evs)[&("sendmeter".to_string(), 12)];
+    let pr: serde_json::Value = serde_json::from_str(&pr(&head)).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let w = waiting_on(
+        &herdsman::waiting::Log::new(&evs),
+        &evs,
+        s,
+        Some((&head, 1)),
+        &pr,
+        f,
+        None,
+    );
+    assert_eq!(w.what, format!("PASS · verify {word} · merging next pass"));
+    assert_eq!(w.next_cmd.as_deref(), Some("herdsman merge sendmeter 12"));
+    let r = fake(&head, "src/a.rs\n");
+    drive(&c, &r);
+    assert!(r.called(&format!(
+        "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
+    )));
+    assert_eq!(state(&c), "merged");
+    assert!(kinds(&c, "spawn")
+        .iter()
+        .all(|e| e.str("role") != Some("rev") || e.ts == 20));
+}
+
+#[test]
+fn a_rev_pass_and_verify_skipped_at_the_head_merge_in_one_drive_pass() {
+    skipped_after_a_refusal_merges_in_one_pass("verify-650-skip", "verify-skipped", "skipped");
+}
+
+#[test]
+fn a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass() {
+    skipped_after_a_refusal_merges_in_one_pass("verify-650-no-recipe", "verify-no-recipe", "no recipe");
+}
+
+/// #650: a verified head (rev PASS, verify skipped) that a merge refused for another gate names that gate, never
+/// "review again".
+#[test]
+fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
+    let cfg = Config::parse(&config()).unwrap();
+    let a = sha("a");
+    let e = |ts, kind, d| Event::new(ts, "sendmeter", Some(12), kind, d);
+    let evs = vec![
+        e(1, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"})),
+        e(
+            2,
+            "spawn",
+            json!({"role": "rev", "stage": "rev", "check": true, "agent": "r1"}),
+        ),
+        e(
+            3,
+            "verdict",
+            json!({"verdict": "PASS", "sha": a, "stage": "rev", "loop": "rev"}),
+        ),
+        e(4, "verify-skipped", json!({"sha": a, "stage": "verify", "reason": "r"})),
+        e(
+            5,
+            "blocked",
+            json!({"code": "SERIAL_UNMARKED", "reason": "touches serial paths"}),
+        ),
+    ];
+    let s = &fold(&evs)[&("sendmeter".to_string(), 12)];
+    let pr: serde_json::Value = serde_json::from_str(&pr(&a)).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let w = waiting_on(&herdsman::waiting::Log::new(&evs), &evs, s, Some((&a, 1)), &pr, f, None);
+    assert_eq!(w.what, "PASS · merge refused SERIAL_UNMARKED: touches serial paths");
+    assert_eq!(w.next_cmd, None);
+}

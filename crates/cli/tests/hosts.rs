@@ -48,6 +48,10 @@ fn fake(mini: f64, remote: f64) -> Fake {
             &format!("{} 1 1 1/9 42", remote * 4.0),
         )
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
 }
 
 const HERDR_STATUS: &str = "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.5\n";
@@ -643,6 +647,20 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     );
 }
 
+/// #592: a remote host's old fleet.toml is flagged, never removed; none there, no row.
+#[test]
+fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
+    let c = setup("hosts-stale-conf", "", true, 0);
+    let r = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(!out.contains("stale fleet.toml"), "{out}");
+    let conf = c.config.display().to_string();
+    let r = r.reply(&format!("{SSH}'sh' '-c' 'test -e \"$1\"' 'sh' '{conf}'"), "");
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains("\n! stale fleet.toml on bazzite: no longer read"), "{out}");
+    assert!(!r.calls.borrow().iter().any(|l| l.contains("'rm'") && l.contains(&conf)));
+}
+
 #[test]
 fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     let c = setup("hosts-sick", "", true, 0);
@@ -748,8 +766,9 @@ fn an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once() {
         "amber, not red: {out}"
     );
     let sha = env!("HERDSMAN_SHA");
+    let conf = c.config.display(); // #592: the full sync only where an old fleet.toml is left
     let script = format!(
-        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path crates/cli --locked --root '\\''/opt/herdsman'\\'' --force && '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync'"
+        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.herdsman-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/herdsman'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path crates/cli --locked --root '\\''/opt/herdsman'\\'' --force && {{ test ! -e '\\''{conf}'\\'' || '\\''/opt/herdsman/bin/herdsman'\\'' profiles sync; }}'"
     );
     assert!(old.called(&script), "{:#?}", old.calls.borrow());
     let ev = read(&c.state).unwrap();
@@ -1152,6 +1171,10 @@ fn live_fake() -> Fake {
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
+        .reply(
+            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            "",
+        )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
 }
 
@@ -1354,4 +1377,126 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     assert_eq!(code, 0, "{out}");
     let (driven, trimmed) = (out.find("sendmeter #12 start:"), out.find(TRIMMED));
     assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
+}
+
+/// #573: the main host runs herdsman through a symlink (`~/.local/bin/herdsman` → `<root>/bin/herdsman`): the update
+/// installs into the real root, and the readback asks the real binary, so a stale one shows though the symlink is current.
+#[test]
+fn a_symlinked_herdsman_updates_and_reads_back_its_real_install_root() {
+    let extra =
+        "\n[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/herdsman\"\nintegration = \"staging\"\n";
+    let mut c = setup("hosts-symlink", "", true, 0);
+    std::fs::write(&c.config, config("") + extra).unwrap();
+    let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
+    let root = dir.join("share/herdsman");
+    std::fs::create_dir_all(root.join("bin")).unwrap();
+    std::fs::create_dir_all(dir.join("local/bin")).unwrap();
+    std::fs::write(root.join("bin/herdsman"), "").unwrap();
+    std::os::unix::fs::symlink(root.join("bin/herdsman"), dir.join("local/bin/herdsman")).unwrap();
+    c.exe = dir.join("local/bin/herdsman").display().to_string();
+    let (real, link) = (root.join("bin/herdsman").display().to_string(), c.exe.clone());
+    let cfg = Config::load(&c.config).unwrap();
+    let r = healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
+        .reply(
+            &format!("{SSH}'{link}' '--version'"),
+            &format!("herdsman {}\n", herdsman::VERSION),
+        )
+        .reply(&format!("{SSH}'{real}' '--version'"), "herdsman 0.1.0 (0ld)\n");
+    let (on, home) = (herdsman::hosts::On::new(&r, Some("bazzite")), herdsman::config::home());
+    let home = home.to_str().unwrap(); // the same home there: paths unchanged
+    let rows = herdsman::hosts::health(&c, &cfg, &on, &[], home);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].starts_with("! herdsman — herdsman 0.1.0 (0ld) there"),
+        "{rows:?}"
+    );
+    assert!(herdsman::hosts::update(&c, &cfg, &on, "bazzite", home));
+    let root = format!("--root '\\''{}'\\'' --force", root.display());
+    let sync = format!("|| '\\''{real}'\\'' profiles sync");
+    let calls = r.calls.borrow();
+    assert!(
+        calls.iter().any(|c| c.contains(&root) && c.contains(&sync)),
+        "{calls:#?}"
+    );
+}
+
+/// #649: bazzite's lane `sendmeter-impl-12`, its worktree there with one dirty file; `push` answers the wip push.
+fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
+    let g = format!("{SSH}'git' '-C' '{WT}' ");
+    let f = match push {
+        Some(code) => f.once_err(
+            &format!("{g}'push'"),
+            code,
+            "ssh: connect to host bazzite: Connection refused",
+        ),
+        None => f,
+    };
+    let f = f
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{g}'status' '--porcelain'"), " M src/a.rs\n")
+        .reply(&format!("{g}'rev-list' '--count'"), "0\n")
+        .reply(&format!("{SSH}'git' '-C'"), "")
+        .reply("date -r", "20261107-1200\n");
+    (f, g)
+}
+
+/// #649: `kill --yes` of a lane on bazzite saves its work there: status, commit and push over ssh, never local git.
+#[test]
+fn kill_saves_a_remote_lanes_work_on_its_own_host() {
+    let c = setup("hosts-kill-wip", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    let (r, g) = dirty_remote(Fake::default(), None);
+    let r = r.reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let (code, out) = run(&c, &r, &["kill", "sendmeter-impl-12", "--yes"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200'");
+    for step in ["'status' '--porcelain'", "'add' '-A'", "'commit' '-q' '--no-verify'"] {
+        assert!(r.called(&format!("{g}{step}")), "{step}: {calls:?}");
+    }
+    assert!(r.index(&push).unwrap() < r.index("herdr --machine bazzite pane close w9:p1").unwrap());
+    assert!(!r.called("git "), "never local git: {calls:?}");
+}
+
+/// #649: `spawn --supersede` of bazzite's lane with dirty work pushes it to `wip/` there before any pane closes, and the
+/// new lane's brief names that branch; a failed save refuses and closes nothing.
+#[test]
+fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
+    for fail in [false, true] {
+        let c = setup(&format!("hosts-supersede-wip-{fail}"), "", true, 0);
+        assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+        remote_spawn(&c, NOW - 900);
+        let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
+        let live = live_fake()
+            .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
+            .reply("herdr --machine bazzite pane close w9:p1", "{}")
+            .reply("herdr --machine bazzite worktree open", ws)
+            .reply(
+                "herdr --machine bazzite pane list --workspace w9",
+                r#"{"result":{"panes":[{"pane_id":"w9:p2","agent":null}]}}"#,
+            )
+            .reply("herdr --machine bazzite pane run w9:p2 export", "{}")
+            .reply("herdr --machine bazzite agent start sendmeter-impl-12", "{}")
+            .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}");
+        let (r, g) = dirty_remote(live, fail.then_some(1));
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+        let calls = r.calls.borrow().clone();
+        let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200'");
+        assert!(r.called(&push), "{calls:?}");
+        if fail {
+            assert!(code == 3 && out.contains("REFUSED SNAPSHOT_FAILED"), "{out}");
+            assert!(!r.called("herdr --machine bazzite pane close"), "{calls:?}");
+            assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
+            continue;
+        }
+        assert_eq!(code, 0, "{out} {calls:?}");
+        assert!(r.index(&push).unwrap() < r.index("herdr --machine bazzite pane close w9:p1").unwrap());
+        let brief = r
+            .inputs
+            .borrow()
+            .iter()
+            .any(|(_, t)| t.contains("wip/sendmeter-impl-12-20261107-1200"));
+        assert!(brief, "the new lane's brief names the wip branch");
+    }
 }

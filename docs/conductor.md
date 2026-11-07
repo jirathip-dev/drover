@@ -168,7 +168,7 @@ lines never push, nor (#407) anything in a thread a board has open.
 
 Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `conductor-start` (session, resumed,
 account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
-`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only), `telegram-topic`.
+`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only).
 
 ## Config changes (#387)
 
@@ -224,25 +224,8 @@ never edits the account list itself: that change is a `config propose` card.
   `all`'s) through a 0600 file the pane's shell sources, deleted after the start (docs/providers.md).
 - `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
 
-## Telegram (#387, optional)
+## Telegram (removed, #557)
 
-herdsman talks to the Telegram Bot API itself (no Hermes). The bot token is the keychain item
-`herdsman/all/TELEGRAM_BOT_TOKEN` (a `secret request` in an `all` thread stores it there), never fleet.toml. curl
-gets it on stdin only.
+The Telegram bridge (#387) is gone: the board and web push are the only owner UI. A leftover `[telegram]` table in
+fleet.toml loads with a warning (`herdsman doctor` shows a `!` row); drop it.
 
-```toml
-[telegram]
-chat = -100123     # a forum supergroup the bot administers (topics on)
-owner = 4242          # your Telegram user id: only your messages and taps count (required: without it the bridge stays off)
-# api = "https://api.telegram.org"
-```
-
-- `herdsman serve` long-polls it (it moves to Phase C, #345, later).
-- **One forum topic is one thread.** A new topic starts a thread under **all repos**, unless its name starts with a
-  repo's fleet name. A thread started on the board gets a new topic.
-- The conductor's replies and system lines go to the topic. An ask's options become inline keyboard buttons (a tap
-  answers it, `via: telegram`). Images go both ways: a photo you send is saved in the thread's `uploads/` and typed
-  in with its path, and the conductor's images arrive as photos (other files as documents). A config or secret card
-  says it waits on the board.
-- The board stays the primary UI and shows the whole conversation. Your own messages stay where you wrote them.
-- Cursor: `<state dir>/telegram.json` (the next update id, the events relayed). The first run relays nothing older.

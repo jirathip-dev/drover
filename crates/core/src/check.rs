@@ -608,7 +608,7 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None), true)
+    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false), true)
 }
 
 /// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub). Dry run unless `yes`.
@@ -619,7 +619,7 @@ pub fn clean(
     r: &dyn Runner,
     out: &mut dyn Write,
     fleet: Option<&str>,
-    (issue, lane): (Option<u64>, Option<&str>),
+    (issue, lane, sched): (Option<u64>, Option<&str>, bool),
     yes: bool,
 ) -> Result<()> {
     let events = read(&ctx.state)?;
@@ -627,7 +627,7 @@ pub fn clean(
     let agents = crate::hosts::all_agents(cfg, r).context("cannot list herdr agents; refusing to clean blind")?;
     let mut seen = std::collections::BTreeSet::new();
     let mut failed = 0;
-    let mut freed = 0;
+    let (mut freed, mut removed) = (0, 0);
     let mut closed = BTreeMap::new();
     // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
     let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
@@ -685,6 +685,17 @@ pub fn clean(
         } else {
             continue;
         };
+        // #557: the daily job takes lanes idle 3 days or more since their issue's last event, 10 per run.
+        let idle = states
+            .get(&(e.fleet.clone(), n))
+            .is_some_and(|s| ctx.now >= s.last_ts + 3 * 86_400);
+        if sched && !idle {
+            continue;
+        }
+        if sched && removed == 10 {
+            writeln!(out, "stop: 10 removed this run; the rest go next run")?;
+            break;
+        }
         seen.insert(wt);
         let pane = e.str("pane").unwrap_or_default();
         let shown = away.map_or(wt.into(), |h| format!("{h}:{wt}")); // #416
@@ -746,6 +757,7 @@ pub fn clean(
             crate::harness::remove_tmp(&stray_roots(cfg), wt);
         }
         drop_log(ctx, e.str("agent"));
+        removed += 1;
         writeln!(out, "removed {shown} ({}#{n} {why})", e.fleet)?;
         emit(
             &ctx.state,
@@ -774,6 +786,42 @@ pub fn clean(
         anyhow::bail!("{failed} worktree(s) could not be removed; see above");
     }
     Ok(())
+}
+
+/// #557 `clean --scheduled`, the daily `dev.herdsman.clean` job: `clean --yes` held to lanes idle 3 days (10 a run),
+/// then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed`
+/// once (until a run passes); a clean no-op is silent.
+pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let res = clean(ctx, cfg, r, out, None, (None, None, true), true).and_then(|()| {
+        let list = herdr::list(r, "workspace")?;
+        let all = list["result"]["workspaces"].as_array().cloned().unwrap_or_default();
+        for w in all {
+            let (id, path) = (w["workspace_id"].as_str(), w["worktree"]["checkout_path"].as_str());
+            let (Some(id), Some(path)) = (id, path.filter(|p| !Path::new(p).exists())) else {
+                continue;
+            };
+            let o = herdr::workspace_close(r, id)?;
+            anyhow::ensure!(o.code == 0, "close workspace {id}: {}", herdr::message(&o));
+            writeln!(out, "closed workspace {id}: {path} is gone")?;
+        }
+        Ok(())
+    });
+    let mark = ctx.state.with_file_name("clean.failed");
+    let Err(e) = res else {
+        let _ = std::fs::remove_file(&mark);
+        return Ok(());
+    };
+    let why = format!("scheduled clean: {e:#}");
+    if std::fs::read_to_string(&mark).ok().as_deref() != Some(why.as_str()) {
+        std::fs::write(&mark, &why)?;
+        let d = json!({"key": "clean", "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, "herdsman", None, "clean-failed", d),
+        )?;
+    }
+    Err(e)
 }
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
@@ -1373,19 +1421,7 @@ pub fn kill(
     let st = e.issue.and_then(|n| fold(&events).remove(&(e.fleet.clone(), n)));
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
-    let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt.unwrap_or_default()][..], a].concat());
-    let (dirty, ahead) = match wt {
-        Some(_) => {
-            let st = git(&["status", "--porcelain"])?;
-            (
-                changes(&st),
-                git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?
-                    .trim()
-                    .parse()?,
-            )
-        }
-        None => (0, 0),
-    };
+    let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
     let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
@@ -1407,22 +1443,7 @@ pub fn kill(
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        match snapshot(r, wt.unwrap_or_default(), w, "wip: kill snapshot") {
-            Err(Snap::Failed(e)) => {
-                return crate::gate::refused(
-                    "SNAPSHOT_FAILED",
-                    format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
-                )
-            }
-            Err(Snap::Secret(hit)) => {
-                return crate::gate::refused(
-                    "SECRET_IN_WIP",
-                    format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
-                )
-            }
-            Err(Snap::Push(e)) => return Err(e),
-            Ok(()) => {}
-        }
+        save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
@@ -1469,6 +1490,42 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     Ok(())
+}
+
+/// #649: `wt`'s dirty files and unpushed commits, read on the lane's own host.
+fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
+    let git = |a: &[&str]| ok(on, "git", &[&["-C", wt][..], a].concat());
+    let dirty = changes(&git(&["status", "--porcelain"])?);
+    let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
+    Ok((dirty, ahead.trim().parse().unwrap_or(0)))
+}
+
+/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
+    match snapshot(on, wt, w, msg) {
+        Err(Snap::Failed(e)) => crate::gate::refused(
+            "SNAPSHOT_FAILED",
+            format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
+        ),
+        Err(Snap::Secret(hit)) => crate::gate::refused(
+            "SECRET_IN_WIP",
+            format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
+        ),
+        Err(Snap::Push(e)) => crate::gate::refused(
+            "SNAPSHOT_FAILED",
+            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+        ),
+        Ok(()) => Ok(()),
+    }
+}
+
+/// #649: a superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
+pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
+    if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
+        return Ok(None);
+    }
+    let w = wip_branch(ctx, on.r, agent);
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|()| Some(w))
 }
 
 /// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).

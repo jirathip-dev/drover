@@ -59,7 +59,7 @@ pub fn based(r: &dyn Runner, f: &Fleet, head: &str) -> bool {
 
 /// Commit `sha`'s full suite (integration's required checks, else every check run there): green | pending | failed
 /// (`none`: no run at all), and the checks.
-fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Value) {
+pub(crate) fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Value) {
     let jq = "[.check_runs[] | {__typename: \"CheckRun\", name, status: (.status | ascii_upcase), conclusion: \
         ((.conclusion // \"\") | ascii_upcase), startedAt: .started_at, detailsUrl: .details_url}]";
     let api = format!("repos/{}/commits/{sha}/check-runs?per_page=100", f.repo);

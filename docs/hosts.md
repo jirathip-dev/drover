@@ -19,8 +19,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    - git access to each fleet repo: the host clones each repo itself the first time a lane goes there, with plain
      `git clone https://github.com/<repo>.git <local>`, so its git config (`insteadOf`, credential helper) applies;
    - the agent harness (Claude Code logged in);
-   - herdsman itself, then run `herdsman profiles sync` there. The lane's tool-guard hook calls `herdsman hook`, and
-     the Claude profile lives under that host's own home.
+   - herdsman itself. The lane's tool-guard hook calls `herdsman hook`, and the Claude profile lives under that host's
+     own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
    herdsman never copies credentials to another host: a role's `account` token is only exported to lanes on the
    main host; a lane on another host runs on that host's own Claude login.
@@ -86,6 +86,17 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
+
+## A remote lane's hook rules (#592)
+
+Only the main host has a fleet.toml. Spawn resolves a remote lane's hook rules there (protected branches, the fleet's
+`deny_commands` under the host's `[hosts.<name>]` rules, the reviewer flag) and writes them to
+`<worktree>.rules.json` on the lane's host, exported as `HERDSMAN_RULES`, and syncs the lane's harness profile there
+by name. The hook there reads only that file (the lane
+may not edit it); a missing or unreadable one fails closed `HOOK_FAILED_CLOSED`. It holds no notifier, token or env
+value. The rules are frozen at spawn: after a config change that alters them, the board marks the lane `rules stale`
+until a respawn. A fleet.toml left on a remote host is no longer read: `herdsman doctor` shows
+`! stale fleet.toml on <host>: no longer read`; remove it by hand (herdsman never does).
 
 ## Asks, answers and verdicts from another host (#275, #389)
 
@@ -176,7 +187,7 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 When `check` sees an older herdsman on a remote host, and fleet.toml has the herdsman fleet, it rebuilds the main
 host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
 `cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
-`herdsman profiles sync`. Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
+`herdsman profiles sync` if an old fleet.toml is left there (#592). Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
 logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
 A host still on the old version stays amber. A failed update never blocks the main host.
 
@@ -243,8 +254,8 @@ again. In order:
    paste the host's fine-grained token and press Enter (read without echo, never on a command line or in a log). Then
    run bootstrap again. herdsman never copies a token from this host.
 4. **git over HTTPS** with that token (`gh auth setup-git`): never your SSH key.
-5. **fleet.toml** there, when it has none: only the `[fleet.*]` tables, without their notifiers.
-6. A clone of each fleet's repo the host fits, then `herdsman profiles sync`. Logged `host-bootstrap`.
+5. A clone of each fleet's repo the host fits. Logged `host-bootstrap`. #592: no fleet.toml goes there; each spawn
+   syncs its lane's profile (a full `profiles sync` runs only where an old fleet.toml is left).
 
 **The token.** Make one fine-grained token per cloud host, limited to the fleets' repos, with contents and pull
 requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
