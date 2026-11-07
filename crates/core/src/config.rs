@@ -29,12 +29,42 @@ pub struct Config {
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     pub conductor: ConductorCfg,
-    /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
-    pub telegram: Telegram,
+    /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
+    pub telegram: Option<toml::Value>,
     /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
     pub service: ServiceCfg,
     /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
     pub chat: Chat,
+    /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
+    pub ci_runners: Option<CiRunners>,
+}
+
+/// #537: the repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap;
+/// `vms` are the ones made by hand (`runners add|remove` change the set in the log); `local_*` the mini's runners.
+#[derive(Debug, Deserialize)]
+pub struct CiRunners {
+    pub provider: String,
+    pub repo: String,
+    pub label: String,
+    pub size: String,
+    #[serde(default)]
+    pub ttl_hours: u64,
+    #[serde(default)]
+    pub snapshots: bool,
+    pub slots: u64,
+    pub max_vms: u64,
+    pub usd_day: f64,
+    #[serde(default)]
+    pub vms: Vec<String>,
+    pub local_label: Option<String>,
+    pub local_stop: Option<String>,
+    /// The VMs' runner service (the recipe's `{service}`).
+    #[serde(default = "ci_service")]
+    pub service: String,
+}
+
+fn ci_service() -> String {
+    "ci-runner".into()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -51,14 +81,6 @@ pub struct Chat {
     pub account: Option<String>,
     #[serde(default)]
     pub accounts: Vec<String>,
-}
-
-/// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
-#[derive(Debug, Default, Deserialize)]
-pub struct Telegram {
-    pub chat: Option<i64>,
-    pub owner: Option<i64>,
-    pub api: Option<String>,
 }
 
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
@@ -106,6 +128,9 @@ pub enum RuntimeKind {
     #[default]
     Herdr,
     Shed,
+    /// #565: shed running each lane as an ACP session (`acp` defaults to `claude-acp`, `acp_policy` to `allow`).
+    #[serde(rename = "shed-acp")]
+    ShedAcp,
     /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
     Berth,
 }
@@ -124,10 +149,17 @@ pub struct Runtime {
 impl Runtime {
     /// The shed runtime, when it is the kind.
     pub fn shed(&self) -> Option<crate::shed::Shed> {
-        matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth).then(|| crate::shed::Shed {
+        let acp = self.kind == RuntimeKind::ShedAcp;
+        (acp || matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth)).then(|| crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
-            acp: self.acp.clone(),
-            policy: self.acp_policy.clone().unwrap_or_else(|| "ask".into()),
+            acp: self
+                .acp
+                .clone()
+                .or_else(|| acp.then(crate::harness::default_acp).flatten().map(Into::into)),
+            policy: self
+                .acp_policy
+                .clone()
+                .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
         })
     }
 }
@@ -344,6 +376,8 @@ pub struct Fleet {
     pub ui_paths: Vec<String>,
     /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
+    /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
+    pub runtime: Option<Runtime>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -467,6 +501,8 @@ pub struct Limits {
     pub effort: Option<String>,
     /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
+    /// #584: an ask nobody waits on (no live asking lane) closes as expired after this many hours.
+    pub ask_expire_hours: u64,
     /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
     /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
@@ -494,7 +530,7 @@ pub struct Limits {
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Deny {
     Cmd(String),
@@ -533,6 +569,7 @@ impl Default for Limits {
             min_free_mem_gb: 2.0,
             effort: None,
             ask_default_minutes: 30,
+            ask_expire_hours: 24,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
             transcript_days: 30,
@@ -583,7 +620,7 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
+/// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "thread-msg",
     "blocked",
@@ -600,10 +637,15 @@ pub const WEBPUSH_ON: &[&str] = &[
     "state-write-failed",
     "wip-blocked",
     "spawn-held",
+    "host-busy",
     "cap-near",
     "orphan-issue",
     "config-warning",
     "keychain-locked",
+    "self-update-failed",
+    "clean-failed",
+    "runners-low",
+    "runners-ok",
 ];
 
 impl Notify {
@@ -627,7 +669,12 @@ impl Config {
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
         let f = self.accounts.accounts_env.as_deref();
-        f.map(|f| ("[accounts].accounts_env", run(f))).into_iter().collect()
+        let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
+        let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
+        f.map(|f| ("[accounts].accounts_env", run(f)))
+            .into_iter()
+            .chain(tg)
+            .collect()
     }
 
     /// #539: secret `name` from the retired `accounts_env` file, for one the store lacks; None without it.
@@ -804,6 +851,18 @@ impl Config {
     pub fn webpush_sub(&self) -> Option<&str> {
         let all = self.notify.iter().chain(self.fleet.values().flat_map(|f| &f.notify));
         all.filter(|n| n.webpush()).find_map(|n| n.sub.as_deref())
+    }
+
+    /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
+    pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
+        let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
+        own.map_or_else(|| self.runtime.shed(), Runtime::shed)
+    }
+
+    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's.
+    pub fn shed(&self) -> Option<crate::shed::Shed> {
+        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref()?.shed());
+        self.runtime.shed().or_else(first)
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).

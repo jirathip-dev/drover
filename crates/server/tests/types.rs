@@ -67,9 +67,9 @@ macro_rules! each {
             Sub,
             Paired,
             Notifier,
-            Telegram,
             QueueTab,
             QueueCard,
+            Marks,
             Drive,
             DriveAct,
             QueueRow,
@@ -84,6 +84,13 @@ macro_rules! each {
             Conductor,
             Events,
             Ev,
+            IssueView,
+            Verdict,
+            Repro,
+            Lessons,
+            LessonFleet,
+            LessonRun,
+            Digest,
             SetupScreen,
             Roles,
             ChatDefaults,
@@ -191,7 +198,45 @@ fn serde_json_fits_the_types() {
         f: "api".into(),
         n: Some(7),
     };
+    // #576: a queued row's marks and an issue's verdict with its shots and `Repro:` block, every field set.
+    let marks = Marks {
+        verify: Some("on".into()),
+        repro: true,
+        serial: vec!["db".into()],
+        note: Some("verify(1)".into()),
+        ..Marks::default()
+    };
+    let verdict = Verdict {
+        role: "verify".into(),
+        shots: vec!["shots/home-390.png".into()],
+        repro: Some(Repro {
+            kind: "run".into(),
+            text: "```sh\ncargo test\n```".into(),
+        }),
+        ..Verdict::default()
+    };
+    let last = Some(LessonRun {
+        issue: 30,
+        ts: 1,
+        state: "impl".into(),
+    });
+    let lessons = Lessons {
+        fleets: vec![LessonFleet {
+            last,
+            next: Some(2),
+            ..LessonFleet::default()
+        }],
+    };
     checks.extend([
+        ("Marks", json!(marks)),
+        (
+            "IssueView",
+            json!(IssueView {
+                verdicts: vec![verdict],
+                ..IssueView::default()
+            }),
+        ),
+        ("Lessons", json!(lessons)),
         ("HostRow", json!(row)),
         ("Waiting", json!(wait)),
         ("Moment", json!(moment)),
@@ -257,9 +302,9 @@ fn serde_json_fits_the_types() {
         Sub,
         Paired,
         Notifier,
-        Telegram,
         QueueTab,
         QueueCard,
+        Marks,
         Drive,
         DriveAct,
         QueueRow,
@@ -274,6 +319,13 @@ fn serde_json_fits_the_types() {
         Conductor,
         Events,
         Ev,
+        IssueView,
+        Verdict,
+        Repro,
+        Lessons,
+        LessonFleet,
+        LessonRun,
+        Digest,
         Reply
     );
     checks.extend([

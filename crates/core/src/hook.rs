@@ -1,7 +1,9 @@
 //! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
-use crate::config::Deny;
+use crate::config::{Config, Deny};
 use crate::harness::dialects;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 pub struct Policy {
     pub branches: Vec<String>,
@@ -19,6 +21,50 @@ pub struct Policy {
     pub groups: Vec<String>,
     /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
+}
+
+/// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
+/// its rules file (`HERDSMAN_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Rules {
+    /// main, master, staging and every fleet's integration branch.
+    pub branches: Vec<String>,
+    /// #216/#256: the fleet's `deny_commands` under the lane host's rules, plus #502's broad-kill ban.
+    pub deny: Vec<Deny>,
+    pub groups: Vec<String>,
+    pub reviewer: bool,
+    /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
+    pub builds: bool,
+}
+
+impl Rules {
+    pub fn resolve(cfg: &Config, fleet: &str, role: &str, host: &str) -> Rules {
+        let f = cfg.fleet.get(fleet);
+        let d = f.map_or_else(|| cfg.limits.deny_commands.clone(), |f| f.deny(&cfg.limits));
+        let mut deny = match cfg.hosts.get(host) {
+            Some(h) => h.deny(d),
+            None => d,
+        };
+        // #502: no fleet or host drops the broad-kill ban.
+        deny.extend(broad_kill());
+        let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
+        branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
+        let family = f.map(|f| f.family(role));
+        Rules {
+            branches,
+            deny,
+            groups: cfg.conductor.groups().into_iter().map(String::from).collect(),
+            reviewer: family == Some("rev"),
+            builds: role != "lesson" && family == Some("impl"),
+        }
+    }
+}
+
+/// #592: lane spawn `sp` froze rules (a remote lane's) that fleet.toml now resolves otherwise: a respawn takes them.
+pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool {
+    let (role, host) = (sp.str("role").unwrap_or_default(), sp.str("host").unwrap_or_default());
+    let now = serde_json::to_value(Rules::resolve(cfg, fleet, role, host)).ok();
+    sp.data.get("rules").is_some_and(|r| now.as_ref() != Some(r))
 }
 
 /// git subcommands that make commits or move refs; denied to reviewers.
@@ -138,11 +184,12 @@ fn resolve(w: &str, cwd: &str) -> String {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    let cmd = &dups(&unquote(cmd));
-    let mut cwd = cwd.to_string();
-    if let Some(d) = denied(cmd, &p.deny) {
+    // #537: a quoted argument's text (`gh issue create --body "…docker…"`) is no command word.
+    if let Some(d) = denied(&dups(&unquote(cmd, true)), &p.deny) {
         return Some(d.reason());
     }
+    let cmd = &dups(&unquote(cmd, false));
+    let mut cwd = cwd.to_string();
     // #538: the hard nos no run card may run, from a conductor's own shell either.
     if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.conductor) {
         return Some(format!(
@@ -279,8 +326,9 @@ fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
 
 /// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
 /// bodies fed to `cat` or `tee`, comments, and the quoted text of `herdsman thread reply|say` and `herdsman ask`
-/// (the question, each `--option`).
-fn unquote(cmd: &str) -> String {
+/// (the question, each `--option`). #537: with `args`, also any quoted argument of a command that runs no text of its
+/// own: none of its words a wrapper (`sh`, `eval`, …), `ssh`, `watch`, `parallel` or `-c` (`su -c`, `script -c`).
+fn unquote(cmd: &str, args: bool) -> String {
     let (mut out, mut cur) = (String::new(), String::new());
     // Pending heredocs: delimiter, quoted, body dropped.
     let mut docs = Vec::<(String, bool, bool)>::new();
@@ -302,6 +350,10 @@ fn unquote(cmd: &str) -> String {
                 });
                 let rest: Vec<&str> = i.map_or(vec![], |i| words[i + 1..].iter().map(String::as_str).collect());
                 let text = matches!(rest[..], ["thread", "reply" | "say", ..] | ["ask", ..]);
+                let runs =
+                    |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
+                let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
+                let text = text || data;
                 // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
                 let ansi = c == '\'' && out.ends_with('$');
                 out.push(c);
@@ -509,6 +561,10 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     // `apply`, a rules-file rewrite in the lane's own worktree) is open.
     if !conductor && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman lesson` (#419)".into());
+    }
+    // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
+    if !conductor && r.first() == Some(&"amend") {
+        return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman amend` (#574)".into());
     }
     // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
     if !conductor && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
@@ -719,6 +775,38 @@ pub fn reported(input: &Value) -> Option<&'static str> {
         Some(_) => "blocked",
         None => "working",
     })
+}
+
+/// #511: what the stop hook tells an impl lane whose turn ended unreported.
+pub const TURN_ASK: &str =
+    "herdsman: end your turn with `herdsman turn done|blocked|need-input|working [--why <text>]` \
+(done: pushed and ready for review; blocked: --why names the blocker; need-input: after `herdsman ask`; working: \
+stopped mid-task)";
+
+/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `herdsman turn`
+/// ran, `asked` once the stop hook told it.
+pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
+    state.with_file_name(format!("turn-{}", lane.replace([':', '/'], "-")))
+}
+
+/// #511: an impl lane (`builds`) whose turn ends with no `herdsman turn` since its last prompt goes on once with
+/// `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
+pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
+    let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
+    let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
+    if d.prompt == ev {
+        let _ = std::fs::write(mark, "prompt");
+        return None;
+    }
+    let seen = std::fs::read_to_string(mark).unwrap_or_default();
+    let again = d
+        .again
+        .filter(|_| !matches!(seen.as_str(), "turn" | "asked") && input["stop_hook_active"] != true)?;
+    if !builds() {
+        return None;
+    }
+    let _ = std::fs::write(mark, "asked");
+    Some(again(TURN_ASK))
 }
 
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).

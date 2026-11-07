@@ -1,0 +1,14 @@
+{
+  "response": {
+    "fleet": "sendmeter",
+    "issue": 12,
+    "verdicts": []
+  },
+  "route": "GET /api/v1/issue/<fleet>/<n>",
+  "schema": {
+    "fleet": "string",
+    "issue": "number",
+    "verdicts": []
+  },
+  "type": "IssueView"
+}

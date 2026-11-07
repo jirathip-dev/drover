@@ -27,6 +27,8 @@ static DIALECT: Dialect = Dialect {
     stop: "on_session_end",
     blocked: "",
     deny: |reason| json!({"action": "block", "message": reason}),
+    prompt: "",
+    again: None,
 };
 
 impl Harness for Hermes {

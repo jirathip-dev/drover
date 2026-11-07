@@ -209,7 +209,9 @@ impl Service {
         let k = &v["kick"];
         if let (Some(f), Some(n)) = (k["fleet"].as_str(), k["issue"].as_u64()) {
             let why = k["why"].as_str().unwrap_or("kick");
-            let k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
+            let id = k["id"].as_str().map(|i| ["--id".to_string(), i.into()]);
+            let mut k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
+            k.extend(id.into_iter().flatten());
             // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
             if self.job(k, KICK_SECS).await.is_none() {
                 herdsman_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);

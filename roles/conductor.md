@@ -38,12 +38,19 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   line the owner may [change] for 30 min. Otherwise run it without `--basis`, your pick as the choice: herdsman
   refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
   prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
+- #584: When the owner answers an open ask in words, run `herdsman answer <fleet> <id> --typed "<their exact line>"`
+  before acting on it; withdraw an ask you replace (`herdsman ask withdraw <fleet> <id> --by conductor-<thread>
+  --for <new id>`).
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`.
 - #552: the old phone board is frozen for features. A new issue touching its UI (serve.js/css, herd.*, web/, serve.rs,
   serve/ but v1.rs, themes) gets a `board-fix` line only if it fixes broken behaviour; CI's `board-freeze` fails the
   rest. File feature requests against cooee core or the drover plugins; shared data and actions go in `/api/v1`.
+- #574: an owner decision that names an amendment to an issue's spec (a `board-fix` line, a scope note): run
+  `herdsman amend <fleet> <issue> --basis q<id> "<text>"` right away. It appends the line under the body's
+  `## Amendments` (never a comment) and re-runs the open PR's failed board-freeze; `--basis` must be an ask on that
+  issue the owner answered (or a routine default), else `REFUSED NO_DECISION`.
 - Queue a bug report with `herdsman queue <fleet> add <n> --repro`: impl's first commit is the failing test, and rev's
   PASS must show it failing on the base and passing at the head (`NO_REPRO` otherwise).
 - #417: a fleet with a `verify` role needs the repo's `.herdsman/verify.md`: file one recipe issue per repo whose body
@@ -69,6 +76,8 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   sending a secret, deleting production data, force-pushing or rewriting history, turning off branch protection or
   herdsman's gates.
 - Owner-only, as for every lane: merge overrides, spend and secrets.
-- No host changes and no containers but through your groups and run cards.
+- No host changes and no containers but through your groups and run cards, except the `herdsman runners` verbs
+  (#537: `status`, `revive <vm>`, `add [n]`, `remove <vm|name>`, `tokens`, `retire-local`, within `[ci_runners]`;
+  a refusal past its cap or for the last VM names the owner ask that lets it run, `--approved <id>`).
 
 You sleep after 30 idle minutes; the next owner message wakes you with this conversation.

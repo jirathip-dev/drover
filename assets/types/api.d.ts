@@ -129,9 +129,9 @@ export type QueuedMsg = { q: number, text: string, };
 
 /**
  * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
- * and conductor folder `dir`.
+ * and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
  */
-export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
+export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
 
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
@@ -203,7 +203,7 @@ export type Row = { name: string, tone: string, detail: string, fix: string, };
  * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
  * forms are inert); `mtime` the forms send back.
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, telegram: Telegram, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
@@ -266,12 +266,6 @@ export type Paired = { hash: string, label: string, created: number, used: numbe
 export type Notifier = { kind: string, on: string, };
 
 /**
- * #440: the Telegram bridge: `on` with both `chat` and `owner` set, its `topics` (threads) and last poll's age; never
- * the token or the chat's id.
- */
-export type Telegram = { on: boolean, chat: boolean, owner: boolean, topics: number, polled: string, };
-
-/**
  * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
  * unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
  */
@@ -282,7 +276,13 @@ export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string,
  * line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of
  * `done_n`), the backlog and the [config] sheet.
  */
-export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, };
+export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
+
+/**
+ * #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`),
+ * `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
+ */
+export type Marks = { design: boolean, verify?: string | null, repro: boolean, serial: Array<string>, needs: Array<string>, note?: string | null, };
 
 /**
  * #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
@@ -362,6 +362,41 @@ export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
  * agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
  */
 export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
+
+/**
+ * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first.
+ */
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, };
+
+/**
+ * A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
+ * (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the
+ * `i`th); a `--repro` PASS's `Repro:` block.
+ */
+export type Verdict = { role: string, round: number, sha: string, verdict: string, ts: number, findings: string, shots: Array<string>, repro?: Repro | null, };
+
+/**
+ * #420: a `Repro:` block: `run` (the commands and both outputs) or `verify` (the quoted reason), its lines as `text`.
+ */
+export type Repro = { kind: string, text: string, };
+
+/**
+ * #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick`
+ * runs the `next` (none: `off`).
+ */
+export type Lessons = { fleets: Array<LessonFleet>, };
+
+export type LessonFleet = { fleet: string, lessons: string, last?: LessonRun | null, next?: number | null, };
+
+/**
+ * A lesson issue: its lane's spawn time `ts` and the issue's state now.
+ */
+export type LessonRun = { issue: number, ts: number, state: string, };
+
+/**
+ * #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+ */
+export type Digest = { fleet: string, days: number, text: string, };
 
 /**
  * #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every

@@ -80,7 +80,8 @@ runs it every 5 minutes. Check it worked:
 
 One command, safe to run again: `herdsman setup`. It writes and loads the tick job and the board
 job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `herdsman profiles sync`,
-then runs `herdsman doctor` and exits with its code. Each step prints `✓ done`, `= already` or
+plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), then runs
+`herdsman doctor` and exits with its code. Each step prints `✓ done`, `= already` or
 `✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
 
 Run it every 5 minutes: `herdsman timer install`. That is the tick job alone: `herdsman tick` every
@@ -103,28 +104,33 @@ no Hermes needed.
 (unloads it and deletes its files). Check it worked: `herdsman doctor` shows `✓ timer` and a
 `watchdog check` that ran under 15 minutes ago.
 
-Optional: reinstall when staging goes green, so the binary never lags it. A short script
-you can add to the same crontab:
+### Self-update and the daily clean (#557)
+
+herdsman needs no Hermes: `herdsman setup` (or `timer install`) also writes two jobs of its own.
+
+- `dev.herdsman.update` runs `herdsman self-update` every 5 minutes. It fetches the herdsman fleet's integration
+  branch (the fleet whose repo is `…/herdsman`) and installs a new head only once its CI is all green: it builds in
+  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, signs the build by hash with
+  "herdsman-local" through `scripts/signing-identity.sh sign` (#556, #568; refused without it:
+  `sh scripts/signing-identity.sh` once), runs the new binary's
+  `doctor --config-only` against the live fleet.toml (#539), swaps it in atomically, then runs `profiles sync` and
+  restarts the board job. Any failed step keeps the old binary and alerts `self-update-failed` once per head, with
+  the exact failure. `herdsman self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
+  (logged). The job's PATH includes `cargo`'s directory.
+- `dev.herdsman.clean` runs `herdsman clean --scheduled` daily at 03:30: worktrees of merged or closed issues idle
+  3 days or more, at most 10 a run, never a live one; unsaved work goes to `wip/` first, as `clean --yes`. Then it
+  closes each herdr workspace whose checkout folder is gone. A refusal or failure alerts `clean-failed` once; a clean
+  no-op is silent.
+
+Moving off Hermes: once both jobs have run (`self-updated` in the log after a staging merge, no keychain prompt),
+remove the old Hermes fleet jobs, once:
 
 ```sh
-#!/bin/sh
-# reinstall-herdsman: rebuild from staging when its latest CI run is green.
-set -e
-cd ~/src/herdsman
-git fetch -q origin staging
-sha=$(git rev-parse origin/staging)
-[ "$sha" = "$(cat ~/.local/share/herdsman/sha 2>/dev/null)" ] && exit 0
-ok=$(gh run list --branch staging --commit "$sha" --json conclusion -q '.[0].conclusion')
-[ "$ok" = "success" ] || exit 0
-git checkout -q --detach "$sha"
-cargo install --path crates/cli --locked --root ~/.local/share/herdsman/next
-# #539: swap only if the new binary's `doctor --config-only` loads the live fleet.toml; else keep the old one, exit 1.
-# #556: it also signs the new binary with "herdsman-local" (scripts/signing-identity.sh, once); #568: a sign that
-# fails or times out keeps the old binary and exits 1 with the fix.
-new=~/.local/share/herdsman/next/bin/herdsman
-scripts/install-gate.sh "$new" ~/.local/share/herdsman/bin/herdsman
-echo "$sha" > ~/.local/share/herdsman/sha
+hermes -p conductor cron remove d8bbecd490d7   # fleet-check (auto-install)
+hermes -p conductor cron remove 064cdd00dc56   # herdr-worktree-prune
 ```
+
+Other Hermes cron jobs (a one-off reminder) stay. `scripts/install-gate.sh` stays for a manual install.
 
 ## 5. Alerts
 

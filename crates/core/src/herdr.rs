@@ -87,16 +87,29 @@ impl Shed {
             acp: None,
         }
     }
-    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge). A
-    /// terminal of that name an earlier lane left exited is removed first.
-    pub fn start(&self, r: &dyn Runner, name: &str, labels: &[(&str, String)], cwd: &str) -> Result<()> {
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565:
+    /// its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
+    pub fn start(
+        &self,
+        r: &dyn Runner,
+        name: &str,
+        labels: &[(&str, String)],
+        cwd: &str,
+        cmd: &[String],
+    ) -> Result<()> {
         if self.get(r, name).is_ok_and(|t| t.state == shed_proto::State::Exited) {
             self.call(r, Method::Rm, Target { name: name.into() })?;
         }
-        let Some(id) = &self.0.acp else {
+        if self.0.acp.is_none() {
             return self.call(r, Method::Run, Self::run_params(name, labels, cwd)).map(drop);
-        };
-        let mut a = vec![
+        }
+        let a = self.acp_argv(name, labels, cwd, cmd);
+        shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
+    }
+    /// The `shed run --acp` words that start ACP lane `name`.
+    pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
+        let id = self.0.acp.as_deref().unwrap_or_default();
+        let mut a = argv(&[
             "run",
             "--acp",
             id,
@@ -106,10 +119,15 @@ impl Shed {
             name,
             "--cwd",
             cwd,
-        ];
-        let kv: Vec<String> = labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        a.extend(kv.iter().flat_map(|l| ["--label", l.as_str()]));
-        shed::cli(r, &a).map(drop)
+        ]);
+        a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
+        a.extend(
+            (!cmd.is_empty())
+                .then(|| "--".to_string())
+                .into_iter()
+                .chain(cmd.iter().cloned()),
+        );
+        a
     }
     /// The ACP lane's kick: once its session is ready, the prompt (framed by shed's CLI), confirmed by its state.
     pub fn kick_acp(&self, r: &dyn Runner, name: &str, text: &str) -> Result<bool> {
@@ -233,7 +251,8 @@ impl Runtime for Shed {
             return Ok(failed("unsupported", &format!("shed runs no `herdr {}`", a.join(" "))));
         };
         let name = params["name"].as_str().unwrap_or_default().to_string();
-        let acp = self.0.acp.is_some();
+        // #565: an ACP terminal by its own `acp` (one fleet's lanes may be ACP sessions, another's shells).
+        let acp = matches!(m, Method::Send | Method::Keys) && self.get(r, &name).is_ok_and(|t| t.acp.is_some());
         let got = match m {
             // ACP: a prompt is framed by shed's CLI, and it needs no Enter.
             Method::Send if acp => {
@@ -356,17 +375,20 @@ pub fn list(r: &dyn Runner, what: &str) -> Result<Value> {
 }
 
 /// Live agents (`herdr agent list`); #298: with shed, herdr's (if it answers; a cached list's shed rows dropped) and
-/// shed's lanes.
+/// shed's lanes. #601: on another host (shed over ssh) herdr's answer alone proves it up; shed failing there is its
+/// `! shed:` health row (`hosts::health`), never offline.
 pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
     let Some(b) = r.shed() else {
         return Herdr.agents(r);
     };
-    let herdr = Herdr
-        .agents(r)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|a| a["runtime"] != "shed");
-    Ok(herdr.chain(Shed(b).agents(r)?).collect())
+    let remote = matches!(b.wire, shed::Wire::Connect);
+    let herdr = Herdr.agents(r);
+    let sheds = match Shed(b).agents(r) {
+        Err(_) if remote && herdr.is_ok() => vec![],
+        s => s?,
+    };
+    let herdr = herdr.unwrap_or_default().into_iter().filter(|a| a["runtime"] != "shed");
+    Ok(herdr.chain(sheds).collect())
 }
 
 /// `herdr agent list`'s stdout when it ran OK (serve's watcher hashes and caches it); #298: with shed, both lists.
