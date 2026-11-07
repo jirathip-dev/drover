@@ -129,9 +129,9 @@ export type QueuedMsg = { q: number, text: string, };
 
 /**
  * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
- * and conductor folder `dir`.
+ * and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
  */
-export type ThreadPage = { msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
+export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
 
 /**
  * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,

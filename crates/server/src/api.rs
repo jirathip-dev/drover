@@ -302,8 +302,10 @@ pub struct QueuedMsg {
 }
 
 /// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
-/// and conductor folder `dir`.
+/// and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
 pub struct ThreadPage {
+    pub id: String,
+    pub archived: bool,
     pub msgs: Vec<Msg>,
     pub older: Option<u64>,
     pub started: u64,

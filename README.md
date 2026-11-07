@@ -16,7 +16,27 @@ only through it, and it refuses anything that breaks a rule.
 - **The pipeline is configurable.** The default is impl → rev → gates → merge; yours is validated as a
   full loop when the config loads and drawn on the board.
 - **A phone board.** `herdsman serve` is a PWA: queue, lanes, host, events, and web push for what needs you.
-  Frozen for features (#552): bug fixes only; new UI goes to cooee and the drover plugins, over `/api/v1`.
+  Frozen for features (#552): bug fixes only; new UI goes to cooee and cooee-drover, over `/api/v1` (see below).
+
+## How it fits
+
+```
+cooee  →  cooee-drover  →  herdsman /api/v1
+(app)     (tabs)           (engine)
+```
+
+Calls go one way, left to right; nothing on the right depends on what is to its left.
+
+- **herdsman** (this repo) is the engine: queue, drive, lanes, reviews, gates, merge. It is to be renamed
+  drover (#456).
+- **cooee** is the app: chats, and shed sessions, which include the lanes as Workflow chats (cooee#33).
+- **cooee-drover** is cooee's Queue, Asks and Fleets tabs. They read and act through herdsman's `/api/v1` and
+  reimplement nothing.
+- The old board (`herdsman serve`) is frozen (#552) and retires once #553's parity rows pass on the owner's phone.
+
+A new Queue-tab feature's data comes from herdsman's `/api/v1`, so herdsman changes first: it adds the field to
+`/api/v1` (with its fixture in `crates/cli/tests/api_v1_contract.rs`), then cooee-drover's tab reads it. A
+consumer never derives engine state itself ([docs/serve.md](docs/serve.md#json-api-v1-265)).
 
 ## Quick start
 ```sh
