@@ -7,15 +7,20 @@
 # found by `--name` in `boat list --all --json` (jq); `user@host port` is its `sshEndpoint`, the host key from
 # ssh-keyscan, pinned at the first start.
 key_env = "BOAT_API_KEY"
+# #635 D: a new sandbox authorizes only boat's own key; the host block gets `IdentityFile` + `IdentitiesOnly yes`.
+identity = "~/.ssh/ascii_box_ed25519"
+# #635 C: `{id}` in a line is this lookup (`--all`: the default list omits stopped sandboxes). An empty id is boat's
+# current sandbox, so each line refuses one, and herdsman runs no `stop` or `destroy` when it prints nothing.
+id = '''boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id' '''
 create = "boat new --type {size} --name {name} --no-auto-stop --no-update >/dev/null"
-start = '''boat resume "$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id')" --no-update >/dev/null'''
-stop = '''boat stop "$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id')" --no-update >/dev/null'''
+start = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat resume "$i" --no-update >/dev/null'''
+stop = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat stop "$i" --no-update >/dev/null'''
 status = '''boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|if (.state=="idle" or .state=="running" or .state=="ready") then "running" else .state end' '''
 address = '''e=$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.sshEndpoint'); \
 h=${e%:*}; p=${e##*:}; echo "user@$h $p"; ssh-keyscan -t ed25519 -p "$p" "$h" 2>/dev/null | grep -m1 ' ssh-ed25519 ' | cut -d' ' -f2-'''
-destroy = '''boat delete "$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id')" --yes --no-update'''
+destroy = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat delete "$i" --yes --no-update'''
 # #255: `hosts snapshot` saves a bootstrapped host; `create_from` makes a new one from that snapshot, ready to use.
-snapshot = '''boat snapshot "$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id')" herdsman-{name} --no-update'''
+snapshot = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat snapshot "$i" herdsman-{name} --no-update'''
 create_from = "boat new --type {size} --name {name} --from herdsman-{name} --no-auto-stop --no-update >/dev/null"
 
 # #537: `[ci_runners]` VMs (boat.dev's HTTP API, docs.boat.dev; check them there). `{vm}` is a VM id; `{size}`,

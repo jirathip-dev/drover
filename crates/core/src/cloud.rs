@@ -49,8 +49,18 @@ pub fn load(ctx: &Ctx, c: &str) -> Result<toml::Table> {
 /// Run host `name`'s recipe command `verb`, the provider key exported from stdin (never in argv or a log); its stdout.
 fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Result<String> {
     let (rc, size) = recipe(ctx, cfg, name)?;
-    let line = rc.get(verb).and_then(|v| v.as_str()).unwrap_or_default();
-    let line = line.replace("{name}", name).replace("{size}", &size);
+    let get = |k: &str| {
+        rc.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .replace("{name}", name)
+    };
+    // #635 C: an empty id is boat's current sandbox: no stop or destroy when the recipe's `id` finds none.
+    if ["stop", "destroy"].contains(&verb) && rc.contains_key("id") {
+        let id = run(r, &rc, &format!("{name} id"), &get("id"), (None, fleet(ctx, cfg, name)))?;
+        ensure!(!id.trim().is_empty(), "no sandbox named {name}: {verb} refused");
+    }
+    let line = get(verb).replace("{id}", &get("id")).replace("{size}", &size);
     run(r, &rc, &format!("{name} {verb}"), &line, (None, fleet(ctx, cfg, name)))
 }
 
@@ -156,7 +166,8 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     let up = up.and_then(|_| {
         for _ in 0..30 {
             if cmd(ctx, cfg, r, name, "status")?.trim() == "running" {
-                return refresh(ctx, cfg, r, name).map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
+                return refresh(ctx, cfg, r, name, (true, false))
+                    .map(|()| drop(crate::hosts::survey(ctx, cfg, r, true)));
             }
             r.sleep(10);
         }
@@ -176,9 +187,17 @@ fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
     ctx.home.join(format!(".ssh/herdsman/{name}.known"))
 }
 
+/// #635 D: when cloud host `name`'s `status` says running, its block rewritten if `address` moved (bootstrap: `repin`).
+pub fn moved(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, repin: bool) -> Result<()> {
+    if !cmd(ctx, cfg, r, name, "status").is_ok_and(|s| s.trim() == "running") {
+        return Ok(());
+    }
+    refresh(ctx, cfg, r, name, (false, repin))
+}
+
 /// Rewrite host `name`'s block in `~/.ssh/config.d/herdsman` and its `known_hosts` from `address` (a key other than
-/// the pinned one fails closed); logs `cloud-up`.
-fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
+/// the pinned one fails closed; `repin` replaces it, logged `cloud-repin`); logs `cloud-up` on a change, or `up`.
+fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bool, bool)) -> Result<()> {
     let out = cmd(ctx, cfg, r, name, "address")?;
     let bad = || format!("{name} address: not `user@host port` + key");
     let mut l = out.lines().map(str::trim);
@@ -195,18 +214,35 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     let was = was.split_once(' ').map_or("", |w| w.1.trim());
     let k = known.display();
     ensure!(
-        was.is_empty() || was == key,
-        "{name}: host key changed from the one pinned in {k} (rm it to trust the new one)"
+        was.is_empty() || was == key || repin,
+        "{name}: host key changed from the one pinned in {k} (rm it to trust the new one; hosts bootstrap re-pins a running host)"
     );
+    // #635 D: the recipe's `identity` (boat's own key is the only one a new sandbox takes).
+    let id = recipe(ctx, cfg, name)?
+        .0
+        .get("identity")
+        .and_then(|v| v.as_str().map(String::from));
+    ensure!(
+        !id.as_deref().is_some_and(|i| i.contains(char::is_whitespace)),
+        "{name}: identity has whitespace"
+    );
+    let id = id.map_or(String::new(), |i| format!("  IdentityFile {i}\n  IdentitiesOnly yes\n"));
+    let pinned = format!("{} {key}\n", at[usize::from(port == "22")]);
     std::fs::create_dir_all(&dir)?;
     std::fs::create_dir_all(known.parent().context("pin dir")?)?;
-    write_atomic(&known, &format!("{} {key}\n", at[usize::from(port == "22")]))?;
-    let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known"))); // the pre-#635 place
     let (a, b) = (format!("# herdsman {name}\n"), format!("# end {name}\n"));
     let m = cfg.hosts[name].machine.as_deref().unwrap_or(name);
-    let s = format!("{a}Host {m}\n  HostName {host}\n  User {user}\n  Port {port}\n  UserKnownHostsFile {k}\n{b}");
+    let s = format!("{a}Host {m}\n  HostName {host}\n  User {user}\n  Port {port}\n  UserKnownHostsFile {k}\n{id}{b}");
     let p = dir.join("herdsman");
     let old = std::fs::read_to_string(&p).unwrap_or_default();
+    if !up && old.contains(&s) && std::fs::read_to_string(&known).is_ok_and(|w| w == pinned) {
+        return Ok(());
+    }
+    if !was.is_empty() && was != key {
+        log(ctx, cfg, "cloud-repin", name, json!({"was": was, "key": key}))?;
+    }
+    write_atomic(&known, &pinned)?;
+    let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known"))); // the pre-#635 place
     let (keep, tail) = old.split_once(&a).unwrap_or((&old, ""));
     // A block whose end marker is lost ends at the next block, never swallowing it.
     let next = || tail.find("# herdsman ").map_or("", |i| &tail[i..]);
@@ -332,6 +368,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let h = cfg.hosts.get(name).context("no such host")?;
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
+    } else if h.cloud.is_some() {
+        moved(ctx, cfg, r, name, true)?;
     }
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let on = crate::hosts::On::new(r, Some(m));
@@ -420,6 +458,16 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
         || format!("✗ cloud {name} key — {var} not in env, herdsman/{}/{var} or herdsman/all/{var} → herdsman secret request <thread> {var}", f.unwrap_or("all")),
         |k| format!("✓ cloud {name} key — {}", k.1),
     ));
+    if let Some(i) = rc.get("identity").and_then(|v| v.as_str()) {
+        let there = ctx.home.join(i.trim_start_matches("~/")).exists();
+        rows.push(
+            [
+                format!("✗ cloud {name} identity — {i} missing → put {c}'s ssh key there"),
+                format!("✓ cloud {name} identity — {i}"),
+            ][usize::from(there)]
+            .clone(),
+        );
+    }
     let mut uses = vec![];
     for (verb, line) in rc
         .iter()

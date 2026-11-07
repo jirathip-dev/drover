@@ -222,7 +222,11 @@ overflow_after_minutes = 10  # the default
   `<config>/recipes/boat.toml` to change them. #635: it targets the current boat CLI (`boat new --type --name`,
   `list --all --json`, `resume`, `stop`, `delete`, `snapshot <id> <name>`, `new --from`; it needs `jq`) and finds the
   sandbox by name. `user@host port` is the sandbox's `sshEndpoint`, the host key comes from `ssh-keyscan` at the first
-  start and stays pinned: a later start that sees another key fails closed (remove the pin to trust a new one). Sizes
+  start and stays pinned: a start or survey that sees another key fails closed, and `hosts bootstrap <name>` re-pins
+  it (logged `cloud-repin` with both keys). `identity` (boat: `~/.ssh/ascii_box_ed25519`, the only key a new sandbox
+  takes) adds `IdentityFile` and `IdentitiesOnly yes` to the host block; doctor checks the file exists. `id` prints the
+  sandbox's id and `{id}` in a line runs it: boat reads an empty id as the sandbox it runs in, so each recipe line
+  refuses an empty one, and herdsman runs no `stop` or `destroy` when `id` prints nothing. Sizes
   are `small|default|large|xlarge`; an old `size = "medium"` is run as `default` and `herdsman doctor` shows a `!`
   row for it. doctor also checks each `boat` subcommand the recipe uses against `boat --help` (✗ with the recipe line).
 - **The provider key** is read on the main host from the environment, else from the store's `herdsman/<fleet>/<key_env>`
@@ -236,6 +240,8 @@ overflow_after_minutes = 10  # the default
   own host, `--host`, or a role `host` pin starts it too. `spawn` runs `start`, then polls `status` for up to 5 min.
   It then rewrites the host's block in `~/.ssh/config.d/herdsman` and its own known_hosts file
   (`~/.ssh/herdsman/<name>.known`, outside `config.d`) from `address`, and then spawns. A dry run never starts a host.
+  Bootstrap of a running host, and each survey of a cloud host whose `status` says running, reads `address` again and
+  rewrites the block when it moved.
   Add `Include config.d/herdsman` at the top of `~/.ssh/config` once: name only that file, since ssh reads every
   included file as config. doctor flags an `Include` that reads a `.known` file (the pre-#635 place); start
   removes those.

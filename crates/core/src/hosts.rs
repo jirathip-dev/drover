@@ -353,6 +353,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         let s = all.entry(name.clone()).or_default();
         // #254: a stopped cloud host is not looked at (its lanes are paused, never paged).
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        // #635 D: a running cloud host's moved address, rewritten before it is looked at.
+        if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
+            eprintln!("cloud {name}: {e:#}");
+        }
         let a = (!stopped).then(|| host::agents(&on).ok()).flatten();
         s.up = a.is_some();
         let live = a.as_ref().is_some_and(|a| !a.is_empty());
