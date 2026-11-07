@@ -1,12 +1,13 @@
 //! #254 cloud hosts (docs/hosts.md): recipe commands start, stop and price a `[hosts.<n>] cloud` host; logs `cloud-*`.
 use crate::config::{write_atomic, Config};
 use crate::events::{age, emit, read, Event};
-use crate::runner::{argv, ok, Runner};
+use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::Path;
 
 /// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size.
 fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
@@ -301,9 +302,17 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         }
         // herdr's install is `herdr machine add` from here: this host's version there.
         let add = || r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]));
-        let o = if install.is_empty() { add()? } else { sh(install)? };
-        let err = o.stderr.lines().last().unwrap_or_default().to_string();
-        ensure!(pass(check), "{name}: {what} installed, `{check}` fails: {err}");
+        let (cmd, o) = match install {
+            "" => (format!("herdr machine add {m}"), add()?),
+            i => (i.to_string(), sh(i)?),
+        };
+        let (cmd, o) = match o.code {
+            0 => (check.to_string(), sh(check)?),
+            _ => (cmd, o),
+        };
+        if o.code != 0 {
+            return Err(failed(ctx, cfg, name, what, &cmd, &o, out));
+        }
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
@@ -335,13 +344,46 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
             l.display()
         ))?;
     }
-    // #592: no fleet.toml there (spawn syncs each lane's profile); an old one still gets its sync.
-    step(&format!(
-        "profiles sync\ttest ! -e '{conf}' || '{exe}' profiles sync >/dev/null\ttrue"
-    ))?;
+    // #592: no fleet.toml there (spawn syncs each lane's profile); #647: an old bootstrap's is removed, any other
+    // still gets its sync.
+    let p = Path::new(&conf);
+    if on.read(p).is_some_and(|t| old_conf(&t, name)) {
+        on.remove(p)?;
+        writeln!(out, "✓ old fleet.toml — removed")?;
+    }
+    let sync = format!("test ! -e '{conf}' || '{exe}' profiles sync");
+    let o = sh(&sync)?;
+    if o.code != 0 {
+        return Err(failed(ctx, cfg, name, "profiles sync", &sync, &o, out));
+    }
+    writeln!(out, "✓ profiles sync — there")?;
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
+}
+
+/// #647: the fleet.toml a pre-#592 bootstrap wrote on host `name`: only `[fleet.*]` and that host's command rules.
+fn old_conf(text: &str, name: &str) -> bool {
+    let Ok(t) = text.parse::<toml::Table>() else {
+        return false;
+    };
+    let rules = |h: &toml::Table| h.keys().all(|k| k == "allow_commands" || k.starts_with("deny_"));
+    let hosts = t.get("hosts").and_then(toml::Value::as_table);
+    let mine = hosts.filter(|h| h.len() == 1).and_then(|h| h.get(name)?.as_table());
+    t.keys().all(|k| k == "fleet" || k == "hosts") && mine.is_some_and(rules)
+}
+
+/// #647: a failed bootstrap step: its command, exit code and last 20 lines of output, printed and logged.
+fn failed(ctx: &Ctx, cfg: &Config, name: &str, what: &str, cmd: &str, o: &Out, out: &mut dyn Write) -> anyhow::Error {
+    let all = format!("{}{}", o.stdout, o.stderr);
+    let lines: Vec<_> = all.lines().collect();
+    let tail = lines[lines.len().saturating_sub(20)..].join("\n");
+    let _ = writeln!(out, "✗ {what} — `{cmd}` exit {}:\n{tail}", o.code);
+    let d = json!({"sha": env!("HERDSMAN_SHA"), "step": what, "cmd": cmd, "code": o.code, "tail": tail});
+    match log(ctx, cfg, "host-bootstrap", name, d) {
+        Ok(()) => anyhow!("{name}: bootstrap step {what} failed (exit {})", o.code),
+        Err(e) => e,
+    }
 }
 
 /// #255 `hosts snapshot <name>`: after a fresh health look, up with no `✗`, the recipe's `snapshot`; logs `cloud-snapshot`.

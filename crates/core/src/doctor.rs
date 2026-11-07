@@ -251,12 +251,21 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
-        let Some((tags, home)) = crate::hosts::probe(&on).filter(|_| crate::host::agents(&on).is_ok()) else {
-            rows.push(format!(
-                "✗ host {name} — unreachable → herdr machine status; ssh {m} true"
-            ));
+        // #647: the check that failed, by name; `unreachable` only when ssh itself fails (shed's is a `!` health row).
+        let Some((tags, home)) = crate::hosts::probe(&on) else {
+            let why = match ok(&on, "true", &[] as &[&str]) {
+                Err(e) => format!("unreachable (ssh: {e:#})"),
+                Ok(_) => "probe: no uname/$HOME answer".into(),
+            };
+            rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
+        if let Err(e) = crate::herdr::poll(&on) {
+            rows.push(format!(
+                "✗ host {name} — herdr agent list: {e:#} → herdr machine status"
+            ));
+            continue;
+        }
         let tags = crate::hosts::tags(
             h,
             Some(&crate::hosts::Seen {
@@ -273,7 +282,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
-        // #592: lanes there read only their rules file; the owner removes an old copy by hand, herdsman never does.
+        // #592: lanes there read only their rules file; the owner removes an old copy (#647: bootstrap, one it wrote).
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!(
