@@ -1082,7 +1082,7 @@ fn exits(b: &Server, kinds: &[Value]) {
     }
 }
 
-fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
+fn later(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
     herdsman::Ctx {
         now: c.now + secs,
         ..c.clone()
@@ -1114,7 +1114,7 @@ fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_workt
         ],
     );
     let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
-    let (code, out) = run(&at(&c, 300), &cli, &["drive"]);
+    let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     // Its commits are on the issue branch, its staged file is not; it runs again in the same worktree, on D.
     assert_eq!(git(&origin, &["rev-parse", "issue-12"]), head, "{out}");
@@ -1133,12 +1133,12 @@ fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_workt
     // It keeps exiting mid-turn (the adapter crashes): each time it is pushed and resumed, never needs-human.
     for i in 1..=3 {
         exits(&b, &[json!({"event": "exited", "code": 1})]);
-        let (code, out) = run(&at(&c, 300 + i * 1900), &cli, &["drive"]);
+        let (code, out) = run(&later(&c, 300 + i * 1900), &cli, &["drive"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(logged(&c, "spawn").len(), 2 + i as usize, "{out}");
     }
     assert!(logged(&c, "needs-human").is_empty());
-    let (_, st) = run(&at(&c, 6000), &cli, &["status", "sendmeter"]);
+    let (_, st) = run(&later(&c, 6000), &cli, &["status", "sendmeter"]);
     assert!(!st.contains("needs-human"), "{st}");
 }
 
@@ -1147,7 +1147,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     let (c, b, f, wt, _) = acp_lane("acp-cause");
     exits(&b, &[json!({"event": "exited", "code": 139})]);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let c = at(&c, 300);
+    let c = later(&c, 300);
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
@@ -1158,4 +1158,205 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     assert!(dead[0].str("reason").unwrap().contains("adapter crash"), "{dead:?}");
     let (_, w) = run(&c, &cli, &["waiting", "sendmeter"]);
     assert!(w.contains("lane gone (adapter crash), no push: respawning impl"), "{w}");
+}
+
+/// #608: a shed-acp fleet's thread, its conductor's events of `kind`.
+fn thread_events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    let all = herdsman::events::read(&c.state).unwrap();
+    all.into_iter().filter(|e| e.kind == kind).collect()
+}
+
+fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
+    herdsman::Ctx { now, ..c.clone() }
+}
+
+#[test]
+fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and_restarts() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor", &acp_config(&b.sock, "claude", true));
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
+        "t1\n"
+    );
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "t1: -> conductor-t1\n"),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let dir = c.state.with_file_name("conductor").join("t1");
+    let calls = f.calls.borrow().clone();
+    let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
+    let head = format!(
+        "shed run --acp claude-acp --policy allow --name conductor-t1 --cwd {} --label fleet=sendmeter --label issue=- \
+         --label role=conductor --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
+         -- sh -c ",
+        dir.display()
+    );
+    assert!(start.starts_with(&head), "{start}");
+    let herdr = |c: &&String| c.starts_with("herdr") && *c != "herdr agent list";
+    assert!(!calls.iter().any(|c| herdr(&c)), "no herdr pane: {calls:?}");
+    // The brief and the kick are the session's first prompt.
+    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
+    let thread = dir.join(".thread.md");
+    let first = format!(
+        "shed send conductor-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
+        brief.trim_end(),
+        thread.display()
+    );
+    let sends: Vec<_> = calls.iter().filter(|c| c.starts_with("shed send")).collect();
+    assert_eq!(sends, [&first]);
+    assert!(brief.contains("Thread: t1, Grill #12"));
+    let st = &thread_events(&c, "conductor-start")[0];
+    assert_eq!(
+        (st.str("runtime"), st.str("pane")),
+        (Some("shed-acp"), Some("conductor-t1"))
+    );
+    assert_eq!(st.data["confirmed"], json!(true));
+
+    // Awake: a multi-line message goes in as it is, through `shed send`.
+    let f = acp_fake(&["echo"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(
+        run(&at(&c, c.now + 60), &cli, &["thread", "say", "t1", "scope\nthen tests"]).0,
+        0
+    );
+    assert_eq!(
+        f.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("shed"))
+            .collect::<Vec<_>>(),
+        [&"shed send conductor-t1 [t1] owner: scope\nthen tests".to_string()]
+    );
+    assert!(
+        !b.methods().iter().any(|m| m == "send" || m == "keys"),
+        "{:?}",
+        b.methods()
+    );
+
+    // Idle 30 min: the session ends (shed kills and removes it); asleep.
+    let quiet = at(&c, c.now + 60 + 31 * 60);
+    assert_eq!(run(&quiet, &cli, &["check"]).0, 0);
+    assert_eq!(
+        b.methods().iter().filter(|m| *m == "kill").count(),
+        1,
+        "{:?}",
+        b.methods()
+    );
+    assert!(!b.terms.lock().unwrap().contains_key("conductor-t1"));
+    let sl = thread_events(&c, "conductor-sleep");
+    assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("idle")]);
+    let (_, ls) = run(&quiet, &Fake::default(), &["thread", "ls", "--json"]);
+    assert!(ls.contains("\"conductor\": \"asleep\""), "{ls}");
+
+    // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
+    let f = acp_fake(&["echo"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(
+        run(&at(&c, quiet.now + 60), &cli, &["thread", "say", "t1", "third"]).0,
+        0
+    );
+    assert_eq!(f.count("shed run --acp claude-acp"), 1);
+    let sends: Vec<_> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("shed send"))
+        .cloned()
+        .collect();
+    assert!(sends.len() == 1 && sends[0].ends_with("[t1] owner: third"), "{sends:?}");
+    let history = std::fs::read_to_string(&thread).unwrap();
+    assert!(
+        history.contains("owner: scope\nthen tests") && history.ends_with("owner: third\n"),
+        "{history}"
+    );
+    let st = thread_events(&c, "conductor-start");
+    assert_eq!((st.len(), st[1].data["resumed"].clone()), (2, json!(false)));
+
+    // A session shed no longer runs is asleep on the next check, quiet or not.
+    b.terms.lock().unwrap().remove("conductor-t1");
+    assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
+    let sl = thread_events(&c, "conductor-sleep");
+    assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
+}
+
+#[test]
+fn an_acp_conductor_runs_under_the_conductor_guard() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor-guard", &acp_config(&b.sock, "claude", true));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
+    assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
+    let dump = cli.2.borrow().concat();
+    let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
+    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
+    assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
+    assert_eq!(env.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&TOKEN_C));
+    let dir = c.config.with_file_name("claude").join("lane-conductor");
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&dir.to_str().unwrap()));
+    // The profile's `PreToolUse` hook, run in the adapter's env as Claude Code runs it.
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    let cwd = c.state.with_file_name("conductor").join("t1");
+    let tool = |cmd: &str| {
+        let mut ch = std::process::Command::new("sh")
+            .args(["-c", hook])
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (*k, *v)))
+            .env("FLEET_CONFIG", &c.config)
+            .env("FLEET_STATE", &c.state)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        ch.stdin
+            .take()
+            .unwrap()
+            .write_all(bash_call(cmd, &cwd).as_bytes())
+            .unwrap();
+        let o = ch.wait_with_output().unwrap();
+        assert!(o.status.success());
+        String::from_utf8(o.stdout).unwrap()
+    };
+    let o = tool("herdsman card approve c1 --sha abc");
+    let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
+    assert!(o.contains("REFUSED OWNER_ONLY"), "{o}");
+    // A conductor's own verb (an impl lane's CONDUCTOR_ONLY) runs.
+    assert_eq!(
+        tool("herdsman amend sendmeter 12 'x' --basis q1"),
+        "",
+        "a conductor amends"
+    );
+}
+
+#[test]
+fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor-noacct", &acp_config(&b.sock, "claude", false));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    let f = acp_fake(&["env"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] token"),
+        "{out}"
+    );
+    let calls = f.calls.borrow();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.starts_with("shed run") || c.starts_with("herdr w") || c.starts_with("herdr agent s")),
+        "{calls:?}"
+    );
+    let msgs = thread_events(&c, "thread-msg");
+    let sys: Vec<_> = msgs.iter().filter(|e| e.str("from") == Some("system")).collect();
+    assert_eq!(sys.len(), 1, "{msgs:?}");
+    assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
+    assert!(thread_events(&c, "conductor-start").is_empty());
 }
