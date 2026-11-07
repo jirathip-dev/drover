@@ -1808,7 +1808,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         } else {
             &[]
         };
-        let msg = [msg, &format!("skipped: {}", skip.join(", "))][..1 + usize::from(!skip.is_empty())].join("\n\n");
+        let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
         git(&[id, &["commit", "-q", "--no-verify", "-m", &msg]].concat()).map_err(undo)?;
     }
     git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
