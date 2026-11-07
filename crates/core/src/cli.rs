@@ -1514,6 +1514,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
+                    let slots = crate::drive::holders(ctx);
+                    if !json && !slots.is_empty() {
+                        writeln!(out, "slots: {slots}")?;
+                    }
                     if json {
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     }
