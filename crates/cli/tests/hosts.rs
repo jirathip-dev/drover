@@ -1313,7 +1313,7 @@ fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pa
         "{:?}",
         r.calls.borrow()
     );
-    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
+    herdsman::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert!(out.contains(TRIMMED), "{out}");
     let calls = r.calls.borrow();
@@ -1332,7 +1332,7 @@ fn a_disabled_host_gets_no_trim_call() {
     let cfg = Config::load(&c.config).unwrap();
     let r = fake(1.0, 0.1);
     let mut out = Vec::new();
-    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
+    herdsman::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     assert!(
         !r.calls.borrow().iter().any(|l| l.contains("bazzite")),
         "{:?}",
@@ -1348,7 +1348,7 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     let down = "ssh: connect to host bazzite port 22: Operation timed out";
     let r = fake(1.0, 0.1).once_err(QUICK, 255, down);
     let mut out = Vec::new();
-    herdsman::check::trim_hosts(&cfg, &r, &mut out).unwrap();
+    herdsman::check::trim_hosts(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert_eq!(out, format!("builds: bazzite: trim failed (255): {down}\n"));
     let calls = r.calls.borrow();
