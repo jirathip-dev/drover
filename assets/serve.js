@@ -1987,7 +1987,22 @@ function chatOpen(t) {
 }
 // #403: back to the list: the history entry a thread's open pushed, else straight there.
 const chatBack = () => history.state && history.state.thr ? history.back() : chatOpen('');
-addEventListener('popstate', e => chatOpen((e.state && e.state.thr) || ''));
+// #618: back to a thread a ref left: scrolled where it was.
+addEventListener('popstate', e => {
+  const s = e.state || {};
+  chatOpen(s.thr || '');
+  if (s.y == null) return;
+  FOL = false;
+  const c = thrSc();
+  if (c) c.scrollTop = s.y; else scrollTo(0, s.y);
+});
+// #618: a thread ref (or #413's link chip) opens that thread in place; this one's entry keeps its scroll for back.
+function chatGo(t) {
+  const c = thrSc();
+  history.replaceState({ thr: THR, y: c ? c.scrollTop : scrollY }, '');
+  chatOpen(t);
+  history.pushState({ thr: t }, '');
+}
 // #407: the thread a board is looking at (the chat tab open on it, the page shown): its stream names it, so the
 // server pushes nothing for it.
 function watching() { return document.documentElement.dataset.tab === 'chat' && !document.hidden && THR && !THR.startsWith('new-') ? THR : ''; }
@@ -2171,10 +2186,10 @@ chatOpen(THR);
 chatPaint();
 document.addEventListener('click', async e => {
   const t = e.target, row = t.closest('#chat .tr'), c = t.closest('#chat .chq button[name=choice]');
-  const lk = t.closest('#chat .lc'); // #413: a linked row's chip opens the other thread
+  const lk = t.closest('#chat .lc, #chat .tl'); // #413: a linked row's chip opens the other thread; #618: a thread ref
   const at = t.closest('.ath'); // #517: an ask's `asked in <thread>` opens that thread in [chat]
   if (at) { e.preventDefault(); tab('chat'); chatOpen(at.dataset.go); history.pushState({ thr: at.dataset.go }, ''); }
-  else if (lk) { e.preventDefault(); chatOpen(lk.dataset.go); history.pushState({ thr: lk.dataset.go }, ''); }
+  else if (lk) { e.preventDefault(); chatGo(lk.dataset.go); }
   else if (row) { e.preventDefault(); chatOpen(row.dataset.t); history.pushState({ thr: row.dataset.t }, ''); }
   else if (t.closest('#chat .bk')) chatBack();
   else if (t.closest('#chat .tmo')) chatOlder();
@@ -2182,6 +2197,7 @@ document.addEventListener('click', async e => {
   else if (t.closest('#chat .snt .rt')) { const v = t.closest('.cvp'); SENT.splice(SENT.findIndex(p => p.st === '✗' && p.t === v.dataset.t), 1); v.querySelector('.tw').requestSubmit(); }
   else if (t.closest('#chat .rty')) chatPost({ op: 'retry', t: t.closest('.cvp').dataset.t, n: t.closest('.rty').dataset.n });
   else if (t.closest('#chat .ntb')) { const n = 'new-' + t.closest('.ntb').dataset.repo; chatOpen(n); history.pushState({ thr: n }, ''); $(`#chat .tw[data-t="${CSS.escape(n)}"] textarea`)?.focus(); }
+  else if (t.closest('#chat .rst')) chatPost({ op: 'restore', t: t.closest('.rst').dataset.t }); // #618: an archived thread's [restore]
   else if (t.closest('#chat .sb')) { const b = t.closest('.sb'); chatPost({ op: b.name, t: b.dataset.t }).then(ok => { if (ok && b.name === 'archive') undo(b.dataset.t); }); }
   else if (t.closest('#chat .tq button')) { // #407: a queued message's [send now] (steered in), edit, [remove]
     const b = t.closest('button'), q = b.closest('.tq').dataset.q, f = b.closest('.tw'), box = f.elements.text;

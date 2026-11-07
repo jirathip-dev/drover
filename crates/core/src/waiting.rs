@@ -299,7 +299,13 @@ pub fn waiting_on(
         .find(|e| e.is("blocked", f, n))
         .and_then(|e| e.str("code"));
     let retry = s.state == "blocked" && s.verdicts.last().is_some_and(|v| v.1 == "PASS");
+    // #599: a PASS at the head that goes on to another check waits on that check, whatever the merge refused.
+    let here = s
+        .verdicts
+        .last()
+        .is_some_and(|v| v.0.eq_ignore_ascii_case(base) || v.0.eq_ignore_ascii_case(pushed));
     let st = match block {
+        _ if retry && here && next_check.is_some() => "ready",
         Some("CI_NOT_GREEN" | "NOT_MERGEABLE" | "HOST_BUSY") if retry => "ready",
         // #165: a head with no verdict of its own (a non-pure merge) gets a review round, not a block.
         Some("STALE_VERDICT") if s.state == "blocked" => "stale",
@@ -681,6 +687,11 @@ pub fn scan(
         // #478: an active lane on a host the last look could not reach is not gone: nothing respawns it.
         if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd) = ("none", format!("host offline: {h}"), None);
+        }
+        // #592: a live remote lane's rules, frozen at spawn, that fleet.toml now resolves otherwise: a respawn takes them.
+        let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
+        if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
+            w.what += " · rules stale";
         }
         let gone = || gh::missing(ctx, live.then_some(r), cfg, (&s.fleet, s.issue), mine, &pr);
         let m = w.what.starts_with("PASS · CI running").then(gone).flatten();

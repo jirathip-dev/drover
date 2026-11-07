@@ -29,8 +29,8 @@ pub struct Config {
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     pub conductor: ConductorCfg,
-    /// #387: `[telegram]`, the optional bridge (`crate::telegram`); off without `chat`.
-    pub telegram: Telegram,
+    /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
+    pub telegram: Option<toml::Value>,
     /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
     pub service: ServiceCfg,
     /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
@@ -81,14 +81,6 @@ pub struct Chat {
     pub account: Option<String>,
     #[serde(default)]
     pub accounts: Vec<String>,
-}
-
-/// #387: the forum supergroup (`chat`), the one user whose messages and taps count (`owner`), and the Bot API root.
-#[derive(Debug, Default, Deserialize)]
-pub struct Telegram {
-    pub chat: Option<i64>,
-    pub owner: Option<i64>,
-    pub api: Option<String>,
 }
 
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
@@ -540,7 +532,7 @@ pub struct Limits {
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, serde::Serialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Deny {
     Cmd(String),
@@ -631,7 +623,7 @@ pub struct Notify {
     pub sub: Option<String>,
 }
 
-/// A webpush notifier's events when `on` is unset: the Telegram set plus the asks (#40) and needs-human (#130).
+/// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "thread-msg",
     "blocked",
@@ -653,6 +645,8 @@ pub const WEBPUSH_ON: &[&str] = &[
     "orphan-issue",
     "config-warning",
     "keychain-locked",
+    "self-update-failed",
+    "clean-failed",
     "runners-low",
     "runners-ok",
 ];
@@ -678,7 +672,12 @@ impl Config {
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
         let f = self.accounts.accounts_env.as_deref();
-        f.map(|f| ("[accounts].accounts_env", run(f))).into_iter().collect()
+        let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
+        let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
+        f.map(|f| ("[accounts].accounts_env", run(f)))
+            .into_iter()
+            .chain(tg)
+            .collect()
     }
 
     /// #539: secret `name` from the retired `accounts_env` file, for one the store lacks; None without it.
