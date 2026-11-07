@@ -1402,7 +1402,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .map(|x| x.1)
                         .collect();
                     // #493: a working or next-to-start issue too; one nothing drives says so.
-                    let log = crate::waiting::Log::new(&events);
+                    let (log, st) = (crate::waiting::Log::new(&events), crate::events::fold(&events));
                     for s in crate::waiting::guarded(&events, &cfg) {
                         let (f, pr) = (&cfg.fleet[&s.fleet], crate::gh::cached_pr(ctx, &s.fleet, s.issue));
                         let un = crate::waiting::undriven(&log, &s, f, &pr, &agents, ctx.now);
@@ -1415,7 +1415,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         let (who, what) = match &s.lane {
                             Some(l) => ("none", format!("waiting on {l} (working){note}")),
-                            None => ("drive", format!("next in the queue: drive starts it{note}")),
+                            // #604: its last start refused (a kick's too) says so.
+                            None => match crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now) {
+                                Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
+                                None => ("drive", format!("next in the queue: drive starts it{note}")),
+                            },
                         };
                         // #558: why drive hasn't started it yet, never `?`.
                         let why = match crate::drive::last_pass(ctx, &s.fleet) {
