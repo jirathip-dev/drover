@@ -176,6 +176,8 @@ thread_local! {
     static IN_ACT: Cell<bool> = const { Cell::new(false) };
     /// #560: the pass's one look at this host's admission (`room`), taken at its first launch: (looked, refusal).
     static ROOM: RefCell<(bool, Option<(&'static str, String)>)> = const { RefCell::new((false, None)) };
+    /// #638: the running kick holds its own launch's spawn slot (a hook's kick never does).
+    static SLOT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
@@ -237,8 +239,10 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         );
         let mut buf = vec![];
         KICK.set(Some(n));
+        SLOT.set(pending.is_some());
         let res = drive(ctx, cfg, r, &mut buf, Some(fleet), false, false);
         KICK.set(None);
+        SLOT.set(false);
         // #318: a launched kick's marker goes after its first run; #604: its result then goes to its pass.
         if pending.take().map(drop).is_some() {
             update(ctx, r, out, fleet, n)?;
@@ -632,10 +636,9 @@ pub fn drive(
             Err(e) => fail(name, e),
         }
     }
-    for name in due.into_iter().filter(|_| !fast) {
-        match starts(ctx, cfg, r, out, name, start) {
-            Ok(go) => start = go,
-            Err(e) => fail(name, e),
+    if !fast {
+        for (name, e) in starts(ctx, cfg, r, out, &due, start) {
+            fail(name, e);
         }
     }
     // #337: a step that logged something is looked at again, so the board shows what it did.
@@ -967,10 +970,12 @@ fn pass(
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
             let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
-            // #599: a PASS that goes on to another check (verify) merges only after that check, next pass.
-            let then = f.flow().next(&s.stage, "PASS").and_then(|t| f.flow().get(t.0));
-            let last = then.is_none_or(|t| t.kind != "check");
-            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && last {
+            // #599/#650: a PASS merges this pass only if the merge gate's rule finds the head verified by it.
+            let verified = || -> Result<bool> {
+                let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
+                Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
+            };
+            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
                 merge = true;
                 code = if pr["mergeable"] == "CONFLICTING" {
                     Some("NOT_MERGEABLE")
@@ -1397,38 +1402,108 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
     Ok(())
 }
 
-/// One fleet's starts (every startable queued issue in order), then clean merged lanes. A refused item is skipped,
-/// `CAP` ends this fleet's starts, `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets' (false).
-fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, start: bool) -> Result<bool> {
-    let (events, f) = (read(&ctx.state)?, cfg.fleet(fleet)?);
-    let mut go = start;
+/// #638: each pending spawn's fleet with its count, most first (`cooee 3, berth 2`): who holds the slots.
+pub fn holders(ctx: &Ctx) -> String {
+    let mut by = BTreeMap::<String, usize>::new();
+    for p in pending(ctx) {
+        *by.entry(p.fleet).or_default() += 1;
+    }
+    let mut by: Vec<_> = by.into_iter().collect();
+    by.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    let by: Vec<String> = by.iter().map(|(f, n)| format!("{f} {n}")).collect();
+    by.join(", ")
+}
+
+/// Every fleet's starts (each startable queued issue in order), then clean merged lanes. #638: the fleets take turns,
+/// one issue each, beginning after the fleet that started first last pass; while another fleet still has issues, none
+/// holds more than its `weight` share of the start slots. A refused item is skipped, `CAP` ends that fleet's starts,
+/// `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets'. Each fleet's error, to log.
+fn starts<'a>(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleets: &[&'a str],
+    mut go: bool,
+) -> Vec<(&'a str, anyhow::Error)> {
+    let mut errs = vec![];
+    let events = match read(&ctx.state) {
+        Ok(e) => e,
+        Err(e) => return vec![(fleets.first().copied().unwrap_or_default(), e)],
+    };
+    let rr = state_dir(ctx).join("drive.first");
+    let last = std::fs::read_to_string(&rr).unwrap_or_default();
+    let mut order = fleets.to_vec();
+    order.rotate_left(fleets.iter().position(|f| *f == last).map_or(0, |i| i + 1) % fleets.len().max(1));
     let one = |n: &String| KICK.get().is_none_or(|k| n == &k.to_string());
-    for n in queue::startable(&events, fleet)
-        .into_iter()
-        .filter(one)
-        .take_while(|_| start)
-    {
+    let mut todo: Vec<(&str, std::collections::VecDeque<String>)> = order
+        .iter()
+        .map(|f| (*f, queue::startable(&events, f).into_iter().filter(one).collect()))
+        .filter(|(_, q): &(_, std::collections::VecDeque<_>)| go && !q.is_empty())
+        .collect();
+    let max = cfg.limits.max_parallel_spawns;
+    let weight = |f: &str| cfg.fleet.get(f).and_then(|f| f.weight).unwrap_or(1).max(1);
+    let total: usize = todo.iter().map(|(f, _)| weight(f)).sum();
+    let share = |f: &str| (max - usize::from(max > 1)) * weight(f);
+    let (mut first, mut i) = (None, 0);
+    while go && !todo.is_empty() {
+        i %= todo.len();
+        let fleet = todo[i].0;
+        let held = || pending(ctx).iter().filter(|p| p.fleet == fleet).count();
+        let full = max > 0 && KICK.get().is_none() && todo.len() > 1 && held() * total >= share(fleet);
+        let Some(n) = todo[i].1.pop_front().filter(|_| !full) else {
+            todo.remove(i);
+            continue;
+        };
         let at = (fleet, n.parse().ok(), "start");
         // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
         let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        let f = &cfg.fleet[fleet];
         let c = if design {
             ["spawn", fleet, &n, "design", "--supersede"]
         } else {
             ["spawn", fleet, &n, f.flow().start(), ""]
         };
-        let code = act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)])?;
+        let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)]) {
+            Ok(c) => c,
+            Err(e) => {
+                errs.push((fleet, e));
+                todo.remove(i);
+                continue;
+            }
+        };
+        first = first.or(code.is_none().then_some(fleet));
         go &= !matches!(
             code,
             Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
         );
-        if matches!(
-            code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "CAP" | "ALL_CAPPED")
-        ) {
-            break;
+        if matches!(code, Some("CAP")) {
+            todo.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+    if let Some(f) = first.filter(|_| KICK.get().is_none()) {
+        let _ = std::fs::write(&rr, f);
+    }
+    for fleet in fleets {
+        if let Err(e) = clean_merged(ctx, cfg, r, out, &events, fleet) {
+            errs.push((fleet, e));
         }
     }
-    let st = fold(&events);
+    errs
+}
+
+/// A merged issue's lane worktree still there: `clean --yes`.
+fn clean_merged(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    events: &[Event],
+    fleet: &str,
+) -> Result<()> {
+    let st = fold(events);
     let merged = |e: &&Event| {
         e.issue
             .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
@@ -1445,9 +1520,9 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
             .any(|e| left(&e))
     {
         let c = (fleet, None, "clean");
-        act(ctx, cfg, r, out, &events, c, &["clean", fleet, "--yes"])?;
+        act(ctx, cfg, r, out, events, c, &["clean", fleet, "--yes"])?;
     }
-    Ok(go)
+    Ok(())
 }
 
 /// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in
@@ -1585,6 +1660,10 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
             None => (format!("error: {e:#}"), Some("ERROR")),
         },
     };
+    // #638: a kick's spawn refused (a busy host, a lock) is only waiting: its slot goes back now, not at its pass's end.
+    if let Some(n) = issue.filter(|_| code.is_some() && c[0] == "spawn" && SLOT.get()) {
+        crate::db::release(&ctx.state, &format!("spawn-{fleet}-{n}.pending"), None);
+    }
     // `clean` with nothing removable (a dirty merged lane) is not an action.
     if step == "clean" && code.is_none() && !text.contains("removed ") {
         return Ok(None);
