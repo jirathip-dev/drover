@@ -4,6 +4,10 @@
 (() => {
   const V = DBG.get('audit'); // serve.js read the query before it tidied the URL
   if (!V) return;
+  // #566: `&shot=1` (the screenshot runs) freezes motion at one frame: a frame callback runs once, at t = 2 s, and the
+  // next frame it asks for never comes. The herd's endless loop (its storm) hung headless Chrome before the shot.
+  let inside = false;
+  if (DBG.has('shot')) window.requestAnimationFrame = f => inside ? 0 : setTimeout(() => { inside = true; try { f(2000); } finally { inside = false; } });
   const hp = n => H.querySelectorAll('.hp')[n];
   // #440: Host and Events are System's Hosts & health and Activity, opened over the Queue tab.
   const sys = s => { tab('queue'); sysopen(s); };

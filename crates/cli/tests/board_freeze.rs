@@ -74,3 +74,100 @@ fn ci_runs_the_freeze_on_every_staging_pr() {
     assert!(wf.contains("branches: [staging]") && wf.contains("synchronize"), "{wf}");
     assert!(wf.contains("| scripts/board-freeze.sh spec.md"), "{wf}");
 }
+
+/// #574: the body `herdsman amend` sent with `gh issue edit` (the call's `--body` value).
+fn edited(r: &Fake) -> String {
+    let calls = r.calls.borrow();
+    let edit = calls
+        .iter()
+        .rfind(|c| c.starts_with("gh issue edit 60 "))
+        .expect("an edit");
+    edit.split_once(" --body ").unwrap().1.to_string()
+}
+
+/// #574: `herdsman amend` appends an owner's decision under the body's `## Amendments` (made once), logs `amend`,
+/// re-runs the open PR's failed board-freeze (not other checks), and its `board-fix` line passes board-freeze.
+#[test]
+fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
+    use herdsman::events::{append, read, Event};
+    use serde_json::json;
+    let c = ctx(&tmpdir("amend"), CONFIG);
+    let ev = |n: u64, kind: &str, d: serde_json::Value| append(&c.state, &Event::new(1, "sendmeter", Some(n), kind, d));
+    for (id, n, by) in [
+        ("q1", 60, Some("owner")),
+        ("q2", 60, Some("default")),
+        ("q3", 60, None),
+        ("q4", 61, Some("owner")),
+        ("q5", 60, Some("conductor-t1")),
+    ] {
+        ev(n, "needs-decision", json!({"id": id, "question": "?"})).unwrap();
+        if let Some(by) = by {
+            ev(n, "decision", json!({"id": id, "choice": "yes", "by": by})).unwrap();
+        }
+    }
+    for id in ["q3", "q4", "q5", "q9"] {
+        let r = Fake::default();
+        let (code, out) = run(&c, &r, &["amend", "sendmeter", "60", "--basis", id, "board-fix: x"]);
+        assert_eq!(code, 3, "{id}: {out}");
+        assert!(out.contains("REFUSED NO_DECISION"), "{id}: {out}");
+        assert!(r.calls.borrow().is_empty(), "{id}: no gh call: {:?}", r.calls.borrow());
+    }
+    let checks = json!({"state": "OPEN", "statusCheckRollup": [
+        {"__typename": "CheckRun", "name": "board-freeze", "status": "COMPLETED", "conclusion": "FAILURE",
+         "detailsUrl": "https://github.com/o/r/actions/runs/77/job/5"},
+        {"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "FAILURE",
+         "detailsUrl": "https://github.com/o/r/actions/runs/88/job/6"}]});
+    let r = Fake::default()
+        .reply("gh issue view 60", &json!({"body": "Tidy the tab.\n"}).to_string())
+        .reply("gh issue edit 60", "")
+        .reply("gh pr view issue-60", &checks.to_string())
+        .reply("gh run rerun 77", "");
+    let text = "board-fix: the tab redraws twice";
+    let (code, out) = run(&c, &r, &["amend", "sendmeter", "60", "--basis", "q1", text]);
+    assert_eq!(code, 0, "{out}");
+    let first = edited(&r);
+    assert_eq!(
+        first,
+        format!("Tidy the tab.\n\n## Amendments\n- **Amendment (q1)**: {text}\n")
+    );
+    assert!(
+        r.called("gh run rerun 77 -R jirathip-dev/sendmeter --failed"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(!r.called("gh run rerun 88"), "only spec-reading checks re-run");
+    let amends: Vec<_> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "amend")
+        .collect();
+    assert_eq!(
+        (amends[0].issue, amends[0].str("id"), amends[0].str("text")),
+        (Some(60), Some("q1"), Some(text))
+    );
+    assert_eq!(
+        freeze(&first, "web/src/queue.ts\n").0,
+        Some(0),
+        "the amend line passes board-freeze"
+    );
+    assert_eq!(
+        freeze("Tidy the tab.\n", "web/src/queue.ts\n").0,
+        Some(1),
+        "without it, red"
+    );
+
+    let r = Fake::default()
+        .reply("gh issue view 60", &json!({"body": first}).to_string())
+        .reply("gh issue edit 60", "")
+        .reply("gh pr view issue-60", "{}");
+    let (code, out) = run(
+        &c,
+        &r,
+        &["amend", "sendmeter", "60", "--basis", "q2", "scope: no new tab"],
+    );
+    assert_eq!(code, 0, "{out}");
+    let second = edited(&r);
+    assert_eq!(second, format!("{first}- **Amendment (q2)**: scope: no new tab\n"));
+    assert_eq!(second.matches("## Amendments").count(), 1, "{second}");
+    assert!(!r.called("gh run rerun"), "no PR, nothing to re-run");
+}
