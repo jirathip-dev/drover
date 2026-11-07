@@ -169,8 +169,16 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             "=certificate leaf[subject.CN] = \"herdsman-local\"",
             &ctx.exe,
         ];
-        let line = format!("signature — {} signed by \"herdsman-local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall", ctx.exe);
-        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+        let signed = ok(r, "codesign", &req).is_ok();
+        // #568: the identity is there but signing never took: codesign waits on the key's dialog.
+        let has = !signed && ok(r, "security", &["find-certificate", "-c", "herdsman-local"]).is_ok();
+        let fix = if has {
+            format!("security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db (asks the login password), then sh scripts/signing-identity.sh sign {}", ctx.exe)
+        } else {
+            "sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall".into()
+        };
+        let line = format!("signature — {} signed by \"herdsman-local\" → {fix}", ctx.exe);
+        row(rows, signed, '✗', &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();
@@ -262,6 +270,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
+        // #592: lanes there read only their rules file; the owner removes an old copy by hand, herdsman never does.
+        let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
+        if on.exists(Path::new(&conf)) {
+            rows.push(format!(
+                "! stale fleet.toml on {name}: no longer read → rm {conf} there"
+            ));
+        }
     }
 }
 

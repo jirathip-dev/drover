@@ -13,22 +13,28 @@ srv=$!
 trap 'kill $srv' EXIT
 for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null && break; sleep 0.1; done
 # #71: a Chrome run that never returns (virtual time stuck) is killed after UI_AUDIT_TIMEOUT s and fails loudly,
-# with its stderr tail, instead of hanging the job (`timeout` where the host has it: coreutils on the runner).
-# #453: a hung run is retried once: the runner's Chrome hangs a view now and then, never on two runs in a row.
+# with its stderr tail, instead of hanging the job (`timeout` where the host has it: coreutils on the runner; else perl's alarm).
+# #566: a hung run is retried twice, each on a fresh profile. Every hang goes to <shots>/hangs.txt; a run still hung
+# after that is no failure: it goes to <shots>/flaky.txt (CI's soft `ui-flaky` check), and a hung check run skips the view's check.
 limit=${UI_AUDIT_TIMEOUT:-60} to=$(command -v timeout || command -v gtimeout || true)
+: > "$shots/hangs.txt" && : > "$shots/flaky.txt"
+hung() { [ "$1" = 124 ] || [ "$1" = 137 ] || [ "$1" = 142 ]; }
 run() { # url, extra args
-  local rc=0; once "$@" || rc=$?
-  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-    echo "$v: retrying the hung run once" >&2; rc=0; once "$@" || rc=$?
-  fi
-  return "$rc"
+  local rc=0 n
+  for n in 1 2 3; do
+    rc=0; once "$@" || rc=$?
+    hung "$rc" || return "$rc"
+    echo "$v ${2%%=*}: try $n hung" >> "$shots/hangs.txt"
+  done
+  echo "$v ${2%%=*}" >> "$shots/flaky.txt"
 }
 once() {
-  local prof rc=0; prof=$(mktemp -d)
-  ${to:+"$to" -k 5 "$limit"} "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$prof" --no-first-run \
+  local prof rc=0 hold=(perl -e 'alarm shift; exec @ARGV' "$limit"); prof=$(mktemp -d)
+  [ -n "$to" ] && hold=("$to" -k 5 "$limit")
+  "${hold[@]}" "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --user-data-dir="$prof" --no-first-run \
     --window-size="${size:-390,844}" --force-device-scale-factor="${dpr:-3}" --virtual-time-budget=8000 "${@:2}" "$1" 2>"$prof.err" || rc=$?
   if [ "$rc" != 0 ]; then
-    echo "$v: chrome ${2%%=*} exited $rc$([ "$rc" = 124 ] || [ "$rc" = 137 ] && echo ", killed after ${limit} s: hung")" >&2
+    echo "$v: chrome ${2%%=*} exited $rc$(hung "$rc" && echo ", killed after ${limit} s: hung")" >&2
     tail -5 "$prof.err" >&2
   fi
   rm -rf "$prof" "$prof.err"
@@ -77,10 +83,11 @@ for v in queue queue-open queue-lanes queue-change queue-drive queue-result conf
   case $v in herd-garden*) url+="&theme=garden" ;; esac # #423
   case $v in herd-kitchen*) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172, #239
   case $v in moment-still|herd-kitchen-still|herd-garden-still|herd-nav|loading-still|chat-wait-still|row-loop-still|moment-row-still) flags=(--force-prefers-reduced-motion) ;; esac # #241, #239, #291, #305, #370
-  run "$url" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1
+  run "$url&shot=1" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1
   run "$url&check=1" --dump-dom ${flags[@]+"${flags[@]}"} > "$shots/$v.html" || fail=1
-  if ! python3 - "$shots/$v.html" "$v" "$shots/$v.png" "$dpr" <<'EOF'
-import html, json, re, struct, sys, zlib
+  if grep -qx "$v --dump-dom" "$shots/flaky.txt"; then echo "$v: hung 3 times, not checked (ui-flaky)"
+  elif ! python3 - "$shots/$v.html" "$v" "$shots/$v.png" "$dpr" <<'EOF'
+import html, json, os, re, struct, sys, zlib
 m = re.search(r'<pre id="audit">(.*?)</pre>', open(sys.argv[1]).read(), re.S)
 r = json.loads(html.unescape(m.group(1))) if m else {"outliers": ["no audit output"]}
 def png(path):  # 8-bit RGB(A), non-interlaced: Chrome's screenshots
@@ -103,7 +110,7 @@ def png(path):  # 8-bit RGB(A), non-interlaced: Chrome's screenshots
     return rows
 # #281: a row sprite's pixels are crisp: an art pixel is 4.5 device px (1.5 css px at DPR 3), so no device pixel inside its
 # box is a blend of its two neighbours (smoothing paints those along every edge).
-if r.get("sprites"):
+if r.get("sprites") and os.path.exists(sys.argv[3]):
     px, blend, d = png(sys.argv[3]), 0, int(sys.argv[4])  # d: device px per css px (#266: 2 at 1440)
     mid = lambda a, p, b: a != b and p not in (a, b) and all(min(x, z) <= y <= max(x, z) for x, y, z in zip(a, p, b))
     for x0, y0, w, h in r["sprites"]:

@@ -49,6 +49,7 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   instructions = "~/notes/conductor/AGENTS.md"   # inlined
   memory = "~/notes/conductor/memory"            # each *.md inlined
   skills = "~/notes/conductor/skills"            # listed, read on demand
+  allow = ["design", "clean", "hosts"]           # #538: capability groups (default: all but pause and set)
   ```
 
 - **Sleep and resume:** `check` closes an awake conductor whose thread has been quiet for 30 min and that is not
@@ -75,6 +76,12 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   logged `ask-owner` in the thread: a choice row (the conductor's pick recommended) that pushes like an ask. Each
   conductor answer posts `answered <id> for #<n>: <choice>, because <basis>` with [change] for 30 min (no push); the
   owner's pick there re-sends `DECISION <id>: <choice>` to the lane, `by: owner`, replacing it.
+- **Amendments (#574):** `herdsman amend <fleet> <issue> --basis q<id> "<text>"` (conductors and the owner; the lane
+  hook refuses it for impl, rev and design lanes) writes an owner's decision into the spec: it appends
+  `- **Amendment (q<id>)**: <text>` to the issue body's `## Amendments` section (made once, at the end), logs `amend`
+  `{id, text}` and re-runs the open PR's failed spec-reading checks (board-freeze). `q<id>` must be an ask on that
+  issue answered `by: owner` (or a routine ask's `by: default`), else `REFUSED NO_DECISION` before any GitHub call.
+  A conductor runs it as soon as an owner decision names an amendment; the thread shows it as a tool row.
 
 - **Files:** `herdsman thread reply <thread> "<text>" --file <path>` (repeatable) shows the files with the message:
   images inline, any other file as a row. Only a file in the thread's conductor folder is taken (anything else is
@@ -161,7 +168,7 @@ lines never push, nor (#407) anything in a thread a board has open.
 
 Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `conductor-start` (session, resumed,
 account), `conductor-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
-`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only), `telegram-topic`.
+`secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only).
 
 ## Config changes (#387)
 
@@ -175,6 +182,27 @@ changed since` instead of its buttons (#460). Settled, the card folds to the thr
 applied by owner, backup kept, doctor ✓` (the conductor gets it too). #460: while a card waits, the thread's bar and
 its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
 always carries it: past the last 30 messages it stays right under the older-messages marker.
+
+## Capability groups and run cards (#538)
+
+- **Groups:** `[conductor] allow = [...]` switches on owner-level herdsman verbs for conductors; the lane hook allows
+  a group's verbs from a conductor and refuses them from every other lane (`OWNER_ONLY`), and refuses an off group's
+  `GROUP_OFF`. Unset, every group but `pause` and `set` is on. The groups: `design` (`spawn … design`), `clean`
+  (`clean --yes`, `--orphans`, `--lane`), `hosts` (`hosts on|off|refresh`), `reclaim`, `accounts` (`accounts
+  reset`), `runners` (#537's `runners …`), `pause` (`pause`, `resume`), `set`. The brief lists each, on or off. The
+  conductor never edits `allow`: it proposes the change as a config card the owner applies. Its group verbs show in
+  the thread as tool rows with their group (`thread-cmd`'s `group`).
+- **Run cards:** `herdsman card post <thread> --cmd "<command>" --why "…" --blast "…" --dir <folder> [--timeout
+  600]` posts the exact command, why, what it touches and where it runs (the main host, that folder) as card
+  `r<n>` (`run-card`, with the command's sha). The owner settles it: `herdsman card approve <id> [--sha <prefix>]`
+  or `card deny <id>` (owner-only, `OWNER_ONLY` in any lane), or the card's Telegram buttons. An approval covers the
+  exact text (`CARD_CHANGED` if the sha the owner saw differs), runs once (`ALREADY_SETTLED`) and only within 15
+  min of the post (`EXPIRED`). herdsman runs it with `sh` in the folder under the timeout, then posts `run r1
+  approved by owner, ran in <dir>: exit <code>` and the output's last 20 lines (secrets masked) to the thread.
+  Events: `run-card`, `run-settled` (`by: owner`, id, sha, approved), `run-done` (code, tail).
+- **Hard nos** (`CARD_FORBIDDEN`, at posting and, from a conductor's own shell, in the hook): printing or sending a
+  secret's value, deleting production data, force-pushing or rewriting history, turning off branch protection or
+  herdsman's gates. It is a pattern guard over the command's words, best effort like `deny_commands`.
 
 ## Accounts (#387)
 
@@ -196,25 +224,8 @@ never edits the account list itself: that change is a `config propose` card.
   `all`'s) through a 0600 file the pane's shell sources, deleted after the start (docs/providers.md).
 - `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
 
-## Telegram (#387, optional)
+## Telegram (removed, #557)
 
-herdsman talks to the Telegram Bot API itself (no Hermes). The bot token is the keychain item
-`herdsman/all/TELEGRAM_BOT_TOKEN` (a `secret request` in an `all` thread stores it there), never fleet.toml. curl
-gets it on stdin only.
+The Telegram bridge (#387) is gone: the board and web push are the only owner UI. A leftover `[telegram]` table in
+fleet.toml loads with a warning (`herdsman doctor` shows a `!` row); drop it.
 
-```toml
-[telegram]
-chat = -100123     # a forum supergroup the bot administers (topics on)
-owner = 4242          # your Telegram user id: only your messages and taps count (required: without it the bridge stays off)
-# api = "https://api.telegram.org"
-```
-
-- `herdsman serve` long-polls it (it moves to Phase C, #345, later).
-- **One forum topic is one thread.** A new topic starts a thread under **all repos**, unless its name starts with a
-  repo's fleet name. A thread started on the board gets a new topic.
-- The conductor's replies and system lines go to the topic. An ask's options become inline keyboard buttons (a tap
-  answers it, `via: telegram`). Images go both ways: a photo you send is saved in the thread's `uploads/` and typed
-  in with its path, and the conductor's images arrive as photos (other files as documents). A config or secret card
-  says it waits on the board.
-- The board stays the primary UI and shows the whole conversation. Your own messages stay where you wrote them.
-- Cursor: `<state dir>/telegram.json` (the next update id, the events relayed). The first run relays nothing older.

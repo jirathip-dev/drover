@@ -7,31 +7,48 @@ use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
 
 /// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size.
 fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
     let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
-    let file = format!("recipes/{}.toml", c.as_deref().unwrap_or(""));
-    let p = ctx.config.with_file_name(file);
-    let boat = || (c.as_deref() == Some("boat")).then(|| include_str!("../assets/recipes/boat.toml").into());
+    Ok((load(ctx, c.as_deref().unwrap_or(""))?, size))
+}
+
+/// Recipe `c`: `<config>/recipes/<c>.toml`, else the built-in `boat`.
+pub fn load(ctx: &Ctx, c: &str) -> Result<toml::Table> {
+    let p = ctx.config.with_file_name(format!("recipes/{c}.toml"));
+    let boat = || (c == "boat").then(|| include_str!("../assets/recipes/boat.toml").into());
     let text = std::fs::read_to_string(&p).ok().or_else(boat);
     let text = text.with_context(|| format!("cloud recipe {}", p.display()))?;
-    Ok((toml::from_str(&text)?, size))
+    Ok(toml::from_str(&text)?)
 }
 
 /// Run host `name`'s recipe command `verb`, the provider key exported from stdin (never in argv or a log); its stdout.
 fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Result<String> {
     let (rc, size) = recipe(ctx, cfg, name)?;
-    let s = |k: &str| rc.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let (var, line) = (s("key_env"), s(verb).replace("{name}", name).replace("{size}", &size));
-    let stored = || r.secret(&crate::secret::service("all", &var)).ok().flatten();
-    let key = std::env::var(&var).ok().or_else(stored).unwrap_or_default();
+    let line = rc.get(verb).and_then(|v| v.as_str()).unwrap_or_default();
+    let line = line.replace("{name}", name).replace("{size}", &size);
+    run(r, &rc, &format!("{name} {verb}"), &line, None)
+}
+
+/// Run recipe `rc`'s filled-in `line`: its provider key, then #537's `token` (as `RT`), exported from stdin.
+pub fn run(r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, token: Option<&str>) -> Result<String> {
+    let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
+    let stored = || r.secret(&crate::secret::service("all", var)).ok().flatten();
+    let key = std::env::var(var).ok().or_else(stored).unwrap_or_default();
     ensure!(!key.is_empty(), "{var} not set (env or the store's `all` secret {var})");
-    let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {line}");
-    let o = r.run_in("sh", &argv(&["-c", &script]), &format!("{key}\n"))?;
-    let err = o.stderr.trim().replace(&key, "•••");
-    ensure!(o.code == 0, "{name} {verb} failed ({}): {err}", o.code);
+    let rt = token.map_or("", |_| "IFS= read -r RT; export RT; ");
+    let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {rt}{line}");
+    let o = r.run_in(
+        "sh",
+        &argv(&["-c", &script]),
+        &format!("{key}\n{}", token.map_or(String::new(), |t| format!("{t}\n"))),
+    )?;
+    let mut err = o.stderr.trim().replace(&key, "•••");
+    if let Some(t) = token.filter(|t| !t.is_empty()) {
+        err = err.replace(t, "•••");
+    }
+    ensure!(o.code == 0, "{what} failed ({}): {err}", o.code);
     Ok(o.stdout)
 }
 
@@ -260,8 +277,8 @@ const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
 /// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
-/// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token, the
-/// `[fleet.*]` tables, the clones of the fleets it fits and `profiles sync`. Nothing is copied from this host's logins.
+/// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token and the
+/// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
@@ -309,38 +326,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         "{name}: log in in pane {p} there (herdr or the board), then bootstrap again"
     );
     step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
-    if !on.exists(Path::new(&conf)) {
-        // Only the `[fleet.*]` tables, without their notifiers (a notify command may hold a token).
-        let all: toml::Table = toml::from_str(&std::fs::read_to_string(&ctx.config)?)?;
-        let mut t = all.clone();
-        t.retain(|k, _| k == "fleet");
-        for (_, f) in t
-            .iter_mut()
-            .filter_map(|f| f.1.as_table_mut())
-            .flat_map(|f| f.iter_mut())
-        {
-            f.as_table_mut().map(|f| f.remove("notify"));
-        }
-        // #256: its lanes' hook resolves `HERDSMAN_HOST` there: only this host's command rules, its cloud default spelled out.
-        let mut rules = toml::Table::new();
-        rules.insert("allow_commands".into(), h.allow().into());
-        if let Some(mine) = all
-            .get("hosts")
-            .and_then(|t| t.get(name))
-            .and_then(toml::Value::as_table)
-        {
-            rules.extend(
-                mine.iter()
-                    .filter(|r| r.0.starts_with("deny_"))
-                    .map(|(k, v)| (k.clone(), v.clone())),
-            );
-        }
-        t.insert(
-            "hosts".into(),
-            toml::Table::from_iter([(name.to_string(), rules.into())]).into(),
-        );
-        on.write(Path::new(&conf), &t.to_string())?;
-    }
     let tags = [h.tags.clone(), tags].concat();
     for f in cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t))) {
         let l = crate::hosts::under(&f.local, Some(&home));
@@ -350,7 +335,10 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
             l.display()
         ))?;
     }
-    step(&format!("profiles sync\t'{exe}' profiles sync >/dev/null\ttrue"))?;
+    // #592: no fleet.toml there (spawn syncs each lane's profile); an old one still gets its sync.
+    step(&format!(
+        "profiles sync\ttest ! -e '{conf}' || '{exe}' profiles sync >/dev/null\ttrue"
+    ))?;
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)

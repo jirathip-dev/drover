@@ -29,6 +29,8 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
 - After three attempts in one diagnostic class without progress, stop and report.
+- End every turn with `herdsman turn <state>`: `done` once pushed with the PR open, `blocked --why <reason>`
+  (the owner gets a card), `need-input` after `herdsman ask`, `working` when you stop mid-task. Drive acts on it.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
   Finish your work, run the gates, push. If the other PR merges first, herdsman gives you an update round to resolve it.
 - A decision that says to wait for another issue #N: run `herdsman queue <fleet> block --on N <issue>`

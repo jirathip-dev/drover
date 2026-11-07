@@ -164,6 +164,9 @@ impl Runner for Snap<'_> {
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
     }
+    fn local(&self) -> bool {
+        self.r.local()
+    }
     fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
         self.r.secret(svc)
     }

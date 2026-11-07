@@ -7,15 +7,20 @@ const or = (c: boolean, a: string, b: string) => (c ? a : b);
 /** `serve::enc`: every byte but an ASCII letter or digit as `%XX`. */
 export const enc = (s: string) => [...new TextEncoder().encode(s)].map(b => (/[A-Za-z0-9]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`)).join('');
 
-/** Escaped prose: paragraphs at blank lines, `code`, and plain links. */
+/** #618: the thread ids the tab knows (any repo, archived too), as of its last draw. */
+let ids = new Set<string>();
+/** #618: in escaped text, each whole-word `t<n>` naming a known thread a ref that opens it (serve.js); others stay text. */
+export const refs = (s: string) => s.replace(/(?<![\w/.-])t\d+(?!\w)/g, t => (ids.has(t) ? `<span class=tl data-go="${t}">${t}</span>` : t));
+
+/** Escaped prose: paragraphs at blank lines, `code`, plain links and (#618, outside `code`) thread refs. */
 function paras(text: string): string {
   const link = (w: string) => {
     const url = w.replace(/[.,);:]+$/, '');
-    return url.startsWith('https://') || url.startsWith('http://') ? `<a href="${url}">${url}</a>${w.slice(url.length)}` : w;
+    return url.startsWith('https://') || url.startsWith('http://') ? `<a href="${url}">${url}</a>${w.slice(url.length)}` : refs(w);
   };
   const para = (p: string) => {
-    const c = esc(p.trim()).split('`').map((s, i) => (i % 2 === 1 ? `<code>${s}</code>` : s)).join('');
-    return `<p>${c.split(' ').map(link).join(' ').replace(/\n/g, '<br>')}</p>`;
+    const c = esc(p.trim()).split('`').map((s, i) => (i % 2 === 1 ? `<code>${s}</code>` : s.split(' ').map(link).join(' '))).join('');
+    return `<p>${c.replace(/\n/g, '<br>')}</p>`;
   };
   return text.split('\n\n').filter(p => p.trim()).map(para).join('');
 }
@@ -63,7 +68,7 @@ function files(id: string, m: Msg): string {
 /** An ask's choice rows (recommended first; #492: a handoff card's past 5 behind `more`) and an "other" box. */
 function choices(a: NonNullable<Msg['ask']>, dis: string): string {
   const rows = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
-  const btn = ([o, n]: readonly [string, number]) => `<button type=button name=choice value=${n}${dis}><span>${n}. ${esc(o)}${or(n === a.recommend, ' <small>(recommended)</small>', '')}</span></button>`;
+  const btn = ([o, n]: readonly [string, number]) => `<button type=button name=choice value=${n}${dis}><span>${n}. ${refs(esc(o))}${or(n === a.recommend, ' <small>(recommended)</small>', '')}</span></button>`;
   return `<form class=chq data-id="${esc(a.id)}" data-fleet="${esc(a.fleet)}">${rows.slice(0, 5).map(btn).join('')}${or(rows.length > 5, `<details class=more><summary>more (${rows.length - 5})</summary>${rows.slice(5).map(btn).join('')}</details>`, '')}<div class=oth><input name=text aria-label="other answer" placeholder="other: type an answer"${dis}><button${dis}>send</button></div></form>`;
 }
 
@@ -90,10 +95,10 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
       const r = m.retry ? ' r' : '', rt = m.retry ? ` <button type=button class=rty data-n=${m.seq}${dis}>retry</button>` : '';
       const si = m.signin == null ? '' : ` <button type=button data-su="${esc(m.signin)}" data-host="${esc(m.host)}"${dis}>sign in</button>`;
       const ch = m.ask && m.open ? `<details class=chg><summary>change</summary>${choices(m.ask, dis)}</details>` : ''; // #541: a conductor's answer, 30 min
-      b = `<p class="qs note${r}">${lk}${esc(m.text)}${si}${rt}</p>${ch}`;
+      b = `<p class="qs note${r}">${lk}${refs(esc(m.text))}${si}${rt}</p>${ch}`;
       break;
     }
-    case 'handoff': b = `<p class=qs>${lk}· ${esc(m.text)}</p>`; break;
+    case 'handoff': b = `<p class=qs>${lk}· ${refs(esc(m.text))}</p>`; break;
     case 'msg': {
       const [k, who] = m.from === 'conductor' ? ['ai', 'conductor'] : lk ? ['ai', lk.trimEnd()] : ['me', 'you'];
       b = block(now, k, who, m.text, `<div class=md data-md="${esc(m.text)}">${prose(m.text)}</div>${files(id, m)}`, m.ts); // #407: [copy as markdown]
@@ -155,12 +160,14 @@ const LIVE: Record<string, string> = {
 /** #460: `config c1 c2 waiting` while proposals wait for the owner's tap. */
 const cw = (w: string[]) => (w.length ? `<b class="a cw">config ${esc(w.join(' '))} waiting</b>` : '');
 
-/** One thread: the bar, its last messages, the live line and the composer (inert off a paired owner device). */
+/** One thread: the bar (#618: its id after the title), its last messages, the live line and the composer (inert off a
+ * paired owner device; #618: and while archived, the line its [restore]). */
 function thread(d: ChatTab, t: ThreadView): string {
   const dis = or(d.rw, '', ' disabled'), dot = or(['asleep', 'new'].includes(t.state), '', '<i class=dt></i>');
-  const guest = or(d.rw, '', '<p class="ns m">pair this phone to answer or write</p>');
-  return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>${esc(t.title)}</b><span class=ds>${dot}${esc(t.ds)}</span>${cw(t.waiting)}</div></div>`
-    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div><p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>${guest}${composer(t.id, '', queue(t, dis), dis, t.chips)}</div>`; // #407: working, serve.js floats the line as a pill
+  const guest = or(d.rw, '', '<p class="ns m">pair this phone to answer or write</p>'), ro = t.page.archived;
+  const live = ro ? `<p class=tlv>archived · read-only <button type=button class=rst data-t="${t.id}"${dis}>restore</button></p>` : `<p class=${t.since == null ? 'tlv' : `"tlv wk" data-since=${t.since}`}>${LIVE[t.state] ?? '<b class=g>●</b> awake · sleeps after 30 min idle'}</p>`; // #407: working, serve.js floats the line as a pill
+  return `<div class=cvp data-t="${t.id}"><div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><div class=tn><b>${esc(t.title)}</b><small class=tid>· ${t.id}</small></div><span class=ds>${dot}${esc(t.ds)}</span>${cw(t.waiting)}</div></div>`
+    + `<div class=tc>${page(d.now, t.id, t.page, d.rw)}</div>${live}${guest}${composer(t.id, '', queue(t, dis), or(ro, ' disabled', dis), t.chips)}</div>`; // #407: working, serve.js floats the line as a pill
 }
 
 /** #405: [+ thread]'s empty thread `new-<repo>`: nothing is logged until its first message starts it. */
@@ -176,7 +183,7 @@ const ST: Record<string, string> = { choose: '<b class=r>! choose</b>', working:
  * row swiped left shows [archive], an archived one [restore]. */
 function row(r: ThreadRow, b: string, dis: string): string {
   const lk = r.links.map(l => chip(l) + ' ').join('');
-  const a = `<a class="tr${or(r.unread, '', ' rd')}" href=#chat data-t="${r.id}"><i class=ud>${or(r.unread, '●', '')}</i><span class=tt>${esc(r.title)}</span><span class=ta>${r.age}</span><span class=tp>${lk}${cw(r.waiting)}${ST[r.state] ?? ''}${esc(r.line)}</span></a>`;
+  const a = `<a class="tr${or(r.unread, '', ' rd')}" href=#chat data-t="${r.id}"><i class=ud>${or(r.unread, '●', '')}</i><span class=tt><span>${esc(r.title)}</span><small class=tid>· ${r.id}</small></span><span class=ta>${r.age}</span><span class=tp>${lk}${cw(r.waiting)}${ST[r.state] ?? ''}${esc(r.line)}</span></a>`;
   return `<div class=sw>${a}<button type=button class=sb name=${b} data-t="${r.id}"${dis}>${b}</button></div>`;
 }
 
@@ -184,6 +191,7 @@ function row(r: ThreadRow, b: string, dis: string): string {
  * [+ thread]; then every thread's view (serve.js shows the open one). */
 export function tab(d: ChatTab): string {
   if (d.error != null) return `<p class=r>${esc(d.error)}</p>`;
+  ids = new Set(d.threads.map(t => t.id));
   const dis = or(d.rw, '', ' disabled');
   let list = '', views = '';
   for (const c of d.repos) {

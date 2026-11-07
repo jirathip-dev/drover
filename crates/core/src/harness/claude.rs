@@ -35,6 +35,8 @@ static DIALECT: Dialect = Dialect {
     stop: "Stop",
     blocked: "Notification",
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
+    prompt: "UserPromptSubmit",
+    again: Some(|reason| json!({"decision": "block", "reason": reason})),
 };
 
 /// `<config dir>/claude`, the generated per-role profiles.
@@ -54,7 +56,11 @@ impl Harness for Claude {
             .replace("\"{{FLEET_STATUSLINE}}\"", &line)
             .replace("\"{{TRANSCRIPT_DAYS}}\"", &days.to_string());
         std::fs::write(dir.join("settings.json"), settings)?;
-        std::fs::write(dir.join("role.md"), format!("{}\n\n{usage}", role_prompt(prompt)))?;
+        let role_md = format!("{}\n\n{usage}", role_prompt(prompt));
+        std::fs::write(dir.join("role.md"), &role_md)?;
+        // #565: an ACP lane (the profile as `CLAUDE_CONFIG_DIR`, `bypassPermissions` as the CLI's flag) reads its role
+        // as user memory, since the adapter takes no `--append-system-prompt-file`.
+        std::fs::write(dir.join("CLAUDE.md"), role_md)?;
         std::fs::write(dir.join("fleet.md"), usage)?;
         writeln!(out, "synced {} ({prompt})", dir.display())?;
         Ok(())
@@ -125,6 +131,16 @@ impl Harness for Claude {
     /// #248: no updater, telemetry or other background traffic (names as of Claude Code 2.1.311).
     fn env(&self) -> &'static [&'static str] {
         &["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"]
+    }
+    /// #565: claude-agent-acp loads Claude Code's user settings, so a lane whose `CLAUDE_CONFIG_DIR` is its profile
+    /// runs that profile's `PreToolUse` guard.
+    fn acp(&self) -> Option<&'static str> {
+        Some("claude-acp")
+    }
+    fn acp_env(&self, profile: &Path, model: Option<&str>) -> Vec<(&'static str, String)> {
+        let mut env = vec![("CLAUDE_CONFIG_DIR", profile.to_string_lossy().into_owned())];
+        env.extend(model.map(|m| ("ANTHROPIC_MODEL", m.to_string())));
+        env
     }
     /// The env var Claude Code reads its OAuth token from.
     fn credential(&self) -> Credential {

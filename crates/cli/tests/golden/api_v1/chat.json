@@ -1,0 +1,109 @@
+{
+  "response": {
+    "error": null,
+    "now": 1000000,
+    "repos": [
+      {
+        "archived": [],
+        "harness": {
+          "all": [
+            "claude",
+            "hermes",
+            "dsh"
+          ],
+          "cur": "hermes",
+          "name": "harness"
+        },
+        "k": "x",
+        "repo": "all",
+        "rows": []
+      },
+      {
+        "archived": [],
+        "harness": {
+          "all": [
+            "claude",
+            "hermes",
+            "dsh"
+          ],
+          "cur": "hermes",
+          "name": "harness"
+        },
+        "k": "g",
+        "repo": "sendmeter",
+        "rows": [
+          {
+            "age": "0s",
+            "id": "t1",
+            "line": "you: Let's talk about #30",
+            "links": [],
+            "state": "awake",
+            "title": "Let's talk about #30",
+            "unread": false,
+            "waiting": []
+          }
+        ]
+      }
+    ],
+    "rw": true,
+    "threads": [
+      {
+        "chips": [
+          {
+            "all": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "cur": null,
+            "name": "effort"
+          }
+        ],
+        "ds": "sendmeter · hermes · opus · awake",
+        "id": "t1",
+        "page": {
+          "archived": false,
+          "dir": "<tmp>/state/conductor/t1",
+          "id": "t1",
+          "msgs": [
+            {
+              "answer": null,
+              "ask": null,
+              "cmds": [],
+              "files": [],
+              "from": "owner",
+              "host": "",
+              "kind": "msg",
+              "link": null,
+              "open": false,
+              "retry": false,
+              "routine": false,
+              "seq": 6,
+              "signin": null,
+              "text": "Let's talk about #30",
+              "ts": 1000000
+            }
+          ],
+          "older": null,
+          "started": 1000000
+        },
+        "queued": [],
+        "since": null,
+        "state": "awake",
+        "title": "Let's talk about #30",
+        "waiting": []
+      }
+    ]
+  },
+  "route": "GET /api/v1/chat",
+  "schema": {
+    "error": "null",
+    "now": "number",
+    "repos": [],
+    "rw": "boolean",
+    "threads": []
+  },
+  "type": "ChatTab"
+}

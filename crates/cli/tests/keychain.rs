@@ -135,7 +135,7 @@ fn a_hung_keychain_is_keychain_locked_in_5_s_with_a_system_row_and_one_alert() {
 }
 
 #[test]
-fn a_second_message_behind_a_stuck_delivery_is_not_delivered_in_30_s() {
+fn a_second_message_behind_a_stuck_delivery_is_not_delivered_in_240_s() {
     let c = setup("keychain-lock");
     let dir = c.state.with_file_name("conductor").join("t1");
     std::fs::create_dir_all(&dir).unwrap();
@@ -145,10 +145,10 @@ fn a_second_message_behind_a_stuck_delivery_is_not_delivered_in_30_s() {
     let r = herdr();
     let log = say(&c, &r, "second");
     assert!(
-        log.contains(r#""text":"✗ not delivered: t1's previous message is still being delivered after 30 s""#),
+        log.contains(r#""text":"✗ not delivered: t1's previous message is still being delivered after 240 s""#),
         "{log}"
     );
-    assert_eq!(sleeps(&r), 30, "{:?}", r.calls.borrow());
+    assert_eq!(sleeps(&r), 240, "{:?}", r.calls.borrow());
     assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
 }
 

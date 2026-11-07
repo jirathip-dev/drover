@@ -269,6 +269,7 @@ pub fn plain(ev: &Event) -> String {
                 s("id")
             )
         }
+        "host-busy" => format!("host-busy {}: {}", s("host"), s("reason")),
         "decision" => format!("{who} decision {} by {}: {}", s("id"), s("by"), s("choice")),
         "queue" => {
             let n: Vec<String> = ev.data["issues"]
@@ -360,13 +361,15 @@ pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
 }
 
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since).
-pub fn held_on(events: &[Event], s: &IssueState) -> Option<u64> {
+/// #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
+pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
     let e = events
         .iter()
         .rev()
-        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e))?;
-    e.data.get("on").filter(|_| e.kind == "held")?.as_u64()
+        .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
+    e.filter(|e| e.kind == "held")
+        .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
 }
 
 /// #500: a design lane's spawn: never the issue's build or check lane.
@@ -393,6 +396,9 @@ pub fn checks(e: &Event) -> bool {
 pub const PASSIVE: &[&str] = &[
     "lane-state",
     "lesson-prompted",
+    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
+    "turn-end",
+    "turn-prompted",
     "budget-freed",
     "wip-saved",
     "wip-blocked",
@@ -435,19 +441,53 @@ pub const PASSIVE: &[&str] = &[
     "form-rounds-exhausted",
     "stale-marker",
     "spawn-held",
+    "host-busy",
     "outbox",
+    // #584: an ask's other endings, and the one-time sweep.
+    "ask-withdrawn",
+    "ask-delivered",
+    "ask-failed",
+    "ask-expired",
+    "asks-swept",
+    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
+    "intent",
+    "done",
+    "failed",
 ];
 
-/// Why ask `a` closed: answered, its issue merged, or its lane killed, cleaned or respawned; `None` while open.
+/// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its
+/// issue merged, or its lane killed, cleaned or respawned; `None` while open. The one place that decides "open".
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
+    ending(events, a).map(|e| e.0)
+}
+
+/// `closed`, and the event that closed it.
+fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event)> {
     let before = || events.iter().take_while(|e| !std::ptr::eq(*e, a));
     let why: Vec<_> = (events.iter())
         .skip_while(|e| !std::ptr::eq(*e, a))
-        .filter_map(|e| closes(a, e, || before().any(|x| started(x, e))))
+        .filter_map(|e| closes(a, e, || before().any(|x| started(x, e))).map(|w| (w, e)))
         .collect();
-    ["answered", "closed: merged", "closed: lane gone"]
-        .into_iter()
-        .find(|w| why.contains(w))
+    let order = [
+        "answered",
+        "withdrawn",
+        "delivered",
+        "failed",
+        "expired",
+        "closed: merged",
+        "closed: lane gone",
+    ];
+    order.into_iter().find_map(|w| why.iter().find(|x| x.0 == w).copied())
+}
+
+/// #584: `closed` as `herdsman asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
+pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
+    let (why, e) = ending(events, a)?;
+    Some(match (why, e.str("for"), e.str("to")) {
+        ("withdrawn", Some(q), _) => format!("withdrawn → {q}"),
+        ("delivered", _, Some(t)) => format!("delivered to {t}"),
+        _ => why.into(),
+    })
 }
 
 /// #446: `e` is the `spawn-started` of spawn `sp` (same agent and pane).
@@ -460,10 +500,19 @@ fn started(e: &Event, sp: &Event) -> bool {
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
+    let id = e.str("id") == a.str("id");
     if e.fleet != a.fleet {
         None
-    } else if e.kind == "decision" && e.str("id") == a.str("id") {
-        Some("answered")
+    } else if e.kind == "decision" && id {
+        Some(if a.data.get("handoff").is_some() {
+            "delivered"
+        } else {
+            "answered"
+        })
+    } else if let (true, Some(w)) = (id, e.kind.strip_prefix("ask-")) {
+        ["withdrawn", "delivered", "failed", "expired"]
+            .into_iter()
+            .find(|k| *k == w)
     } else if on("merged") {
         Some("closed: merged")
     } else if mine && !(e.kind == "spawn" && own()) || on("clean") {
@@ -491,7 +540,8 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
                 first.entry(at).or_insert(i);
             }
             "needs-decision" => open.push((i, e)),
-            "decision" | "merged" | "clean" | "spawn" | "lane-killed" => {
+            "decision" | "merged" | "clean" | "spawn" | "lane-killed" | "ask-withdrawn" | "ask-delivered"
+            | "ask-failed" | "ask-expired" => {
                 open.retain(|(n, a)| closes(a, e, || first.get(&at).is_some_and(|f| f < n)).is_none());
             }
             _ => {}

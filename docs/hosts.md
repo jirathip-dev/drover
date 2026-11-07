@@ -19,8 +19,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    - git access to each fleet repo: the host clones each repo itself the first time a lane goes there, with plain
      `git clone https://github.com/<repo>.git <local>`, so its git config (`insteadOf`, credential helper) applies;
    - the agent harness (Claude Code logged in);
-   - herdsman itself, then run `herdsman profiles sync` there. The lane's tool-guard hook calls `herdsman hook`, and
-     the Claude profile lives under that host's own home.
+   - herdsman itself. The lane's tool-guard hook calls `herdsman hook`, and the Claude profile lives under that host's
+     own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
    herdsman never copies credentials to another host: a role's `account` token is only exported to lanes on the
    main host; a lane on another host runs on that host's own Claude login.
@@ -86,6 +86,17 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
 paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
+
+## A remote lane's hook rules (#592)
+
+Only the main host has a fleet.toml. Spawn resolves a remote lane's hook rules there (protected branches, the fleet's
+`deny_commands` under the host's `[hosts.<name>]` rules, the reviewer flag) and writes them to
+`<worktree>.rules.json` on the lane's host, exported as `HERDSMAN_RULES`, and syncs the lane's harness profile there
+by name. The hook there reads only that file (the lane
+may not edit it); a missing or unreadable one fails closed `HOOK_FAILED_CLOSED`. It holds no notifier, token or env
+value. The rules are frozen at spawn: after a config change that alters them, the board marks the lane `rules stale`
+until a respawn. A fleet.toml left on a remote host is no longer read: `herdsman doctor` shows
+`! stale fleet.toml on <host>: no longer read`; remove it by hand (herdsman never does).
 
 ## Asks, answers and verdicts from another host (#275, #389)
 
@@ -176,7 +187,7 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 When `check` sees an older herdsman on a remote host, and fleet.toml has the herdsman fleet, it rebuilds the main
 host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
 `cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
-`herdsman profiles sync`. Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
+`herdsman profiles sync` if an old fleet.toml is left there (#592). Output goes to `~/.herdsman-update.log` on the host. Each host and sha is tried once, and
 logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
 A host still on the old version stays amber. A failed update never blocks the main host.
 
@@ -243,8 +254,8 @@ again. In order:
    paste the host's fine-grained token and press Enter (read without echo, never on a command line or in a log). Then
    run bootstrap again. herdsman never copies a token from this host.
 4. **git over HTTPS** with that token (`gh auth setup-git`): never your SSH key.
-5. **fleet.toml** there, when it has none: only the `[fleet.*]` tables, without their notifiers.
-6. A clone of each fleet's repo the host fits, then `herdsman profiles sync`. Logged `host-bootstrap`.
+5. A clone of each fleet's repo the host fits. Logged `host-bootstrap`. #592: no fleet.toml goes there; each spawn
+   syncs its lane's profile (a full `profiles sync` runs only where an old fleet.toml is left).
 
 **The token.** Make one fine-grained token per cloud host, limited to the fleets' repos, with contents and pull
 requests write and nothing else (no admin). It lives only on that host. Each health look reads it with one
@@ -259,6 +270,50 @@ above (and the token look) before placement uses it, so an unhealthy host never 
 ✗, the recipe's `snapshot` command (logged `cloud-snapshot`). The recipe's `create_from` template makes a new
 sandbox from it that starts ready. Check both against docs.boat.dev.
 
+## CI runner VMs (#537)
+
+`[ci_runners]` (owner-set; the hook guards fleet.toml) describes a repo's self-hosted GitHub runners on cloud VMs:
+
+```toml
+[ci_runners]
+provider = "boat"        # a recipe, like a cloud host's: the built-in boat, or <config>/recipes/<name>.toml
+repo = "owner/app"       # the repo the runners register to
+label = "app-boat"       # the VM runners' label
+size = "large"           # a key of the recipe's [rate_usd_hour]
+ttl_hours = 0            # 0: no TTL
+snapshots = false
+slots = 3                # runner slots per VM
+max_vms = 5
+usd_day = 30             # the $/day cap: VMs × rate × 24
+vms = ["bx_1", "bx_2"]   # the VMs made by hand; `runners add|remove` change the set in the log
+service = "ci-runner"    # the VMs' runner service (the default), the recipe's `{service}`
+local_label = "app-self"                          # optional: this host's own runners (`retire-local`)
+local_stop = "~/ci/ci-runners.sh down --now"      # optional: the command that stops them
+```
+
+The recipe's `runner_*` commands (assets/recipes/boat.toml) create, read and delete a VM and run its VM-side steps.
+The verbs, each logged `runners-<verb>`; a conductor runs them while its `runners` group is on, no other lane may:
+
+- `herdsman runners status`: the health line (`9/9 online`: online VM runners of `slots × VMs`), each VM's state and
+  each runner.
+- `runners revive <vm>`: a fresh registration token to that VM and a restart of its runner service.
+- `runners add [n]`: n VMs to the spec, each revived. Past `max_vms` or `usd_day` it refuses `RUNNERS_CAP`.
+- `runners remove <vm|name>`: drain the VM (no job running, 30 min at most), deregister its runners, delete it; or
+  deregister one idle runner by name. The last VM with online runners refuses `RUNNERS_LAST`.
+- `runners tokens`: push a fresh token to every VM now. `herdsman check` (the 5-minute timer) is the refresher: it
+  does the same every 30 min.
+- `runners retire-local`: run `local_stop`, then deregister the idle `local_label` runners. While VM runners are
+  below expected it refuses `RUNNERS_LOW`.
+
+Past a refusal the only way is an owner ask: `herdsman ask <fleet> "herdsman runners add 2: ok?" --option yes --option
+no --kind owner`; once the owner picks the first option, run the verb again with `--approved <id>` (one yes lets one run on).
+
+The registration token comes from `gh api` on this host and reaches the VM on stdin, never in argv, the log or the
+output; the provider key never leaves this host, and no other credential goes to a VM. `check` alerts `runners-low`
+once when online VM runners drop below `slots × VMs`, and `runners-ok` once when they are back.
+
 ## Limits
 
 Remote lanes run the Claude harness. The dsh harness writes its pre-push hook file on the main host only.
+
+A stale binary, fleet.toml drift or shed on a remote host: see [troubleshooting](troubleshooting.md).

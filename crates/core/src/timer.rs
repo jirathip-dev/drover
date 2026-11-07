@@ -15,6 +15,12 @@ pub const FAST: &str = "dev.herdsman.fast";
 /// #345: `herdsman service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.herdsman.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
+/// #557: herdsman's own install every 5 min and the daily scheduled clean, no Hermes; `setup` and `timer` write them.
+pub const UPDATE: &str = "dev.herdsman.update";
+pub const CLEAN: &str = "dev.herdsman.clean";
+pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
+/// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
+pub const DAILY: u64 = 86_400;
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "herdsman timer install";
 const ABANDON: &str = "<key>AbandonProcessGroup</key><true/>";
@@ -31,6 +37,8 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
         let when = ["KeepAlive</key><true/>", "StartInterval</key><integer>{secs}</integer>"][i];
+        let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
+        let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
         (strings, when, include_str!("../assets/job.plist"), dest)
     } else {
@@ -42,7 +50,14 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let fill = |s: String, (k, v): &(&str, &str)| s.replace(k, v).replace("{secs}", &secs);
     let text = kv.iter().fold(template.replace("{when}", when), fill);
     let timer = ctx.home.join(format!(".config/systemd/user/{label}.timer"));
-    let timer = (every > 0 && !mac).then(|| (timer, include_str!("../assets/job.timer").replace("{secs}", &secs)));
+    let mut unit = include_str!("../assets/job.timer").replace("{secs}", &secs);
+    if every == DAILY {
+        unit = unit.replace(
+            "OnActiveSec=0\nOnUnitActiveSec=86400",
+            "OnCalendar=*-*-* 03:30:00\nPersistent=true",
+        );
+    }
+    let timer = (every > 0 && !mac).then_some((timer, unit));
     std::iter::once((ctx.home.join(dest), text)).chain(timer).collect()
 }
 
@@ -58,6 +73,13 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     ["is-active", "enable --now", "disable --now"].map(|a| format!("systemctl --user {a} {unit}"))
 }
 
+/// #557: restart the board job on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
+pub fn restart(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+    let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
+    exec(r, &probe.replacen("is-active", "restart", 1))
+}
+
 fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
     let mut w = cmd.split(' ');
     ok(r, w.next().unwrap_or_default(), &w.collect::<Vec<_>>())
@@ -66,7 +88,13 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
 /// The job's files as `install` writes them, with `path` for PATH.
 fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
     let every = !["serve", "service"].contains(&args[0]);
-    let secs = [0, cfg.limits.slow_secs, cfg.limits.fast_secs][usize::from(every) + usize::from(args[0] == "drive")];
+    let secs = match args[0] {
+        _ if !every => 0,
+        "drive" => cfg.limits.fast_secs,
+        "self-update" => 300,
+        "clean" => DAILY,
+        _ => cfg.limits.slow_secs,
+    };
     let cmd: Vec<&str> = std::iter::once(ctx.exe.as_str()).chain(args.iter().copied()).collect();
     files(ctx, label, &cmd, path, secs, MAC)
 }
@@ -99,7 +127,7 @@ fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let roles = cfg.fleet.values().flat_map(|f| f.role.values());
     let found = roles
         .map(|role| role.harness.as_str())
-        .chain(["gh", herdr::BIN])
+        .chain(["gh", herdr::BIN, "cargo"]) // #557: `self-update` builds with cargo
         .filter_map(|b| ok(r, "which", &[b]).ok());
     let dir = |p: String| Some(Path::new(p.trim()).parent()?.to_string_lossy().into_owned());
     let mut dirs: Vec<String> = found.chain([ctx.exe.clone()]).filter_map(dir).collect();
@@ -142,7 +170,7 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
 /// `herdsman timer install|remove|status`.
 pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: (&str, &str, bool)) -> Result<i32> {
     let (action, label, load) = cmd;
-    let both = [(label, JOBS[0].1), JOBS[1]];
+    let both = [(label, JOBS[0].1), JOBS[1], MORE[0], MORE[1]];
     let line = match action {
         "install" => {
             let lines = both.map(|(l, args)| (l, install(ctx, cfg, r, l, args, load)));
@@ -225,7 +253,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if last.is_none_or(|t| ctx.now >= t + 3600) {
             pass.step("clean");
             let _ = std::fs::write(&at, ctx.now.to_string());
-            if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None), true) {
+            if let Err(e) = crate::check::clean(ctx, cfg, &pass, out, None, (None, None, false), true) {
                 writeln!(out, "clean: {e:#}")?;
             }
         }
@@ -355,7 +383,12 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     };
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
     let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
-    writeln!(out, "{}", [tick, fast, board, tailscale, sync].join("\n"))?;
+    let [update, clean] = MORE.map(|(l, args)| install(ctx, &cfg, r, l, args, load));
+    writeln!(
+        out,
+        "{}",
+        [tick, fast, board, tailscale, sync, update, clean].join("\n")
+    )?;
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 
@@ -485,6 +518,18 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let why = k.map(|e| format!(" ({} #{})", e.str("why").unwrap_or("?"), e.issue.unwrap_or(0)));
     let d = format!("last kick {}{}", ago(ctx.now, k.map(|e| e.ts)), why.unwrap_or_default());
     rows.push(row("kick", "m", d, ""));
+    // #529: the service's lane event streams; amber while one is down and the passes poll.
+    for rt in [herdr::BIN, "shed"].iter().filter(|_| service.is_some()) {
+        let last = events
+            .iter()
+            .rfind(|e| e.kind == "lane-stream" && e.str("runtime") == Some(rt));
+        let Some(e) = last else { continue };
+        let (t, d) = match e.str("why") {
+            None => ("g", format!("live, since {}", ago(ctx.now, Some(e.ts)))),
+            Some(why) => ("a", format!("down {}: {why} · polling", ago(ctx.now, Some(e.ts)))),
+        };
+        rows.push(row(&format!("{rt} lane events"), t, d, ""));
+    }
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "herdsman push test"));
     let v = herdr_versions(r);

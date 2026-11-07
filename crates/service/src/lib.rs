@@ -1,7 +1,7 @@
 //! #345 `herdsman service` (docs/service.md): one supervised tokio process. A kick (a lane's push, stop or ask, a
 //! verdict, an answer, a board tap) arrives on the local socket and is driven in process at once; the fast step
 //! polls GitHub every 15 s; API v1 takes a remote lane's commands with its token and streams the event log; with
-//! `--board` the board runs in it. Every job has a timeout and a bounded slot; a watchdog exits the process when the
+//! `--board` the board runs in it; #529: lane state comes from herdr's and shed's event streams (`lanes`). Every job has a timeout and a bounded slot; a watchdog exits the process when the
 //! loop stalls 30 s, and launchd/systemd start it again.
 use anyhow::{bail, Result};
 use herdsman_core::config::Config;
@@ -17,6 +17,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{watch, Semaphore};
 use tokio::time::{interval, timeout};
+
+mod lanes;
 
 /// Its bounds: job and connection slots, a request's size, the events a stream replays, the timeouts (seconds).
 const JOBS: usize = 16;
@@ -38,6 +40,8 @@ pub struct Service {
     conns: Arc<Semaphore>,
     polling: AtomicBool,
     seq: watch::Sender<u64>,
+    /// #529: each runtime's lane event stream, live or not.
+    streams: std::sync::Mutex<std::collections::BTreeMap<&'static str, bool>>,
 }
 
 /// `herdsman service`: refuses a second one, then runs until killed.
@@ -54,11 +58,19 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
         });
     }
     let api = std::net::TcpListener::bind(api)?;
-    run(ctx.clone(), &Real, herdsman_core::now, api)
+    let herdr = std::env::var_os("HERDR_SOCKET_PATH").map_or(ctx.home.join(".config/herdr/herdr.sock"), Into::into);
+    run(ctx.clone(), &Real, herdsman_core::now, api, Some(herdr))
 }
 
-/// The service on `api` and the state dir's socket, until the process ends.
-pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::TcpListener) -> Result<()> {
+/// The service on `api` and the state dir's socket, until the process ends; #529: lane state from herdr's socket
+/// `herdr` (and shed's, by the config).
+pub fn run(
+    ctx: Ctx,
+    r: &'static dyn Runner,
+    clock: fn() -> u64,
+    api: std::net::TcpListener,
+    herdr: Option<std::path::PathBuf>,
+) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
         api.set_nonblocking(true)?;
@@ -73,6 +85,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
             conns: Arc::new(Semaphore::new(CONNS)),
             polling: AtomicBool::new(false),
             seq: watch::channel(herdsman_core::db::last_seq(&ctx.state)).0,
+            streams: std::sync::Mutex::default(),
             ctx,
             r,
             clock,
@@ -83,6 +96,13 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         tokio::spawn(s.clone().watch_log());
         tokio::spawn(s.clone().poll());
         tokio::spawn(s.clone().local(local));
+        if let Some(h) = herdr {
+            tokio::spawn(s.clone().herdr(h));
+        }
+        if let Some(w) = Config::load(&s.ctx.config).ok().and_then(|c| c.runtime.shed()) {
+            let me = s.clone();
+            std::thread::spawn(move || me.shed(&w.wire));
+        }
         loop {
             if let Ok((c, peer)) = api.accept().await {
                 tokio::spawn(s.clone().api(c, peer));
@@ -189,7 +209,9 @@ impl Service {
         let k = &v["kick"];
         if let (Some(f), Some(n)) = (k["fleet"].as_str(), k["issue"].as_u64()) {
             let why = k["why"].as_str().unwrap_or("kick");
-            let k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
+            let id = k["id"].as_str().map(|i| ["--id".to_string(), i.into()]);
+            let mut k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
+            k.extend(id.into_iter().flatten());
             // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
             if self.job(k, KICK_SECS).await.is_none() {
                 herdsman_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);

@@ -2,6 +2,7 @@
 //! adapter call, a lane's spawn, the lane hook's state report, drive's event intake, ACP mode and `--on` hosts.
 mod common;
 use common::*;
+use herdsman::events::Event;
 use herdsman::herdr;
 use herdsman::hosts::On;
 use herdsman::runner::Runner;
@@ -336,54 +337,25 @@ fn a_lane_spawns_on_shed() {
     assert!(out.contains("LANE_LIVE"), "{out}");
 }
 
-#[test]
-fn an_acp_lane_starts_and_is_prompted_through_sheds_cli() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
-    b.add("sendmeter-impl-12", lane_labels()); // shed's CLI made it (the Fake runs no shed)
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
-    let d = tmpdir("shed-acp");
-    let c = ctx(
-        &d,
-        &shed_config(&b.sock, "acp = \"claude-acp\"\nacp_policy = \"allow\"\n"),
+/// #565: the fleet piloting ACP lanes: its own `[fleet.<n>.runtime]` (no global one), a `harness` role signed in with
+/// account C (`account`), whose token is in the store.
+fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
+    let acct = if account { "\naccount = \"C\"" } else { "" };
+    let cfg = CONFIG.replace(
+        "harness  =  \"hermes\"    # toggled in tests",
+        &format!("harness = \"{harness}\"{acct}"),
     );
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let f = spawn_fake().reply("shed run", "").reply("shed send", "");
-    let (code, out) = run(&c, &Cli(&f, b.terms.clone()), &["spawn", "sendmeter", "12", "impl"]);
-    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    let calls = f.calls.borrow();
-    let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
-    assert!(
-        start.starts_with("shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd "),
-        "{start}"
-    );
-    assert!(start.ends_with("--label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude"));
-    let kick = calls.iter().find(|c| c.starts_with("shed send")).unwrap();
-    assert!(kick.starts_with("shed send sendmeter-impl-12 Read ") && kick.ends_with(".brief.md and execute it fully."));
-    // The exited terminal of the lane before was removed first; nothing typed into a shell; ready, then the turn.
-    let m = b.methods();
-    assert_eq!(m.iter().filter(|m| *m == "rm").count(), 1, "{m:?}");
-    assert!(
-        !m.contains(&"send".to_string()) && !m.contains(&"run".to_string()),
-        "{m:?}"
-    );
-    assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
-    drop(calls);
-    // A reply is framed by shed's CLI too, with no Enter after it.
-    let r = shed::With(
-        &f,
-        Shed {
-            acp: Some("claude-acp".into()),
-            ..b.shed()
-        },
-    );
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("running");
-    herdr::reply(&r, false, "sendmeter-impl-12", "sendmeter-impl-12", "go on").unwrap();
-    assert!(f.called("shed send sendmeter-impl-12 go on"));
-    assert!(!b.methods().contains(&"keys".to_string()));
+    format!(
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n",
+        sock.display()
+    )
 }
 
-/// shed's CLI as the fake server sees it: `shed run --acp` makes a running terminal of that name.
-struct Cli<'a>(&'a Fake, Terms);
+const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
+
+/// shed's CLI as the fake server sees it: `shed run --acp` makes a running ACP terminal of that name and, as shed's
+/// bridge does, starts the adapter command after `--` at once (in the terminal's env, `$SHED` set): its stdout kept.
+struct Cli<'a>(&'a Fake, Terms, Shared<Vec<String>>);
 
 impl Runner for Cli<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -392,10 +364,261 @@ impl Runner for Cli<'_> {
             let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["shed"], "keep": false,
                 "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
             self.1.lock().unwrap().insert(name.clone(), t);
+            if let Some(i) = args.iter().position(|a| a == "--") {
+                let o = std::process::Command::new(&args[i + 1])
+                    .args(&args[i + 2..])
+                    .env_clear()
+                    .env("PATH", std::env::var("PATH").unwrap())
+                    .env("SHED", name)
+                    .output()
+                    .unwrap();
+                self.2.borrow_mut().push(String::from_utf8(o.stdout).unwrap());
+            }
         }
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+}
+
+/// A shed-acp spawn's fake: shed's CLI answers, and the installed agent is `adapter` (`shed agents --json`).
+fn acp_fake(adapter: &[&str]) -> Fake {
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
+    spawn_fake()
+        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C", TOKEN_C)
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
+/// An ACP lane's ctx: its profiles synced, the real binary as their hook.
+fn acp_ctx(name: &str, cfg: &str) -> herdsman::Ctx {
+    let mut c = ctx(&tmpdir(name), cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    c
+}
+
+#[test]
+fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels()); // the lane before left it exited: removed first
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let c = acp_ctx("acp-spawn", &acp_config(&b.sock, "claude", true));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let calls = f.calls.borrow();
+    let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
+    let head = format!(
+        "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {} --label fleet=sendmeter \
+         --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
+         --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 \
+         --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c ",
+        wt.display()
+    );
+    assert!(start.starts_with(&head), "{start}");
+    assert!(start.ends_with(" sh echo claude-agent-acp"), "{start}");
+    assert!(
+        !start.contains(TOKEN_C) && !out.contains(TOKEN_C),
+        "no token in argv: {start}"
+    );
+    // The brief itself is the session's first prompt; no Enter, nothing typed into a shell.
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    assert!(brief.contains("AC: it works"));
+    let sends: Vec<_> = calls.iter().filter(|c| c.starts_with("shed send")).collect();
+    assert_eq!(sends, [&format!("shed send sendmeter-impl-12 {brief}")]);
+    let m = b.methods();
+    assert_eq!(m.iter().filter(|m| *m == "rm").count(), 1, "{m:?}");
+    assert!(!m.iter().any(|m| m == "send" || m == "keys" || m == "run"), "{m:?}");
+    assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
+    let ev = herdsman::events::read(&c.state).unwrap();
+    let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
+    assert_eq!(
+        (sp.str("pane"), sp.data["confirmed"].as_bool()),
+        (Some("sendmeter-impl-12"), Some(true))
+    );
+    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
+
+    // A DECISION is a prompt through shed's CLI (the terminal is ACP; the runtime is the fleet's), with no Enter.
+    drop(calls);
+    let (none, s) = (Fake::default(), b.shed());
+    let none = shed::With(&none, s);
+    assert!(
+        herdr::agents(&On::new(&none, Some("bazzite"))).is_err(),
+        "neither answers: unreachable"
+    );
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let d = json!({"id": "q1", "agent": "sendmeter-impl-12"});
+    let ask = Event::new(c.now, "sendmeter", Some(12), "needs-decision", d);
+    herdsman::events::append(&c.state, &ask).unwrap();
+    let r = shed::With(&f, cfg.shed().unwrap());
+    let to = herdsman::deliver(&c, &cfg, &r, &ask, "DECISION q1: go on", false).unwrap();
+    assert_eq!(to.as_deref(), Some("sendmeter-impl-12"));
+    assert!(f.called("shed send sendmeter-impl-12 DECISION q1: go on"));
+    assert!(
+        !b.methods().iter().any(|m| m == "send" || m == "keys"),
+        "{:?}",
+        b.methods()
+    );
+}
+
+/// A `PreToolUse` call of Claude's `Bash` tool for `cmd`, as Claude Code hands it to a hook.
+fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
+    json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd})
+        .to_string()
+}
+
+#[test]
+fn a_guarded_command_is_refused_inside_an_acp_lane() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-guard", &acp_config(&b.sock, "claude", true));
+    // The fake ACP agent is `env`: the bridge gets back the environment the lane's adapter runs in.
+    let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let dump = cli.2.borrow().concat();
+    let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
+    let dir = c.config.with_file_name("claude").join("fleet-impl");
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&dir.to_str().unwrap()));
+    assert_eq!(
+        env.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        Some(&TOKEN_C),
+        "the account's token, from the secrets file"
+    );
+    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:12:impl"));
+    assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"opus"));
+    assert!(!env.contains_key("SHED"), "the session reports its state, not the hook");
+    // As Claude Code in that adapter: the user settings' (`$CLAUDE_CONFIG_DIR/settings.json`) `PreToolUse` hook runs in
+    // the adapter's env before each tool, and its deny stops the tool.
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(s["permissions"]["defaultMode"], "bypassPermissions");
+    assert!(std::fs::read_to_string(dir.join("CLAUDE.md"))
+        .unwrap()
+        .contains("herdsman"));
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let tool = |cmd: &str| {
+        let mut ch = std::process::Command::new("sh")
+            .args(["-c", hook])
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (*k, *v)))
+            .env("FLEET_CONFIG", &c.config)
+            .env("FLEET_STATE", &c.state)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        ch.stdin
+            .take()
+            .unwrap()
+            .write_all(bash_call(cmd, &wt).as_bytes())
+            .unwrap();
+        let o = ch.wait_with_output().unwrap();
+        assert!(o.status.success());
+        String::from_utf8(o.stdout).unwrap()
+    };
+    let kill = ["p", "kill x"].concat();
+    for (cmd, why) in [
+        ("git push origin staging", "staging"),
+        (kill.as_str(), "NO_BROAD_KILL"),
+        ("gh pr merge 3", "merge"),
+    ] {
+        let o = tool(cmd);
+        let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{cmd}: {o}"));
+        let d = &v["hookSpecificOutput"];
+        assert_eq!(d["permissionDecision"], "deny", "{cmd}: {o}");
+        assert!(
+            d["permissionDecisionReason"].as_str().unwrap().contains(why),
+            "{cmd}: {o}"
+        );
+    }
+    assert_eq!(tool("cargo test"), "", "an ordinary command runs");
+}
+
+#[test]
+fn an_unguardable_acp_lane_refuses_to_start() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude", true));
+    let cases = [
+        (
+            acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false)),
+            "[accounts] token",
+        ),
+        (
+            acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes", true)),
+            "runs no hermes hook",
+        ),
+        (unsynced, "no herdsman PreToolUse hook"),
+    ];
+    for (c, why) in cases {
+        let f = acp_fake(&["env"]);
+        let cli = Cli(&f, b.terms.clone(), Shared::default());
+        let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+        assert_eq!(code, 3, "{out}");
+        assert!(out.contains("REFUSED ACP_UNGUARDED") && out.contains(why), "{out}");
+        assert!(
+            !f.called("shed run") && !f.called("git"),
+            "nothing started: {:?}",
+            f.calls.borrow()
+        );
+        let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
+        assert!(code == 3 && out.contains("ACP_UNGUARDED"), "the dry run too: {out}");
+    }
+    assert!(b.methods().is_empty(), "{:?}", b.methods());
+}
+
+#[test]
+fn an_acp_lanes_state_follows_its_turn_events() {
+    let ev = |seq: u64, kind: Value| {
+        let mut e = json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
+        e
+    };
+    let events = vec![
+        ev(1, json!({"event": "turn", "prompt": "# Brief"})),
+        ev(2, json!({"event": "state", "state": "working"})),
+        ev(
+            3,
+            json!({"event": "tool_call", "id": "t1", "title": "git push", "status": "pending"}),
+        ),
+        ev(
+            4,
+            json!({"event": "approval_request", "tool": "git push", "options": []}),
+        ),
+        ev(5, json!({"event": "state", "state": "blocked", "note": "git push"})),
+        ev(6, json!({"event": "reply", "text": "done", "stop_reason": "end_turn"})),
+        ev(7, json!({"event": "state", "state": "done", "note": "end_turn"})),
+        ev(8, json!({"event": "exited", "code": 0})),
+    ];
+    let b = Server::new(shed::proto::VERSION, events);
+    let c = ctx(&tmpdir("acp-state"), &acp_config(&b.sock, "claude", true));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert!(cfg.runtime.shed().is_none(), "no global runtime: the fleet's own");
+    let sh = cfg.shed_for("sendmeter").unwrap();
+    assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
+    assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
+    let states: Vec<_> = herdsman::events::read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "lane-state")
+        .map(|e| (e.str("state").map(String::from), e.str("note").map(String::from)))
+        .collect();
+    let s = |a: &str, n: Option<&str>| (Some(a.to_string()), n.map(String::from));
+    assert_eq!(
+        states,
+        [
+            s("working", None),
+            s("blocked", Some("git push")),
+            s("done", Some("end_turn")),
+            s("gone", None)
+        ]
+    );
 }
 
 /// `herdsman hook` in a shed terminal (`$SHED`) on `event`: its stderr.
@@ -493,7 +716,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
         states,
         [
             (Some(12), Some("done"), Some("sendmeter-impl-12")),
-            (Some(12), Some("exited"), Some("sendmeter-impl-12"))
+            (Some(12), Some("gone"), Some("sendmeter-impl-12"))
         ]
     );
     assert_eq!(
@@ -572,4 +795,136 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     );
     shed::intake(&c, &cfg, &b.shed().wire).unwrap();
     assert_eq!(b.last("events")["since"], 9, "shed's file wins once it exists");
+}
+
+/// #529: the service follows shed's stream: each lane's state is logged as it comes (an exit: gone), `shed.seq`
+/// kept, and the stream's end is logged as down.
+#[test]
+fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
+    let ev = |seq: u64, kind: Value| {
+        let mut e = json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
+        e
+    };
+    let events = vec![
+        ev(3, json!({"event": "state", "state": "working"})),
+        ev(4, json!({"event": "exited", "code": 137})),
+    ];
+    let b = Server::new(shed::proto::VERSION, events);
+    let d = tmpdir("shed-service");
+    let c = ctx(&d, &shed_config(&b.sock, ""));
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr", "{}")));
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman_service::run(sc, r, || 1_000_000, api, None));
+    let logged = |kind: &str| -> Vec<herdsman::events::Event> {
+        let all = herdsman::events::read(&c.state).unwrap_or_default();
+        all.into_iter().filter(|e| e.kind == kind).collect()
+    };
+    let t0 = std::time::Instant::now();
+    while logged("lane-state").len() < 2 {
+        assert!(t0.elapsed().as_secs() < 2, "{:?}", logged("lane-state"));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let states: Vec<_> = logged("lane-state")
+        .iter()
+        .map(|e| (e.issue, e.str("state").map(String::from)))
+        .collect();
+    assert_eq!(
+        states,
+        [(Some(12), Some("working".into())), (Some(12), Some("gone".into()))]
+    );
+    assert_eq!(logged("lane-state")[1].str("why"), Some("exited"));
+    assert_eq!(
+        std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
+        "4"
+    );
+    // The fake server ends the stream after 3 s: down, with the passes on the polled list.
+    while !logged("lane-stream").iter().any(|e| e.str("state") == Some("down")) {
+        assert!(t0.elapsed().as_secs() < 5, "{:?}", logged("lane-stream"));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let s: Vec<_> = logged("lane-stream")
+        .iter()
+        .map(|e| (e.str("runtime").map(String::from), e.str("state").map(String::from)))
+        .collect();
+    assert_eq!(
+        s[..2],
+        [
+            (Some("shed".into()), Some("live".into())),
+            (Some("shed".into()), Some("down".into()))
+        ]
+    );
+}
+
+/// #601: with a shed runtime, a remote host whose herdr answers is up though shed is not installed there (its
+/// `shed connect` over ssh fails): its herdr agents count, spawn there is not `HOST_OFFLINE`, its lanes are not
+/// `host offline`, and the shed failure is one `! shed:` health row (`hosts refresh`, `doctor`).
+#[test]
+fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let d = tmpdir("shed-remote-up");
+    let c = ctx(
+        &d,
+        &shed_config(&b.sock, "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
+    );
+    let st = c.state.parent().unwrap();
+    std::fs::create_dir_all(st).unwrap();
+    let cache = json!({
+        "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": 1, "seen": 1, "up": true},
+        "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": 1, "seen": 1, "up": true},
+    });
+    std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C \
+               -oControlPersist=10m bazzite -- ";
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1",
+        "workspace": "w9", "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
+    herdsman::events::append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(12), "spawn", sp)).unwrap();
+    let f = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(
+            "herdr --machine bazzite agent list",
+            &agents(&[("sendmeter-impl-12", "working", wt, "w9:p1")]),
+        )
+        .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("git ", "")
+        .reply(&format!("{ssh}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\n");
+    let base = shed::With(&f, b.shed());
+    let on = On::new(&base, Some("bazzite"));
+    assert!(on.shed().is_some(), "shed runtime on");
+    let listed = herdr::agents(&on).expect("herdr answers there: the host is up");
+    assert_eq!(listed[0]["name"], "sendmeter-impl-12", "{listed:?}");
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let remote = herdsman::hosts::remote_agents(&cfg, &base);
+    assert_eq!(remote.len(), 1, "its herdr agents are listed: {remote:?}");
+
+    let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
+    assert!(!out.contains("HOST_OFFLINE"), "{out}");
+    // Past placement, the offline refusal and the duplicate guard: the lane's clone runs there.
+    assert!(f.called(&format!("{ssh}'git' 'clone'")), "{out} {:?}", f.calls.borrow());
+    let (code, out) = run(&c, &f, &["hosts", "refresh"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("offline") && !out.contains("unreachable"), "{out}");
+    let seen: Value = serde_json::from_str(&std::fs::read_to_string(st.join("hosts.json")).unwrap()).unwrap();
+    let health = seen["bazzite"]["health"].as_array().unwrap();
+    let shed_rows = health
+        .iter()
+        .filter(|w| w.as_str().unwrap().starts_with("! shed: shed connect failed"));
+    assert_eq!(
+        (seen["bazzite"]["up"].as_bool(), shed_rows.count()),
+        (Some(true), 1),
+        "{health:?}"
+    );
+    for _ in 0..2 {
+        assert_eq!(run(&c, &f, &["check"]).0, 0);
+    }
+    let evs = herdsman::events::read(&c.state).unwrap();
+    assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
+    let (_, status) = run(&c, &f, &["status"]);
+    assert!(!status.contains("host offline"), "{status}");
+    let (_, doc) = run(&c, &f, &["doctor"]);
+    assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
 }

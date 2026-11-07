@@ -940,7 +940,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     );
     let status = run(&c, &fake(&working(&c, &[2, 3, 9])), &["status", "sendmeter"]).1;
     assert!(
-        status.contains("skipped this pass: SERIAL_BUSY (db: #9 holds 1/1"),
+        status.contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
         "{status}"
     );
     let board = run(&c, &Fake::default(), &["board", "sendmeter"]).1;
@@ -948,6 +948,81 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     // The second pass: #1 still refused (logged once an hour), nothing else free: a no-op.
     let r = fan_fake(&working(&c, &[2, 3, 9]));
     idle(&c, &r);
+}
+
+/// #572: a `SERIAL_BUSY` skip shows the group's holders now: a merged one drops out, a free slot says so.
+#[test]
+fn a_serial_busy_skip_shows_the_live_holders() {
+    let c = fanout("drive-skip-live", SERIAL, &["9", "1", "4", "--serial"]);
+    let at = |ts: u64, n: u64, kind: &str, d: serde_json::Value| {
+        append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
+    };
+    let spawn = |ts: u64, n: u64| {
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}")});
+        at(ts, n, "spawn", d);
+    };
+    spawn(c.now - 600, 9);
+    let why = "REFUSED SERIAL_BUSY: db: #9 holds 1/1; retry after they merge";
+    at(
+        c.now - 300,
+        1,
+        "driven",
+        json!({"step": "start", "code": "SERIAL_BUSY", "result": why}),
+    );
+    let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let board = || run(&c, &Fake::default(), &["board", "sendmeter"]).1;
+    assert!(
+        status().contains("skipped this pass: waiting for a db slot (#9 holds 1/1)"),
+        "{}",
+        status()
+    );
+    at(c.now - 200, 9, "merged", json!({}));
+    let s = status();
+    assert!(s.contains("skipped this pass: db slot free; starts next pass"), "{s}");
+    assert!(board().contains(" #1     queued      db slot free "), "{}", board());
+    spawn(c.now - 100, 4);
+    let s = status();
+    assert!(
+        s.contains("skipped this pass: waiting for a db slot (#4 holds 1/1)"),
+        "{s}"
+    );
+    assert!(!s.contains("#9 hold"), "{s}");
+    assert!(board().contains(" #1     queued      skip SERIAL_BUSY "), "{}", board());
+}
+
+/// #572: another code's skip shows its age; one older than the issue's last state change is gone.
+#[test]
+fn an_old_skip_shows_its_age_until_the_issue_moves() {
+    let c = fanout("drive-skip-age", "", &["12"]);
+    let why = "REFUSED CAP: 2 impl lane(s) open in sendmeter, max_impl = 2";
+    ev(
+        &c,
+        c.now - 720,
+        "driven",
+        json!({"step": "start", "code": "CAP", "result": why}),
+    );
+    let status = || run(&c, &Fake::default(), &["status", "sendmeter"]).1;
+    let s = status();
+    assert!(
+        s.contains("skipped this pass: CAP (2 impl lane(s) open in sendmeter, max_impl = 2) · 12m ago"),
+        "{s}"
+    );
+    // Its lane started and was killed since: back in the queue, the old reason is not current.
+    ev(
+        &c,
+        c.now - 600,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
+    );
+    ev(
+        &c,
+        c.now - 500,
+        "lane-killed",
+        json!({"role": "impl", "agent": "sendmeter-impl-12"}),
+    );
+    let s = status();
+    assert!(s.contains(" queued "), "{s}");
+    assert!(!s.contains("skipped this pass"), "{s}");
 }
 
 /// #103: DISK_LOW stops the pass like HOST_BUSY: #3 is not tried.
@@ -2062,8 +2137,8 @@ fn a_held_lane_is_prompted_once_when_its_blocker_merges() {
     assert_eq!(r.count(typed), 1, "{out} {:?}", r.calls.borrow());
     let rel = &kinds(&c, "released")[0];
     assert_eq!(
-        (rel.data["on"].as_u64(), rel.data["respawn"].as_bool()),
-        (Some(11), Some(false))
+        (&rel.data["on"], rel.data["respawn"].as_bool()),
+        (&json!([11]), Some(false))
     );
     drive(&c, &r);
     assert_eq!(r.count(typed), 1, "woken once");
@@ -2086,6 +2161,34 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     let rel = &kinds(&c, "released")[0];
     assert_eq!(rel.data["respawn"].as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
+}
+
+/// #505: a lane held on two issues is woken only once both have merged.
+#[test]
+fn a_lane_held_on_two_blockers_waits_for_both() {
+    let (c, r) = held(
+        "drive-held-two",
+        &agents(&[("sendmeter-impl-12", "idle", "/x", "w9:sendmeter-impl-12")]),
+    );
+    ev(
+        &c,
+        c.now - 400,
+        "held",
+        json!({"agent": "sendmeter-impl-12", "on": [11, 13]}),
+    );
+    drive(&c, &r);
+    assert!(
+        !r.called("herdr agent prompt sendmeter-impl-12"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(kinds(&c, "released").is_empty());
+    let merged = Event::new(c.now - 30, "sendmeter", Some(13), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    drive(&c, &r);
+    let typed = "herdr agent prompt sendmeter-impl-12 #11, #13 merged; rebase on staging and continue";
+    assert_eq!(r.count(typed), 1, "{:?}", r.calls.borrow());
+    assert_eq!(kinds(&c, "released")[0].data["on"], json!([11, 13]));
 }
 
 // --- #444: a fix round whose lane ended without pushing is driven again ---
@@ -2275,6 +2378,37 @@ fn a_told_reviewers_corrected_fail_is_recorded() {
     assert_eq!(state(&c), "fix(1)", "{out}");
     assert_eq!(told(&r), 1);
     assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
+}
+
+/// #607: a `--repro` PASS whose `Repro: run` has the command but no output blocks.
+const NO_OUTPUTS: &str = "PASS\n\nRepro: run\n```\ncargo test meter_total\n```\n";
+
+#[test]
+fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
+    let (mut c, _, r) = proofless("drive-norepro-told", NO_OUTPUTS, true);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]);
+    assert_eq!(code, 0, "{out}");
+    let told = || {
+        r.count("herdr agent prompt sendmeter-rev-12-r1 herdsman verdict refused your verdict.md: REFUSED NO_REPRO: `Repro: run` needs")
+    };
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict"], "{out}");
+    assert!(out.contains("REFUSED NO_REPRO"), "{out}");
+    assert_eq!(told(), 1, "{:?}", r.calls.borrow());
+    let refused = kinds(&c, "repro-refused");
+    assert_eq!((refused.len(), refused[0].data["prompted"].as_bool()), (1, Some(true)));
+    // The same file at the same head is not tried again, nor its reviewer told twice; `waiting` says why.
+    c.now += 7200;
+    let (out, _) = drive(&c, &r);
+    assert_eq!(
+        (told(), kinds(&c, "repro-refused").len(), kinds(&c, "verdict").len()),
+        (1, 1, 0),
+        "{out}"
+    );
+    assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(out.contains("verdict refused NO_REPRO: `Repro: run` needs"), "{out}");
+    assert!(!out.contains("recording within 1 min"), "{out}");
 }
 
 // --- #517: a lesson lane that ends with no push and no `done` ---

@@ -6,7 +6,7 @@ or the owner-only `design`. No lane runs the fleet: `herdsman drive` does ([Driv
 ## Typical flow
 
 ```sh
-herdsman queue app add 12 13          # ordered queue (mv / rm / block --on N / ls)
+herdsman queue app add 12 13          # ordered queue (mv / rm / block --on N [--on M] / unblock / ls)
 herdsman spawn app 12 impl            # worktree + pane + brief + verified kick
 herdsman spawn app 12 rev             # after the implementer pushed
 herdsman verdict app 12 PASS --sha <head> --file <rev worktree>/verdict.md
@@ -218,6 +218,14 @@ The needs-you card tags each ask `routine · defaults to 2 in 24m` or `owner · 
 decision shows on its issue row as `decided by default: <option>` with **[change]**: answering again (also
 `herdsman answer`) logs a new `decision` and prompts the lane, or the next lane's brief carries it. A decision
 someone made is final (`ALREADY_ANSWERED`).
+
+#584: an ask closes on every real ending, and `herdsman asks --all` says which: `answered` (a tap, `herdsman answer`,
+or `answer <fleet> <id> --typed "<line>"`, which a conductor runs with the owner's exact line from the ask's thread,
+logged `by: owner (typed)`; any other line is `NOT_TYPED`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
+thread's conductor), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
+gone`. `herdsman check` expires an ask open over `[limits] ask_expire_hours` (24) that nobody waits on: a thread ask
+with no lane, a handoff card, an ask whose lane is no live agent. A live lane's ask never expires; `ask-waiting`
+repeats for it once a day. The first `check` after #584 sweeps the log once (`asks-swept`, with the count).
 
 ## Check and notifiers
 

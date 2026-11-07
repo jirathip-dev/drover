@@ -1,0 +1,38 @@
+{
+  "response": {
+    "archived": false,
+    "dir": "<tmp>/state/conductor/t1",
+    "id": "t1",
+    "msgs": [
+      {
+        "answer": null,
+        "ask": null,
+        "cmds": [],
+        "files": [],
+        "from": "owner",
+        "host": "",
+        "kind": "msg",
+        "link": null,
+        "open": false,
+        "retry": false,
+        "routine": false,
+        "seq": 6,
+        "signin": null,
+        "text": "Let's talk about #30",
+        "ts": 1000000
+      }
+    ],
+    "older": null,
+    "started": 1000000
+  },
+  "route": "GET /api/v1/thread/<t>",
+  "schema": {
+    "archived": "boolean",
+    "dir": "string",
+    "id": "string",
+    "msgs": [],
+    "older": "null",
+    "started": "number"
+  },
+  "type": "ThreadPage"
+}
