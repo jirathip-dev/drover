@@ -328,12 +328,9 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
     let tags = [h.tags.clone(), tags].concat();
     for f in cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t))) {
-        let l = crate::hosts::under(&f.local, Some(&home));
-        step(&format!(
-            "clone {0}\ttest -d '{1}/.git'\tgit clone https://github.com/{0}.git '{1}'",
-            f.repo,
-            l.display()
-        ))?;
+        let l = crate::hosts::under(&f.local, Some(&home)).display().to_string();
+        let clone = crate::spawn::clone_sh(&f.repo, &f.integration, &l);
+        step(&format!("clone {}\ttest -d '{l}/.git'\t{clone}", f.repo))?;
     }
     // #592: no fleet.toml there (spawn syncs each lane's profile); an old one still gets its sync.
     step(&format!(

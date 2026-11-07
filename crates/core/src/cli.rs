@@ -185,6 +185,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ConfigCmd,
     },
+    /// #646: the fleet repo's `wip/*` branches
+    Wip {
+        #[command(subcommand)]
+        cmd: WipCmd,
+    },
     /// #387: secrets in the host's keychain as `herdsman/<fleet>/<NAME>`; fleet `env` reads them as `secret:<NAME>`
     Secret {
         #[command(subcommand)]
@@ -550,6 +555,17 @@ enum ConfigCmd {
     Apply { id: String },
     /// Owner only: discard a proposal
     Discard { id: String },
+}
+
+#[derive(Subcommand)]
+enum WipCmd {
+    /// Owner only (a run card): list origin's `wip/*` branches (size, issue state, build output); delete those of a merged or closed issue that carry build output
+    Prune {
+        fleet: String,
+        /// List only; delete nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1381,6 +1397,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     writeln!(out, "{}", crate::propose::settle(ctx, &cfg, r, &id, apply)?)?;
                 }
+                Cmd::Wip {
+                    cmd: WipCmd::Prune { fleet, dry_run },
+                } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
                 Cmd::Secret { cmd } => match cmd {
                     SecretCmd::Request { thread, name, why } => {
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;

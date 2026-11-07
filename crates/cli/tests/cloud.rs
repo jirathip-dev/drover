@@ -614,8 +614,13 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
         "{out}"
     );
-    let clone = "git clone https://github.com/jirathip-dev/sendmeter.git '/tmp/does-not-matter/sendmeter'";
+    // #646: a lean clone: the integration branch only, and no later fetch brings `wip/*`.
+    let clone = "git clone --single-branch --branch 'staging' https://github.com/jirathip-dev/sendmeter.git \
+                 '/tmp/does-not-matter/sendmeter' && git -C '/tmp/does-not-matter/sendmeter' config remote.origin.fetch \
+                 '+refs/heads/*:refs/remotes/origin/*' && git -C '/tmp/does-not-matter/sendmeter' config --add \
+                 remote.origin.fetch '^refs/heads/wip/*'";
     assert!(r.0.called(&step(clone)), "{:?}", r.0.calls.borrow());
+    assert!(!r.0.called(&step("git clone https://")), "never a full clone");
     assert!(
         !r.0.calls.borrow().iter().any(|c| c.contains("--with-token")),
         "no login pane"
