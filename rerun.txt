@@ -1,0 +1,66 @@
+-p herdsman --doc
+-p herdsman --test outbox
+-p herdsman --test overlap
+-p herdsman --test pair_status
+-p herdsman --test parked
+-p herdsman --test perf
+-p herdsman --test pipeline
+-p herdsman --test pr_snapshot
+-p herdsman --test proof
+-p herdsman --test protection
+-p herdsman --test queue_blockers
+-p herdsman --test queue_board
+-p herdsman --test queue_graph
+-p herdsman --test queue_lanes
+-p herdsman --test queue_tab
+-p herdsman --test queue_titles
+-p herdsman --test readme
+-p herdsman --test reap
+-p herdsman --test reclaim
+-p herdsman --test remote_rules
+-p herdsman --test report
+-p herdsman --test repro
+-p herdsman --test retired_keys
+-p herdsman --test run_card
+-p herdsman --test runners
+-p herdsman --test schemes
+-p herdsman --test scratch
+-p herdsman --test screens_golden
+-p herdsman --test self_update
+-p herdsman --test serial_groups
+-p herdsman --test serve_web
+-p herdsman --test service
+-p herdsman --test set_notify
+-p herdsman --test setup_neutral
+-p herdsman --test setup_terminal
+-p herdsman --test shed
+-p herdsman --test spawn
+-p herdsman --test spawn_guard
+-p herdsman --test state_db
+-p herdsman --test state_write
+-p herdsman --test store
+-p herdsman --test synergy
+-p herdsman --test system_sheet
+-p herdsman --test themes
+-p herdsman --test thread_handoff
+-p herdsman --test thread_refs
+-p herdsman --test tick_stuck
+-p herdsman --test timer
+-p herdsman --test timer_install
+-p herdsman --test tmpdir
+-p herdsman --test transcript_tail
+-p herdsman --test turn
+-p herdsman --test ui_audit
+-p herdsman --test ui_audit_hang
+-p herdsman --test ui_tokens
+-p herdsman --test usage
+-p herdsman --test verify_stage
+-p herdsman --test waiting
+-p herdsman --test webpush
+-p herdsman-core --doc
+-p herdsman-core --lib
+-p herdsman-server --doc
+-p herdsman-server --lib
+-p herdsman-server --test types
+-p herdsman-service --doc
+-p herdsman-service --lib
