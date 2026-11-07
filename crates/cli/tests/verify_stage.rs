@@ -589,3 +589,37 @@ fn a_rev_pass_and_verify_skipped_at_the_head_merge_in_one_drive_pass() {
 fn a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass() {
     skipped_after_a_refusal_merges_in_one_pass("verify-650-no-recipe", "verify-no-recipe", "no recipe");
 }
+
+/// #650: a verified head (rev PASS, verify skipped) that a merge refused for another gate names that gate, never
+/// "review again".
+#[test]
+fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
+    let cfg = Config::parse(&config()).unwrap();
+    let a = sha("a");
+    let e = |ts, kind, d| Event::new(ts, "sendmeter", Some(12), kind, d);
+    let evs = vec![
+        e(1, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"})),
+        e(
+            2,
+            "spawn",
+            json!({"role": "rev", "stage": "rev", "check": true, "agent": "r1"}),
+        ),
+        e(
+            3,
+            "verdict",
+            json!({"verdict": "PASS", "sha": a, "stage": "rev", "loop": "rev"}),
+        ),
+        e(4, "verify-skipped", json!({"sha": a, "stage": "verify", "reason": "r"})),
+        e(
+            5,
+            "blocked",
+            json!({"code": "SERIAL_UNMARKED", "reason": "touches serial paths"}),
+        ),
+    ];
+    let s = &fold(&evs)[&("sendmeter".to_string(), 12)];
+    let pr: serde_json::Value = serde_json::from_str(&pr(&a)).unwrap();
+    let f = cfg.fleet("sendmeter").unwrap();
+    let w = waiting_on(&herdsman::waiting::Log::new(&evs), &evs, s, Some((&a, 1)), &pr, f, None);
+    assert_eq!(w.what, "PASS · merge refused SERIAL_UNMARKED: touches serial paths");
+    assert_eq!(w.next_cmd, None);
+}
