@@ -438,6 +438,8 @@ pub const PASSIVE: &[&str] = &[
     "push-sent",
     "account-capped",
     "agent-unavailable",
+    "account-signed-out",
+    "cap-banner-ignored",
     "spawn-failed",
     "spawn-started",
     // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.

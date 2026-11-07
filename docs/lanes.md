@@ -239,7 +239,11 @@ repeats for it once a day. The first `check` after #584 sweeps the log once (`as
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
 no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
-`account-capped`. It is idempotent and exits 0, so it can run from cron:
+`account-capped`. #640: a limit banner counts only on the harness's own lines (the pane's last block, unless a `⏺`
+reply or tool call heads it; prompt lines never), and caps only when the account's usage reading agrees: none
+fresh (10 min), or a window the plan has at 100%; otherwise it logs `cap-banner-ignored` with both numbers.
+`claude is signed out` (or a 401 usage reading) is `account-signed-out`, an owner card with no reset time: sign
+in or replace the token, then `herdsman accounts reset <name>`. `herdsman accounts` shows each state's evidence. It is idempotent and exits 0, so it can run from cron:
 
 ```cron
 */5 * * * * herdsman check >/dev/null 2>>"$HOME/Library/Logs/herdsman-check.log"

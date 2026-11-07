@@ -827,15 +827,39 @@ fn pass(
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
         let on = crate::events::held_on(&ev, s);
-        let Some((role, lane)) = s.active_lane().filter(|_| !on.is_empty()) else {
+        let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
+        if on.is_empty() || on.iter().any(open) {
+            continue;
+        }
+        // #665: a hold a pass already outlived past its blockers' merge is logged once.
+        let merged = ev.iter().filter(|e| e.kind == "merged" && e.fleet == fleet);
+        let at = merged
+            .filter(|e| e.issue.is_some_and(|b| on.contains(&b)))
+            .map(|e| e.ts)
+            .max();
+        let outlived = ev
+            .iter()
+            .any(|e| e.kind == "drive-pass" && e.fleet == fleet && at.is_some_and(|t| e.ts > t));
+        let mut episode = ev.iter().rev().take_while(|e| !e.is("held", fleet, s.issue));
+        if outlived && !episode.any(|e| e.is("hold-stale", fleet, s.issue)) {
+            let d = json!({"on": on, "merged_at": at});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, Some(s.issue), "hold-stale", d),
+            )?;
+        }
+        // #665: no lane to wake (it ended, or the issue sits at review/ready): the hold just ends.
+        let Some((role, lane)) = s.active_lane() else {
+            let e = Event::new(ctx.now, fleet, Some(s.issue), "released", json!({"on": on}));
+            emit(&ctx.state, cfg, e)?;
             continue;
         };
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a["name"] == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
         let away = crate::hosts::offline(ctx, sp).is_some(); // #478: woken once its host is back
-        let open = |b: &u64| st.get(&(fleet.into(), *b)).is_none_or(|b| b.state != "merged");
-        if on.iter().any(open) || fast && !live || away {
+        if fast && !live || away {
             continue;
         }
         let text = format!(
