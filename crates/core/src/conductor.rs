@@ -1193,14 +1193,19 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
         herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
         harness::get(hn),
     );
-    let out = h.signed_out(&screen);
-    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
+    // #640: an account's banner caps only when its usage reading agrees; a cap is never a sign-out.
     let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
+    let seen = limit.map(|u| crate::access::confirm(ctx, cfg, r, account, u));
+    let (seen, limit) = seen.map_or((None, None), |s| (Some(s.0), s.1));
+    let out = seen.map_or(h.signed_out(&screen), |k| k == "account-signed-out");
+    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
     let Some(until) = limit.or(rest) else {
         return Ok(false);
     };
     if chain {
-        let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
+        let kind = ["account-capped", "account-signed-out"][usize::from(out)];
+        let kind = account.map_or("agent-unavailable", |_| kind);
+        let until = (!out || account.is_none()).then_some(until);
         let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
         emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
     }

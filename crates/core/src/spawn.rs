@@ -863,7 +863,7 @@ pub fn spawn(
     // #302: the lane before went unavailable (capped, signed out): its successor carries on, and says from what.
     let unavailable =
         |e: &Event, sp: &Event| e.issue == Some(issue) && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
-    let rest = |e: &&Event| matches!(e.kind.as_str(), "account-capped" | "agent-unavailable");
+    let rest = |e: &&Event| crate::access::rests(&e.kind);
     let chain = !f.role(role)?.fallback.is_empty();
     let gone = prior.filter(|sp| chain && events.iter().filter(rest).any(|e| unavailable(e, sp)));
     let entry = |h: Option<&str>, a: Option<&str>| [h, a].into_iter().flatten().collect::<Vec<_>>().join(":");

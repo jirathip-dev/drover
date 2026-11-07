@@ -631,6 +631,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "blocked",
     "stall",
     "lane-dead",
+    "account-signed-out",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",

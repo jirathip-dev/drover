@@ -267,7 +267,7 @@ pub fn waiting_on(
     let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
     let spawned = last_spawn(events, &lane).filter(|_| active);
     let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
-    let rest = |e: &&Event| e.is("account-capped", f, n) || e.is("agent-unavailable", f, n); // #302
+    let rest = |e: &&Event| crate::access::rests(&e.kind) && e.is(&e.kind, f, n); // #302, #640
     if let Some(c) = events.iter().filter(since_spawn).find(rest) {
         let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
         let what = "account capped, waiting for drive to respawn on a free one";

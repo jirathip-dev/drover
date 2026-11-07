@@ -120,7 +120,7 @@ A = "CLAUDE_CODE_OAUTH_TOKEN_A"
 B = "CLAUDE_CODE_OAUTH_TOKEN_B"
 C = "CLAUDE_CODE_OAUTH_TOKEN_C"
 # cap_reset_minutes = 300
-# cap_pattern = "usage limit reached|hit your limit"   # `|`-separated, case-insensitive
+# cap_pattern = "usage limit reached|hit your limit"   # `|`-separated, case-insensitive; #640: harness's own banner line only, checked against [accounts.usage]
 # pick = "headroom"   # spawns take the uncapped account with the most 5h/7d headroom; default "order"
 
 # The usage meter: each account's own `claude` login folder (docs/providers.md); never given to lanes.
