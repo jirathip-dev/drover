@@ -262,7 +262,7 @@ fn a_lane_spawns_on_shed() {
 
     let (code, out) = run(
         &c,
-        &Fake::default(),
+        &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
         &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"],
     );
     assert_eq!(code, 0, "{out}");
