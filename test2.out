@@ -1,0 +1,1354 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running unittests src/lib.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/herdsman-cbf0ff632426ee17)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/herdsman-87ef3d55ceb725dd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/access.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/access-3c894aa31dff8aa7)
+
+running 10 tests
+test cap_until_parses_the_banner_reset_in_local_time ... ok
+test hermes_profile_gets_only_the_listed_mcp_servers ... ok
+test capped_ready_lane_is_not_told_to_respawn ... ok
+test every_account_capped_refuses_all_capped ... ok
+test capped_lane_waits_on_drive_to_respawn_on_a_free_account ... ok
+test cap_expires_after_cap_reset_minutes ... ok
+test capped_account_is_used_again_after_its_banner_reset ... ok
+test capped_account_is_skipped_until_reset ... ok
+test mcp_allowlist_is_the_only_mcp_and_prod_is_refused ... ok
+test role_account_b_exports_its_token_into_the_lane_and_nowhere_else ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests/amendments.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/amendments-e5e7171095dbe5ee)
+
+running 3 tests
+test no_trusted_amendment_leaves_the_body_alone ... ok
+test brief_lists_trusted_amendments_in_order ... ok
+test new_amendment_prompts_the_open_lane_exactly_once ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/answer_delivery.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/answer_delivery-858a103f85c3862d)
+
+running 8 tests
+test a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane ... ok
+test a_supersede_close_logged_after_the_new_spawn_does_not_close_it ... ok
+test a_remote_lane_is_answered_with_machine ... ok
+test a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer ... ok
+test an_ask_without_an_agent_is_answered_into_the_issues_current_lane ... ok
+test an_answer_with_no_lane_alerts_once_from_check ... ok
+test a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane ... ok
+test drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+     Running tests/api_v1.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/api_v1-f33814f8d0a840cd)
+
+running 4 tests
+test refusals_are_json_with_a_code ... ok
+test state_events_and_lane_json_match_the_goldens ... ok
+test a_post_runs_the_boards_op_and_answers_json ... ok
+test over_500_new_events_ask_for_a_refresh ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests/asks.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/asks-a9aa95899f1e3568)
+
+running 16 tests
+test ask_refuses_an_empty_question_or_five_options ... ok
+test an_ask_from_outside_a_lane_names_no_agent ... ok
+test a_manual_answer_before_30_min_prevents_the_default ... ok
+test asks_json_says_why_an_ask_closed ... ok
+test an_open_ask_re_alerts_once_as_ask_waiting_after_30_min ... ok
+test ask_answer_round_trip_prompts_the_asker_once ... ok
+test answer_to_a_gone_agent_records_the_decision_and_exits_0 ... ok
+test an_answer_the_agent_never_picks_up_is_retried_once_then_pushed ... ok
+test an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once ... ok
+test an_ask_closes_when_its_issue_merges_or_its_lane_goes ... ok
+test routine_needs_a_recommendation_and_no_owner_topic ... ok
+test notifier_gets_the_question_numbered_options_and_answer_command ... ok
+test needs_you_card_tops_every_tab_and_answer_needs_a_paired_device ... ok
+test a_paired_device_answers_from_the_card_and_bad_text_is_refused ... ok
+test ask_waiting_pushes_are_capped_per_pass ... ok
+test a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+
+     Running tests/backlog.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/backlog-61206ba071c938b7)
+
+running 6 tests
+test the_backlog_draws_on_a_fresh_load_and_after_a_live_patch ... ok
+test rows_search_filters_and_ticks_in_serve_js ... ok
+test the_reads_jq_flattens_each_issue ... ok
+test the_tick_reads_all_open_issues_then_only_those_updated_since ... ok
+test queue_n_follows_tick_order_and_marks_needs_check ... ok
+test the_board_renders_the_backlog_from_the_last_read_with_no_github_call ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+
+     Running tests/board_errors.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/board_errors-3b3c338720eca317)
+
+running 1 test
+test a_tab_names_the_real_read_error ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/brief_golden.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/brief_golden-5499fdcf1ac5541f)
+
+running 3 tests
+test briefs_carry_the_test_antipatterns ... ok
+test only_a_repro_issues_briefs_carry_the_repro_steps ... ok
+test lane_briefs_match_staging ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/chat_blocks.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/chat_blocks-950ab7c4852acb55)
+
+running 12 tests
+test a_now_command_is_summarised_to_its_first_command ... ok
+test ansi_lines_mask_run_by_run_and_strip_to_text ... ok
+test a_session_transcript_keeps_prompts_and_final_replies ... ok
+test now_is_the_panes_last_tool_line ... ok
+test a_claude_spinner_is_its_word_and_elapsed_time ... ok
+test the_transcript_keeps_the_last_5000_lines ... ok
+test overlapping_reads_append_once_and_a_miss_writes_a_gap ... ok
+test markdown_is_escaped_text_plus_spans ... ok
+test sgr_maps_to_the_nearest_board_token ... ok
+test the_default_view_keeps_prompts_final_replies_and_asks ... ok
+test tool_runs_tag_cap_and_keep_the_failure ... ok
+test screens_group_into_role_blocks ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/chat_pick.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/chat_pick-d790334c0dedb81a)
+
+running 5 tests
+test chat_defaults_come_from_the_chat_table_else_the_conductor_role ... ok
+test the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread ... ok
+test an_old_thread_without_a_harness_renders_and_starts_on_the_default ... ok
+test a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it ... ok
+test thread_new_harness_is_recorded_and_its_conductor_starts_on_it ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests/chat_tab.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/chat_tab-d39ba1e6108e9c6c)
+
+running 21 tests
+test a_message_is_answered_once_logged_and_typed_into_the_conductor_after ... ok
+test a_device_that_is_not_paired_reads_the_thread_but_cannot_write ... ok
+test a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy ... ok
+test a_message_with_three_images_delivers_all_three_and_eleven_are_refused ... ok
+test an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline ... ok
+test a_large_attachment_arrives_whole_over_the_socket ... ok
+test a_failed_delivery_shows_red_with_retry_and_retry_types_it_again ... ok
+test a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it ... ok
+test a_finished_turns_commands_fold_and_the_live_turns_stay_open ... ok
+test the_service_worker_answers_a_thread_file_navigation_with_the_file ... ok
+test archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it ... ok
+test the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks ... ok
+test a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_the_conductor ... ok
+test a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time ... ok
+test a_stream_with_a_thread_open_stamps_its_watch_file ... ok
+test a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now ... ok
+test an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_images ... ok
+test copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_one ... ok
+test the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload ... ok
+test the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place ... ok
+test scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.20s
+
+     Running tests/check_clean.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/check_clean-49dd124a551623a1)
+
+running 17 tests
+test du_counts_blocks_used_not_apparent_size ... ok
+test plain_lines_for_merged_stall_needs_human ... ok
+test merged_issues_are_never_flagged ... ok
+test clean_reclaims_lanes_whose_issue_closed_outside_merge ... ok
+test orphan_lane_fires_once_per_agent ... ok
+test clean_removes_only_merged_clean_idle_lanes ... ok
+test lane_dead_fires_once_and_again_after_state_change ... ok
+test ci_missing_fires_once_per_head_after_the_grace ... ok
+test an_unheld_idle_lane_stalls_again_every_two_hours ... ok
+test a_blocked_live_lane_is_held_shown_held_and_never_stalls ... ok
+test working_lane_is_not_a_stall ... ok
+test ready_unmerged_fires_once_and_again_after_state_change ... ok
+test stall_fires_once_and_again_after_state_change ... ok
+test verdict_closes_the_reviewer_lane_unless_dirty_or_working ... ok
+test notifier_gets_plain_line_unless_format_json ... ok
+test clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going ... ok
+test clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_trees ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+     Running tests/cloud.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/cloud-15a5c846c70de4b5)
+
+running 14 tests
+test bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_pane ... ok
+test a_failed_wip_push_aborts_the_stop ... ok
+test a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enough ... ok
+test a_snapshot_needs_a_green_health_check_first ... ok
+test a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused ... ok
+test the_token_expiry_parses_and_warns_from_14_days ... ok
+test bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_secrets ... ok
+test the_provider_key_never_reaches_argv_or_the_log ... ok
+test an_idle_cloud_host_saves_each_lane_to_wip_then_stops ... ok
+test a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked ... ok
+test an_unreachable_host_aborts_the_stop_and_destroy_saves_first ... ok
+test the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks ... ok
+test a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns ... ok
+test the_budget_warns_at_80_percent_and_refuses_when_used_up ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/compaction.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/compaction-d1f7477fc72fe14d)
+
+running 3 tests
+test the_fold_of_a_50mb_log_takes_under_20ms ... ignored, builds a 50 MB log; run in release
+test a_checkpoint_plus_its_tail_folds_like_the_whole_log ... ok
+test rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.29s
+
+     Running tests/conductor.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/conductor-ce6e642882c32723)
+
+running 5 tests
+test a_thread_needs_a_conductor_or_impl_role_and_spawn_never_starts_one ... ok
+test a_harness_without_resume_gets_the_history_in_its_kick ... ok
+test a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_into_the_thread ... ok
+test a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history ... ok
+test no_harness_starts_an_agent_with_a_control_character_in_its_argv ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/conductor_adopt.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/conductor_adopt-0ea2eebf7001e934)
+
+running 5 tests
+test a_failed_start_shows_herdrs_message_not_its_json ... ok
+test a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in ... ok
+test a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered ... ok
+test a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept ... ok
+test two_messages_while_a_start_is_in_flight_start_one_conductor_and_reach_it_in_order ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+     Running tests/conductor_cards.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/conductor_cards-e0df95a72e6d39ae)
+
+running 6 tests
+test a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session ... ok
+test telegram_handles_each_update_and_event_once_even_when_a_call_fails ... ok
+test telegram_maps_topics_to_threads_choices_to_buttons_and_images_both_ways ... ok
+test a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_doctor_check ... ok
+test a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login ... ok
+test a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_reference_injects_at_spawn ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+     Running tests/conductor_default.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/conductor_default-21df5706e0694cbc)
+
+running 3 tests
+test a_fleet_without_a_conductor_role_starts_one_on_its_impl_role_from_the_board ... ok
+test a_conductor_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone ... ok
+test a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_start_uses_it ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests/conductor_lanes.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/conductor_lanes-23f5af9ffdad1545)
+
+running 3 tests
+test conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed ... ok
+test the_lanes_tab_renders_conductor_rows_with_their_thread ... ok
+test a_tap_on_a_conductor_row_opens_its_thread_in_the_chat_tab ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.63s
+
+     Running tests/config_card.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/config_card-66fd02334fae4972)
+
+running 3 tests
+test a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply ... ok
+test a_proposal_reaches_a_thread_open_on_the_phone_live ... ok
+test the_card_lands_live_in_view_and_stays_reachable_in_webkit ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.19s
+
+     Running tests/demo_export.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/demo_export-0f37c43feb2ac63f)
+
+running 2 tests
+test demo_export_writes_the_file_set_without_running_anything ... ok
+test demo_page_is_inert_and_relative ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests/design_orphan.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/design_orphan-43f1f5088a06390b)
+
+running 4 tests
+test a_pane_adopted_once_is_never_adopted_again ... ok
+test a_respawn_is_named_after_the_build_lane ... ok
+test the_install_repair_unparks_a_lane_ends_a_design_adoption_caused ... ok
+test a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests/design_stage.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/design_stage-400238aeaa52c055)
+
+running 6 tests
+test design_off_on_a_queued_issue_lets_impl_spawn_directly ... ok
+test the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins ... ok
+test reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human ... ok
+test a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_to_impl ... ok
+test a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can ... ok
+test revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.51s
+
+     Running tests/disk.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/disk-678cbe510cbcecca)
+
+running 8 tests
+test a_reviewer_verdict_frees_its_build_folders ... ok
+test orphans_are_listed_and_removed_only_with_the_flag ... ok
+test over_budget_frees_the_idlest_lane_first_then_disk_budget ... ok
+test a_builder_with_a_pass_frees_its_build_folders ... ok
+test drive_refuses_starts_over_budget ... ok
+test the_hourly_sweep_runs_once_per_hour ... ok
+test the_host_tab_removes_orphans_for_a_paired_device_only ... ok
+test leftovers_are_saved_to_wip_or_kept_on_a_secret ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests/doctor.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/doctor-946ea71e8d1f3adb)
+
+running 7 tests
+test warnings_do_not_fail ... ok
+test tailscale_missing_is_a_warning ... ok
+test retired_accounts_env_warns_until_the_line_is_dropped ... ok
+test all_good_exits_zero_and_never_writes ... ok
+test secrets_never_echo ... ok
+test bad_config_and_hermes_profiles ... ok
+test each_check_fails_with_its_fix_and_exit_one ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+
+     Running tests/done_close.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/done_close-e811659009e7639d)
+
+running 4 tests
+test a_spawn_whose_prompt_never_landed_is_not_closed_as_done ... ok
+test a_lane_without_a_logged_handoff_stays_open ... ok
+test a_done_pushed_lane_closes_after_the_delay ... ok
+test a_dirty_or_unpushed_lane_stays_open_with_an_event ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests/drive.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/drive-2f9c6d38b26f91bb)
+
+running 67 tests
+test a_gone_lesson_lane_is_closed_not_respawned ... ok
+test a_blocked_ci_not_green_item_merges_once_ci_turns_green ... ok
+test a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected ... ok
+test a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns ... ok
+test a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges ... ok
+test a_held_lane_is_prompted_once_when_its_blocker_merges ... ok
+test a_lesson_issue_parked_lane_ends_is_closed_on_install ... ok
+test a_behind_pr_after_pass_is_updated_the_same_way ... ok
+test a_fail_starts_a_fix_round_with_the_findings_verbatim ... ok
+test a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions ... ok
+test a_ci_only_fail_green_again_at_the_same_head_merges_without_a_review ... ok
+test a_code_fail_with_no_change_is_reviewed_again_at_the_same_head ... ok
+test a_head_moved_during_review_gets_a_fresh_reviewer_not_the_old_verdict ... ok
+test a_merge_that_fails_on_a_conflict_gets_the_update_lane ... ok
+test a_pass_recorded_with_green_ci_merges_in_the_same_pass ... ok
+test a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done ... ok
+test a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absent ... ok
+test a_pr_off_serial_paths_is_not_marked ... ok
+test a_refused_review_start_shows_waiting_for_a_reviewer_slot ... ok
+test a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_head ... ok
+test a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_update ... ok
+test a_ready_conflicting_pr_gets_its_update_lane_and_no_merge_attempt ... ok
+test a_spawn_whose_prompt_never_landed_is_retried_by_the_next_pass ... ok
+test a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round ... ok
+test a_working_reviewer_in_the_way_still_waits ... ok
+test a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned ... ok
+test a_written_verdict_is_recorded_at_the_head_then_pending_ci_waits ... ok
+test an_exited_reviewer_without_a_verdict_gets_a_new_review_round ... ok
+test an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing ... ok
+test a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it ... ok
+test a_told_reviewers_corrected_fail_is_recorded ... ok
+test auto_update_runs_in_a_pass_with_no_merge ... ok
+test an_unmarked_pr_touching_a_serial_path_is_auto_marked_and_merges ... ok
+test an_idle_reviewer_is_told_once_then_the_unchanged_file_is_not_retried_but_re_reviewed ... ok
+test an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane ... ok
+test an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass ... ok
+test disk_low_stops_the_pass ... ok
+test clean_reclaims_merged_lanes ... ok
+test a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once ... ok
+test auto_update_rechecks_premerge_before_its_push ... ok
+test blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action ... ok
+test no_checks_after_the_grace_is_ci_missing_not_running ... ok
+test every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_repeat_too ... ok
+test red_ci_after_pass_is_a_fail_with_the_log_tail ... ok
+test pass_and_green_ci_merges ... ok
+test a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends ... ok
+test review_spawns_rev_at_the_pushed_head ... ok
+test the_drive_summary_groups_per_action ... ok
+test status_says_a_ready_pr_lacks_the_merge_label ... ok
+test paused_fleets_and_host_busy_are_no_ops ... ok
+test start_spawns_the_next_queued_issue ... ok
+test a_serial_busy_item_is_skipped_and_keeps_its_place ... ok
+test the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it ... ok
+test the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back ... ok
+test the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over ... ok
+test the_third_fail_stops_at_needs_human_with_the_findings ... ok
+test the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane ... ok
+test the_replayed_cooee_1_log_recovers_in_one_pass ... ok
+test one_pass_starts_every_free_item_in_order_with_a_fresh_host_sample_each ... ok
+test the_363_sequence_replayed_respawns_impl_once_per_30_min ... ok
+test under_limited_admission_a_review_goes_before_any_fleets_new_start ... ok
+test two_respawns_without_a_push_go_to_needs_human ... ok
+test host_busy_stops_the_pass_and_cap_stops_starting ... ok
+test a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human ... ok
+test drive_now_on_the_board_is_paired_only_and_toasts_its_line ... ok
+test extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix ... ok
+test drive_now_runs_in_the_background_and_the_board_keeps_answering ... ok
+
+test result: ok. 67 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.67s
+
+     Running tests/drive_kicks.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/drive_kicks-8ee06118aae3a5b3)
+
+running 17 tests
+test a_stale_marker_does_not_hold_the_issue_forever ... ok
+test a_full_hosts_pending_spawn_holds_no_slot_for_another_host ... ok
+test a_due_fix_round_takes_the_reserved_slot ... ok
+test a_kick_refused_disk_low_leaves_no_driven_ok ... ok
+test a_pass_with_ten_due_spawns_launches_ten_kicks_and_starts_no_harness ... ok
+test a_panicking_kick_leaves_no_marker_or_lock ... ok
+test fix_rounds_launch_before_starts_and_starts_keep_one_slot_free ... ok
+test an_old_or_reused_pid_marker_is_stale ... ok
+test a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies ... ok
+test one_slot_and_nothing_in_flight_still_starts ... ok
+test spawn_pending_for_15_minutes_alerts_once ... ok
+test six_dead_markers_never_hold_a_new_spawn ... ok
+test two_quick_passes_launch_each_spawn_once ... ok
+test a_failed_kick_clears_its_marker_and_the_next_pass_retries ... ok
+test a_hook_kick_never_clears_a_launched_kicks_marker ... ok
+test kicks_respect_max_parallel_spawns_and_admission ... ok
+test a_pass_counts_starting_spawns_against_serial_and_cap ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/dsh.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/dsh-85a6bece4e36cc16)
+
+running 12 tests
+test dry_run_launches_pinned_dsh_tui_with_role_patch ... ok
+test sync_writes_per_role_dsh_patch ... ok
+test spawn_refuses_unpinned_dsh_tui ... ok
+test pre_push_refuses_scripts_that_start_containers ... ok
+test pre_push_refuses_protected_branches_and_reviewer_pushes ... ok
+warning: You appear to have cloned an empty repository.
+test never_idle_sends_no_prompt_and_exits_4 ... ok
+test spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working ... ok
+test quick_turn_that_lands_on_done_confirms ... ok
+test unconfirmed_prompt_is_retried_and_a_typed_kick_gets_enter ... ok
+test check_finds_unnamed_dsh_lane_by_its_pane ... ok
+test first_run_wizard_is_skipped_before_the_prompt ... ok
+test installed_hook_refuses_real_push_to_staging_from_lane_worktree_only ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s
+
+     Running tests/dsh_unit.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/dsh_unit-2562af3560f3752e)
+
+running 1 test
+test kick_with_non_ascii_path_does_not_panic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/empty_env.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/empty_env-94a67f514be151b4)
+
+running 1 test
+test empty_values_are_unset ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/events_log.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/events_log-644c718f3ea0ac92)
+
+running 7 tests
+test writer_child ... ok
+test kill9_child_writer ... ok
+test read_child ... ok
+test torn_last_line_is_ignored_and_next_append_is_clean ... ok
+test corrupt_middle_line_warns_torn_tail_is_silent ... ok
+test kill9_mid_append_never_corrupts ... ok
+test seq_is_monotonic_across_concurrent_writers ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/events_tab.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/events_tab-c7dfad28acf3ff48)
+
+running 6 tests
+test each_kind_has_its_glyph_colour_and_weight ... ok
+test rows_sit_under_now_5m_1h_earlier_today_and_yesterday ... ok
+test important_leaves_out_routine_kinds_and_capacity_holds ... ok
+test old_rows_are_dated_without_a_date_call_each ... ok
+test the_noise_fold_never_hides_a_failure ... ok
+test a_fleet_chip_hides_the_others_and_a_row_links_its_pr ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests/fallback.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/fallback-4e529d2df8ead113)
+
+running 9 tests
+test all_claude_accounts_resting_carries_on_with_the_next_harness ... ok
+test a_rest_that_expired_goes_back_to_a_at_the_next_round ... ok
+test usage_limit_rests_a_and_the_next_spawn_uses_b ... ok
+test a_harness_that_wont_start_twice_rests ... ok
+test without_a_transcript_the_handover_reads_the_pane_log ... ok
+test a_signed_out_lane_rests_and_its_successor_gets_the_carry_over ... ok
+test the_fallback_brief_carries_a_capped_handover_from_the_transcript ... ok
+test default_config_is_unchanged ... ok
+test an_entry_that_ran_before_gets_only_the_delta ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/fleet_cards.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/fleet_cards-c9073f8c5d65d5b6)
+
+running 3 tests
+test the_config_sheet_shows_every_group_and_its_pickers_post_through_set ... ok
+test colour_is_a_stable_name_hash_and_color_overrides_it ... ok
+test fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/fleet_notify.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/fleet_notify-6a0891496953b595)
+
+running 5 tests
+test empty_fleet_notify_cmd_is_rejected ... ok
+test fleet_notifier_replaces_global ... ok
+test fleet_without_notifier_uses_global ... ok
+test fleetless_event_goes_to_global_only ... ok
+test notify_global_sends_to_both ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/form_only.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/form_only-105bfe10a606f92e)
+
+running 8 tests
+test form_only_parses_tags ... ok
+test a_blocking_heading_is_ignored ... ok
+test the_antipatterns_line_is_accepted ... ok
+test an_all_form_fail_is_not_counted ... ok
+test one_substantive_or_untagged_blocker_counts ... ok
+test a_fleet_overrides_the_form_categories ... ok
+test past_form_rounds_they_count_and_needs_you_says_how_many_were_form ... ok
+test the_card_says_not_counted_in_amber ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/gate_unit.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/gate_unit-8e033f3553440f54)
+
+running 6 tests
+test pending_required_is_refused ... ok
+test required_quality_missing_is_refused ... ok
+test newer_failure_is_refused ... ok
+test required_quality_ignores_narrowed_failure ... ok
+test newer_success_supersedes_older_failure ... ok
+test unset_checks_every_check ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/generic_harness.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/generic_harness-2320d8aa7f4c0d53)
+
+running 2 tests
+test the_generic_harness_has_every_fallback ... ok
+test a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+     Running tests/gh_links.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/gh_links-f834a96b7e37277c)
+
+running 3 tests
+test queue_row_links_the_issue_and_its_card_shows_three_links ... ok
+test a_reviewer_event_links_the_prs_checks_not_its_own_branch ... ok
+test an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests/herd.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/herd-395ec6042ce12326)
+
+running 8 tests
+test herd_json_has_no_pane_text ... ok
+test herd_json_shape_on_a_fixture ... ok
+test herd_json_refuses_a_foreign_host_or_origin ... ok
+test page_has_the_herd_button_and_horse_symbols ... ok
+test herd_json_carries_the_action_and_fleet_colour ... ok
+test weather_param_works_on_loopback_only ... ok
+test herd_horses_are_one_size_at_390px ... ok
+test herd_snapshots_fit_390px ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 31.90s
+
+     Running tests/herdr_adapter.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/herdr_adapter-dd11feae75b6c977)
+
+running 1 test
+test only_herdr_rs_runs_herdr ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/hermes_hooks.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/hermes_hooks-bc82c42403f6c573)
+
+running 4 tests
+test sync_check_requires_allowed_hooks ... ok
+test sync_removes_agent_reasoning_effort_only ... ok
+test sync_writes_only_the_hooks_key_idempotently ... ok
+test sync_approves_the_hook_once_per_role ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/history.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/history-594e0d5bba67a730)
+
+running 2 tests
+test a_chat_opens_with_its_last_10_turns_within_64kb ... ok
+test events_open_with_100_rows_then_page ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/hook.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/hook-de55c2b77ba8fefd)
+
+running 31 tests
+test ai_coauthor_trailer_is_spotted ... ok
+test container_commands_are_allowed_outside_a_lane ... ok
+test a_lane_may_queue_block_only_its_own_issue ... ok
+test a_conductor_writes_its_own_thread_folder ... ok
+test a_conductor_command_is_logged_for_its_thread ... ok
+herdsman: fleet.other.deny_commands is empty: the lane hook denies no commands
+herdsman: fleet.other.deny_commands is empty: the lane hook denies no commands
+test a_conductor_may_spawn_design_lanes ... ok
+herdsman hook: invalid config /var/folders/51/tp633f_n3tj561q8rqwrqtxw0000gn/T/tmp.xCbJeod7d2/fleet-test-hook-49001-99/fleet.toml: TOML parse error at line 37, column 17
+   |
+37 | [fleet.sendmeter
+   |                 ^
+invalid table header
+expected `.`, `]`
+
+test config_apply_and_secret_ls_rm_are_owner_only ... ok
+test a_conductors_shell_writes_its_own_thread_folder ... ok
+herdsman hook: invalid config /var/folders/51/tp633f_n3tj561q8rqwrqtxw0000gn/T/tmp.xCbJeod7d2/fleet-test-hook-49001-111/fleet.toml: TOML parse error at line 37, column 17
+   |
+37 | [fleet.sendmeter
+   |                 ^
+invalid table header
+expected `.`, `]`
+
+test gh_pr_merge_is_denied ... ok
+herdsman hook: invalid config /var/folders/51/tp633f_n3tj561q8rqwrqtxw0000gn/T/tmp.xCbJeod7d2/fleet-test-hook-49001-129/fleet.toml: TOML parse error at line 37, column 17
+   |
+37 | [fleet.sendmeter
+   |                 ^
+invalid table header
+expected `.`, `]`
+
+test files_a_lane_edits_never_change_the_hook_rules ... ok
+test deny_commands_override_per_fleet_and_log_denials ... ok
+herdsman hook: invalid config /var/folders/51/tp633f_n3tj561q8rqwrqtxw0000gn/T/tmp.xCbJeod7d2/fleet-test-hook-closed-ev-49001-0/fleet.toml: TOML parse error at line 1, column 9
+  |
+1 | [fleet.x
+  |         ^
+invalid table header
+expected `.`, `]`
+
+test a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour ... ok
+test hermes_terminal_workdir_resolves_bare_push ... ok
+herdsman hook: invalid config /var/folders/51/tp633f_n3tj561q8rqwrqtxw0000gn/T/tmp.xCbJeod7d2/fleet-test-hook-49001-167/fleet.toml: TOML parse error at line 37, column 17
+   |
+37 | [fleet.sendmeter
+   |                 ^
+invalid table header
+expected `.`, `]`
+
+test delete_refspec_on_protected_branch_is_denied ... ok
+test a_lane_hook_fails_closed ... ok
+test design_spawn_is_owner_only ... ok
+test docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac ... ok
+test only_a_conductor_runs_lesson ... ok
+test only_a_conductor_runs_timer_install ... ok
+test legacy_fleet_lane_arms_the_hook_and_herdsman_lane_wins ... ok
+test protected_config_edits_are_denied ... ok
+test setup_is_owner_only ... ok
+test hook_is_inert_unless_fleet_lane_is_set ... ok
+test push_to_feature_branch_is_allowed ... ok
+test serve_approve_is_owner_only ... ok
+test github_comments_are_denied ... ok
+herdsman: fleet.other.deny_commands is empty: the lane hook denies no commands
+herdsman: fleet.other.deny_commands is empty: the lane hook denies no commands
+herdsman: fleet.other.deny_commands is empty: the lane hook denies no commands
+test broad_kills_are_denied_and_pid_kills_allowed ... ok
+test push_to_staging_is_denied ... ok
+test quoted_text_is_not_a_command ... ok
+test reviewers_are_read_only ... ok
+test container_commands_are_denied_as_command_words ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.24s
+
+     Running tests/host_history.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/host_history-66b1c79bfda3a3d6)
+
+running 9 tests
+test downsampling_keeps_the_worst_per_bucket ... ok
+test rows_older_than_24h_are_dropped ... ok
+test rows_are_appended_per_host_per_step ... ok
+test no_process_table_walk_while_nobody_watches ... ok
+test the_host_tab_has_a_card_per_host_and_serves_the_chart ... ok
+test one_host_keeps_24h_and_rewrites_rarely ... ok
+test the_file_stays_under_the_size_bound ... ok
+test sampling_resumes_once_the_host_tab_is_open ... ok
+test the_byte_bound_holds_with_long_command_lines ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.95s
+
+     Running tests/host_offline.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/host_offline-60f010b8ab81a77e)
+
+running 6 tests
+test a_logged_lane_on_the_down_host_still_blocks_a_duplicate ... ok
+test an_unreachable_host_refuses_only_its_own_spawns ... ok
+test a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back ... ok
+test kill_and_close_take_a_host_when_names_collide ... ok
+test its_lanes_show_host_offline_alert_once_and_recover ... ok
+test another_hosts_agent_list_is_cut_off_at_its_limit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests/host_tab.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/host_tab-4048450d2b5de626)
+
+running 2 tests
+test a_live_board_draws_cards_gauges_and_forms_that_post ... ok
+test an_export_ships_the_host_data_and_its_forms_are_inert ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+     Running tests/host_words.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/host_words-5aa9922ff7fcce36)
+
+running 1 test
+test every_refusal_and_outcome_has_its_plain_words ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hosts.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/hosts-99a66f48392ec53c)
+
+running 32 tests
+test a_disabled_host_gets_no_trim_call ... ok
+test a_remote_supersede_stays_on_its_host_and_outlives_a_gone_workspace ... ok
+test a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only ... ok
+test a_lane_gets_its_token_from_the_retired_accounts_env_before_the_import ... ok
+test a_failed_remote_start_closes_its_workspace ... ok
+test a_remote_dry_run_prints_the_argv_the_spawn_sends ... ok
+test a_supersede_onto_another_host_closes_the_old_lane_on_its_own ... ok
+test a_remote_lane_knows_the_main_host_and_answers_reach_it ... ok
+test a_remote_lane_gets_the_service_url_and_its_own_token ... ok
+test an_unreachable_host_costs_one_short_attempt_per_pass ... ok
+test a_lost_agent_name_retries_once_without_a_double_start ... ok
+test an_unhealthy_host_takes_no_lanes_and_shows_red ... ok
+test admission_runs_per_host ... ok
+test a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness ... ok
+test disk_low_on_a_remote_host_trims_its_shared_build_folder_first ... ok
+test clean_removes_a_remote_worktree_over_its_host ... ok
+test clean_lists_and_removes_a_second_hosts_lane_and_orphan ... ok
+test an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once ... ok
+test a_remote_review_is_read_over_ssh_and_recorded ... ok
+test asks_stranded_on_a_remote_host_are_imported_once ... ok
+test a_remote_lane_runs_every_command_on_its_host ... ok
+test design_runs_on_the_main_host_only_and_a_role_pin_holds ... ok
+test the_least_busy_host_wins ... ok
+test each_health_check_says_what_failed_and_how_to_fix_it ... ok
+test remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pass ... ok
+test needs_pick_the_host_whose_tags_cover_them_else_no_host ... ok
+test tags_are_detected_cached_and_refreshed_hourly ... ok
+test the_tick_drives_before_it_trims_remote_hosts ... ok
+test an_off_host_is_never_chosen_but_drains_its_lanes ... ok
+test an_offline_host_never_pages_and_shows_grey ... ok
+test lane_cards_and_the_herd_name_the_host ... ok
+test cli_and_board_toggles_both_log ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests/kick.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/kick-b6b98bf17a1d49cd)
+
+running 6 tests
+test the_hook_matches_a_successful_push_and_a_stop_only ... ok
+test the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes ... ok
+test a_held_drive_lock_does_not_delay_a_kick ... ok
+test a_kick_runs_only_its_issue ... ok
+test three_kicks_coalesce_into_one_run_and_one_follow_up ... ok
+test a_detached_kick_runs_in_its_own_process_group ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/land.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/land-5a49609d900e396c)
+
+running 16 tests
+test a_pr_touching_full_first_paths_waits_for_the_full_suite ... ok
+test default_config_still_needs_the_full_suite ... ok
+test doctor_warns_on_an_unknown_mode ... ok
+test stats_land_reports_both_modes ... ok
+test the_pass_must_be_at_the_exact_head_and_fast_red_is_no_landing ... ok
+test several_landings_bisect_to_the_first_red_one ... ok
+test a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it ... ok
+test a_full_first_landing_is_never_reverted_only_fixed ... ok
+test integration_moved_catches_up_and_lands_on_the_fast_checks_again ... ok
+test the_only_fast_first_landing_is_the_culprit_beside_full_first_ones ... ok
+test a_pass_lands_once_its_fast_checks_are_green ... ok
+test red_pauses_fast_first_landings_and_green_resumes_them ... ok
+test a_bisect_run_that_does_not_start_is_alerted_once_and_retried ... ok
+test a_revert_whose_fast_checks_go_red_is_alerted_once ... ok
+test a_revert_that_does_not_apply_is_logged_and_alerted_once ... ok
+test a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/lane_actions.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/lane_actions-079cf461852cf037)
+
+running 17 tests
+test kill_refuses_a_secret_in_the_wip_diff ... ok
+test kill_dry_run_lists_what_is_lost ... ok
+test kill_pushes_wip_then_closes_and_logs ... ok
+test close_shuts_an_others_pane_and_refuses_lanes ... ok
+test inputs_are_16px_and_zoom_is_off ... ok
+test secret_flags_real_shapes_only ... ok
+test stop_sends_escape ... ok
+test kill_saves_code_and_names_the_secret_line ... ok
+test clean_lane_refuses_unsafe_lanes ... ok
+test a_closed_lane_reads_claudes_saved_session ... ok
+test a_gone_lane_reads_its_stored_transcript ... ok
+test lane_pages_back_through_the_rolling_transcript ... ok
+test act_needs_a_paired_cookie_and_logs_via_web ... ok
+test kill_skips_lockfile_checksums_but_not_secrets ... ok
+test kill_counts_lane_scratch_as_clean_and_never_pushes_it ... ok
+test kill_restores_the_index_when_the_snapshot_fails ... ok
+test kill_snapshots_only_the_real_dirty_file ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests/lane_asks.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/lane_asks-6cb052f2ecf44c24)
+
+running 7 tests
+test an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread ... ok
+test with_no_thread_the_ask_goes_to_the_owner_as_before ... ok
+test the_owner_changes_a_conductor_answer_within_30_minutes_only ... ok
+test a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing ... ok
+test an_empty_or_unmatched_basis_is_refused ... ok
+test a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push ... ok
+test the_pinned_thread_wins_over_the_newest ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.59s
+
+     Running tests/lanes_sheet.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/lanes_sheet-1c1d163382fe3a5a)
+
+running 13 tests
+test sheet_transcript_is_the_masked_pane_tail ... ok
+test others_sheet_offers_only_close_pane ... ok
+test ascii_horse_snapshots ... ok
+test reply_refusals_rate_limit_and_read_only ... ok
+test pairing_behind_a_proxy_and_retaps ... ok
+test vector_horses_keep_a_coat_per_name ... ok
+test pairing_codes_devices_and_prompt_events ... ok
+test lanes_group_by_state_then_repo_with_counts ... ok
+test lane_card_shows_its_port ... ok
+test page_has_no_dash_placeholders ... ok
+test pairing_is_a_phone_request_approved_on_the_mac ... ok
+test chat_views_never_blank ... ok
+test lanes_and_sheet_fit_390px ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.86s
+
+     Running tests/lesson.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/lesson-09022149de543e58)
+
+running 6 tests
+test a_rules_file_over_30_lines_fails_the_check ... ok
+test digest_shows_the_last_week_and_redacts_secrets ... ok
+test rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine ... ok
+test lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change ... ok
+test tick_skips_lesson_for_a_young_or_quiet_fleet ... ok
+test tick_runs_lesson_once_a_week_and_never_when_off ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/live.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/live-6bba03b81fcb3130)
+
+running 14 tests
+test prompt_parser_fixtures ... ok
+test prompt_card_golden_from_the_auto_deny_screen ... ok
+test the_sampler_thread_fills_the_host ... ok
+test the_board_dedupes_by_seq_and_skips_stale_moments ... ok
+test answer_refuses_reviewer_menus_and_unparsed_panes ... ok
+test unparsed_blocked_pane_shows_masked_tail_and_reply ... ok
+test answer_sends_the_digit_and_logs_no_question ... ok
+test countdown_card_shows_reason_command_and_clears_when_the_prompt_goes ... ok
+test answer_refuses_a_changed_menu_and_rerenders_fresh ... ok
+test live_caps_clients_and_checks_host ... ok
+test unpaired_viewers_see_no_pane_text ... ok
+test live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed ... ok
+test live_pushes_one_frag_per_changed_section ... ok
+test live_board_fits_390px ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.49s
+
+     Running tests/live_board.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/live_board-020b073112c4f864)
+
+running 2 tests
+test herd_paints_at_once_and_refresh_is_the_plain_spinner ... ok
+test live_board_chat_and_ascii_in_webkit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.25s
+
+     Running tests/m3.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/m3-5dea966a594b87ee)
+
+running 9 tests
+test agent_doc_and_roles_cover_m3 ... ok
+test spec_is_refetched_only_when_updated_at_moves ... ok
+test queue_survives_torn_last_line ... ok
+test board_matches_fixture_and_fits_phone_width ... ok
+test pr_makes_one_gh_call_per_60s ... ok
+test next_skips_blocked_and_live_lane_items ... ok
+test wait_exit_codes ... ok
+error: the following required arguments were not provided:
+  <--top|--before <N>|--after <N>>
+
+Usage: herdsman queue <FLEET> mv <--top|--before <N>|--after <N>> <ISSUE>
+
+For more information, try '--help'.
+test queue_add_mv_rm_block_ordering ... ok
+test serve_is_read_only_html ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/m3_fixes.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/m3_fixes-a26fb6b6ba0d6e0f)
+
+running 4 tests
+test clean_reaches_adopted_lanes_of_merged_issues ... ok
+test merged_issue_never_leaves_merged ... ok
+test spawn_and_adopt_on_merged_issue_are_refused ... ok
+test notifier_runs_without_lane_hermes_env ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/merge.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/merge-ea95fe9c55a1e267)
+
+running 34 tests
+test failed_update_round_counts_as_a_review_round ... ok
+test evidence_comment_retry_that_lands_closes_issue ... ok
+test list_form_premerge_still_runs_its_checks ... ok
+test merge_message_copies_the_human_summary_and_the_facts_line ... ok
+test merge_into_fleet_repo_prints_reinstall_command_last ... ok
+test merge_without_a_human_summary_gives_the_facts_line_only ... ok
+test merge_tears_down_clean_lanes_and_keeps_unpushed_ones ... ok
+test an_extend_after_an_overrun_round_grants_the_next_one ... ok
+test merges_with_exact_head_pass_and_green_ci ... ok
+test merge_twice_says_already_merged_and_logs_nothing ... ok
+test extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override ... ok
+test extend_and_park_refuse_outside_needs_human_and_park_clears_it ... ok
+test premerge_cap_failure_refuses_without_merging_and_goes_to_fix ... ok
+test premerge_default_needs_cap_toml ... ok
+test premerge_rechecks_when_staging_moved ... ok
+test premerge_passing_merges_and_logs_its_time ... ok
+test refuses_fail_verdict ... ok
+test named_premerge_skips_when_its_paths_are_unchanged ... ok
+test owner_override_merges_past_round_limit_and_says_so ... ok
+test named_premerge_failure_refuses_with_its_code_and_a_fix_round ... ok
+test evidence_comment_failing_twice_leaves_issue_open_and_exits_nonzero ... ok
+test refuses_main_as_integration_target ... ok
+test owner_override_still_refuses_red_ci_and_a_stale_verdict ... ok
+test refuses_without_open_pr ... ok
+test refuses_without_verdict ... ok
+test refuses_pr_based_on_main ... ok
+test refuses_verdict_for_older_sha ... ok
+test refuses_when_round_limit_exceeded ... ok
+test reverdict_on_same_sha_is_one_round ... ok
+test update_round_does_not_count_toward_review_rounds ... ok
+test verdict_pins_exact_branch_head ... ok
+test required_checks_gate_only_the_latest_named_run ... ok
+test refuses_when_ci_not_green ... ok
+test round_extended_allows_exactly_one_more_round ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/migrate.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/migrate-d3d7ce0777be3100)
+
+running 12 tests
+test status_with_neither_home_is_an_empty_board_without_hint ... ok
+test failed_state_move_rolls_the_config_move_back ... ok
+test migrate_with_nothing_to_move_says_so ... ok
+test migrate_refuses_an_empty_herdsman_home_and_leaves_the_cwd_alone ... ok
+test hook_with_pre_rename_home_prints_only_its_json_decision ... ok
+test version_and_help_touch_nothing ... ok
+test status_reads_old_paths_in_place_and_hints_once ... ok
+test symlinked_old_dir_migrates_as_a_link ... ok
+test existing_new_dirs_win_and_old_ones_are_left_alone ... ok
+test migrate_moves_both_once ... ok
+test the_live_state_dir_is_migrated_only_with_live ... ok
+test empty_path_vars_resolve_to_the_defaults ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/needs_human.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/needs_human-60f5d0d6cdee4063)
+
+running 6 tests
+test needs_human_pushes_with_the_default_on ... ok
+test herd_marks_the_issue_and_park_clears_the_card ... ok
+test card_with_a_fail_has_no_merge_anyway ... ok
+test a_recorded_extension_is_a_pending_line_without_buttons ... ok
+test card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only ... ok
+test card_ops_need_needs_human_and_a_refused_extend_logs_nothing ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/orphan_issue.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/orphan_issue-10846d740ec35eeb)
+
+running 8 tests
+test waiting_names_an_issue_nothing_drives ... ok
+test a_paused_fleet_raises_none ... ok
+test drive_going_silent_on_an_issue_alerts_30_min_after_its_last_action ... ok
+test fix_lane_ended_without_pushing_alerts_once_at_30_min ... ok
+test a_lane_live_loop_on_a_finished_lane_is_an_orphan ... ok
+test no_change_fix_round_with_merge_label_alerts_once ... ok
+test a_healthy_fleet_raises_none ... ok
+test undelivered_answer_alerts_once_after_the_ask_closes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/orphans.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/orphans-accd4587a27d225a)
+
+running 8 tests
+test spawn_logs_spawn_started_before_the_harness_starts ... ok
+test a_merged_issues_orphan_is_closed ... ok
+test a_remote_orphan_is_adopted_on_its_host ... ok
+test a_stale_head_orphan_review_is_closed_not_recorded ... ok
+test an_unmatched_pane_is_only_alerted ... ok
+test a_finished_orphan_review_at_the_head_is_recorded_then_closed ... ok
+test a_crash_after_spawn_started_is_adopted_by_the_next_step ... ok
+test a_lane_spawned_during_the_remote_listing_is_not_adopted ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+
+     Running tests/outbox.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/outbox-a2128c194684fe9e)
+
+running 1 test
+test a_remote_lane_only_queues_and_drive_drains_it_once ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/overlap.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/overlap-22caebb1801e593c)
+
+running 21 tests
+test cap_check_reads_the_limit_from_config ... ok
+test cap_check_warns_within_reach_of_the_cap ... ok
+test cap_check_reports_web_lines_without_capping_them ... ok
+test a_branch_in_review_is_not_updated ... ok
+test a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head ... ok
+test behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is ... ok
+test a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses ... ok
+test clean_auto_update_keeps_the_pass_and_spawns_no_lane ... ok
+test a_written_verdict_is_recorded_before_the_update_in_the_same_pass ... ok
+test a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried ... ok
+test check_emits_cap_near_once_per_integration_sha ... ok
+test a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges ... ok
+test a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it ... ok
+test a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn_head ... ok
+test an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass ... ok
+test conflicting_auto_update_spawns_an_update_lane ... ok
+test heads_up_reaches_a_working_lane_once ... ok
+test merge_tree_finds_the_pair_and_its_files_once ... ok
+test drive_merges_the_ready_pr_that_conflicts_with_nothing_first ... ok
+test strict_rule_auto_updates_and_puts_the_merge_label_back ... ok
+test gate_refuses_a_merge_head_that_adds_its_own_change ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.13s
+
+     Running tests/parked.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/parked-b6b641c2842fd519)
+
+running 5 tests
+test unpaused_fleet_resumes_a_parked_impl_to_review ... ok
+test a_fix_round_held_for_a_spawn_slot_is_not_parked ... ok
+test parked_lane_alerts_once_and_never_stalls ... ok
+test gone_pane_with_safe_work_is_parked_dirty_is_dead ... ok
+test cleaned_lane_of_a_closed_issue_is_not_dead ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/perf.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/perf-608f4c40e2e72b89)
+
+running 7 tests
+test a_recorded_verdict_and_a_merged_lane_are_never_read ... ok
+test the_page_carries_no_tab_and_each_part_is_its_own_read ... ok
+test a_step_makes_one_remote_call_per_host_and_requests_make_none ... ok
+test the_loader_and_the_age_are_one_strip_under_the_header ... ok
+test the_first_paint_in_webkit_is_under_300ms ... ok
+test a_steady_state_live_change_is_one_part_under_5kb ... ok
+test waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.65s
+
+     Running tests/pipeline.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/pipeline-fe98e6a2b389d207)
+
+running 8 tests
+test the_design_error_example_breaks_its_rules ... ok
+test two_checks_merge_on_both_passes_and_either_fail_routes_to_fix ... ok
+test the_brief_and_custom_pipelines_are_valid ... ok
+test each_rule_rejects_a_crafted_pipeline ... ok
+test a_bad_pipeline_refuses_spawn_and_doctor_lists_it ... ok
+test red_ci_in_the_last_round_goes_to_park ... ok
+test round_limits_are_per_check_stage ... ok
+test default_pipeline_replays_recorded_histories ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+     Running tests/pr_snapshot.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/pr_snapshot-a0f531daa29c5e21)
+
+running 3 tests
+test the_merge_gate_reads_checks_from_the_snapshot ... ok
+test a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet ... ok
+test status_and_serve_make_no_gh_call ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/proof.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/proof-c4590740aa3222d0)
+
+running 8 tests
+test a_blocker_without_proof_is_refused_by_name ... ok
+test a_form_only_fail_with_a_spec_proof_is_recorded_and_not_counted ... ok
+test prose_after_the_findings_is_not_a_finding ... ok
+test a_screenshot_path_is_a_run_proof ... ok
+test a_run_or_spec_proof_is_recorded ... ok
+test pass_and_notes_are_free_form ... ok
+test proof_output_and_quotes_are_never_findings ... ok
+test malformed_proofs_are_refused ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/protection.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/protection-2aaf0df468101b1a)
+
+running 10 tests
+test unprotected_staging_exits_non_zero ... ok
+test one_unprotected_among_fleets_exits_non_zero ... ok
+test enforce_admins_off_is_a_warning_line ... ok
+test repo_with_no_branch_verified_exits_non_zero ... ok
+test repo_without_main_is_skipped ... ok
+test all_protected_exits_zero ... ok
+test bad_credentials_is_unavailable_with_status ... ok
+test private_free_plan_is_unavailable_with_status ... ok
+test protection_without_checks_or_reviews_is_incomplete ... ok
+test transient_failure_is_unavailable_never_bare_error ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/queue_board.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/queue_board-411e6058e2bb4f04)
+
+running 2 tests
+test a_thread_ask_on_an_issue_is_answerable_from_its_queue_card ... ok
+test the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/queue_graph.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/queue_graph-832f6091d9839e20)
+
+running 3 tests
+test serial_label_defaults_to_db_and_takes_an_override ... ok
+test rows_carry_the_graph_data_and_the_fleet_its_serial_paths ... ok
+test the_graph_and_its_legend_pass_the_audit_at_390px ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.41s
+
+     Running tests/queue_lanes.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/queue_lanes-ec9a22c0ff37c1cc)
+
+running 1 test
+test lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/queue_tab.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/queue_tab-e5053cb166f77e91)
+
+running 4 tests
+test a_chain_names_first_to_last_and_the_next_steps_state ... ok
+test rows_group_needs_you_then_in_progress_then_queued ... ok
+test time_is_one_unit_style_naming_its_phase ... ok
+test a_row_carries_the_time_its_age_counts_from ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/queue_titles.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/queue_titles-4a0d1ed0134d7b18)
+
+running 7 tests
+test sw_answers_a_navigation_to_a_json_read_with_the_page ... ok
+test sw_never_serves_the_cache_over_a_non_200 ... ok
+test cached_spec_and_pr_titles_show_in_the_queue_row ... ok
+test uncached_rows_have_no_title_and_make_no_gh_call ... ok
+test check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title ... ok
+test queue_add_reads_an_uncached_title_and_a_backlog_row_has_the_reads ... ok
+test no_lanes_mode_button ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/readme.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/readme-f0f3285decc94ef3)
+
+running 10 tests
+test readme_links_setup ... ok
+test readme_is_short ... ok
+test docs_name_no_real_tailnet_host ... ok
+test doc_links_resolve ... ok
+test setup_toml_parses ... ok
+test table_commands_exist ... ok
+test setup_commands_exist ... ok
+test docs_leak_no_ids_tokens_or_personal_paths ... ok
+test readme_commands_are_in_help_agent ... ok
+herdsman serve: phone page on http://127.0.0.1:51014/
+test quick_start_runs_as_written ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/reap.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/reap-366d17f208ab7490)
+
+running 8 tests
+test closing_a_lane_terms_then_kills_only_its_worktree_pids ... ok
+test check_reaps_closed_lanes_but_spares_active_and_live_ones ... ok
+test a_dry_run_and_a_live_lane_signal_nothing ... ok
+test what_dies_on_term_gets_no_kill_and_an_empty_tree_is_not_logged ... ok
+test check_trims_a_done_lanes_children_but_not_its_agent ... ok
+test host_tab_shows_top_memory_users_with_their_owner ... ok
+test host_tab_sums_claude_lane_memory_by_state ... ok
+test host_tab_shows_leftovers_and_reap_kills_them ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/reclaim.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/reclaim-fe0e499fe4c7106d)
+
+running 4 tests
+test a_y_answer_applies ... ok
+test the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile ... ok
+test busy_or_recent_worktrees_are_skipped ... ok
+test preview_changes_nothing_and_apply_removes_only_build_folders ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/report.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/report-6cb298f4df5cfd0c)
+
+running 2 tests
+test a_paired_report_is_kept_and_named_to_the_notifier ... ok
+test report_mode_in_webkit_outlines_confirms_and_sends_a_bundle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.88s
+
+     Running tests/repro.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/repro-0d089735c0907407)
+
+running 7 tests
+test help_agent_documents_repro_and_no_repro ... ok
+test an_unmarked_issues_pass_is_never_parsed_for_a_repro_block ... ok
+test a_verify_block_needs_the_pr_bodys_repro_section_and_its_quote ... ok
+test queue_set_turns_the_mark_off_and_on ... ok
+test a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro ... ok
+test a_repro_verify_pass_goes_to_verify_outside_ui_paths ... ok
+test a_repro_verify_pass_merges_only_after_a_verify_pass_at_the_head ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/retired_keys.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/retired_keys-ccad0c91cb84003c)
+
+running 4 tests
+test config_only_fails_on_a_config_this_build_cannot_load ... ok
+test a_fleet_toml_from_before_each_retired_key_change_loads ... ok
+test check_alerts_a_retired_key_once_and_the_board_shows_it ... ok
+test install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/schemes.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/schemes-5b7b88106a8acab6)
+
+running 6 tests
+test github_dark_is_todays_board ... ok
+test a_light_dark_scheme_follows_the_phone_and_a_pick_still_wins ... ok
+test a_user_scheme_is_served_and_overrides_a_built_in ... ok
+test each_theme_names_its_default_and_the_first_paint_is_the_board_themes ... ok
+test every_built_in_has_the_whole_token_set_and_passes_the_gate ... ok
+test a_bad_scheme_is_refused_with_the_reason ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/screens_golden.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/screens_golden-2588e8542dd46bc2)
+
+running 1 test
+test real_screens_keep_the_transcript_and_lift_the_frame_and_spinner ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/serial_groups.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/serial_groups-d3eac3c4698e0484)
+
+running 12 tests
+test both_forms_parse_and_together_are_an_error ... ok
+test doctor_suggests_the_new_form ... ok
+test merge_refuses_a_pr_touching_a_group_it_never_joined ... ok
+test a_mark_joins_its_group_plain_serial_the_first ... ok
+test a_pushed_diff_joins_a_free_group_and_carries_on ... ok
+test a_marked_issue_logs_its_join_by_mark ... ok
+test two_groups_take_slots_in_name_order_so_two_issues_never_deadlock ... ok
+test a_second_ci_push_holds_until_the_holder_merges_then_updates ... ok
+test the_first_held_in_queue_order_takes_a_freed_slot ... ok
+test crossed_joins_over_two_groups_never_deadlock ... ok
+test a_held_issue_waits_on_its_second_group_with_its_first_slot_taken ... ok
+test work_over_the_limit_when_a_group_lands_keeps_going_and_new_joins_wait ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/serve_web.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/serve_web-5c621a351f6b80d3)
+
+running 17 tests
+test activity_lines_per_harness_are_masked_and_cut ... ok
+test frag_parts_redirect_navigations_and_404_unknown_ids ... ok
+test one_lane_per_agent_name ... ok
+test pair_request_carries_the_optional_approve_hint ... ok
+test fetch_only_reads_redirect_navigations_to_the_board ... ok
+test host_local_pairing_shows_the_approve_line_and_lasts_a_year ... ok
+test lanes_group_by_fleet_with_others ... ok
+test stale_mtime_refuses_without_writing ... ok
+test page_reads_only_cached_pr_data_and_serves_pwa_assets ... ok
+test set_refuses_toml_injection_on_web_and_cli ... ok
+test queue_shows_open_work_only_and_folds_paused_retired_and_noise ... ok
+test foreign_host_or_origin_is_403_and_read_only_is_405 ... ok
+test pause_button_matches_cli_and_blocks_next_and_spawn ... ok
+test role_dropdowns_set_like_herdsman_set ... ok
+test queue_buttons_move_like_queue_mv ... ok
+test page_never_samples_the_host_and_links_immutable_assets ... ok
+test page_fits_390px_without_horizontal_scroll ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.66s
+
+     Running tests/service.rs (/Users/jkmacmini/.cache/herdsman/target/herdsman/debug/deps/service-a1b1807d4ae0738e)
+
+running 2 tests
+test the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other ... FAILED
+test a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes ... FAILED
+
+failures:
+
+---- the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other stdout ----
+
+thread 'the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other' (62392614) panicked at crates/cli/tests/service.rs:110:5:
+assertion `left == right` failed
+  left: None
+ right: Some(62896)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes stdout ----
+
+thread 'a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes' (62392613) panicked at crates/cli/tests/service.rs:240:5:
+the service never answered
+
+
+failures:
+    a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes
+    the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.22s
+
+error: test failed, to rerun pass `-p herdsman --test service`
+exit=101
