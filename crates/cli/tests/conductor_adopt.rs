@@ -105,8 +105,9 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
 #[test]
 fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
     let c = setup("adopt-elsewhere");
-    let r =
-        herdr(&agents(&[("conductor-t1", "idle", "/elsewhere/t1", "w16:p1")])).once_err("herdr agent start", 1, TAKEN);
+    let r = herdr(&agents(&[("conductor-t1", "idle", "/elsewhere/t1", "w16:p1")]))
+        .once_err("herdr agent start", 1, TAKEN)
+        .once_err("herdr agent start", 1, TAKEN);
     let log = say(&c, &r, "hello");
     assert!(log.contains("✗ not delivered: "), "{log}");
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
@@ -116,12 +117,17 @@ fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
 #[test]
 fn a_failed_start_shows_herdrs_message_not_its_json() {
     let c = setup("adopt-message");
-    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT);
+    // #623: it is tried twice (an automatic retry), each waiting 120 s for its agent; one row.
+    let r = herdr(NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once_err("herdr agent start", 1, TIMEOUT);
     let log = say(&c, &r, "hello");
+    assert_eq!(log.matches("✗ not delivered").count(), 1, "{log}");
     assert!(
         log.contains(r#""text":"✗ not delivered: herdr agent start failed: timed out waiting for agent startup""#),
         "{log}"
     );
+    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
 }
 

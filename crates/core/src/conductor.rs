@@ -469,17 +469,32 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -
     let dir = dir(ctx, cfg, id);
     std::fs::create_dir_all(&dir)?;
     let lock = std::fs::File::create(dir.join(".deliver.lock"))?;
-    // #548: a delivery stuck past 30 s (a Keychain dialog) fails the next one instead of hanging it.
-    for i in 0..=30 {
+    // #548: a delivery stuck past the bound (a Keychain dialog) fails the next one instead of hanging it; #623: the
+    // bound covers a slow start's wait for its agent.
+    let wait = 2 * START_SECS;
+    for i in 0..=wait {
         match lock.try_lock() {
             Ok(()) => break,
-            Err(std::fs::TryLockError::WouldBlock) if i < 30 => r.sleep(1),
+            Err(std::fs::TryLockError::WouldBlock) if i < wait => r.sleep(1),
             Err(std::fs::TryLockError::WouldBlock) => {
-                bail!("{id}'s previous message is still being delivered after 30 s")
+                bail!("{id}'s previous message is still being delivered after {wait} s")
             }
             Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
         }
     }
+    // #623: a failed delivery (not a refusal) is tried once more before the thread shows it.
+    once(ctx, cfg, r, t, line).or_else(|e| match e.downcast_ref::<crate::gate::Refusal>() {
+        Some(_) => Err(e),
+        None => once(ctx, cfg, r, t, line),
+    })
+}
+
+/// #623: how long a timed-out start waits for its agent to show up (twice that while the host is busy).
+const START_SECS: u64 = 120;
+
+/// One try at `deliver`, under its lock.
+fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
+    let id = t.str("thread").unwrap_or_default();
     let events = read(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     let agents = herdr::agents(r)?;
@@ -795,29 +810,62 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     on.write(&brief, &profile(cfg, t, fleet))?;
     h.prepare(ctx, &on, &p)?;
     let _secrets = crate::spawn::deliver(&on, cfg, &p)?;
-    let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
     let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
-    herdr::ok(r, &p.lane_cmd(&new))?;
-    let o = herdr::exec(r, &p.start_cmd(ctx, &new))?;
-    let mut pane = new.clone();
-    if o.code != 0 {
+    let mine =
+        |a: &&Value| a["name"] == agent.as_str() && a["cwd"].as_str().map(std::path::Path::new) == Some(dir.as_path());
+    let find = |list: &[Value]| {
+        list.iter()
+            .find(mine)
+            .and_then(|a| a["pane_id"].as_str())
+            .map(String::from)
+    };
+    let mut retried = false;
+    let (new, o, up) = loop {
+        let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
+        herdr::ok(r, &p.lane_cmd(&new))?;
+        let o = herdr::exec(r, &p.start_cmd(ctx, &new))?;
+        if o.code == 0 {
+            break (new, o, None);
+        }
         // #477: a start that timed out (or found its name taken) whose agent is up in the thread's folder is adopted.
-        let soft = ["timeout", "agent_name_taken"]
-            .iter()
-            .any(|c| herdr::failed_with(&o, c));
-        let list = if soft { herdr::agents(r)? } else { vec![] };
-        let mine = |a: &&Value| {
-            a["name"] == agent.as_str() && a["cwd"].as_str().map(std::path::Path::new) == Some(dir.as_path())
+        let has = |c: &str| herdr::failed_with(&o, c);
+        let lost = has("agent_name_not_found") || herdr::message(&o).contains("no longer owns the target terminal");
+        let seen = if has("timeout") || has("agent_name_taken") || lost {
+            herdr::agents(r)?
+        } else {
+            vec![]
         };
-        let up = list.iter().find(mine).and_then(|a| a["pane_id"].as_str());
-        if up.is_none_or(|p| ws(p) != ws(&new)) {
+        let mut up = find(&seen);
+        // #623: on a loaded host the agent may still be coming up: poll for it (backoff) up to the bound.
+        if up.is_none() && has("timeout") {
+            let busy = crate::host::admit(&crate::host::sample(r), &cfg.limits).is_err();
+            let (bound, mut waited, mut step) = (START_SECS << u8::from(busy), 0, 1);
+            while up.is_none() && waited < bound {
+                r.sleep(step);
+                (waited, step) = (waited + step, (step * 2).min(10));
+                up = find(&herdr::agents(r).unwrap_or_default());
+            }
+        }
+        if up.as_deref().is_none_or(|p| ws(p) != ws(&new)) {
             let _ = herdr::workspace_close(r, &ws(&new));
         }
-        pane = match up {
-            Some(p) => p.into(),
-            None => bail!("herdr agent start failed: {}", herdr::message(&o)),
-        };
-    }
+        // #623: a name a dead terminal holds (no live agent has it): clear its last workspace and start once more.
+        let taken = has("agent_name_taken") && !seen.iter().any(|a| a["name"] == agent.as_str());
+        if up.is_none() && (lost || taken) && !retried {
+            let prev = of(events, id).rfind(|e| e.kind == "conductor-start");
+            if let Some(w) = prev.and_then(|e| e.str("workspace")).filter(|w| *w != ws(&new)) {
+                let _ = herdr::workspace_close(r, w);
+            }
+            retried = true;
+            continue;
+        }
+        break (new, o, up);
+    };
+    let pane = match (o.code, up) {
+        (0, _) => new.clone(),
+        (_, Some(p)) => p,
+        _ => bail!("herdr agent start failed: {}", herdr::message(&o)),
+    };
     // Its own new pane gets the kick; one elsewhere (the name taken) or a kick that didn't land gets the line.
     let kicked = pane == new && h.kick(r, &p, &pane).unwrap_or(false);
     if o.code != 0 && !kicked {
