@@ -2,7 +2,7 @@
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
-use crate::conductor;
+use crate::conductor::{self, of};
 use crate::config::Config;
 use crate::events::{closed, Event};
 use crate::runner::Runner;
@@ -25,11 +25,6 @@ pub fn files_of(e: &Event) -> impl Iterator<Item = &Value> {
 /// A file name's extension, lower case.
 pub fn ext(name: &str) -> String {
     name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase()
-}
-
-/// The thread's events, in order.
-fn of<'a>(events: &'a [Event], id: &'a str) -> impl DoubleEndedIterator<Item = &'a Event> {
-    events.iter().filter(move |e| e.str("thread") == Some(id))
 }
 
 /// Its open asks (`ask --thread`): they wait in the thread, never in the needs-you stack; #541: and the lane asks put
@@ -135,7 +130,7 @@ fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
 /// live turn's start) stays rows.
 fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64, usize), open: u64) -> ThreadPage {
     let id = t.str("thread").unwrap_or_default();
-    let (mut msgs, mut run) = (vec![], vec![]);
+    let (mut msgs, mut run, sent) = (vec![], vec![], conductor::forwarded(events));
     let fold = |msgs: &mut Vec<Msg>, run: &mut Vec<Msg>| {
         let Some((seq, ts)) = run.first().map(|f| (f.seq, f.ts)) else {
             return;
@@ -181,11 +176,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                     name: f["name"].as_str().unwrap_or_default().into(),
                     size: f["size"].as_u64().unwrap_or(0),
                 };
-                let fwd = if conductor::forwarded(events, e) {
-                    " (forwarded)"
-                } else {
-                    ""
-                };
+                let fwd = if sent.contains(&e.seq) { " (forwarded)" } else { "" };
                 Msg {
                     from: f.into(),
                     files: files_of(e).map(file).collect(),
@@ -396,18 +387,33 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
 }
 
 impl super::Server<'_> {
-    /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads.
-    pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> ChatTab {
-        // #483: a config or log read error shows its own text (as the Queue tab does).
-        let (cfg, events) = match (Config::load(&ctx.config), crate::events::read(&ctx.state)) {
-            (Ok(c), Ok(e)) => (Ok(c), e),
-            (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), vec![]),
-        };
+    /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads. #620: the fold is kept by the log's
+    /// last seq, fleet.toml's mtime, the agents, `rw` and the minute; a request in between reuses it, the log unread.
+    pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        tab(ctx, cfg.as_ref().map_err(String::as_str), &events, &agents, rw)
+        let key = json!([
+            crate::db::last_seq(&ctx.state),
+            super::mtime(ctx),
+            agents,
+            rw,
+            ctx.now / 60
+        ]);
+        let mut c = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if c.0 != key {
+            // #483: a config or log read error shows its own text (as the Queue tab does).
+            let (cfg, events) = match (Config::load(&ctx.config), crate::events::read(&ctx.state)) {
+                (Ok(c), Ok(e)) => (Ok(c), e),
+                (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), vec![]),
+            };
+            *c = (
+                key,
+                json!(tab(ctx, cfg.as_ref().map_err(String::as_str), &events, &agents, rw)),
+            );
+        }
+        c.1.clone()
     }
 }
 
