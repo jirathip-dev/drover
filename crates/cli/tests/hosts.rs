@@ -1437,7 +1437,7 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
         .reply(&format!("{g}'status' '--porcelain'"), " M src/a.rs\n")
         .reply(&format!("{g}'rev-list' '--count'"), "0\n")
         .reply(&format!("{SSH}'git' '-C'"), "")
-        .reply("date -r", "20261107-1200\n");
+        .reply("date -r", "20261107-120000\n");
     (f, g)
 }
 
@@ -1447,11 +1447,13 @@ fn kill_saves_a_remote_lanes_work_on_its_own_host() {
     let c = setup("hosts-kill-wip", "", true, 0);
     remote_spawn(&c, NOW - 900);
     let (r, g) = dirty_remote(Fake::default(), None);
-    let r = r.reply("herdr --machine bazzite pane close w9:p1", "{}");
+    let r = r
+        .reply("herdr --machine bazzite pane close w9:p1", "{}")
+        .reply("herdr --machine bazzite agent list", NO_AGENTS);
     let (code, out) = run(&c, &r, &["kill", "sendmeter-impl-12", "--yes"]);
     let calls = r.calls.borrow().clone();
     assert_eq!(code, 0, "{out} {calls:?}");
-    let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200'");
+    let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
     for step in ["'status' '--porcelain'", "'add' '-A'", "'commit' '-q' '--no-verify'"] {
         assert!(r.called(&format!("{g}{step}")), "{step}: {calls:?}");
     }
@@ -1482,7 +1484,7 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
         let (r, g) = dirty_remote(live, fail.then_some(1));
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
         let calls = r.calls.borrow().clone();
-        let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200'");
+        let push = format!("{g}'push' 'origin' 'HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
         assert!(r.called(&push), "{calls:?}");
         if fail {
             assert!(code == 3 && out.contains("REFUSED SNAPSHOT_FAILED"), "{out}");
@@ -1496,7 +1498,7 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
             .inputs
             .borrow()
             .iter()
-            .any(|(_, t)| t.contains("wip/sendmeter-impl-12-20261107-1200"));
+            .any(|(_, t)| t.contains("wip/sendmeter-impl-12-20261107-120000-"));
         assert!(brief, "the new lane's brief names the wip branch");
     }
 }
@@ -1609,4 +1611,99 @@ fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
     assert!(!r.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree'")), "{calls:?}");
     assert!(!r.called(&format!("{SSH}'rm'")), "{calls:?}");
     assert!(!out.contains("removed"), "{out}");
+}
+
+/// #664: the Air's case: a merged lane `kill` already logged as killed, its harness gone but its shell pane (unnamed in
+/// herdr) still idle in the worktree: clean keeps it while under `idle_merged_minutes`, then closes that pane there,
+/// sees it gone and removes the worktree.
+#[test]
+fn clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree() {
+    let c = setup("hosts-leftover-664", "", true, 0);
+    remote_spawn(&c, NOW - 900);
+    ev(
+        &c,
+        NOW - 100,
+        12,
+        "merged",
+        json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
+    );
+    ev(
+        &c,
+        NOW - 50,
+        12,
+        "lane-killed",
+        json!({"agent": "sendmeter-impl-12", "pane": "w9:p1", "host": "bazzite"}),
+    );
+    let shell = json!({"result": {"agents": [{"name": null, "agent_status": "idle", "cwd": WT, "pane_id": "w9:p7"}]}});
+    let r = || {
+        Fake::default()
+            .closing()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr --machine bazzite agent list", &shell.to_string())
+            .reply("herdr --machine bazzite pane close", "{}")
+            .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+            .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "0\n")
+            .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+            .reply("herdr --machine bazzite worktree remove --workspace w9", "{}")
+    };
+    let r0 = r();
+    let (code, out) = run(&c, &r0, &["clean", "sendmeter", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("live agent (idle; its pane closes in 15 min)"), "{out}");
+    assert!(
+        !r0.called("herdr --machine bazzite pane close w9:p7"),
+        "{:?}",
+        r0.calls.borrow()
+    );
+    let later = herdsman::Ctx {
+        now: c.now + 900,
+        ..c.clone()
+    };
+    let r1 = r();
+    let (code, out) = run(&later, &r1, &["clean", "sendmeter", "--yes"]);
+    assert_eq!(code, 0, "{out} {:?}", r1.calls.borrow());
+    let close = r1
+        .index("herdr --machine bazzite pane close w9:p7")
+        .expect("the shell pane closes");
+    assert!(close < r1.index("herdr --machine bazzite worktree remove").expect("removed"));
+    assert!(
+        out.contains(&format!("removed bazzite:{WT} (sendmeter#12 merged)")),
+        "{out}"
+    );
+}
+
+/// #664: clean resolves a lane's host from its spawn: mini's merged `sendmeter-impl-12` worktree is not kept live by
+/// bazzite's agent of the same name.
+#[test]
+fn a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live() {
+    let c = setup("hosts-samename-664", "", true, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let w = wt.display().to_string();
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w1:p1", "workspace": "w1", "worktree": w,
+                   "branch": "issue-12", "host": "mini"});
+    ev(&c, NOW - 900, 12, "spawn", d);
+    ev(
+        &c,
+        NOW - 100,
+        12,
+        "merged",
+        json!({"pr": "34", "merge_sha": "abc", "into": "staging"}),
+    );
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(
+            "herdr --machine bazzite agent list",
+            &agents(&[("sendmeter-impl-12", "working", WT, "w9:p1")]),
+        )
+        .reply(&format!("git -C {w} rev-list"), "0\n")
+        .reply(&format!("git -C {w} status"), "")
+        .reply("herdr worktree remove --workspace w1", "{}");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("would remove {w} (pane w1:p1, sendmeter#12 merged)")),
+        "{out}"
+    );
+    assert!(!out.contains("live agent"), "{out}");
 }

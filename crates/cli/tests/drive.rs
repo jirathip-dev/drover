@@ -428,9 +428,10 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf,
     // One unpushed commit until the wip push.
     let r = move |_| {
         fake(&list)
+            .closing()
             .once(&format!("git -C {w} rev-list"), 0, "1\n")
             .reply(&format!("git -C {w} rev-list"), "0\n")
-            .reply("date -r", "20261107-1200\n")
+            .reply("date -r", "20261107-120000\n")
             .reply("git -C", "")
     };
     (c, wt, r)
@@ -458,18 +459,20 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
     let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
-    let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200");
+    let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
     let close = r1.index("herdr pane close w9:sendmeter-impl-12").expect("pane closed");
     assert!(r1.index(&push).expect("wip pushed") < close, "{:?}", r1.calls.borrow());
     let all = read(&c.state).unwrap();
     let e = all.iter().find(|e| e.kind == "lane-closed").expect("lane-closed");
     assert_eq!(
-        (e.str("agent"), e.str("why"), e.str("wip")),
-        (
-            Some("sendmeter-impl-12"),
-            Some("merged-idle"),
-            Some("wip/sendmeter-impl-12-20261107-1200")
-        )
+        (e.str("agent"), e.str("why")),
+        (Some("sendmeter-impl-12"), Some("merged-idle"))
+    );
+    assert!(
+        e.str("wip")
+            .unwrap()
+            .starts_with("wip/sendmeter-impl-12-20261107-120000-"),
+        "{e:?}"
     );
     // Then the worktree goes the clean way.
     assert!(close < r1.index("herdr worktree remove --workspace w9").expect("removed"));

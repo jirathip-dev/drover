@@ -182,12 +182,14 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
             Ok(0) => crate::check::save_wip(&on, wt, &w, &format!("wip: cloud host {verb}")),
             o => o.and_then(|c| Err(anyhow!("can't reach {name} to check {wt} (exit {c})"))),
         };
-        if let Err(e) = saved {
-            let d = json!({"lane": lane, "why": format!("{e:#}")});
-            log(ctx, cfg, "cloud-abort", name, d)?;
-            return Err(e.context(format!("{name}: {verb} aborted, {lane}'s work not saved")));
+        match saved {
+            Ok(w) => wip.push(w),
+            Err(e) => {
+                let d = json!({"lane": lane, "why": format!("{e:#}")});
+                log(ctx, cfg, "cloud-abort", name, d)?;
+                return Err(e.context(format!("{name}: {verb} aborted, {lane}'s work not saved")));
+            }
         }
-        wip.push(w);
     }
     cmd(ctx, cfg, r, name, verb)?;
     let d = json!({"verb": verb, "why": why, "wip": wip});
