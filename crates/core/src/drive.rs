@@ -945,10 +945,12 @@ fn pass(
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
             let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
-            // #599: a PASS that goes on to another check (verify) merges only after that check, next pass.
-            let then = f.flow().next(&s.stage, "PASS").and_then(|t| f.flow().get(t.0));
-            let last = then.is_none_or(|t| t.kind != "check");
-            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && last {
+            // #599/#650: a PASS merges this pass only if the merge gate's rule finds the head verified by it.
+            let verified = || -> Result<bool> {
+                let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
+                Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
+            };
+            if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
                 merge = true;
                 code = if pr["mergeable"] == "CONFLICTING" {
                     Some("NOT_MERGEABLE")
