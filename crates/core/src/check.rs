@@ -935,8 +935,14 @@ fn save(
 /// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the
 /// Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let (mut total, live) = (du(&ctx.worktrees), live_lanes(ctx, cfg, r)?);
+    let mut total = du(&ctx.worktrees);
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
+    let builds = !cfg.limits.build_root.is_empty() && crate::config::expand(&cfg.limits.build_root).is_dir();
+    let live = if over(total) || builds {
+        live_lanes(ctx, cfg, r)?
+    } else {
+        Live::new()
+    };
     if over(total) {
         let events = read(&ctx.state)?;
         let states = fold(&events);
