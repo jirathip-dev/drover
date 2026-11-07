@@ -303,7 +303,10 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
     assert_eq!(v.matches("name=choice").count(), 7, "{v}");
     assert_eq!(v[..more].matches("name=choice").count(), 5, "{v}");
     assert!(v[..more].contains("5. new thread: Rate limits"), "{v}");
-    assert!(v[more..].contains("7. Main chat · <span class=tl data-go=\"t2\">t2</span>"), "{v}");
+    assert!(
+        v[more..].contains("7. Main chat · <span class=tl data-go=\"t2\">t2</span>"),
+        "{v}"
+    );
 }
 
 #[test]
@@ -529,7 +532,9 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
         "<span class=lc data-go=\"t2\">continued in t2</span>",
     );
     assert!(
-        view("t1").contains(&format!(" class=qs>{go2} · Rate limits → Rate limits · <span class=tl data-go=\"t2\">t2</span></p>")),
+        view("t1").contains(&format!(
+            " class=qs>{go2} · Rate limits → Rate limits · <span class=tl data-go=\"t2\">t2</span></p>"
+        )),
         "{}",
         view("t1")
     );

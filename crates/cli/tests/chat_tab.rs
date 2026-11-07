@@ -942,8 +942,14 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         .1
         .starts_with("t1 sendmeter: Land mode for #12\n"));
     let (chat, _) = frags(&s, &cookie, T + 5);
-    assert!(chat.contains("<span class=tt><span>Land mode for #12</span><small class=tid>· t1</small></span>"), "{chat}");
-    assert!(chat.contains("<div class=tn><b>Land mode for #12</b><small class=tid>· t1</small></div>"), "{chat}");
+    assert!(
+        chat.contains("<span class=tt><span>Land mode for #12</span><small class=tid>· t1</small></span>"),
+        "{chat}"
+    );
+    assert!(
+        chat.contains("<div class=tn><b>Land mode for #12</b><small class=tid>· t1</small></div>"),
+        "{chat}"
+    );
     for bad in ["two\nlines", " "] {
         assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
     }
