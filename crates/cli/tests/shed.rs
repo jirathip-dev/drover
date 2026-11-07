@@ -447,6 +447,12 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
 
     // A DECISION is a prompt through shed's CLI (the terminal is ACP; the runtime is the fleet's), with no Enter.
     drop(calls);
+    let (none, s) = (Fake::default(), b.shed());
+    let none = shed::With(&none, s);
+    assert!(
+        herdr::agents(&On::new(&none, Some("bazzite"))).is_err(),
+        "neither answers: unreachable"
+    );
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let d = json!({"id": "q1", "agent": "sendmeter-impl-12"});
     let ask = Event::new(c.now, "sendmeter", Some(12), "needs-decision", d);
@@ -899,4 +905,75 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
             (Some("shed".into()), Some("down".into()))
         ]
     );
+}
+
+/// #601: with a shed runtime, a remote host whose herdr answers is up though shed is not installed there (its
+/// `shed connect` over ssh fails): its herdr agents count, spawn there is not `HOST_OFFLINE`, its lanes are not
+/// `host offline`, and the shed failure is one `! shed:` health row (`hosts refresh`, `doctor`).
+#[test]
+fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let d = tmpdir("shed-remote-up");
+    let c = ctx(
+        &d,
+        &shed_config(&b.sock, "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
+    );
+    let st = c.state.parent().unwrap();
+    std::fs::create_dir_all(st).unwrap();
+    let cache = json!({
+        "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": 1, "seen": 1, "up": true},
+        "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": 1, "seen": 1, "up": true},
+    });
+    std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C \
+               -oControlPersist=10m bazzite -- ";
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1",
+        "workspace": "w9", "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
+    herdsman::events::append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(12), "spawn", sp)).unwrap();
+    let f = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(
+            "herdr --machine bazzite agent list",
+            &agents(&[("sendmeter-impl-12", "working", wt, "w9:p1")]),
+        )
+        .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("git ", "")
+        .reply(&format!("{ssh}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\n");
+    let base = shed::With(&f, b.shed());
+    let on = On::new(&base, Some("bazzite"));
+    assert!(on.shed().is_some(), "shed runtime on");
+    let listed = herdr::agents(&on).expect("herdr answers there: the host is up");
+    assert_eq!(listed[0]["name"], "sendmeter-impl-12", "{listed:?}");
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let remote = herdsman::hosts::remote_agents(&cfg, &base);
+    assert_eq!(remote.len(), 1, "its herdr agents are listed: {remote:?}");
+
+    let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
+    assert!(!out.contains("HOST_OFFLINE"), "{out}");
+    // Past placement, the offline refusal and the duplicate guard: the lane's clone runs there.
+    assert!(f.called(&format!("{ssh}'git' 'clone'")), "{out} {:?}", f.calls.borrow());
+    let (code, out) = run(&c, &f, &["hosts", "refresh"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("offline") && !out.contains("unreachable"), "{out}");
+    let seen: Value = serde_json::from_str(&std::fs::read_to_string(st.join("hosts.json")).unwrap()).unwrap();
+    let health = seen["bazzite"]["health"].as_array().unwrap();
+    let shed_rows = health
+        .iter()
+        .filter(|w| w.as_str().unwrap().starts_with("! shed: shed connect failed"));
+    assert_eq!(
+        (seen["bazzite"]["up"].as_bool(), shed_rows.count()),
+        (Some(true), 1),
+        "{health:?}"
+    );
+    for _ in 0..2 {
+        assert_eq!(run(&c, &f, &["check"]).0, 0);
+    }
+    let evs = herdsman::events::read(&c.state).unwrap();
+    assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
+    let (_, status) = run(&c, &f, &["status"]);
+    assert!(!status.contains("host offline"), "{status}");
+    let (_, doc) = run(&c, &f, &["doctor"]);
+    assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
 }

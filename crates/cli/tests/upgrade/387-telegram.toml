@@ -1,0 +1,12 @@
+# Before #557: the Telegram bridge's table (#387), removed with the bridge.
+[fleet.herdsman]
+repo = "jirathip-dev/herdsman"
+local = "/tmp/herdsman"
+integration = "staging"
+
+[fleet.herdsman.role.impl]
+harness = "claude"
+
+[telegram]
+chat = -100123
+owner = 4242

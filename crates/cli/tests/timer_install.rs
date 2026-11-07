@@ -24,7 +24,12 @@ fn timer_install_logs_who_ran_it() {
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
     let e = &installs(&c)[0];
     assert_eq!(e.str("by"), Some("owner"));
-    let jobs = json!(["dev.herdsman.tick", "dev.herdsman.fast"]);
+    let jobs = json!([
+        "dev.herdsman.tick",
+        "dev.herdsman.fast",
+        "dev.herdsman.update",
+        "dev.herdsman.clean"
+    ]);
     assert_eq!((&e.data["written"], &e.data["reloaded"]), (&jobs, &json!([])));
     assert!(e.str("thread").is_none());
 

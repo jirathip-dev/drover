@@ -273,6 +273,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
+        // #592: lanes there read only their rules file; the owner removes an old copy by hand, herdsman never does.
+        let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
+        if on.exists(Path::new(&conf)) {
+            rows.push(format!(
+                "! stale fleet.toml on {name}: no longer read → rm {conf} there"
+            ));
+        }
     }
 }
 

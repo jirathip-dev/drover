@@ -38,7 +38,7 @@ export function providers(d: HostTab): string {
   return `${head('agent providers', meta, bad ? 'a' : '')}${body}<p class=pvf>secrets stay in the main host's keychain · remote lanes get theirs over ssh stdin · a conductor proposes, you tap</p>`;
 }
 
-/** Notifications & devices: push (this phone's [enable alerts]), alert devices, paired devices, notifiers, Telegram. */
+/** Notifications & devices: push (this phone's [enable alerts]), alert devices, paired devices, notifiers. */
 export function notifications(d: HostTab): string {
   const ago = (t: number) => age(Math.max(0, d.now - t));
   // #18: the button shows only in the Home Screen app (serve.js); endpoints and keys stay on the Mac.
@@ -49,16 +49,11 @@ export function notifications(d: HostTab): string {
   const how = 'tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code> on the main host';
   const pair = `<p class=mt>${d.devices.length ? `to pair another device: open the board there, ${how}` : `no paired device yet: ${how}`}</p>`;
   const notify = d.notify.length ? dl(d.notify.map(n => [n.kind, esc(n.on)])) : '<p class=mt>none: <code>[[notify]]</code> in fleet.toml</p>';
-  const tg = d.telegram;
-  const bridge = tg.on
-    ? dl([['state', `<b class=g>on</b>${tg.polled ? ` · polled ${esc(tg.polled)} ago` : ''}`], ['chat', 'set'], ['owner', 'set'], ['topics', `${tg.topics} threads`], ['token', '<span class=m>keychain · TELEGRAM_BOT_TOKEN</span>']])
-    : dl([['state', `<b class=m>off</b> <span class=mt>${tg.chat ? '<code>owner</code> is unset: the bridge stays off' : '<code>[telegram] chat</code> and <code>owner</code> in fleet.toml turn it on'}</span>`]]);
   const body = push
     + group('Alert devices', `${d.subs.length} get alerts`, subs || '<p class=mt>none yet: [enable alerts] in the home-screen app</p>')
     + group('Paired devices', `${d.devices.length} paired`, devs + pair)
-    + group('Notifiers', 'global · edit fleet.toml', notify)
-    + group('Telegram bridge', tg.on ? 'on' : 'off', bridge);
-  const meta = `push ${d.push.tone === 'g' ? 'on' : 'off'} · ${d.devices.length} device${d.devices.length === 1 ? '' : 's'} · telegram ${tg.on ? 'on' : 'off'}`;
+    + group('Notifiers', 'global · edit fleet.toml', notify);
+  const meta = `push ${d.push.tone === 'g' ? 'on' : 'off'} · ${d.devices.length} device${d.devices.length === 1 ? '' : 's'}`;
   return `${head('notifications & devices', meta)}<div class=cs>${body}</div>`;
 }
 

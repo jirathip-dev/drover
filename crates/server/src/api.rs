@@ -302,8 +302,10 @@ pub struct QueuedMsg {
 }
 
 /// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
-/// and conductor folder `dir`.
+/// and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
 pub struct ThreadPage {
+    pub id: String,
+    pub archived: bool,
     pub msgs: Vec<Msg>,
     pub older: Option<u64>,
     pub started: u64,
@@ -476,23 +478,12 @@ pub struct HostTab {
     pub subs: Vec<Sub>,
     pub devices: Vec<Paired>,
     pub notify: Vec<Notifier>,
-    pub telegram: Telegram,
 }
 
 /// #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
 pub struct Notifier {
     pub kind: String,
     pub on: String,
-}
-
-/// #440: the Telegram bridge: `on` with both `chat` and `owner` set, its `topics` (threads) and last poll's age; never
-/// the token or the chat's id.
-pub struct Telegram {
-    pub on: bool,
-    pub chat: bool,
-    pub owner: bool,
-    pub topics: usize,
-    pub polled: String,
 }
 
 /// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
