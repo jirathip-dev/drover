@@ -378,11 +378,17 @@ pub fn waiting_on(
                         head.unwrap_or_default().0
                     )
                 });
-                let what = match next {
-                    Some(_) => "review done · recording within 1 min",
-                    None => "verdict written, waiting for drive to record it",
+                // #607: a PASS refused NO_REPRO at this head says why, never "recording".
+                let refused = (events.iter().rev())
+                    .filter(|e| e.fleet == *f && e.issue == Some(n))
+                    .take_while(|e| !(e.kind == "spawn" && crate::events::checks(e)))
+                    .find(|e| e.kind == "repro-refused" && head.is_some_and(|h| e.str("sha") == Some(h.0)));
+                let what = match (&next, refused) {
+                    (Some(_), Some(e)) => format!("verdict refused NO_REPRO: {}", e.str("why").unwrap_or_default()),
+                    (Some(_), None) => "review done · recording within 1 min".into(),
+                    (None, _) => "verdict written, waiting for drive to record it".into(),
                 };
-                w("drive", what, s.last_ts, next)
+                w("drive", &what, s.last_ts, next)
             }
             None => w("none", "rev idle without a verdict (check the pane)", s.last_ts, None),
         },

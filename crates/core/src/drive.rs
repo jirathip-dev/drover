@@ -916,6 +916,12 @@ fn pass(
                     continue;
                 }
             }
+            // #607: a PASS refused NO_REPRO is never retried unchanged either; its reviewer is told once.
+            let repro =
+                (step == "verdict" && args[3] == "PASS").then(|| repro_seen(r, &events, (fleet, s.issue), &args));
+            if repro.as_ref().is_some_and(|x| x.1) {
+                continue;
+            }
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
@@ -925,6 +931,9 @@ fn pass(
             if code == Some("LANE_LIVE") && args[0] == "spawn" && last_words(fleet).contains(OLD) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
+            }
+            if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
+                repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
                 let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
@@ -1043,6 +1052,47 @@ fn no_proof(
         append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-lost", d))?;
     }
     Ok(Some(code))
+}
+
+/// #607: verdict.md's content hash, and whether a `repro-refused` since its reviewer's spawn names it at this head.
+fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&str]) -> (String, bool) {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let body = crate::hosts::On::of(r, sp).read(Path::new(args[7])).unwrap_or_default();
+    let hash = crate::devices::sha256(body.as_bytes())[..16].to_string();
+    let seen = ev.iter().any(|e| {
+        e.is("repro-refused", fleet, n)
+            && sp.is_some_and(|p| e.ts >= p.ts)
+            && e.str("sha") == Some(args[5])
+            && e.str("hash") == Some(&hash)
+    });
+    (hash, seen)
+}
+
+/// #607: log a `NO_REPRO` refusal (its why for `waiting`); a reviewer still in herdr is prompted with it once.
+fn repro_refused(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (ev, agents): (&[Event], &[Value]),
+    (fleet, n, lane): (&str, u64, &str),
+    args: &[&str],
+    hash: &str,
+) -> Result<()> {
+    let sp = ev.iter().rfind(|e| e.is("spawn", fleet, n) && crate::events::checks(e));
+    let on = crate::hosts::On::of(r, sp);
+    let why = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()?["why"].as_str().map(String::from)));
+    let why = why.unwrap_or_default();
+    let told = ev
+        .iter()
+        .any(|e| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.data["prompted"] == true);
+    let pane = sp
+        .and_then(|e| e.str("pane"))
+        .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
+    let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
+    let tell = |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+    let prompted = pane.is_some_and(tell);
+    let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
 }
 
 /// #517 #511: type `text` into `lane`'s pane (its last spawn's); true if sent.

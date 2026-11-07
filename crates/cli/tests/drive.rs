@@ -2380,6 +2380,37 @@ fn a_told_reviewers_corrected_fail_is_recorded() {
     assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
 }
 
+/// #607: a `--repro` PASS whose `Repro: run` has the command but no output blocks.
+const NO_OUTPUTS: &str = "PASS\n\nRepro: run\n```\ncargo test meter_total\n```\n";
+
+#[test]
+fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
+    let (mut c, _, r) = proofless("drive-norepro-told", NO_OUTPUTS, true);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]);
+    assert_eq!(code, 0, "{out}");
+    let told = || {
+        r.count("herdr agent prompt sendmeter-rev-12-r1 herdsman verdict refused your verdict.md: REFUSED NO_REPRO: `Repro: run` needs")
+    };
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["verdict"], "{out}");
+    assert!(out.contains("REFUSED NO_REPRO"), "{out}");
+    assert_eq!(told(), 1, "{:?}", r.calls.borrow());
+    let refused = kinds(&c, "repro-refused");
+    assert_eq!((refused.len(), refused[0].data["prompted"].as_bool()), (1, Some(true)));
+    // The same file at the same head is not tried again, nor its reviewer told twice; `waiting` says why.
+    c.now += 7200;
+    let (out, _) = drive(&c, &r);
+    assert_eq!(
+        (told(), kinds(&c, "repro-refused").len(), kinds(&c, "verdict").len()),
+        (1, 1, 0),
+        "{out}"
+    );
+    assert!(!r.called("herdr agent start sendmeter-rev"), "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(out.contains("verdict refused NO_REPRO: `Repro: run` needs"), "{out}");
+    assert!(!out.contains("recording within 1 min"), "{out}");
+}
+
 // --- #517: a lesson lane that ends with no push and no `done` ---
 
 /// A lesson lane of #12 (no PR) and a Fake that lists it `idle` (`live`) or not at all.
