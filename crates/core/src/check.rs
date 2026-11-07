@@ -592,6 +592,8 @@ pub fn clean(
     let mut failed = 0;
     let mut freed = 0;
     let mut closed = BTreeMap::new();
+    // #605: when each merged lane's agent was first seen not working.
+    let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
     let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
         .flat_map(|(name, f)| {
@@ -658,9 +660,37 @@ pub fn clean(
             writeln!(out, "keep {shown}: {why}")?;
             continue;
         }
-        let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
+        // #605: the lane's own pane, not `working` for `idle_merged_minutes`, closes through `kill`'s path first; a
+        // refused wip snapshot keeps it, reported once and never retried. Any other agent there is left alone.
+        let agent = e.str("agent").unwrap_or_default();
+        let here = host::live_in(&agents, agent, Path::new(wt));
+        let own = |a: &&Value| a["name"] == agent && a["host"].as_str() == away && a["agent_status"] != "working";
+        let key = format!("merged-idle:{agent}:{}", e.ts);
+        let refused = events
+            .iter()
+            .any(|x| x.kind == "lane-kept-dirty" && x.str("key") == Some(&key));
+        let since = (!here.is_empty() && here.iter().all(own)).then(|| *idle.entry(agent.into()).or_insert(ctx.now));
+        let left = since.map(|t| (t + cfg.limits.idle_merged_minutes * 60).saturating_sub(ctx.now));
+        let mut live = !here.is_empty();
+        let mut why_live = match left {
+            Some(m @ 1..) if !refused => format!("live agent (idle; its pane closes in {} min)", m.div_ceil(60)),
+            _ => "live agent".to_string(),
+        };
+        if left == Some(0) && !refused && !yes {
+            writeln!(out, "would close {agent}'s idle pane {pane} (work to wip/ first)")?;
+            live = false;
+        } else if left == Some(0) && !refused {
+            match kill(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
+                Ok(()) => live = false,
+                Err(err) => {
+                    why_live = format!("pane kept: {err:#}");
+                    let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
+                    fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                }
+            }
+        }
         let keep = if live {
-            Some("live agent".to_string())
+            Some(why_live)
         } else {
             if yes {
                 reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
@@ -722,6 +752,14 @@ pub fn clean(
             ),
         )?;
     }
+    if yes {
+        idle.retain(|n, _| {
+            agents
+                .iter()
+                .any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
+        });
+        crate::db::put(&ctx.state, IDLE, ctx.now, &idle)?;
+    }
     if lane.is_some() && seen.is_empty() {
         return crate::gate::refused(
             "UNSAFE_CLEAN",
@@ -738,6 +776,9 @@ pub fn clean(
     }
     Ok(())
 }
+
+/// #605: the `snapshot` row of merged lanes' idle-since times.
+const IDLE: &str = "idle-merged";
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
 pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
@@ -1328,6 +1369,7 @@ pub fn kill(
     out: &mut dyn Write,
     (agent, host): (&str, Option<&str>),
     yes: bool,
+    why: Option<&str>,
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent, host)?;
@@ -1370,7 +1412,7 @@ pub fn kill(
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        match snapshot(r, wt.unwrap_or_default(), w, "wip: kill snapshot") {
+        match snapshot(&on, wt.unwrap_or_default(), w, "wip: kill snapshot") {
             Err(Snap::Failed(e)) => {
                 return crate::gate::refused(
                     "SNAPSHOT_FAILED",
@@ -1389,8 +1431,11 @@ pub fn kill(
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
-    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip});
-    let kind = ["lane-killed", "stale-pane-killed"][usize::from(stale)];
+    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip, "why": why});
+    // #605: a merged lane's idle pane closed by `clean` is `lane-closed`.
+    let kind = why.map_or(["lane-killed", "stale-pane-killed"][usize::from(stale)], |_| {
+        "lane-closed"
+    });
     emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, e.issue, kind, d))?;
     Ok(writeln!(
         out,
@@ -1419,7 +1464,7 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             .iter()
             .any(|a| a["name"] == agent && a["pane_id"].as_str() == pane)
         {
-            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true) {
+            if let Err(e) = kill(ctx, cfg, r, out, (agent, Some(h)), true, None) {
                 writeln!(out, "stale pane {h}:{agent}: {e:#}")?;
             }
         } else {
