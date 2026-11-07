@@ -14,6 +14,11 @@ pub const SECRET: &str = "GITHUB_WEBHOOK_SECRET";
 /// GitHub's payload cap: a longer body is refused before it is read.
 pub const MAX_BODY: usize = 25 << 20;
 const EVENTS: [&str; 5] = ["pull_request", "check_suite", "check_run", "status", "push"];
+const BRANCH: [&str; 3] = [
+    "/pull_request/head/ref",
+    "/check_suite/head_branch",
+    "/check_run/check_suite/head_branch",
+];
 
 /// Each fleet's webhook secret (its own, else `all`'s); empty: webhooks are off.
 pub fn secrets(cfg: &Config, r: &dyn Runner) -> Vec<(String, String)> {
@@ -50,21 +55,10 @@ pub fn rejected(ctx: &Ctx) -> u64 {
 fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
     let s = |p: &str| v.pointer(p).and_then(Value::as_str);
     let all = |p: &str| v.pointer(p).and_then(Value::as_array).into_iter().flatten();
-    let mut branches: Vec<&str> = [
-        "/pull_request/head/ref",
-        "/check_suite/head_branch",
-        "/check_run/check_suite/head_branch",
-    ]
-    .into_iter()
-    .filter_map(s)
-    .collect();
+    let mut branches: Vec<&str> = BRANCH.into_iter().filter_map(s).collect();
     branches.extend(s("/ref").and_then(|r| r.strip_prefix("refs/heads/")));
     branches.extend(all("/branches").filter_map(|b| b["name"].as_str()));
-    let mut nums: Vec<u64> = v
-        .pointer("/pull_request/number")
-        .and_then(Value::as_u64)
-        .into_iter()
-        .collect();
+    let mut nums: Vec<u64> = v["pull_request"]["number"].as_u64().into_iter().collect();
     nums.extend(
         ["/check_suite/pull_requests", "/check_run/pull_requests"]
             .iter()
@@ -101,10 +95,7 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
         return (200, "pong".into());
     }
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
-    let repo = v
-        .pointer("/repository/full_name")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let repo = v["repository"]["full_name"].as_str().unwrap_or_default();
     let (branches, nums) = names(&v);
     let states = fold(&read(&ctx.state).unwrap_or_default());
     let mut hit = vec![];
@@ -138,9 +129,6 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
     if let Some((ts, snap)) = crate::db::get::<crate::snapshot::Snapshot>(&ctx.state, "board") {
         let _ = crate::db::put(&ctx.state, "board", ts, &snap);
     }
-    let done: Vec<String> = hit
-        .iter()
-        .map(|(_, s, _)| format!("{} #{}", s.fleet, s.issue))
-        .collect();
+    let done: Vec<String> = hit.iter().map(|h| format!("{} #{}", h.1.fleet, h.1.issue)).collect();
     (200, format!("refreshed {}", done.join(", ")))
 }

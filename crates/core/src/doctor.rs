@@ -163,10 +163,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     // #626: GitHub webhooks need their secret; the refused deliveries are only counted.
     let n = crate::webhook::rejected(ctx);
-    let bad = if n > 0 {
-        format!(" · {n} refused (bad signature)")
-    } else {
-        String::new()
+    let bad = match n {
+        0 => String::new(),
+        n => format!(" · {n} refused (bad signature)"),
     };
     let on = !crate::webhook::secrets(cfg, r).is_empty();
     let fix = "herdsman secret request <thread> GITHUB_WEBHOOK_SECRET --why 'GitHub webhooks' (docs/serve.md)";
