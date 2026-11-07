@@ -59,10 +59,10 @@ pub fn tokens(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let mut rows = vec![];
     match Config::load(&ctx.config) {
         Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
-        Ok(_) if !crate::runner::keys_helper().is_file() => {
-            let fix = crate::runner::keychain_fix("herdsman/*");
-            rows.push(format!("✗ keys — no herdsman-keys helper → {fix}"));
-        }
+        Ok(_) if !crate::runner::keys_helper().is_file() => rows.push(format!(
+            "✗ keys — no herdsman-keys helper → {}",
+            crate::runner::keychain_fix("herdsman/*")
+        )),
         Ok(cfg) => account_rows(&cfg, r, &mut rows),
     }
     writeln!(out, "{}", rows.join("\n"))?;
@@ -74,22 +74,17 @@ fn account_rows(cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let svc = crate::secret::service("all", var);
         let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
         let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
-        let got = r.secret(&svc);
-        // #548: an item the Keychain guards with a dialog gets its one-time fix.
-        if got.as_ref().is_err_and(|e| {
-            e.downcast_ref::<crate::gate::Refusal>()
-                .is_some_and(|f| f.code == "KEYCHAIN_LOCKED")
-        }) {
-            let fix = crate::runner::keychain_fix(&svc);
-            row(
-                rows,
-                false,
-                '✗',
-                &format!("account {name} — {svc} prompts for Keychain access → {fix}"),
-            );
-            continue;
+        match r.secret(&svc) {
+            // #548: an item the Keychain guards with a dialog gets its one-time fix.
+            Err(e)
+                if e.downcast_ref::<crate::gate::Refusal>()
+                    .is_some_and(|f| f.code == "KEYCHAIN_LOCKED") =>
+            {
+                let fix = crate::runner::keychain_fix(&svc);
+                rows.push(format!("✗ account {name} — {svc} prompts for Keychain access → {fix}"));
+            }
+            got => row(rows, got.is_ok_and(|v| v.is_some()), bad, &line),
         }
-        row(rows, got.is_ok_and(|v| v.is_some()), bad, &line);
     }
 }
 

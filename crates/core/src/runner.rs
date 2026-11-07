@@ -105,27 +105,19 @@ impl Runner for Real {
 /// #631: the `herdsman-keys` helper the store goes through: `$HERDSMAN_KEYS` (the install gates), else beside this
 /// binary. Its cdhash outlasts herdsman builds, so the Keychain's one approval does too.
 pub fn keys_helper() -> std::path::PathBuf {
-    std::env::var_os("HERDSMAN_KEYS").map_or_else(
-        || {
-            let exe = std::env::current_exe()
-                .and_then(std::fs::canonicalize)
-                .unwrap_or_default();
-            exe.with_file_name("herdsman-keys")
-        },
-        Into::into,
-    )
+    let exe = || {
+        std::env::current_exe()
+            .and_then(std::fs::canonicalize)
+            .unwrap_or_default()
+    };
+    std::env::var_os("HERDSMAN_KEYS").map_or_else(|| exe().with_file_name("herdsman-keys"), Into::into)
 }
 
 /// #631: `herdsman-keys <cmd> <svc>` (`input` on stdin) within `KEYCHAIN_SECS`; exit 1 is None, 3 or a timeout is
 /// `KEYCHAIN_LOCKED`.
 fn keys(r: &dyn Runner, cmd: &str, svc: &str, input: &str) -> Result<Option<String>> {
-    let k = keys_helper();
-    let o = r.run_for(
-        &k.to_string_lossy(),
-        &argv(&[cmd, svc]),
-        input,
-        Duration::from_secs(KEYCHAIN_SECS),
-    )?;
+    let (k, t) = (keys_helper(), Duration::from_secs(KEYCHAIN_SECS));
+    let o = r.run_for(&k.to_string_lossy(), &argv(&[cmd, svc]), input, t)?;
     match o.code {
         0 => Ok(Some(o.stdout)),
         1 => Ok(None),
@@ -181,14 +173,11 @@ fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T 
 
 /// #631: the one-time fix for `svc`: authorise `herdsman-keys`, whose cdhash lasts across herdsman builds.
 pub fn keychain_fix(svc: &str) -> String {
-    let k = keys_helper();
-    if !k.is_file() {
-        return format!(
-            "install {} (herdsman self-update or scripts/install-gate.sh; docs/troubleshooting.md §3)",
-            k.display()
-        );
+    let path = keys_helper();
+    let k = path.display();
+    if !path.is_file() {
+        return format!("install {k} (herdsman self-update or scripts/install-gate.sh; docs/troubleshooting.md §3)");
     }
-    let k = k.display();
     format!(
         "authorise {k} once: codesign -dvvv {k} 2>&1 | grep CDHash; security set-generic-password-partition-list \
          -S apple-tool:,apple:,unsigned:,cdhash:<CDHash> -s {svc} ~/Library/Keychains/login.keychain-db (asks the \
