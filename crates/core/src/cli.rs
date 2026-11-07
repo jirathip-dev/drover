@@ -217,6 +217,9 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// #668: the queue-wide line-cap view: total, cap and headroom at integration, each open PR's `src/ net`, the queued
+    /// issues with no PR, the projected total and the one raise to ask for
+    Cap { fleet: String },
     /// Poll `herdsman pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout
     Wait {
         fleet: String,
@@ -1658,6 +1661,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(1);
                     }
                 }
+                Cmd::Cap { fleet } => return crate::overlap::cap_view(ctx, &cfg, r, &fleet, out),
                 Cmd::Wait {
                     fleet,
                     issue,
@@ -1841,6 +1845,13 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         Ok(r) => r,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
+    // #668: an impl lane never edits the cap file, but for the conductor-filed raise (its issue titled `cap: …`).
+    let mut it = lane.split(':');
+    let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
+    let cap = rules.builds
+        && !n
+            .and_then(|n| crate::gh::cached_title(ctx, fleet, n))
+            .is_some_and(|t| t.starts_with("cap:"));
     let dir = |p: &PathBuf| p.parent().unwrap_or(p).to_string_lossy().into_owned();
     let h = home();
     let mut paths = vec![
@@ -1866,6 +1877,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         own,
         groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
+        cap,
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
