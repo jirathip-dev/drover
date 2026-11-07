@@ -1475,19 +1475,7 @@ fn kill_as(
     let st = e.issue.and_then(|n| fold(&events).remove(&(e.fleet.clone(), n)));
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
-    let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt.unwrap_or_default()][..], a].concat());
-    let (dirty, ahead) = match wt {
-        Some(_) => {
-            let st = git(&["status", "--porcelain"])?;
-            (
-                changes(&st),
-                git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?
-                    .trim()
-                    .parse()?,
-            )
-        }
-        None => (0, 0),
-    };
+    let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
     let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
@@ -1509,22 +1497,7 @@ fn kill_as(
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        match snapshot(&on, wt.unwrap_or_default(), w, "wip: kill snapshot") {
-            Err(Snap::Failed(e)) => {
-                return crate::gate::refused(
-                    "SNAPSHOT_FAILED",
-                    format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
-                )
-            }
-            Err(Snap::Secret(hit)) => {
-                return crate::gate::refused(
-                    "SECRET_IN_WIP",
-                    format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
-                )
-            }
-            Err(Snap::Push(e)) => return Err(e),
-            Ok(()) => {}
-        }
+        save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
@@ -1574,6 +1547,42 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     Ok(())
+}
+
+/// #649: `wt`'s dirty files and unpushed commits, read on the lane's own host.
+fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
+    let git = |a: &[&str]| ok(on, "git", &[&["-C", wt][..], a].concat());
+    let dirty = changes(&git(&["status", "--porcelain"])?);
+    let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
+    Ok((dirty, ahead.trim().parse().unwrap_or(0)))
+}
+
+/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
+    match snapshot(on, wt, w, msg) {
+        Err(Snap::Failed(e)) => crate::gate::refused(
+            "SNAPSHOT_FAILED",
+            format!("{agent}: wip snapshot failed ({e:#}); index restored, nothing pushed, pane kept"),
+        ),
+        Err(Snap::Secret(hit)) => crate::gate::refused(
+            "SECRET_IN_WIP",
+            format!("{agent}'s unpushed diff has a secret ({hit}); nothing pushed, pane kept"),
+        ),
+        Err(Snap::Push(e)) => crate::gate::refused(
+            "SNAPSHOT_FAILED",
+            format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
+        ),
+        Ok(()) => Ok(()),
+    }
+}
+
+/// #649: a superseded lane's dirty or unpushed work in `wt`, saved to `wip/` on its host first; that branch, if any.
+pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<String>> {
+    if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
+        return Ok(None);
+    }
+    let w = wip_branch(ctx, on.r, agent);
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|()| Some(w))
 }
 
 /// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
