@@ -1,10 +1,16 @@
 name: sim
 # #680: the simulation's long random batch, nightly (owner, q837). A failing seed joins the fixed set
 # (crates/cli/tests/sim/seeds.rs) with its fix; the PR job runs that set in `cargo test`.
+# #685: the fleet metrics over 200 seeds as the `sim-metrics` artifact (metrics.json) and the job summary's table,
+# beside the last staging run's; a metric over 20% worse is a warning there, never a failure.
 on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   sim:
@@ -15,5 +21,28 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - name: "the last staging baseline (none on the first run)"
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow sim.yml --branch staging --status completed \
+            --limit 20 --json databaseId --jq '.[].databaseId'); do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" -n sim-metrics -D baseline && break
+          done
+      - name: "fleet metrics over 200 seeds"
+        continue-on-error: true
+        env:
+          HERDSMAN_SIM_OUT: sim-metrics
+        run: |
+          test -f baseline/metrics.json && export HERDSMAN_SIM_BASELINE="$PWD/baseline/metrics.json"
+          just sim --metrics 200
+          cat sim-metrics/metrics.md >> "$GITHUB_STEP_SUMMARY"
+          grep '^WARNING' sim-metrics/metrics.md | sed 's/^/::warning::/' || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sim-metrics
+          path: sim-metrics/metrics.json
+          if-no-files-found: warn
       - name: "2000 random seeds (each failure prints its seed, trace and replay line)"
         run: just sim 2000
