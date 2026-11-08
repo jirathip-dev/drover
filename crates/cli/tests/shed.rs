@@ -990,16 +990,12 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
     b.add("sendmeter-impl-13", gone);
     b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
     let d = tmpdir("shed-trim");
-    let root = d.join("builds");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
-        &format!(
-            "build_root = \"{}\"\nbuild_budget_gb = {}",
-            root.display(),
-            2000.0 / 1_073_741_824.0
-        ),
+        &format!("build_budget_gb = {}", 2000.0 / 1_073_741_824.0),
     );
     let c = ctx(&d, &cfg);
+    let root = c.worktrees.join(".build"); // #630: the root's build folder
     let scratch = |agent: &str, n: u64, at: u64| {
         let w = c.worktrees.join("sendmeter").join(agent);
         std::fs::create_dir_all(&w).unwrap();
