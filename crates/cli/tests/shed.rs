@@ -1124,7 +1124,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
 }
 
 /// #634: over `build_budget_gb`, drive's pass never trims a running shed ACP lane's scratch (shed lists it, herdr does
-/// not); an exited shed lane's goes as before, its line naming why.
+/// not), nor (#630) its build folder's profiles; an exited shed lane's goes as before, its line naming why.
 #[test]
 fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
     let b = Server::new(shed::proto::VERSION, vec![]);
@@ -1135,16 +1135,12 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
     b.add("sendmeter-impl-13", gone);
     b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
     let d = tmpdir("shed-trim");
-    let root = d.join("builds");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
-        &format!(
-            "build_root = \"{}\"\nbuild_budget_gb = {}",
-            root.display(),
-            2000.0 / 1_073_741_824.0
-        ),
+        &format!("build_budget_gb = {}", 2000.0 / 1_073_741_824.0),
     );
     let c = ctx(&d, &cfg);
+    let root = c.worktrees.join(".build"); // #630: the root's build folder
     let scratch = |agent: &str, n: u64, at: u64| {
         let w = c.worktrees.join("sendmeter").join(agent);
         std::fs::create_dir_all(&w).unwrap();
@@ -1163,12 +1159,22 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         scratch("sendmeter-impl-12", 12, 1_000),
         scratch("sendmeter-impl-13", 13, 2_000),
     );
+    // #630: and its own build folder's profile (`<root>/.build/<agent>/<profile>`), older still.
+    let profile = root.join("sendmeter-impl-12/release");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join(".cargo-lock"), "").unwrap();
+    std::fs::write(profile.join("blob"), vec![0u8; 4096]).unwrap();
+    std::fs::File::open(&profile)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(500))
+        .unwrap();
     let f = Fake::default().reply("herdr agent list", NO_AGENTS);
     let r = shed::With(&f, b.shed());
     let mut out = vec![];
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
+    assert!(profile.exists(), "a running lane's own build is never trimmed: {out}");
     assert!(
         live.exists(),
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"

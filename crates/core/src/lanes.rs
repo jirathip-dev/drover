@@ -36,6 +36,8 @@ pub struct Lane {
     pub kept: Option<String>,
     /// #260: its worktree, from the spawn.
     pub worktree: Option<String>,
+    /// #630: its workspace root, from the spawn.
+    pub root: Option<String>,
     /// #302: `on <entry> (<entries> resting until 18:40)` when a `fallback` entry carries on.
     pub resting: Option<String>,
     /// #422: a conductor's chat thread (`t6`); with no pane it is `asleep`.
@@ -178,6 +180,11 @@ impl Lane {
     pub fn at(&self) -> String {
         self.host.clone().unwrap_or_else(|| "local".into())
     }
+    /// #630: its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
+    pub fn unsaved(&self, r: &dyn Runner) -> Option<(u64, u64)> {
+        let wt = self.worktree.as_deref().filter(|_| self.thread.is_none())?;
+        crate::spawn::unsaved(&self.on(r), Path::new(wt))
+    }
     /// #157: `r` on the lane's host.
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
@@ -209,6 +216,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         host: s("host").or(l.host),
         machine: s("machine").or(l.machine),
         worktree: s("worktree"),
+        root: s("root"),
         resting: s("resting"),
         runtime: s("runtime").unwrap_or_else(|| crate::herdr::BIN.into()),
         ..l

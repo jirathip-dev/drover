@@ -226,9 +226,16 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         flag();
         return Ok(());
     };
+    let start = crate::now();
     for _ in 0..30 {
+        // #680: each pass decides at its own time: under the kick's start time a reviewer it spawned looked already
+        // told of its refusal and was superseded again every pass (#370's 25 supersedes in one logged second).
+        let ctx = &Ctx {
+            now: ctx.now + crate::now().saturating_sub(start),
+            ..ctx.clone()
+        };
         // #333: a running kick's lease stays unexpired.
-        let expires_at = crate::now().max(ctx.now) + ttl;
+        let expires_at = ctx.now + ttl;
         crate::db::renew(
             &ctx.state,
             &k.1,
@@ -745,6 +752,36 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         }
         let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
         let round = &mine[from.map_or(0, |i| i + 1)..at];
+        // #679: a `LANE_ENDS` whose lane exited right after an idle trim killed its agent gets one respawn in the
+        // same worktree (its work is there): back to the state before the park.
+        let exited = |e: &Event| e.kind == "lane-state" && e.str("state") == Some("gone");
+        let trimmed = round
+            .windows(2)
+            .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+        let again = mine
+            .iter()
+            .any(|(_, e)| e.kind == "repaired" && e.data["trimmed"] == true);
+        if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
+            let Some(was) = fold(&events[..mine[at].0])
+                .remove(&(s.fleet.clone(), s.issue))
+                .map(|b| b.state)
+            else {
+                continue;
+            };
+            writeln!(
+                out,
+                "{} #{} repaired: back to {was} (its lane ended after an idle trim)",
+                s.fleet, s.issue
+            )?;
+            let why = "the lane ended after an idle trim killed its agent: one respawn in its worktree";
+            let d = json!({"code": "LANE_ENDS", "state": was, "reason": why, "trimmed": true});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+            )?;
+            continue;
+        }
         let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
         let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
             continue;

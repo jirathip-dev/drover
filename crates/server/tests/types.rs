@@ -31,6 +31,7 @@ macro_rules! each {
             LaneSection,
             LaneRepo,
             LaneRow,
+            LaneUnsaved,
             LaneNow,
             ChatTab,
             ChatRepo,
@@ -102,6 +103,7 @@ macro_rules! each {
             IssueState,
             Waiting,
             hosts::Seen,
+            herdsman_server::roots::Root,
             hosts::Row,
             Value
         )
@@ -269,6 +271,7 @@ fn serde_json_fits_the_types() {
         LaneSection,
         LaneRepo,
         LaneRow,
+        LaneUnsaved,
         LaneNow,
         ChatTab,
         ChatRepo,

@@ -63,7 +63,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
+            ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
                 let (fleet, n) = x[6..].split_once('/').unwrap_or_default();
@@ -95,7 +95,7 @@ impl Server<'_> {
             }
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
-            ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
+            ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
@@ -592,4 +592,64 @@ pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
         })
         .collect();
     Events { seq, refresh, list }
+}
+
+/// #630: each host card's workspace roots (`hosts.json`), a `root` row each: path, state and free space.
+fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+    let seen = crate::hosts::cached(ctx);
+    for c in &mut tab.hosts {
+        for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {
+            let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+            let free = r.free_gb.map(|g| format!("{g:.0} GB free"));
+            c.rows.push(crate::api::Cell {
+                k: "root".into(),
+                t: t.into(),
+                text: r.path.clone(),
+                notes: [Some(r.state.clone()), free].into_iter().flatten().collect(),
+                ..crate::api::Cell::default()
+            });
+        }
+    }
+    tab
+}
+
+impl Server<'_> {
+    /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
+    fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
+        let events = shared(&ctx.state).unwrap_or_default();
+        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
+        let r = self.cached(ctx.now, 30);
+        let rows = tab
+            .sections
+            .iter_mut()
+            .flat_map(|s| &mut s.repos)
+            .flat_map(|g| &mut g.lanes);
+        for row in rows {
+            let Some(l) = all.iter().find(|l| l.name == row.name) else {
+                continue;
+            };
+            let u = l.unsaved(&r);
+            let more = [
+                l.root.as_ref().map(|r| format!("root {r}")),
+                crate::spawn::unsaved_text(u),
+            ];
+            for m in more.into_iter().flatten() {
+                row.facts = [&row.facts[..], &m]
+                    .into_iter()
+                    .filter(|p| !p.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+            let (root, dirty, unpushed) = (l.root.clone(), u.map(|u| u.0), u.map(|u| u.1));
+            let name = row.name.clone();
+            tab.unsaved.push(crate::api::LaneUnsaved {
+                name,
+                root,
+                dirty,
+                unpushed,
+            });
+        }
+        tab
+    }
 }
