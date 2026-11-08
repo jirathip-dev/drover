@@ -106,7 +106,8 @@ fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Val
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
-        "read" => Ok(json!({"text": format!("screen of {name}")})),
+        // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
+        "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),
         "wait" => {
             let outcome = if name == "slow" { "timeout" } else { "matched" };
@@ -907,6 +908,53 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     );
 }
 
+/// #603: a fleet-only `shed-acp` runtime (the board handed a runner with no shed, as `service --board` does): the
+/// Lanes tab lists shed's running lane live, with its shed state, never dead, parked or gone.
+#[test]
+fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let c = ctx(&tmpdir("acp-lanes-tab"), &acp_config(&b.sock, "claude", true));
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(s, "GET /api/v1/lanes HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut s, &mut body).unwrap();
+    let v: Value = serde_json::from_str(body.split_once("\r\n\r\n").expect(&body).1).expect(&body);
+    let row = v["sections"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{v}"))
+        .iter()
+        .flat_map(|s| {
+            s["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |r| (s["name"].clone(), r))
+        })
+        .flat_map(|(sec, r)| {
+            r["lanes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |l| (sec.clone(), l.clone()))
+        })
+        .find(|(_, l)| l["name"] == "sendmeter-impl-12")
+        .unwrap_or_else(|| panic!("{v}"));
+    assert_eq!(
+        (row.0.as_str(), row.1["state"].as_str(), row.1["gone"].as_bool()),
+        (Some("working"), Some("working"), Some(false)),
+        "{v}"
+    );
+}
+
 /// #601: with a shed runtime, a remote host whose herdr answers is up though shed is not installed there (its
 /// `shed connect` over ssh fails): its herdr agents count, spawn there is not `HOST_OFFLINE`, its lanes are not
 /// `host offline`, and the shed failure is one `! shed:` health row (`hosts refresh`, `doctor`).
@@ -953,7 +1001,11 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
     assert!(!out.contains("HOST_OFFLINE"), "{out}");
     // Past placement, the offline refusal and the duplicate guard: the lane's clone runs there.
-    assert!(f.called(&format!("{ssh}'git' 'clone'")), "{out} {:?}", f.calls.borrow());
+    assert!(
+        f.called(&format!("{ssh}'sh' '-c' 'git clone")),
+        "{out} {:?}",
+        f.calls.borrow()
+    );
     let (code, out) = run(&c, &f, &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains("offline") && !out.contains("unreachable"), "{out}");
@@ -976,6 +1028,154 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, doc) = run(&c, &f, &["doctor"]);
     assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
+    // #647 amendment A: a `!` row, never `✗ unreachable`.
+    assert!(
+        doc.contains("\n! host bazzite shed: ") && !doc.contains("unreachable"),
+        "{doc}"
+    );
+}
+
+/// #666: shed's CLI where a `shed send` lands: the ACP session's transcript then shows the turn.
+struct Lands<'a>(&'a Fake, Terms);
+
+impl Runner for Lands<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog == "shed" && args[0] == "send" {
+            let mut t = self.1.lock().unwrap();
+            t.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #666 amendment A: herdsman-rev-603-r2 sat 8 h, its shed session `running` with an empty transcript: the brief never
+/// landed as its first prompt (the spawn's `shed send` was dropped). Past the start window drive sends it again, once.
+#[test]
+fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let lane = "sendmeter-rev-12-r1";
+    b.add(
+        lane,
+        json!({"fleet": "sendmeter", "issue": "12", "role": "rev", "harness": "claude"}),
+    );
+    {
+        let mut terms = b.terms.lock().unwrap();
+        let t = terms.get_mut(lane).unwrap();
+        (t["acp"], t["reported"], t["text"]) = (json!("claude-acp"), Value::Null, json!(""));
+    }
+    let c = ctx(&tmpdir("acp-dropped"), &acp_config(&b.sock, "claude", true));
+    let head = "a".repeat(40);
+    let wt = c.worktrees.join("sendmeter/rev-12-r1");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join(".brief.md"), "# Brief — review #12\n").unwrap();
+    let ev = |ts: u64, kind: &str, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    };
+    ev(
+        10,
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"}),
+    );
+    ev(20, "pushed", json!({"sha": head}));
+    let t0 = c.now - 60;
+    ev(
+        t0,
+        "spawn",
+        json!({"role": "rev", "check": true, "agent": lane, "pane": lane, "worktree": wt, "branch": "rev-12-r1",
+            "sha": head, "runtime": "shed", "confirmed": true}),
+    );
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "mergeable": "MERGEABLE", "statusCheckRollup": []});
+    let f = Fake::default()
+        .reply("gh pr view issue-12", &pr.to_string())
+        .reply("git -C", "")
+        .reply("shed send", "");
+    let r = Lands(&f, b.terms.clone());
+    let at = |s: u64| herdsman::Ctx { now: s, ..c.clone() };
+    let sends = || f.count(&format!("shed send {lane}"));
+    let drive = |c: &herdsman::Ctx| {
+        let (code, out) = run(c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+        out
+    };
+    drive(&c);
+    assert_eq!(sends(), 0, "inside the start window");
+    let out = drive(&at(t0 + 601));
+    assert_eq!(sends(), 1, "{out} {:?}", f.calls.borrow());
+    assert!(
+        f.called(&format!("shed send {lane} # Brief — review #12")),
+        "the brief itself"
+    );
+    let ev = herdsman::events::read(&c.state).unwrap();
+    assert!(
+        ev.iter()
+            .any(|e| e.kind == "start-resent" && e.str("agent") == Some(lane)),
+        "{out}"
+    );
+    // It landed this time: the session works on; nothing is sent again, superseded or escalated.
+    drive(&at(t0 + 1202));
+    assert_eq!(sends(), 1);
+    let ev = herdsman::events::read(&c.state).unwrap();
+    assert!(
+        !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
+        "{ev:?}"
+    );
+}
+
+/// #634: over `build_budget_gb`, drive's pass never trims a running shed ACP lane's scratch (shed lists it, herdr does
+/// not); an exited shed lane's goes as before, its line naming why.
+#[test]
+fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["acp"] = json!("claude-acp");
+    let mut gone = lane_labels();
+    gone["issue"] = json!("13");
+    b.add("sendmeter-impl-13", gone);
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
+    let d = tmpdir("shed-trim");
+    let root = d.join("builds");
+    let cfg = CONFIG.replace(
+        "build_root = \"\"",
+        &format!(
+            "build_root = \"{}\"\nbuild_budget_gb = {}",
+            root.display(),
+            2000.0 / 1_073_741_824.0
+        ),
+    );
+    let c = ctx(&d, &cfg);
+    let scratch = |agent: &str, n: u64, at: u64| {
+        let w = c.worktrees.join("sendmeter").join(agent);
+        std::fs::create_dir_all(&w).unwrap();
+        let ev = json!({"role": "impl", "agent": agent, "worktree": w, "pane": agent, "workspace": agent});
+        herdsman::events::append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", ev)).unwrap();
+        let p = root.join(".scratch").join(agent);
+        std::fs::create_dir_all(p.join("target")).unwrap();
+        std::fs::write(p.join("target/blob"), vec![0u8; 4096]).unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(at);
+        for f in [p.join("target/blob"), p.join("target"), p.clone()] {
+            std::fs::File::open(&f).unwrap().set_modified(at).unwrap();
+        }
+        p
+    };
+    let (live, exited) = (
+        scratch("sendmeter-impl-12", 12, 1_000),
+        scratch("sendmeter-impl-13", 13, 2_000),
+    );
+    let f = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = shed::With(&f, b.shed());
+    let mut out = vec![];
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        live.exists(),
+        "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
+    );
+    assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
+    let line = format!("builds: trimmed {} ", exited.display());
+    assert!(out.contains(&line) && out.contains("no live agent"), "{out}");
 }
 
 /// #608: a shed-acp fleet's thread, its conductor's events of `kind`.

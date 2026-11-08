@@ -900,3 +900,53 @@ fn cap_check_reports_web_lines_without_capping_them() {
         );
     }
 }
+
+/// #668: `herdsman cap <fleet>` sums every open PR's `src/ net` (its body's, else its measured diff) onto integration's
+/// total, lists the queued issues with no PR and proposes one raise to the projected total plus margin.
+#[test]
+fn cap_prints_the_queue_wide_view() {
+    let (_d, seed, c, _) = repos("cap-view");
+    std::fs::create_dir_all(seed.join("src")).unwrap();
+    std::fs::create_dir_all(seed.join("ci")).unwrap();
+    std::fs::write(
+        seed.join("ci/cap.toml"),
+        "[fleet.sendmeter]\nline_cap = 1000\nwarn_within = 100\n",
+    )
+    .unwrap();
+    commit(&seed, "src/a.rs", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "staging");
+    git(&seed, &["checkout", "-q", "-B", "issue-4", "staging"]);
+    commit(&seed, "src/b.rs", "1\n2\n3\n", "issue-4");
+    git(&seed, &["checkout", "-q", "staging"]);
+    let pr = |n: u64, body: &str| {
+        json!({"number": 10 + n, "state": "OPEN", "baseRefName": "staging", "body": body}).to_string()
+    };
+    let r = Mixed(
+        Fake::default()
+            .reply(
+                "gh pr view issue-1",
+                &pr(1, "## Lines\nsrc/ net +120 (budget +100): the parser"),
+            )
+            .reply("gh pr view issue-2", &pr(2, "src/ net +1,300 (budget +900)"))
+            .reply("gh pr view issue-3", &pr(3, "Closes #3. src/ net -20 (budget +0)"))
+            .reply("gh pr view issue-4", &pr(4, "no figure here")),
+    );
+    assert_eq!(
+        run(&c, &r, &["queue", "sendmeter", "add", "1", "2", "3", "4", "9"]).0,
+        0
+    );
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: 10 / cap 1000 at staging",
+        "headroom 990",
+        "  #1 (PR #11): +120 (body)",
+        "  #2 (PR #12): +1300 (body)",
+        "  #3 (PR #13): -20 (body)",
+        "  #4 (PR #14): +3 (measured)",
+        "queued, no PR: #9\n",
+        "sum of open PRs: +1403; projected total 1413 / cap 1000, headroom -413",
+        "raise to 1513 in one conductor-filed issue (recommended) 2. trim",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}

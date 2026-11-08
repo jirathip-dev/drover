@@ -380,6 +380,13 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let v = crate::timer::herdr_versions(r).context("no herdr server here")?.0;
     let sh = |s: &str| on.run("sh", &argv(&["-c", &format!("{SH}{s}")]));
     let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
+    // #647: a failed step's command, exit code and last 20 lines of output, shown and logged.
+    let fail = |what: &str, cmd: &str, o: &crate::runner::Out| {
+        let tail = crate::lanes::tail(&format!("{}{}", o.stdout, o.stderr), 20).join("\n");
+        let d = json!({"step": what, "cmd": cmd, "code": o.code, "tail": tail});
+        let _ = log(ctx, cfg, "host-bootstrap", name, d);
+        format!("{name}: {what}: `{cmd}` exit {}:\n{tail}", o.code)
+    };
     let mut step = |line: &str| -> Result<()> {
         let [what, check, install] =
             <[&str; 3]>::try_from(line.splitn(3, '\t').collect::<Vec<_>>()).unwrap_or_default();
@@ -389,8 +396,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         // herdr's install is `herdr machine add` from here: this host's version there.
         let add = || r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]));
         let o = if install.is_empty() { add()? } else { sh(install)? };
-        let err = o.stderr.lines().last().unwrap_or_default().to_string();
-        ensure!(pass(check), "{name}: {what} installed, `{check}` fails: {err}");
+        let (cmd, o) = if o.code == 0 { (check, sh(check)?) } else { (install, o) };
+        ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
@@ -408,24 +415,25 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))
         .collect::<Result<Vec<_>>>()?;
     let p = panes.join(" ");
-    ensure!(
-        p.is_empty(),
-        "{name}: log in in pane {p} there (herdr or the board), then bootstrap again"
-    );
+    let again = "there (herdr or the board), then bootstrap again";
+    ensure!(p.is_empty(), "{name}: log in in pane {p} {again}");
     step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
     let tags = [h.tags.clone(), tags].concat();
     for f in cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t))) {
-        let l = crate::hosts::under(&f.local, Some(&home));
-        step(&format!(
-            "clone {0}\ttest -d '{1}/.git'\tgit clone https://github.com/{0}.git '{1}'",
-            f.repo,
-            l.display()
-        ))?;
+        let l = crate::hosts::under(&f.local, Some(&home)).display().to_string();
+        let clone = crate::spawn::clone_sh(&f.repo, &f.integration, &l);
+        step(&format!("clone {}\ttest -d '{l}/.git'\t{clone}", f.repo))?;
     }
-    // #592: no fleet.toml there (spawn syncs each lane's profile); an old one still gets its sync.
-    step(&format!(
-        "profiles sync\ttest ! -e '{conf}' || '{exe}' profiles sync >/dev/null\ttrue"
-    ))?;
+    // #592: no fleet.toml there; #647: an old bootstrap's (`[fleet.*]`, `[hosts.<it>]`) removed, another synced.
+    let mine = |t: &toml::Table| Some(t.len() == 2 && t.contains_key("fleet") && t.get("hosts")?.get(name).is_some());
+    let p = std::path::Path::new(&conf);
+    if on.read(p).and_then(|t| mine(&t.parse().ok()?)) == Some(true) {
+        on.remove(p)?;
+    }
+    let sync = format!("test ! -e '{conf}' || '{exe}' profiles sync");
+    let o = sh(&sync)?;
+    ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
+    writeln!(out, "✓ profiles sync — there")?;
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)

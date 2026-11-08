@@ -458,6 +458,12 @@ fn only_a_conductor_runs_timer_install() {
         assert!(!run(Some(lane), "herdsman timer status").contains("REFUSED"), "{lane}");
     }
     assert!(run(Some("synergy:-:conductor"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
+    // #646: a lane or conductor lists wip branches; deleting them is the owner's run card.
+    for lane in ["synergy:12:impl", "synergy:-:conductor"] {
+        assert_eq!(run(Some(lane), "herdsman wip prune synergy --dry-run"), "", "{lane}");
+        let out = run(Some(lane), "herdsman wip prune synergy");
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
+    }
 }
 
 /// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
@@ -1393,4 +1399,39 @@ fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() 
             assert_eq!(run(lane, cmd), "", "{lane} {cmd}");
         }
     }
+}
+
+/// #668: an impl lane never writes `ci/cap.toml` (an edit, a writer's argument, a redirection's target); reading it,
+/// or a check that names it, passes. The conductor-filed raise (its issue titled `cap: …`) may edit it.
+#[test]
+fn impl_lane_never_edits_the_cap_file() {
+    let d = tmpdir("hook-cap");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let lane = |n: &str| [("HERDSMAN_LANE", Some(format!("sendmeter:{n}:impl")))];
+    let call = |n: &str, tool: &str, ti: Value| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti});
+        let vars = lane(n);
+        let vars: Vec<(&str, Option<&str>)> = vars.iter().map(|(k, v)| (*k, v.as_deref())).collect();
+        hook_at(&d, &d, &vars, "impl", &input.to_string())
+    };
+    let bash = |n: &str, c: &str| call(n, "Bash", json!({"command": c}));
+    let refused = |out: String| out.contains("REFUSED CAP_FILE");
+    assert!(refused(call("24", "Edit", json!({"file_path": "/w/ci/cap.toml"}))));
+    assert!(refused(call("24", "Write", json!({"file_path": "ci/cap.toml"}))));
+    assert!(refused(bash("24", "sed -i '' 's/35500/36000/' ci/cap.toml")));
+    assert!(refused(bash("24", "printf x > ci/cap.toml")));
+    for ok in [
+        "cat ci/cap.toml",
+        "herdsman cap-check --config ci/cap.toml > cap.log 2>&1",
+    ] {
+        assert_eq!(bash("24", ok), "", "{ok}");
+    }
+    assert_eq!(call("24", "Edit", json!({"file_path": "/w/src/a.rs"})), "");
+    // The raise: its cached issue title starts `cap:`.
+    let cache = d.join("state/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let spec = json!({"title": "cap: raise the src/ line cap to 36,000", "body": ""});
+    std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
+    assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
+    assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
 }

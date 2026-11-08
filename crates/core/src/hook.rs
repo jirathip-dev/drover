@@ -21,6 +21,8 @@ pub struct Policy {
     pub groups: Vec<String>,
     /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
+    /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the conductor-filed raise).
+    pub cap: bool,
 }
 
 /// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
@@ -82,6 +84,11 @@ const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
 
+/// #668: the repo's line cap file; one conductor-filed issue raises it for the whole queue.
+pub const CAP_FILE: &str = "ci/cap.toml";
+pub const NO_CAP_EDIT: &str = "REFUSED CAP_FILE: a lane never edits ci/cap.toml; when your PR would cross the cap, \
+                               run `herdsman cap <fleet>` and ask with its view (#668)";
+
 /// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
                                  '& echo $! > f', stop with kill \"$(cat f)\"";
@@ -132,6 +139,9 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
+    if p.cap && file.ends_with(CAP_FILE) {
+        return Some(NO_CAP_EDIT.into());
+    }
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
             "{file} is protected ({pp}); change it only through `herdsman` (e.g. `herdsman set`)"
@@ -231,6 +241,11 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .collect();
         let writer = t.iter().any(|w| WRITERS.contains(w))
             || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
+        // #668: the cap file as a writer's argument or a redirection's target.
+        let cap = |w: &String| w.ends_with(CAP_FILE);
+        if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
+            return Some(NO_CAP_EDIT.into());
+        }
         // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
         // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
         // its own-folder words left out, is still checked. #570: a relative word only as a writer's argument
@@ -571,6 +586,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         return Some(
             "REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman timer install` (#461)".into(),
         );
+    }
+    if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
+        return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
