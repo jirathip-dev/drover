@@ -265,6 +265,8 @@ pub struct Serve {
     pub launchd_label: Option<String>,
     pub addr: Option<String>,
     pub tailscale_https_port: Option<u16>,
+    /// #626: the Funnel listener, `POST /hooks/github` only (default `127.0.0.1:7778`; `""`: off).
+    pub hooks_addr: Option<String>,
     /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
 }
@@ -272,6 +274,9 @@ pub struct Serve {
 impl Serve {
     pub fn addr(&self) -> String {
         self.addr.clone().unwrap_or_else(|| "127.0.0.1:7777".into())
+    }
+    pub fn hooks_addr(&self) -> String {
+        self.hooks_addr.clone().unwrap_or_else(|| "127.0.0.1:7778".into())
     }
 }
 
@@ -519,6 +524,8 @@ pub struct Limits {
     pub idle_reap_minutes: u64,
     /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
     pub done_close_minutes: u64,
+    /// #605: a merged or closed issue's lane not `working` this long has its pane closed (drive's `clean`).
+    pub idle_merged_minutes: u64,
     pub transcript_days: u64,
     /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
@@ -539,6 +546,8 @@ pub struct Limits {
     pub fallback_rest_minutes: u64,
     /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
     pub rotate_mb: u64,
+    /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
+    pub webhook_poll_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -584,6 +593,7 @@ impl Default for Limits {
             ask_expire_hours: 24,
             idle_reap_minutes: 10,
             done_close_minutes: 5,
+            idle_merged_minutes: 15,
             transcript_days: 30,
             // #216: lanes never start containers (owner rule); the list is assets/deny_commands.toml.
             deny_commands: toml::from_str::<toml::Table>(include_str!("../assets/deny_commands.toml"))
@@ -611,6 +621,7 @@ impl Default for Limits {
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
             rotate_mb: 20,
+            webhook_poll_minutes: 10,
         }
     }
 }
@@ -638,6 +649,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "blocked",
     "stall",
     "lane-dead",
+    "account-signed-out",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",

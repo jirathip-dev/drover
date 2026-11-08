@@ -416,6 +416,139 @@ fn clean_reclaims_merged_lanes() {
     idle(&c, &r);
 }
 
+/// #605: drive's pass over #12's impl lane, its pane listed as `status`, `s` seconds after `c.now`.
+fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf, impl Fn(u64) -> Fake) {
+    let c = setup(name);
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    if merged {
+        ev(&c, 30, "merged", json!({"pr": "100"}));
+    }
+    let w = wt.display().to_string();
+    let list = agents(&[("sendmeter-impl-12", status, &w, "w9:sendmeter-impl-12")]);
+    // One unpushed commit until the wip push.
+    let r = move |_| {
+        fake(&list)
+            .once(&format!("git -C {w} rev-list"), 0, "1\n")
+            .reply(&format!("git -C {w} rev-list"), "0\n")
+            .reply("date -r", "20261107-1200\n")
+            .reply("git -C", "")
+    };
+    (c, wt, r)
+}
+
+fn at(c: &herdsman::Ctx, s: u64) -> herdsman::Ctx {
+    herdsman::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    }
+}
+
+#[test]
+fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() {
+    let (c, wt, r) = idle_lane("drive-merged-idle", true, "idle");
+    let r0 = r(0);
+    let (code, out) = run(&c, &r0, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !r0.called("herdr pane close"),
+        "idle under idle_merged_minutes (15): {out}"
+    );
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
+    let r1 = r(900);
+    let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let w = wt.display();
+    let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200");
+    let close = r1.index("herdr pane close w9:sendmeter-impl-12").expect("pane closed");
+    assert!(r1.index(&push).expect("wip pushed") < close, "{:?}", r1.calls.borrow());
+    let all = read(&c.state).unwrap();
+    let e = all.iter().find(|e| e.kind == "lane-closed").expect("lane-closed");
+    assert_eq!(
+        (e.str("agent"), e.str("why"), e.str("wip")),
+        (
+            Some("sendmeter-impl-12"),
+            Some("merged-idle"),
+            Some("wip/sendmeter-impl-12-20261107-1200")
+        )
+    );
+    // Then the worktree goes the clean way.
+    assert!(close < r1.index("herdr worktree remove --workspace w9").expect("removed"));
+}
+
+#[test]
+fn a_working_lane_of_a_merged_issue_is_never_closed() {
+    let (c, _, r) = idle_lane("drive-merged-working", true, "working");
+    for s in [0, 900, 3600] {
+        let r = r(s);
+        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            !r.called("herdr pane close") && !r.called("herdr worktree remove"),
+            "{out}"
+        );
+    }
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
+}
+
+#[test]
+fn an_open_issues_idle_lane_is_kept() {
+    let (c, _, r) = idle_lane("drive-open-idle", false, "idle");
+    for s in [0, 900, 3600] {
+        let r = r(s);
+        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            !r.called("herdr pane close w9:sendmeter-impl-12"),
+            "{:?}",
+            r.calls.borrow()
+        );
+    }
+    assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
+}
+
+#[test]
+fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run_names_the_close() {
+    let c = setup("drive-merged-secret");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 30, "merged", json!({"pr": "100"}));
+    let w = wt.display().to_string();
+    let list = agents(&[("sendmeter-impl-12", "done", &w, "w9:sendmeter-impl-12")]);
+    let r = || {
+        fake(&list)
+            .reply(&format!("git -C {w} rev-list"), "1\n")
+            .reply(
+                &format!("git -C {w} log -p"),
+                concat!("+TOKEN = \"gh", "p_abcdefghijklmnopqrstu1234\"\n"),
+            )
+            .reply("git -C", "")
+    };
+    run(&c, &r(), &["drive"]);
+    let (code, dry) = run(&at(&c, 900), &r(), &["clean", "sendmeter"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(
+        dry.contains("would close sendmeter-impl-12's idle pane w9:sendmeter-impl-12"),
+        "{dry}"
+    );
+    for s in [900, 1200] {
+        let r = r();
+        let (code, out) = run(&at(&c, s), &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            !r.called("herdr pane close") && !r.called(&format!("git -C {w} push")),
+            "{out}"
+        );
+        let n = s == 900;
+        assert_eq!(r.called(&format!("git -C {w} add -A")), n, "tried once, never again");
+    }
+    let kept: Vec<_> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "lane-kept-dirty")
+        .collect();
+    assert_eq!(kept.len(), 1);
+    assert!(kept[0].str("why").unwrap().contains("SECRET_IN_WIP"), "{:?}", kept[0]);
+}
+
 /// #285: PR #100 of #12 as GitHub shows it after it left the open set (`MERGED` / `CLOSED`).
 fn gone_pr(state: &str) -> String {
     let mut v: serde_json::Value = serde_json::from_str(&pr(&sha("a1"), "green")).unwrap();
@@ -1845,6 +1978,13 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
 fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #639: a fix round follows a FAIL (an extra round for a lane never reviewed goes back to impl).
+    ev(
+        &c,
+        12,
+        "verdict",
+        json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
+    );
     ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = fake(NO_AGENTS)
@@ -2607,4 +2747,56 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     std::fs::write(&c.config, CONFIG).unwrap();
     drive(&c, &r);
     assert_eq!(passes(), 1, "a removed fleet gets no pass");
+}
+
+/// #665: #12 held until #11 merges, its lane ended (PASS, no active lane). #11 merges and #12's PR conflicts:
+/// the next pass releases the hold and spawns the update round, and `waiting` stops saying "held".
+#[test]
+fn a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated() {
+    let c = setup("drive-held-merged-conflict");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    let head = sha("a1");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("held"), "{out}");
+}
+
+/// #665: a pass ran after #11 merged and #12 still says held: the release logs `hold-stale` once, both numbers.
+#[test]
+fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
+    let c = setup("drive-hold-stale");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let pass = Event::new(c.now - 1500, "sendmeter", None, "drive-pass", json!({}));
+    append(&c.state, &pass).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    drive(&c, &r);
+    drive(&c, &r);
+    let stale = kinds(&c, "hold-stale");
+    assert_eq!(stale.len(), 1, "logged once");
+    assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
 }

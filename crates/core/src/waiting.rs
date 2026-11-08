@@ -166,14 +166,32 @@ pub fn reviewed_head(t: &str) -> Option<&str> {
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
+    /// #639: each queued issue's blockers not merged yet.
+    pub blocked: Vec<(&'a str, u64, Vec<u64>)>,
 }
 
 impl<'a> Log<'a> {
     pub fn new(all: &'a [Event]) -> Self {
+        let st = fold(all);
+        let fleets: std::collections::BTreeSet<&str> = (all.iter().filter(|e| e.kind == "queue"))
+            .map(|e| e.fleet.as_str())
+            .collect();
+        let blocked = (fleets.into_iter())
+            .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
+            .filter(|(_, i)| !i.blockers.is_empty())
+            .map(|(f, i)| (f, i.issue, i.blockers))
+            .collect();
         Log {
             all,
             asks: open_asks(all),
+            blocked,
         }
+    }
+
+    /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
+    pub fn blockers(&self, fleet: &str, n: u64) -> &[u64] {
+        let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
+        i.map_or(&[], |i| &i.2)
     }
 }
 
@@ -250,7 +268,9 @@ fn waits(
     if s.state == "closed" || pr["state"] == "CLOSED" {
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
-    let on = crate::events::held_on(events, s);
+    let mut on = crate::events::held_on(events, s);
+    // #665: a blocker that merged holds nothing; drive releases the hold on its next pass.
+    on.retain(|b| !log.all.iter().any(|e| e.is("merged", f, *b)));
     if !on.is_empty() {
         return w(
             "drive",
@@ -263,6 +283,12 @@ fn waits(
             None,
         );
         // #425: drive wakes it then
+    }
+    // #639: queue blockers hold every lane of the issue (a fix, impl or update respawn too) as they hold its start.
+    let on = log.blockers(f, n);
+    if !on.is_empty() {
+        let what = format!("blocked by {}", crate::queue::hashes(on));
+        return w("drive", &what, s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
     if let Some(g) = fc
@@ -286,7 +312,7 @@ fn waits(
     let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
     let spawned = last_spawn(events, &lane).filter(|_| active);
     let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
-    let rest = |e: &&Event| e.is("account-capped", f, n) || e.is("agent-unavailable", f, n); // #302
+    let rest = |e: &&Event| crate::access::rests(&e.kind) && e.is(&e.kind, f, n); // #302, #640
     if let Some(c) = events.iter().filter(since_spawn).find(rest) {
         let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
         let what = "account capped, waiting for drive to respawn on a free one";
@@ -439,10 +465,12 @@ fn waits(
         },
         // #217: an extra round whose lane never started (a failed or deferred spawn) is due the same way.
         // #500: so is one a `repaired` false park put back.
+        // #639: never for an issue with no PR: what it waits on shows instead (its lane's push, or its respawn).
         "fix"
-            if matches!(s.last_event.as_str(), "verdict" | "repaired")
-                || unspawned(events, s)
-                || lost(events, s, pushed) =>
+            if !pushed.is_empty()
+                && (matches!(s.last_event.as_str(), "verdict" | "repaired")
+                    || unspawned(events, s)
+                    || lost(events, s, pushed)) =>
         {
             // The FAIL's stage: a check's FAIL, or a gate's CI red (logs before #173 name none: `rev`).
             let v = events.iter().rev().find(|e| e.is("verdict", f, n));
@@ -701,8 +729,11 @@ pub fn scan(
                 }
                 _ => LESSON_CLOSE.into(),
             };
-        } else if let Some(t) = waiting_turn.filter(|_| idle && !gone && !unconfirmed) {
-            // #511: a live build lane's reported turn decides, not a guess.
+        } else if let Some(t) =
+            waiting_turn.filter(|t| idle && (!gone && !unconfirmed || t.str("state") == Some("blocked")))
+        {
+            // #511: a live build lane's reported turn decides, not a guess. #639: a `blocked` one also once its lane
+            // ended (or its spawn was never confirmed): an owner card, never a respawn toward LANE_ENDS.
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
         } else if idle && (gone || unconfirmed) && settled() {
@@ -848,7 +879,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     };
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
-    let held = !crate::events::held_on(log.all, s).is_empty();
+    let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

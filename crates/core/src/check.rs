@@ -114,6 +114,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let _ = gh::spec(ctx, r, f, name, i.issue, false);
         }
     }
+    let events = closed_on_github(ctx, cfg, r, out, events)?;
     // #333: a crashed kick's marker or lock goes on the next check; an issue SPAWN_PENDING has held back in every
     // pass for 15 min alerts once per episode (its fleet's earliest hold is the key).
     crate::drive::markers(ctx, cfg, r, true);
@@ -224,17 +225,26 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let screen = herdr::read(r, p).unwrap_or_default();
                 let name = account.or(sp.str("harness")).unwrap_or_default();
                 let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let rest = |until| json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until});
                 let h = crate::harness::get(harness.unwrap_or_default());
-                if let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now) {
-                    let why = format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now");
-                    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
-                    hits.push((kind, format!("{lane}:{name}"), why));
-                    capped = Some(rest(until));
-                } else if chain && h.signed_out(&screen) {
-                    let why = format!("{name}: {role} lane {lane} is signed out; spawns skip {name} for now");
-                    hits.push(("agent-unavailable", format!("{lane}:{name}:auth"), why));
-                    capped = Some(rest(ctx.now + cfg.limits.fallback_rest_minutes * 60));
+                // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
+                let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
+                    Some(u) => Some((crate::access::confirm(ctx, cfg, r, account, u), "")),
+                    None if h.signed_out(&screen) => {
+                        let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
+                        let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
+                        Some(((kind, none.then_some(rest), "sign-in prompt".into()), ":auth"))
+                    }
+                    None => None,
+                };
+                if let Some(((kind, until, meter), auth)) = seen {
+                    let why = match kind {
+                        "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
+                        "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
+                        _ => format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you sign in or replace its token (an account: then `herdsman accounts reset {name}`)"),
+                    };
+                    hits.push((kind, format!("{lane}:{name}{auth}"), why));
+                    let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
+                    capped = Some((kind, d));
                 }
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
@@ -298,7 +308,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let (Some(serde_json::Value::Object(c)), "account-capped" | "agent-unavailable") = (&capped, kind) {
+            if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
                 c.iter().for_each(|(k, v)| d[k] = v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
@@ -630,6 +640,8 @@ pub fn clean(
     let mut failed = 0;
     let (mut freed, mut removed) = (0, 0);
     let mut closed = BTreeMap::new();
+    // #605: when each merged lane's agent was first seen not working.
+    let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
     // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
     let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
         .flat_map(|(name, f)| {
@@ -687,10 +699,10 @@ pub fn clean(
             continue;
         };
         // #557: the daily job takes lanes idle 3 days or more since their issue's last event, 10 per run.
-        let idle = states
+        let stale = states
             .get(&(e.fleet.clone(), n))
             .is_some_and(|s| ctx.now >= s.last_ts + 3 * 86_400);
-        if sched && !idle {
+        if sched && !stale {
             continue;
         }
         if sched && removed == 10 {
@@ -707,9 +719,37 @@ pub fn clean(
             writeln!(out, "keep {shown}: {why}")?;
             continue;
         }
-        let live = !host::live_in(&agents, e.str("agent").unwrap_or_default(), Path::new(wt)).is_empty();
+        // #605: the lane's own pane, not `working` for `idle_merged_minutes`, closes through `kill`'s path first; a
+        // refused wip snapshot keeps it, reported once and never retried. Any other agent there is left alone.
+        let agent = e.str("agent").unwrap_or_default();
+        let here = host::live_in(&agents, agent, Path::new(wt));
+        let own = |a: &&Value| a["name"] == agent && a["host"].as_str() == away && a["agent_status"] != "working";
+        let key = format!("merged-idle:{agent}:{}", e.ts);
+        let refused = events
+            .iter()
+            .any(|x| x.kind == "lane-kept-dirty" && x.str("key") == Some(&key));
+        let since = (!here.is_empty() && here.iter().all(own)).then(|| *idle.entry(agent.into()).or_insert(ctx.now));
+        let left = since.map(|t| (t + cfg.limits.idle_merged_minutes * 60).saturating_sub(ctx.now));
+        let mut live = !here.is_empty();
+        let mut why_live = match left {
+            Some(m @ 1..) if !refused => format!("live agent (idle; its pane closes in {} min)", m.div_ceil(60)),
+            _ => "live agent".to_string(),
+        };
+        if left == Some(0) && !refused && !yes {
+            writeln!(out, "would close {agent}'s idle pane {pane} (work to wip/ first)")?;
+            live = false;
+        } else if left == Some(0) && !refused {
+            match kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
+                Ok(()) => live = false,
+                Err(err) => {
+                    why_live = format!("pane kept: {err:#}");
+                    let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
+                    fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                }
+            }
+        }
         let keep = if live {
-            Some("live agent".to_string())
+            Some(why_live)
         } else {
             if yes {
                 reap(ctx, cfg, &on, (&e.fleet, Some(n)), wt)?;
@@ -772,6 +812,14 @@ pub fn clean(
             ),
         )?;
     }
+    if yes {
+        idle.retain(|n, _| {
+            agents
+                .iter()
+                .any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
+        });
+        crate::db::put(&ctx.state, IDLE, ctx.now, &idle)?;
+    }
     if lane.is_some() && seen.is_empty() {
         return crate::gate::refused(
             "UNSAFE_CLEAN",
@@ -788,6 +836,9 @@ pub fn clean(
     }
     Ok(())
 }
+
+/// #605: the `snapshot` row of merged lanes' idle-since times.
+const IDLE: &str = "idle-merged";
 
 /// #557 `clean --scheduled`, the daily `dev.herdsman.clean` job: `clean --yes` held to lanes idle 3 days (10 a run),
 /// then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed`
@@ -938,19 +989,21 @@ fn save(
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut total = du(&ctx.worktrees).saturating_sub(du(&ctx.worktrees.join(crate::roots::BUILD)));
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
+    let builds = builds(ctx, cfg).iter().any(|b| b.is_dir());
+    let live = if over(total) || builds {
+        live_lanes(ctx, cfg, r)?
+    } else {
+        Live::new()
+    };
     if over(total) {
-        let (events, agents) = (read(&ctx.state)?, host::agents(r)?);
+        let events = read(&ctx.state)?;
         let states = fold(&events);
         let mut seen = std::collections::BTreeSet::new();
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
-            .filter(|(e, _)| {
-                !agents
-                    .iter()
-                    .any(|a| a["name"].as_str() == e.str("agent") && a["agent_status"] == "working")
-            })
+            .filter(|(e, _)| !e.str("agent").is_some_and(|a| live.contains(a)))
             .map(|(e, w)| {
                 (
                     e.issue
@@ -969,7 +1022,10 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
             if bytes > 0 {
                 total = total.saturating_sub(bytes);
-                writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
+                writeln!(
+                    out,
+                    "budget: freed {bytes} bytes of build folders in {wt} (no live agent)"
+                )?;
                 let d = json!({"agent": e.str("agent"), "bytes": bytes});
                 emit(
                     &ctx.state,
@@ -980,7 +1036,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;
-    trim_builds(ctx, cfg, cfg.limits.build_budget_gb, out, false)?;
+    trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
@@ -997,7 +1053,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(ctx, &on, cfg, cfg.limits.build_budget_gb, out) {
+        if let Err(e) = trim_on(ctx, &on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
             writeln!(out, "builds: {name}: {e:#}")?;
             continue;
         }
@@ -1009,6 +1065,19 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
     }
     Ok(())
+}
+
+pub type Live = std::collections::BTreeSet<String>;
+
+/// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or
+/// one spawned in the last `stall_minutes`.
+pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
+    let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
+    let events = read(&ctx.state)?;
+    let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
+    let agents = host::agents(r)?;
+    let names = agents.iter().filter_map(|a| a["name"].as_str());
+    Ok(names.chain(spawned).map(String::from).collect())
 }
 
 /// #536/#651: a lane's scratch (`<root>/.build/.scratch/<agent>`) on `on`'s host stays while its agent is working,
@@ -1136,14 +1205,17 @@ fn builds(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
 }
 
 /// `trim_root` on each of this host's build folders. Bytes freed.
-pub fn trim_builds(ctx: &Ctx, cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
-    builds(ctx, cfg).iter().map(|b| trim_root(b, budget, out, dry)).sum()
+pub fn trim_builds(ctx: &Ctx, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    builds(ctx, cfg)
+        .iter()
+        .map(|b| trim_root(b, budget, live, out, dry))
+        .sum()
 }
 
 /// #438: over `budget` GB, the shared build folder's profiles (`<root>/.build/<repo>/<profile>`) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
-/// too, oldest first. Bytes freed.
-fn trim_root(root: &Path, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
+/// too, oldest first; #634: never a `live` lane's. Bytes freed.
+fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
     if !root.is_dir() {
         return Ok(0);
     }
@@ -1156,6 +1228,7 @@ fn trim_root(root: &Path, budget: f64, out: &mut dyn Write, dry: bool) -> Result
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
         .map(|p| (p, 3));
+    let lane = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
     let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
     dirs.sort();
     for (_, dir, depth) in dirs {
@@ -1167,10 +1240,14 @@ fn trim_root(root: &Path, budget: f64, out: &mut dyn Write, dry: bool) -> Result
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
-        let size = du(&dir);
+        if depth > 0 && lane(&dir).is_some_and(|n| live.contains(&n)) {
+            writeln!(out, "keep {}: a live lane", dir.display())?;
+            continue;
+        }
+        let (size, why) = (du(&dir), if depth > 0 { "no live agent" } else { "not building" });
         let verb = if dry { "would trim" } else { "trimmed" };
         if dry || std::fs::remove_dir_all(&dir).is_ok() {
-            writeln!(out, "builds: {verb} {} ({:.2} GB)", dir.display(), gb(size))?;
+            writeln!(out, "builds: {verb} {} ({:.2} GB, {why})", dir.display(), gb(size))?;
             (total, freed) = (total.saturating_sub(size), freed + size);
         }
     }
@@ -1240,9 +1317,9 @@ fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
 }
 
 /// The shared build folders on `on`'s host trimmed to `budget` GB each; bytes freed.
-pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, out: &mut dyn Write) -> Result<u64> {
+pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
     if on.machine.is_none() {
-        return trim_builds(ctx, cfg, budget, out, false);
+        return trim_builds(ctx, cfg, budget, live, out, false);
     }
     let dirs = build_dirs(ctx, cfg, on);
     dirs.iter().map(|b| trim_remote(on, b, budget, out)).sum()
@@ -1268,6 +1345,7 @@ const NOTE: &str = "(logical sizes; APFS clones may free less)";
 /// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let live = live_lanes(ctx, cfg, r)?;
     let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
         let wt = Path::new(e.str("worktree").unwrap_or_default());
@@ -1288,7 +1366,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
-    total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, o, !yes)?;
+    total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
@@ -1403,6 +1481,45 @@ pub fn du(p: &Path) -> u64 {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| du(&e.path())).sum()),
         m => m.map_or(0, |m| m.blocks() * 512),
     }
+}
+
+/// #639: an open issue (queued, in a round, needs-human or parked) closed on GitHub by any route is `closed-other`
+/// within one pass, from the fleet's one cached closed-issue read: no respawn, stall, orphan or ask alert follows, its
+/// asks close and `clean` takes its lanes. A PR merged outside herdsman is drive's (`merged`, by: external). The log
+/// read again.
+fn closed_on_github(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: Vec<Event>,
+) -> Result<Vec<Event>> {
+    let st = fold(&ev);
+    let mut any = false;
+    for (name, f) in &cfg.fleet {
+        let state = |n: u64| st.get(&(name.clone(), n));
+        let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
+            .map(|s| s.issue)
+            .collect();
+        open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+        open.retain(|n| gh::cached_pr(ctx, name, *n)["state"] != "MERGED");
+        let Some(closed) = (!open.is_empty())
+            .then(|| gh::closed(ctx, r, f, name, ctx.now).ok())
+            .flatten()
+        else {
+            continue;
+        };
+        for n in open.into_iter().filter(|n| closed.contains(n)) {
+            writeln!(out, "{name} #{n} closed on GitHub")?;
+            let d = json!({"by": "external", "why": "issue closed on GitHub"});
+            emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
+            any = true;
+        }
+    }
+    if any {
+        return read(&ctx.state);
+    }
+    Ok(ev)
 }
 
 /// The fleet's closed issue numbers, read once per fleet per run; a failed read is reported and counts as none.
@@ -1524,8 +1641,21 @@ pub fn kill(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
+    lane: (&str, Option<&str>),
+    yes: bool,
+) -> Result<()> {
+    kill_as(ctx, cfg, r, out, lane, yes, None)
+}
+
+/// #605: `kill`, logged `lane-closed` with `why` when one is given.
+fn kill_as(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
     (agent, host): (&str, Option<&str>),
     yes: bool,
+    why: Option<&str>,
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent, host)?;
@@ -1560,8 +1690,11 @@ pub fn kill(
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
-    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip});
-    let kind = ["lane-killed", "stale-pane-killed"][usize::from(stale)];
+    let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip, "why": why});
+    // #605: a merged lane's idle pane closed by `clean` is `lane-closed`.
+    let kind = why.map_or(["lane-killed", "stale-pane-killed"][usize::from(stale)], |_| {
+        "lane-closed"
+    });
     emit(&ctx.state, cfg, Event::new(ctx.now, &e.fleet, e.issue, kind, d))?;
     Ok(writeln!(
         out,
