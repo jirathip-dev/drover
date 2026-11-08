@@ -623,6 +623,15 @@ pub const OWN_FILES: &[&str] = &[
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
 
+/// #646: a herdsman-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
+    let all = "'+refs/heads/*:refs/remotes/origin/*'";
+    format!(
+        "git clone --single-branch --branch '{branch}' https://github.com/{repo}.git '{dir}' && git -C '{dir}' config \
+         remote.origin.fetch {all} && git -C '{dir}' config --add remote.origin.fetch '^refs/heads/wip/*'"
+    )
+}
+
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
@@ -974,8 +983,7 @@ pub fn spawn(
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         // #157: first use on a host: it clones the repo itself; #307: plain git, so its insteadOf/SSH and helpers apply.
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
-            let url = format!("https://github.com/{}.git", f.repo);
-            ok(r, "git", &["clone", &url, &local])?;
+            ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         ok(
             r,

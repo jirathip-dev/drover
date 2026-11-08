@@ -25,6 +25,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Implement the smallest change that meets the acceptance criteria; follow the repo's
   AGENTS.md / CLAUDE.md. Don't refactor unrelated code or add deps without approval.
 - If the repo has a `justfile`, run `just --list` once and use its recipes.
+- Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
   raw exit status; `cmd | grep` is never PASS/FAIL evidence.
 - Form fixes (PR body, re-date, format, docs) are edits in a new commit: never a history rewrite or force-push.

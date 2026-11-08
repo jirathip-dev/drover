@@ -276,34 +276,29 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
-        let Some((tags, home)) = crate::hosts::probe(&on).filter(|_| crate::host::agents(&on).is_ok()) else {
-            rows.push(format!(
-                "✗ host {name} — unreachable → herdr machine status; ssh {m} true"
-            ));
+        // #647: `unreachable` only when ssh fails, else the failed check by name (shed's: a `!` health row).
+        let Some((tags, home)) = crate::hosts::probe(&on) else {
+            let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
+            let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
+            rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
-        let tags = crate::hosts::tags(
-            h,
-            Some(&crate::hosts::Seen {
-                tags,
-                ..Default::default()
-            }),
-        );
+        if let Err(e) = crate::herdr::poll(&on) {
+            rows.push(format!("✗ host {name} — herdr agent list: {e} → herdr machine status"));
+            continue;
+        }
+        let tags = [tags, h.tags.clone()].concat();
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::harness::all().filter_map(|h| h.1.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
-        let ok = format!(
-            "✓ host {name} — herdr, session, git, gh, {logins}herdsman {}",
-            crate::VERSION
-        );
+        let v = crate::VERSION;
+        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}herdsman {v}");
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
-        // #592: lanes there read only their rules file; the owner removes an old copy by hand, herdsman never does.
+        // #592: lanes there read only their rules file; the owner removes an old copy (#647: bootstrap, one it wrote).
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
-            rows.push(format!(
-                "! stale fleet.toml on {name}: no longer read → rm {conf} there"
-            ));
+            rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
         }
     }
 }
