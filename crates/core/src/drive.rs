@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #677: drive's one prompt on a `done` whose why note was refused.
+pub const WHY_NUDGE: &str = "your why note was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
 const STALE_LOCK_SECS: u64 = 3600;
 
@@ -786,7 +788,8 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
             continue;
         };
-        let gone = (round.iter()).all(|(_, e)| e.kind != "respawn" || e.str("why") == Some("lane gone"));
+        let gone = (round.iter())
+            .all(|(_, e)| e.kind != "respawn" || e.str("why").is_some_and(|w| w.starts_with("lane gone")));
         if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
             continue;
         }
@@ -808,6 +811,43 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         )?;
     }
     Ok(())
+}
+
+/// #662: push gone lane `lane`'s local commits (never its dirty files) to its issue branch, on its own host; a push
+/// that moved the branch is logged `lane-pushed`, a failed one says why.
+fn save(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    f: &crate::config::Fleet,
+    (events, n, lane): (&[Event], u64, &str),
+    why: &str,
+) -> Result<()> {
+    let sp = crate::events::last_spawn(events, lane);
+    let (Some(wt), Some(branch)) = (sp.and_then(|e| e.str("worktree")), sp.and_then(|e| e.str("branch"))) else {
+        return Ok(());
+    };
+    if [f.integration.as_str(), "main", "master"].contains(&branch) {
+        return Ok(());
+    }
+    let on = crate::hosts::On::of(r, sp);
+    let to = format!("HEAD:refs/heads/{branch}");
+    let o = on.run("git", &crate::runner::argv(&["-C", wt, "push", "origin", &to]))?;
+    let fleet = sp.map_or("", |e| e.fleet.as_str());
+    if o.code != 0 {
+        return Ok(writeln!(
+            out,
+            "{fleet} #{n} push of {lane}'s commits failed: {}",
+            o.stderr.trim()
+        )?);
+    }
+    if o.stderr.contains("up-to-date") {
+        return Ok(());
+    }
+    writeln!(out, "{fleet} #{n} pushed {lane}'s local commits to {branch} ({why})")?;
+    let d = json!({"agent": lane, "branch": branch, "why": why});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
 fn pass(
@@ -897,7 +937,7 @@ fn pass(
             writeln!(out, "{fleet} land: {e:#}")?;
         }
     }
-    if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
+    if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
@@ -1056,6 +1096,11 @@ fn pass(
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
+            }
+            // #662: a lane that exited on an account limit or adapter crash has its local commits pushed first.
+            let cause = crate::shed::exit_cause(&events, &w.lane).filter(|c| crate::shed::RESUMABLE.contains(c));
+            if let Some(why) = cause.filter(|_| args[0] == "spawn") {
+                save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
@@ -1408,6 +1453,7 @@ fn update_lane(
 fn handoff(
     ctx: &Ctx,
     cfg: &Config,
+    r: &dyn Runner,
     out: &mut dyn Write,
     fleet: &str,
     ev: &[Event],
@@ -1443,6 +1489,23 @@ fn handoff(
         }
         if handed {
             continue;
+        }
+        // #677: a `done` whose why note was refused is told once (WHY_NUDGE); its next `done` (or 10 min) goes to review.
+        if let Some(why) = turn.and_then(|t| t.str("note").map(|w| (t.ts, w))) {
+            let sp = crate::events::last_spawn(ev, &w.lane).map_or(0, |e| e.ts);
+            let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
+            match ev.iter().rfind(told) {
+                None => {
+                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix why.md, then `herdsman turn done`.", why.1);
+                    let sent = tell(r, ev, &w.lane, &text);
+                    writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
+                    let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
+                    append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "why-nudged", d))?;
+                    continue;
+                }
+                Some(p) if why.0 <= p.ts && ctx.now < p.ts + 600 => continue,
+                Some(_) => {}
+            }
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
         let d = json!({"sha": head, "via": "pr"});
