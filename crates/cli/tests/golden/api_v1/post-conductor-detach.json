@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "NO_SUCH_THREAD",
+    "message": "no cooee thread  attached to sendmeter",
+    "ok": false
+  },
+  "route": "POST /api/v1/conductor-detach",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}
