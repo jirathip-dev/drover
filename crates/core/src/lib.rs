@@ -40,6 +40,7 @@ pub mod setup;
 pub mod shed;
 pub mod snapshot;
 pub mod spawn;
+pub mod stall;
 pub mod timer;
 pub mod update;
 pub mod usage;
@@ -662,7 +663,7 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
 
 /// `herdsman asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = events::shared(&ctx.state)?; // #632: one ask index for every row
     let shown = |e: &&Event| fleet.is_none_or(|f| f == e.fleet) && (all || events::closed(&events, e).is_none());
     let open: Vec<&Event> = events
         .iter()

@@ -224,17 +224,26 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let screen = herdr::read(r, p).unwrap_or_default();
                 let name = account.or(sp.str("harness")).unwrap_or_default();
                 let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let rest = |until| json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until});
                 let h = crate::harness::get(harness.unwrap_or_default());
-                if let Some(until) = h.usage_limited(cfg, r, &screen, ctx.now) {
-                    let why = format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now");
-                    let kind = ["agent-unavailable", "account-capped"][usize::from(account.is_some())];
-                    hits.push((kind, format!("{lane}:{name}"), why));
-                    capped = Some(rest(until));
-                } else if chain && h.signed_out(&screen) {
-                    let why = format!("{name}: {role} lane {lane} is signed out; spawns skip {name} for now");
-                    hits.push(("agent-unavailable", format!("{lane}:{name}:auth"), why));
-                    capped = Some(rest(ctx.now + cfg.limits.fallback_rest_minutes * 60));
+                // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
+                let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
+                    Some(u) => Some((crate::access::confirm(ctx, cfg, r, account, u), "")),
+                    None if h.signed_out(&screen) => {
+                        let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
+                        let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
+                        Some(((kind, none.then_some(rest), "sign-in prompt".into()), ":auth"))
+                    }
+                    None => None,
+                };
+                if let Some(((kind, until, meter), auth)) = seen {
+                    let why = match kind {
+                        "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
+                        "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
+                        _ => format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you sign in or replace its token (an account: then `herdsman accounts reset {name}`)"),
+                    };
+                    hits.push((kind, format!("{lane}:{name}{auth}"), why));
+                    let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
+                    capped = Some((kind, d));
                 }
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
@@ -259,7 +268,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
-            // #425: a held lane waits by design; an unheld one alerts again every 2 h it stays idle.
+            // #425: a held lane waits by design. #666: an unheld one alerts once until it changes (drive acts on it).
             if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
@@ -277,7 +286,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     ),
                     _ => format!("{role} lane {lane} is {st}"),
                 };
-                let key = format!("{key}:{}", (idle - stall) / 7200);
                 hits.push((
                     "stall",
                     key,
@@ -298,7 +306,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let (Some(serde_json::Value::Object(c)), "account-capped" | "agent-unavailable") = (&capped, kind) {
+            if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
                 c.iter().for_each(|(k, v)| d[k] = v.clone());
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
@@ -962,7 +970,7 @@ fn save(
             return Ok(Some(why));
         }
         Err(Snap::Failed(err) | Snap::Push(err)) => return Ok(Some(format!("wip save failed: {err:#}"))),
-        Ok(()) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
+        Ok(_) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
     };
     let remote = git(&["ls-remote", "origin", &format!("refs/heads/{w}")])?;
     if remote.split_whitespace().next() != Some(sha.as_str()) {
@@ -979,19 +987,21 @@ fn save(
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut total = du(&ctx.worktrees);
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
+    let builds = !cfg.limits.build_root.is_empty() && crate::config::expand(&cfg.limits.build_root).is_dir();
+    let live = if over(total) || builds {
+        live_lanes(ctx, cfg, r)?
+    } else {
+        Live::new()
+    };
     if over(total) {
-        let (events, agents) = (read(&ctx.state)?, host::agents(r)?);
+        let events = read(&ctx.state)?;
         let states = fold(&events);
         let mut seen = std::collections::BTreeSet::new();
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
-            .filter(|(e, _)| {
-                !agents
-                    .iter()
-                    .any(|a| a["name"].as_str() == e.str("agent") && a["agent_status"] == "working")
-            })
+            .filter(|(e, _)| !e.str("agent").is_some_and(|a| live.contains(a)))
             .map(|(e, w)| {
                 (
                     e.issue
@@ -1010,7 +1020,10 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
             if bytes > 0 {
                 total = total.saturating_sub(bytes);
-                writeln!(out, "budget: freed {bytes} bytes of build folders in {wt}")?;
+                writeln!(
+                    out,
+                    "budget: freed {bytes} bytes of build folders in {wt} (no live agent)"
+                )?;
                 let d = json!({"agent": e.str("agent"), "bytes": bytes});
                 emit(
                     &ctx.state,
@@ -1021,7 +1034,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;
-    trim_builds(cfg, cfg.limits.build_budget_gb, out, false)?;
+    trim_builds(cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
@@ -1038,7 +1051,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(&on, cfg, cfg.limits.build_budget_gb, out) {
+        if let Err(e) = trim_on(&on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
             writeln!(out, "builds: {name}: {e:#}")?;
             continue;
         }
@@ -1050,6 +1063,19 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
         }
     }
     Ok(())
+}
+
+pub type Live = std::collections::BTreeSet<String>;
+
+/// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or
+/// one spawned in the last `stall_minutes`.
+pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
+    let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
+    let events = read(&ctx.state)?;
+    let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
+    let agents = host::agents(r)?;
+    let names = agents.iter().filter_map(|a| a["name"].as_str());
+    Ok(names.chain(spawned).map(String::from).collect())
 }
 
 /// #536/#651: a lane's scratch (`<build_root>/.scratch/<agent>`) on `on`'s host stays while its agent is working,
@@ -1163,8 +1189,8 @@ fn mtime(d: &Path) -> u64 {
 
 /// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
-/// too, oldest first. Bytes freed.
-pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) -> Result<u64> {
+/// too, oldest first; #634: never a `live` lane's. Bytes freed.
+pub fn trim_builds(cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
     let root = crate::config::expand(&cfg.limits.build_root);
     if cfg.limits.build_root.is_empty() || !root.is_dir() {
         return Ok(0);
@@ -1178,6 +1204,7 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
         .map(|p| (p, 3));
+    let lane = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
     let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
     dirs.sort();
     for (_, dir, depth) in dirs {
@@ -1189,10 +1216,14 @@ pub fn trim_builds(cfg: &Config, budget: f64, out: &mut dyn Write, dry: bool) ->
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
-        let size = du(&dir);
+        if depth > 0 && lane(&dir).is_some_and(|n| live.contains(&n)) {
+            writeln!(out, "keep {}: a live lane", dir.display())?;
+            continue;
+        }
+        let (size, why) = (du(&dir), if depth > 0 { "no live agent" } else { "not building" });
         let verb = if dry { "would trim" } else { "trimmed" };
         if dry || std::fs::remove_dir_all(&dir).is_ok() {
-            writeln!(out, "builds: {verb} {} ({:.2} GB)", dir.display(), gb(size))?;
+            writeln!(out, "builds: {verb} {} ({:.2} GB, {why})", dir.display(), gb(size))?;
             (total, freed) = (total.saturating_sub(size), freed + size);
         }
     }
@@ -1252,9 +1283,9 @@ done
 echo "freed $f""#;
 
 /// The shared build folder on `on`'s host trimmed to `budget` GB; bytes freed.
-pub fn trim_on(on: &On, cfg: &Config, budget: f64, out: &mut dyn Write) -> Result<u64> {
+pub fn trim_on(on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
     if on.machine.is_none() || cfg.limits.build_root.is_empty() {
-        return trim_builds(cfg, budget, out, false);
+        return trim_builds(cfg, budget, live, out, false);
     }
     let kb = format!("{:.0}", budget * 1_048_576.0);
     let o = on.run(
@@ -1278,6 +1309,7 @@ const NOTE: &str = "(logical sizes; APFS clones may free less)";
 /// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
     let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let live = live_lanes(ctx, cfg, r)?;
     let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
         let wt = Path::new(e.str("worktree").unwrap_or_default());
@@ -1298,7 +1330,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
-    total += trim_builds(cfg, cfg.limits.build_budget_gb, o, !yes)?;
+    total += trim_builds(cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
@@ -1613,7 +1645,9 @@ fn kill_as(
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
+        let skip = save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
+        let _ = skip.is_empty()
+            || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
@@ -1674,7 +1708,7 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
 }
 
 /// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
-fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<String>> {
     match snapshot(on, wt, w, msg) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
@@ -1688,7 +1722,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
             "SNAPSHOT_FAILED",
             format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
         ),
-        Ok(()) => Ok(()),
+        Ok(skip) => Ok(skip),
     }
 }
 
@@ -1698,7 +1732,7 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
         return Ok(None);
     }
     let w = wip_branch(ctx, on.r, agent);
-    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|()| Some(w))
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|_| Some(w))
 }
 
 /// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
@@ -1710,7 +1744,7 @@ fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
 
 /// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first).
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<()> {
-    snapshot(r, wt, w, msg).map_err(|e| match e {
+    snapshot(r, wt, w, msg).map(drop).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
         Snap::Failed(e) | Snap::Push(e) => e,
     })
@@ -1723,20 +1757,89 @@ enum Snap {
     Push(anyhow::Error),
 }
 
-/// Stage all but `OWN_FILES` and `SHOT_DIRS`, scan the staged and unpushed diff for a secret (#96, the first as `file:line: masked`),
-/// commit any uncommitted change with `msg` and push HEAD to `w`.
-fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(), Snap> {
+/// #646: build output a wip snapshot never stages, whatever `.gitignore` says (`build`); the per-file and per-snapshot
+/// caps.
+const NO_WIP: [&str; 3] = ["target*", "node_modules", ".lane-logs"];
+const CAPS: (u64, u64) = (5 << 20, 50 << 20);
+/// A path under a `NO_WIP` folder.
+fn build(p: &str) -> bool {
+    (p.split('/').rev().skip(1)).any(|c| c.starts_with("target") || NO_WIP[1..].contains(&c))
+}
+
+/// #646 `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration
+/// branch, its issue's state and whether it carries build output; unless `dry`, those of a merged or closed issue with
+/// build output deleted on origin (a branch delete: never a history rewrite or force-push).
+pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
+    let (f, states) = (cfg.fleet(fleet)?, fold(&read(&ctx.state)?));
+    let dir = f.local_path().to_string_lossy().into_owned();
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
+    git(&["fetch", "-q", "--prune", "origin"])?;
+    let integ = format!("origin/{}", f.integration);
+    let refs = git(&[
+        "for-each-ref",
+        "--format=%(refname:lstrip=3)",
+        "refs/remotes/origin/wip/",
+    ])?;
+    for b in refs.lines() {
+        let tip = format!("origin/{b}");
+        let size: u64 = git(&["rev-list", "--objects", "--disk-usage", &tip, "--not", &integ])?
+            .trim()
+            .parse()?;
+        let has = git(&["log", "--name-only", "--format=", &tip, "--not", &integ])?
+            .lines()
+            .any(build);
+        let n = (b.split_once(&format!("{fleet}-"))).and_then(|x| x.1.split('-').nth(1)?.parse::<u64>().ok());
+        let st = n.and_then(|n| states.get(&(fleet.to_string(), n)));
+        let go = has && st.is_some_and(crate::events::IssueState::done);
+        if go && !dry {
+            git(&["push", "origin", "--delete", b])?;
+        }
+        let what = ["kept", "would delete", "kept", "deleted"][usize::from(go) + 2 * usize::from(!dry)];
+        let issue = n.map_or("no issue".into(), |n| format!("#{n} {}", st.map_or("?", |s| &s.state)));
+        let has = ["", " · build output"][usize::from(has)];
+        writeln!(out, "{b} · {} MB · {issue}{has} · {what}", size >> 20)?;
+    }
+    Ok(())
+}
+
+/// Stage all but `OWN_FILES`, `SHOT_DIRS`, `NO_WIP` and files over `CAPS`, scan the staged and unpushed diff for a
+/// secret (#96, the first as `file:line: masked`), commit any staged change with `msg` (the skipped files listed) and
+/// push HEAD to `w`; the skipped files.
+fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<Vec<String>, Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
     let undo = |e: anyhow::Error| {
         let _ = git(&["reset", "-q"]);
         Snap::Failed(e)
     };
-    let mut commit = false;
+    let mut skip = vec![];
     let mut snap = || -> Result<(String, String)> {
-        commit = changes(&git(&["status", "--porcelain"])?) > 0;
-        git(&["add", "-A"])?;
+        let st = git(&["status", "--porcelain"])?;
+        skip = (st
+            .lines()
+            .filter_map(|l| l.strip_prefix("?? "))
+            .filter(|p| build(p))
+            .map(String::from))
+        .collect();
+        let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
+        git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
         git(&[&["reset", "-q", "--"][..], OWN_FILES, SHOT_DIRS].concat())?;
+        let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
+        let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
+        let mut files: Vec<(u64, &str)> = (tree.split('\0').filter_map(|l| l.split_once('\t')))
+            .filter(|(_, p)| changed.split('\0').any(|c| c == *p))
+            .filter_map(|(m, p)| Some((m.split_whitespace().nth(3)?.parse().ok()?, p)))
+            .collect();
+        files.sort_unstable();
+        let mut total = 0;
+        files.retain(|&(n, _)| {
+            total += n;
+            n > CAPS.0 || total > CAPS.1
+        });
+        for (n, p) in files {
+            git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
+            skip.push(format!("{p} ({} MB)", n >> 20));
+        }
         Ok((
             git(&["diff", "--cached"])?,
             git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?,
@@ -1769,7 +1872,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         let _ = git(&["reset", "-q"]);
         return Err(Snap::Secret(hit));
     }
-    if commit {
+    if !staged.is_empty() {
         // A host with no git identity still saves: herdsman signs only when none is configured.
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -1777,8 +1880,9 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         } else {
             &[]
         };
-        git(&[id, &["commit", "-q", "--no-verify", "-m", msg]].concat()).map_err(undo)?;
+        let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
+        git(&[id, &["commit", "-q", "--no-verify", "-m", &msg]].concat()).map_err(undo)?;
     }
     git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
-    Ok(())
+    Ok(skip)
 }

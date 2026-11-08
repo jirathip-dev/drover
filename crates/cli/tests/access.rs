@@ -380,3 +380,152 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
         "{text}"
     );
 }
+
+/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `herdsman check`'s output.
+fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let r = store(Fake::default())
+        .reply(
+            "herdr agent list",
+            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
+        )
+        .reply("herdr pane read w9:p12", screen);
+    let (code, out) = run(c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+/// #640: account A's latest status-line reading (`usage.jsonl`), read `ago` seconds before now.
+fn reading(c: &herdsman::Ctx, five: Value, seven: Value, ago: u64) {
+    let row = json!({"ts": c.now - ago, "account": "A", "five_hour_pct": five, "five_hour_reset": null,
+        "seven_day_pct": seven, "seven_day_reset": 1_200_000});
+    std::fs::write(c.state.with_file_name("usage.jsonl"), format!("{row}\n")).unwrap();
+}
+
+fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+}
+
+#[test]
+fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_account() {
+    let d = tmpdir("acct-meter-ok");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    reading(&c, Value::Null, json!(23.0), 60);
+    let out = check_shows(&c, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
+    assert!(!out.contains("account-capped"), "{out}");
+    let ignored = kinds(&c, "cap-banner-ignored");
+    assert_eq!(ignored.len(), 1, "{out}");
+    assert!(
+        ignored[0].str("reason").unwrap().contains("5h —, 7d 23%"),
+        "{ignored:?}"
+    );
+    assert_eq!(dry_account(&c, 13), "A");
+    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert!(
+        list.lines()
+            .any(|l| l.starts_with("A ") && l.contains("ok: 5h —, 7d 23%")),
+        "{list}"
+    );
+}
+
+#[test]
+fn a_banner_with_the_week_at_100_caps_until_the_reset() {
+    let d = tmpdir("acct-meter-full");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    reading(&c, Value::Null, json!(100.0), 60);
+    let out = check_shows(&c, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
+    assert!(
+        out.contains("account-capped: A:") && !out.contains("signed out"),
+        "{out}"
+    );
+    let capped = kinds(&c, "account-capped");
+    assert_eq!(capped[0].data["until"], 1_200_000, "the week's reset");
+    assert!(kinds(&c, "account-signed-out").is_empty());
+    assert_eq!(dry_account(&c, 13), "B");
+    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    let a = list.lines().find(|l| l.starts_with("A ")).unwrap();
+    assert!(
+        a.contains("capped until ") && a.contains("banner ") && a.contains("7d 100%"),
+        "{list}"
+    );
+    assert!(!a.contains("signed out"), "{list}");
+}
+
+#[test]
+fn a_banner_with_no_fresh_reading_still_caps() {
+    let d = tmpdir("acct-meter-stale");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    reading(&c, Value::Null, json!(23.0), 601);
+    assert!(check_shows(&c, "You've hit your limit · resets 3pm").contains("account-capped: A:"));
+}
+
+#[test]
+fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
+    let d = tmpdir("acct-banner-src");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    for screen in [
+        "⏺ Bash(rg -n 'hit your limit' crates)\n  ⎿  claude.rs:19: usage limit reached|hit your limit\n",
+        "⏺ The pane said \"You've hit your limit · resets 3pm\", so I matched it.\n",
+        "❯ why did it say usage limit reached?\n",
+    ] {
+        assert!(!check_shows(&c, screen).contains("account-capped"), "{screen}");
+    }
+    assert_eq!(dry_account(&c, 13), "A");
+}
+
+#[test]
+fn signed_out_is_its_own_state_never_a_cap() {
+    let d = tmpdir("acct-signed-out");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    let out = check_shows(&c, "  ⎿  API Error: 401 · Please run /login\n");
+    assert!(
+        out.contains("account-signed-out") && !out.contains("account-capped"),
+        "{out}"
+    );
+    let s = kinds(&c, "account-signed-out");
+    assert!(
+        s[0].data.get("until").is_none_or(Value::is_null),
+        "no reset time: {s:?}"
+    );
+    assert!(s[0].str("reason").unwrap().contains("sign in"), "{s:?}");
+    assert_eq!(dry_account(&c, 13), "B");
+    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    let a = list.lines().find(|l| l.starts_with("A ")).unwrap();
+    assert!(a.contains("signed out: ") && !a.contains("capped"), "{list}");
+    assert_eq!(run(&c, &Fake::default(), &["accounts", "reset", "A"]).0, 0);
+    assert_eq!(dry_account(&c, 13), "A");
+}
+
+#[test]
+fn a_banner_with_a_401_usage_reading_is_signed_out() {
+    let d = tmpdir("acct-meter-401");
+    let cfg = config(&d, "accounts = [\"A\", \"B\"]") + "\n[accounts.usage]\nA = \"~/logins/A\"\n";
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    spawn(&c, 12);
+    let dir = c.state.parent().unwrap().join("usage");
+    std::fs::create_dir_all(&dir).unwrap();
+    let m = json!({"checked": c.now, "ts": c.now - 7200, "login_needed": true});
+    std::fs::write(dir.join("A.json"), m.to_string()).unwrap();
+    let out = check_shows(&c, "You've hit your limit · resets 3pm");
+    assert!(
+        out.contains("account-signed-out") && !out.contains("account-capped"),
+        "{out}"
+    );
+    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert!(
+        list.lines()
+            .any(|l| l.starts_with("A ") && l.contains("signed out: usage 401 at")),
+        "{list}"
+    );
+}

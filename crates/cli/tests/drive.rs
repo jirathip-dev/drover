@@ -419,7 +419,9 @@ fn clean_reclaims_merged_lanes() {
 /// #605: drive's pass over #12's impl lane, its pane listed as `status`, `s` seconds after `c.now`.
 fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf, impl Fn(u64) -> Fake) {
     let c = setup(name);
-    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: an open issue's lane spawned a minute ago, so no pass here finds it stalled.
+    let t = if merged { 10 } else { c.now - 60 };
+    let wt = lane(&c, t, "impl", "sendmeter-impl-12", "issue-12");
     if merged {
         ev(&c, 30, "merged", json!({"pr": "100"}));
     }
@@ -493,7 +495,8 @@ fn a_working_lane_of_a_merged_issue_is_never_closed() {
 #[test]
 fn an_open_issues_idle_lane_is_kept() {
     let (c, _, r) = idle_lane("drive-open-idle", false, "idle");
-    for s in [0, 900, 3600] {
+    // #666: past `stall_minutes` it is superseded instead (tests/stalled_lanes.rs).
+    for s in [0, 900, 1500] {
         let r = r(s);
         let (code, out) = run(&at(&c, s), &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
@@ -1503,7 +1506,8 @@ fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_h
 #[test]
 fn a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done() {
     let c = setup("drive-handoff");
-    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: idle past the handoff's 2 min, short of `stall_minutes`.
+    let wt = lane(&c, c.now - 300, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("bee");
     let r = |ci: &str| {
         fake(&agents(&[(
@@ -2045,7 +2049,8 @@ fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (he
     ev(&c, 20, "pushed", json!({"sha": head}));
     let d = json!({"verdict": "FAIL", "sha": head, "body": body, "stage": stage, "loop": "rev"});
     ev(&c, 30, "verdict", d);
-    let wt = lane(&c, 40, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: the fix lane spawned 15 min ago: idle, not stalled yet.
+    let wt = lane(&c, c.now - 900, "impl", "sendmeter-impl-12", "issue-12");
     assert_eq!(state(&c), "fix(1)");
     let r = fake(&agents(&[(
         "sendmeter-impl-12",
@@ -2114,7 +2119,7 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     idle(&c, &r);
     assert!(kinds(&c, "fix-no-change").is_empty());
     assert_eq!(state(&c), "fix(1)");
-    let (code, out) = run(&c, &r, &["check"]);
+    let (code, out) = run(&at(&c, 1800), &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     let s = &kinds(&c, "stall")[0];
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
@@ -2747,4 +2752,56 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     std::fs::write(&c.config, CONFIG).unwrap();
     drive(&c, &r);
     assert_eq!(passes(), 1, "a removed fleet gets no pass");
+}
+
+/// #665: #12 held until #11 merges, its lane ended (PASS, no active lane). #11 merges and #12's PR conflicts:
+/// the next pass releases the hold and spawns the update round, and `waiting` stops saying "held".
+#[test]
+fn a_hold_whose_blocker_merged_is_released_and_its_conflicting_pr_updated() {
+    let c = setup("drive-held-merged-conflict");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    let head = sha("a1");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&head, "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("held"), "{out}");
+}
+
+/// #665: a pass ran after #11 merged and #12 still says held: the release logs `hold-stale` once, both numbers.
+#[test]
+fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
+    let c = setup("drive-hold-stale");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(&c, 20, "held", json!({"agent": "sendmeter-impl-12", "on": [11]}));
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let merged = Event::new(c.now - 1800, "sendmeter", Some(11), "merged", json!({}));
+    append(&c.state, &merged).unwrap();
+    let pass = Event::new(c.now - 1500, "sendmeter", None, "drive-pass", json!({}));
+    append(&c.state, &pass).unwrap();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    drive(&c, &r);
+    drive(&c, &r);
+    let stale = kinds(&c, "hold-stale");
+    assert_eq!(stale.len(), 1, "logged once");
+    assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
 }
