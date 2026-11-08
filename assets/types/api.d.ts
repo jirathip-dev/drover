@@ -198,7 +198,11 @@ export type State = { seq: number, now: number, tz: number, age?: number | null,
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
-export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, };
+export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, 
+/**
+ * #667: its blockers in another fleet or repo, as `owner/repo#N`.
+ */
+blocked_on: Array<string>, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
