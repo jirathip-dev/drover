@@ -5,13 +5,16 @@ use crate::overlap::Conflicts;
 use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
     pub blockers: Vec<u64>,
     /// The first of `blockers` still open, set by `view`: the frozen board (#552) and /api/v1 rows show one.
     pub blocked_by: Option<u64>,
+    /// #667: blockers in another fleet or repo (`fleet#n`, `owner/repo#n`); one drops out in `view` once merged in its
+    /// fleet or read closed on GitHub (`blocker-closed`).
+    pub ext: Vec<String>,
     /// #294: the serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
     pub serial: Vec<String>,
     /// #157: host tags its lanes need besides the fleet's and role's (`--needs`, `queue set <n> needs`).
@@ -66,6 +69,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     issue: n,
                     blockers: vec![],
                     blocked_by: None,
+                    ext: vec![],
                     serial: serial.clone(),
                     needs: strs(&d["needs"]),
                     check: d["check"] == true,
@@ -77,6 +81,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
             for m in &mut moved {
                 if let Some(old) = q.iter().find(|i| i.issue == m.issue) {
                     m.blockers.clone_from(&old.blockers);
+                    m.ext.clone_from(&old.ext);
                     m.check |= old.check;
                     m.design |= old.design;
                     m.repro |= old.repro;
@@ -101,13 +106,24 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
         // #505: `on` is a list (one number before #505); block adds to the set, unblock drops some or all.
         op @ ("block" | "unblock") => {
             let n = issues[0];
-            let on = nums(&d["on"]);
+            let (on, ext) = (nums(&d["on"]), refs(&d["on"]));
             let i = pos(q, n)?;
             if op == "unblock" {
-                q[i].blockers.retain(|b| !on.is_empty() && !on.contains(b));
+                let all = on.is_empty() && ext.is_empty();
+                q[i].blockers.retain(|b| !all && !on.contains(b));
+                q[i].ext.retain(|b| !all && !ext.contains(b));
                 return Ok(());
             }
-            ensure!(!on.is_empty(), "block needs --on");
+            ensure!(!on.is_empty() || !ext.is_empty(), "block needs --on");
+            for b in ext {
+                let ok = b
+                    .split_once('#')
+                    .is_some_and(|(r, m)| !r.is_empty() && m.parse::<u64>().is_ok());
+                ensure!(ok, "`{b}` is no issue: `<n>`, `<fleet>#<n>` or `<owner/repo>#<n>`");
+                if !q[i].ext.contains(&b) {
+                    q[i].ext.push(b);
+                }
+            }
             for &b in &on {
                 ensure!(b != n, "#{b} cannot block itself");
                 let mut path = vec![b];
@@ -157,6 +173,30 @@ fn strs(v: &Value) -> Vec<String> {
 pub fn nums(v: &Value) -> Vec<u64> {
     let all = v.as_array().into_iter().flatten().filter_map(Value::as_u64);
     v.as_u64().into_iter().chain(all).collect()
+}
+
+/// #667: a `block`'s `on` blockers in another fleet or repo (`fleet#n`, `owner/repo#n`).
+pub fn refs(v: &Value) -> Vec<String> {
+    let all = v.as_array().into_iter().flatten();
+    all.filter_map(|b| b.as_str().map(String::from)).collect()
+}
+
+/// #667: blocker `b` (`fleet#n`, `owner/repo#n`) is merged in its fleet or read closed on GitHub.
+pub fn released(events: &[Event], st: &States, b: &str) -> bool {
+    let merged = b
+        .split_once('#')
+        .and_then(|(f, n)| Some(state(st, f, n.parse().ok()?) == "merged"));
+    merged == Some(true)
+        || events
+            .iter()
+            .any(|e| e.kind == "blocker-closed" && e.str("ref") == Some(b))
+}
+
+/// #667: `#11, herdsman#633, cooee#87`: the item's open blockers, another repo's by its name.
+pub fn labels(i: &Item) -> String {
+    let ext = i.ext.iter().map(|b| b.rsplit('/').next().unwrap_or(b).to_string());
+    let all: Vec<String> = i.blockers.iter().map(|n| format!("#{n}")).chain(ext).collect();
+    all.join(", ")
 }
 
 /// #417: `on`/`off` (or `["on"]`, as `queue set` logs it) as a forced verify stage.
@@ -262,6 +302,7 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
         .filter(|i| !matches!(state(st, fleet, i.issue), "merged" | "closed"));
     open.map(|mut i| {
         i.blockers.retain(|&b| state(st, fleet, b) != "merged");
+        i.ext.retain(|b| !released(events, st, b));
         i.blocked_by = i.blockers.first().copied();
         i
     })
@@ -279,7 +320,7 @@ pub fn next(events: &[Event], fleet: &str) -> (i32, String) {
         return (0, n);
     }
     match free.first() {
-        Some(i) if !i.blockers.is_empty() => (2, format!("#{} is blocked by {}", i.issue, hashes(&i.blockers))),
+        Some(i) if !labels(i).is_empty() => (2, format!("#{} is blocked by {}", i.issue, labels(i))),
         _ => (1, format!("{fleet}: queue empty")),
     }
 }
@@ -292,7 +333,7 @@ pub fn hashes(ns: &[u64]) -> String {
 /// Every unblocked queued issue with no lane, in queue order: drive tries each, `next` is the first.
 pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     let st = fold(events);
-    let free = |i: &Item| state(&st, fleet, i.issue) == "queued" && i.blockers.is_empty();
+    let free = |i: &Item| state(&st, fleet, i.issue) == "queued" && i.blockers.is_empty() && i.ext.is_empty();
     let q = view(events, &st, fleet);
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
@@ -343,7 +384,7 @@ pub fn skipped(
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 
@@ -419,10 +460,10 @@ pub fn board(
     };
     for (k, i) in q.iter().enumerate() {
         // #505: several blockers get their own line, the row is full.
-        let on = match &i.blockers[..] {
-            [] => None,
-            [b] => Some(format!("on #{b}")),
-            bs => Some(format!("on…\n         blocked by {}", hashes(bs))),
+        let on = match (&i.blockers[..], i.ext.len()) {
+            ([], 0) => None,
+            ([b], 0) => Some(format!("on #{b}")),
+            _ => Some(format!("on…\n         blocked by {}", labels(i))),
         };
         lines.push(row((k + 1).to_string(), i.issue, on));
     }

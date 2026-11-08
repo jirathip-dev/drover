@@ -458,6 +458,8 @@ pub struct Queued {
     pub title: Option<String>,
     pub state: String,
     pub blocked_by: Option<u64>,
+    /// #667: its blockers in another fleet or repo, as `owner/repo#N`.
+    pub blocked_on: Vec<String>,
 }
 
 /// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.

@@ -166,8 +166,8 @@ pub fn reviewed_head(t: &str) -> Option<&str> {
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
-    /// #639: each queued issue's blockers not merged yet.
-    pub blocked: Vec<(&'a str, u64, Vec<u64>)>,
+    /// #639: each queued issue's blockers not merged yet (#667: another repo's too), as `#11, cooee#87`.
+    pub blocked: Vec<(&'a str, u64, String)>,
 }
 
 impl<'a> Log<'a> {
@@ -178,8 +178,8 @@ impl<'a> Log<'a> {
             .collect();
         let blocked = (fleets.into_iter())
             .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
-            .filter(|(_, i)| !i.blockers.is_empty())
-            .map(|(f, i)| (f, i.issue, i.blockers))
+            .map(|(f, i)| (f, i.issue, crate::queue::labels(&i)))
+            .filter(|i| !i.2.is_empty())
             .collect();
         Log {
             all,
@@ -189,9 +189,9 @@ impl<'a> Log<'a> {
     }
 
     /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
-    pub fn blockers(&self, fleet: &str, n: u64) -> &[u64] {
+    pub fn blockers(&self, fleet: &str, n: u64) -> &str {
         let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
-        i.map_or(&[], |i| &i.2)
+        i.map_or("", |i| &i.2)
     }
 }
 
@@ -287,7 +287,7 @@ fn waits(
     // #639: queue blockers hold every lane of the issue (a fix, impl or update respawn too) as they hold its start.
     let on = log.blockers(f, n);
     if !on.is_empty() {
-        let what = format!("blocked by {}", crate::queue::hashes(on));
+        let what = format!("blocked by {on}");
         return w("drive", &what, s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.

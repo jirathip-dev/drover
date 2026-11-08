@@ -299,6 +299,17 @@ impl Server<'_> {
                 .get(&(f.clone(), i.issue))
                 .map_or("queued".into(), |s| s.state.clone()),
             blocked_by: i.blocked_by,
+            // #667: another fleet's `fleet#N` reads as its repo's `owner/repo#N`.
+            blocked_on: i
+                .ext
+                .iter()
+                .map(|b| match b.split_once('#') {
+                    Some((x, n)) if !x.contains('/') => {
+                        cfg.fleet.get(x).map_or(b.clone(), |x| format!("{}#{n}", x.repo))
+                    }
+                    _ => b.clone(),
+                })
+                .collect(),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
