@@ -907,6 +907,53 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     );
 }
 
+/// #603: a fleet-only `shed-acp` runtime (the board handed a runner with no shed, as `service --board` does): the
+/// Lanes tab lists shed's running lane live, with its shed state, never dead, parked or gone.
+#[test]
+fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let c = ctx(&tmpdir("acp-lanes-tab"), &acp_config(&b.sock, "claude", true));
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(s, "GET /api/v1/lanes HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut s, &mut body).unwrap();
+    let v: Value = serde_json::from_str(body.split_once("\r\n\r\n").expect(&body).1).expect(&body);
+    let row = v["sections"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{v}"))
+        .iter()
+        .flat_map(|s| {
+            s["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |r| (s["name"].clone(), r))
+        })
+        .flat_map(|(sec, r)| {
+            r["lanes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |l| (sec.clone(), l.clone()))
+        })
+        .find(|(_, l)| l["name"] == "sendmeter-impl-12")
+        .unwrap_or_else(|| panic!("{v}"));
+    assert_eq!(
+        (row.0.as_str(), row.1["state"].as_str(), row.1["gone"].as_bool()),
+        (Some("working"), Some("working"), Some(false)),
+        "{v}"
+    );
+}
+
 /// #601: with a shed runtime, a remote host whose herdr answers is up though shed is not installed there (its
 /// `shed connect` over ssh fails): its herdr agents count, spawn there is not `HOST_OFFLINE`, its lanes are not
 /// `host offline`, and the shed failure is one `! shed:` health row (`hosts refresh`, `doctor`).
@@ -976,4 +1023,260 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, doc) = run(&c, &f, &["doctor"]);
     assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
+}
+
+/// #634: over `build_budget_gb`, drive's pass never trims a running shed ACP lane's scratch (shed lists it, herdr does
+/// not); an exited shed lane's goes as before, its line naming why.
+#[test]
+fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["acp"] = json!("claude-acp");
+    let mut gone = lane_labels();
+    gone["issue"] = json!("13");
+    b.add("sendmeter-impl-13", gone);
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
+    let d = tmpdir("shed-trim");
+    let root = d.join("builds");
+    let cfg = CONFIG.replace(
+        "build_root = \"\"",
+        &format!(
+            "build_root = \"{}\"\nbuild_budget_gb = {}",
+            root.display(),
+            2000.0 / 1_073_741_824.0
+        ),
+    );
+    let c = ctx(&d, &cfg);
+    let scratch = |agent: &str, n: u64, at: u64| {
+        let w = c.worktrees.join("sendmeter").join(agent);
+        std::fs::create_dir_all(&w).unwrap();
+        let ev = json!({"role": "impl", "agent": agent, "worktree": w, "pane": agent, "workspace": agent});
+        herdsman::events::append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", ev)).unwrap();
+        let p = root.join(".scratch").join(agent);
+        std::fs::create_dir_all(p.join("target")).unwrap();
+        std::fs::write(p.join("target/blob"), vec![0u8; 4096]).unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(at);
+        for f in [p.join("target/blob"), p.join("target"), p.clone()] {
+            std::fs::File::open(&f).unwrap().set_modified(at).unwrap();
+        }
+        p
+    };
+    let (live, exited) = (
+        scratch("sendmeter-impl-12", 12, 1_000),
+        scratch("sendmeter-impl-13", 13, 2_000),
+    );
+    let f = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = shed::With(&f, b.shed());
+    let mut out = vec![];
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(
+        live.exists(),
+        "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
+    );
+    assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
+    let line = format!("builds: trimmed {} ", exited.display());
+    assert!(out.contains(&line) && out.contains("no live agent"), "{out}");
+}
+
+/// #608: a shed-acp fleet's thread, its conductor's events of `kind`.
+fn thread_events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    let all = herdsman::events::read(&c.state).unwrap();
+    all.into_iter().filter(|e| e.kind == kind).collect()
+}
+
+fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
+    herdsman::Ctx { now, ..c.clone() }
+}
+
+#[test]
+fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and_restarts() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor", &acp_config(&b.sock, "claude", true));
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
+        "t1\n"
+    );
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "t1: -> conductor-t1\n"),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let dir = c.state.with_file_name("conductor").join("t1");
+    let calls = f.calls.borrow().clone();
+    let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
+    let head = format!(
+        "shed run --acp claude-acp --policy allow --name conductor-t1 --cwd {} --label fleet=sendmeter --label issue=- \
+         --label role=conductor --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
+         -- sh -c ",
+        dir.display()
+    );
+    assert!(start.starts_with(&head), "{start}");
+    let herdr = |c: &&String| c.starts_with("herdr") && *c != "herdr agent list";
+    assert!(!calls.iter().any(|c| herdr(&c)), "no herdr pane: {calls:?}");
+    // The brief and the kick are the session's first prompt.
+    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
+    let thread = dir.join(".thread.md");
+    let first = format!(
+        "shed send conductor-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
+        brief.trim_end(),
+        thread.display()
+    );
+    let sends: Vec<_> = calls.iter().filter(|c| c.starts_with("shed send")).collect();
+    assert_eq!(sends, [&first]);
+    assert!(brief.contains("Thread: t1, Grill #12"));
+    let st = &thread_events(&c, "conductor-start")[0];
+    assert_eq!(
+        (st.str("runtime"), st.str("pane")),
+        (Some("shed-acp"), Some("conductor-t1"))
+    );
+    assert_eq!(st.data["confirmed"], json!(true));
+
+    // Awake: a multi-line message goes in as it is, through `shed send`.
+    let f = acp_fake(&["echo"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(
+        run(&at(&c, c.now + 60), &cli, &["thread", "say", "t1", "scope\nthen tests"]).0,
+        0
+    );
+    assert_eq!(
+        f.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("shed"))
+            .collect::<Vec<_>>(),
+        [&"shed send conductor-t1 [t1] owner: scope\nthen tests".to_string()]
+    );
+    assert!(
+        !b.methods().iter().any(|m| m == "send" || m == "keys"),
+        "{:?}",
+        b.methods()
+    );
+
+    // Idle 30 min: the session ends (shed kills and removes it); asleep.
+    let quiet = at(&c, c.now + 60 + 31 * 60);
+    assert_eq!(run(&quiet, &cli, &["check"]).0, 0);
+    assert_eq!(
+        b.methods().iter().filter(|m| *m == "kill").count(),
+        1,
+        "{:?}",
+        b.methods()
+    );
+    assert!(!b.terms.lock().unwrap().contains_key("conductor-t1"));
+    let sl = thread_events(&c, "conductor-sleep");
+    assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("idle")]);
+    let (_, ls) = run(&quiet, &Fake::default(), &["thread", "ls", "--json"]);
+    assert!(ls.contains("\"conductor\": \"asleep\""), "{ls}");
+
+    // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
+    let f = acp_fake(&["echo"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(
+        run(&at(&c, quiet.now + 60), &cli, &["thread", "say", "t1", "third"]).0,
+        0
+    );
+    assert_eq!(f.count("shed run --acp claude-acp"), 1);
+    let sends: Vec<_> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("shed send"))
+        .cloned()
+        .collect();
+    assert!(sends.len() == 1 && sends[0].ends_with("[t1] owner: third"), "{sends:?}");
+    let history = std::fs::read_to_string(&thread).unwrap();
+    assert!(
+        history.contains("owner: scope\nthen tests") && history.ends_with("owner: third\n"),
+        "{history}"
+    );
+    let st = thread_events(&c, "conductor-start");
+    assert_eq!((st.len(), st[1].data["resumed"].clone()), (2, json!(false)));
+
+    // A session shed no longer runs is asleep on the next check, quiet or not.
+    b.terms.lock().unwrap().remove("conductor-t1");
+    assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
+    let sl = thread_events(&c, "conductor-sleep");
+    assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
+}
+
+#[test]
+fn an_acp_conductor_runs_under_the_conductor_guard() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor-guard", &acp_config(&b.sock, "claude", true));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
+    assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
+    let dump = cli.2.borrow().concat();
+    let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
+    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
+    assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
+    assert_eq!(env.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&TOKEN_C));
+    let dir = c.config.with_file_name("claude").join("lane-conductor");
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&dir.to_str().unwrap()));
+    // The profile's `PreToolUse` hook, run in the adapter's env as Claude Code runs it.
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    let cwd = c.state.with_file_name("conductor").join("t1");
+    let tool = |cmd: &str| {
+        let mut ch = std::process::Command::new("sh")
+            .args(["-c", hook])
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (*k, *v)))
+            .env("FLEET_CONFIG", &c.config)
+            .env("FLEET_STATE", &c.state)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        ch.stdin
+            .take()
+            .unwrap()
+            .write_all(bash_call(cmd, &cwd).as_bytes())
+            .unwrap();
+        let o = ch.wait_with_output().unwrap();
+        assert!(o.status.success());
+        String::from_utf8(o.stdout).unwrap()
+    };
+    let o = tool("herdsman card approve c1 --sha abc");
+    let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
+    assert!(o.contains("REFUSED OWNER_ONLY"), "{o}");
+    // A conductor's own verb (an impl lane's CONDUCTOR_ONLY) runs.
+    assert_eq!(
+        tool("herdsman amend sendmeter 12 'x' --basis q1"),
+        "",
+        "a conductor amends"
+    );
+}
+
+#[test]
+fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-conductor-noacct", &acp_config(&b.sock, "claude", false));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    let f = acp_fake(&["env"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] token"),
+        "{out}"
+    );
+    let calls = f.calls.borrow();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.starts_with("shed run") || c.starts_with("herdr w") || c.starts_with("herdr agent s")),
+        "{calls:?}"
+    );
+    let msgs = thread_events(&c, "thread-msg");
+    let sys: Vec<_> = msgs.iter().filter(|e| e.str("from") == Some("system")).collect();
+    assert_eq!(sys.len(), 1, "{msgs:?}");
+    assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
+    assert!(thread_events(&c, "conductor-start").is_empty());
 }
