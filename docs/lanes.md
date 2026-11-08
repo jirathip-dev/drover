@@ -181,6 +181,9 @@ Every fleet is driven by herdsman itself. `herdsman drive [fleet]` does one pass
 | `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
 | FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
 | a lane killed | `spawn impl` (respawn) |
+| a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
+| a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
+| a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
 **`needs-human` is the owner's** (#130). It pushes to phones (`#96 needs you: review rounds ran out (4/3)`,
