@@ -182,6 +182,16 @@ pub struct LanesTab {
     pub error: Option<String>,
     pub failed: bool,
     pub sections: Vec<LaneSection>,
+    /// #630: each lane's workspace root and unsaved work.
+    pub unsaved: Vec<LaneUnsaved>,
+}
+
+/// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
+pub struct LaneUnsaved {
+    pub name: String,
+    pub root: Option<String>,
+    pub dirty: Option<u64>,
+    pub unpushed: Option<u64>,
 }
 
 /// A state section (`tone`) and its repo groups.
@@ -316,7 +326,7 @@ pub struct ThreadPage {
 /// `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
 /// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
 /// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
-/// links to.
+/// links to; #669 `run` (a run card, `from` its id).
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
@@ -333,6 +343,24 @@ pub struct Msg {
     pub answer: Option<Answered>,
     pub open: bool,
     pub cmds: Vec<String>,
+    pub run: Option<RunCard>,
+}
+
+/// #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
+/// `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+pub struct RunCard {
+    pub id: String,
+    pub cmd: String,
+    pub why: String,
+    pub blast: String,
+    pub host: String,
+    pub dir: String,
+    pub sha: String,
+    pub exp: u64,
+    pub state: String,
+    pub by: Option<String>,
+    pub code: Option<i64>,
+    pub tail: String,
 }
 
 pub struct FileRef {
@@ -419,6 +447,8 @@ pub struct Queued {
     pub title: Option<String>,
     pub state: String,
     pub blocked_by: Option<u64>,
+    /// #667: its blockers in another fleet or repo, as `owner/repo#N`.
+    pub blocked_on: Vec<String>,
 }
 
 /// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.

@@ -2415,6 +2415,9 @@ document.addEventListener('submit', async e => {
   } else if (f.matches('#chat .chc')) { // #387: a config card's [apply] / [discard]
     e.preventDefault();
     chatPost({ op: 'config', id: f.dataset.id, act: e.submitter.value });
+  } else if (f.matches('#chat .chr')) { // #669: a run card's [approve] (with the sha shown) / [deny]
+    e.preventDefault();
+    chatPost({ op: 'card', id: f.dataset.id, act: e.submitter.value, sha: f.dataset.sha });
   } else if (f.matches('#chat .chs')) { // #387: a secret card's [save] / [dismiss]; the value only goes in the POST
     e.preventDefault();
     const act = e.submitter.value;

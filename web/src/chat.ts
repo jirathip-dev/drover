@@ -119,6 +119,18 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
       b = block(now, 'ai', 'conductor', `asks for secret ${m.from}`, `<div class=md><p class=qid>secret ${n} · stored in the keychain, never in the chat</p>${prose(m.text)}</div>${f}`, m.ts);
       break;
     }
+    case 'run': { // #669: a run card, its own row: [approve]/[deny] while open, then its outcome
+      const c = m.run!, q = esc(c.id), btn = (v: string) => `<button name=act value=${v}${dis}>${v}</button>`, who = esc(c.by ?? 'owner');
+      const out: Record<string, string> = {
+        open: `<form class=chr data-id="${q}" data-sha="${esc(c.sha.slice(0, 12))}">${btn('approve')}${btn('deny')}</form><p class=m>expires in ${age(Math.max(0, c.exp - now))}</p>`,
+        running: `<p class=ans>✓ approved by ${who} · running…</p>`,
+        approved: `<p class=ans>✓ approved by ${who} · exit ${c.code ?? '?'}</p><div class=cb><pre>${esc(c.tail)}</pre><button type=button class=cpy>copy</button></div>`,
+        denied: `<p class=ans>✗ denied by ${who} · nothing ran</p>`,
+        expired: '<p class=m>expired · nothing ran; a new run needs a new card</p>',
+      };
+      b = block(now, 'ai', 'conductor', `run card ${c.id}`, `<div class=md><p class=qid>run card ${q} · sha ${esc(c.sha.slice(0, 12))}</p><pre class=rc>${esc(c.cmd)}</pre><p>why: ${esc(c.why)}</p><p>touches: ${esc(c.blast)}</p><p>runs on: ${esc(c.host)} host, ${esc(c.dir)}</p></div>${out[c.state] ?? ''}`, m.ts);
+      break;
+    }
     case 'resumed': b = `<p class=qs>↻ resumed · same session (${[...esc(m.text)].slice(0, 4).join('')}…)</p>`; break;
     case 'sleep': b = '<p class=qs>☾ asleep after 30 min idle · writes wake it</p>'; break;
     default: return '';

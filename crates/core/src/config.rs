@@ -172,13 +172,16 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-/// #157: one host: its herdr machine label (unset = this host), hand tags, worktree root, and whether new lanes go there.
+/// #157: one host: its herdr machine label (unset = this host), hand tags, workspace root, and whether new lanes go there.
+/// #630: or `roots`, in order: a new lane goes to the first mounted, writable one with room.
 #[derive(Debug, Deserialize)]
 pub struct HostCfg {
     pub machine: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub root: Option<String>,
+    #[serde(default)]
+    pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
     /// #254: a cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
@@ -199,6 +202,12 @@ pub struct HostCfg {
 pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
 
 impl HostCfg {
+    /// #630: its workspace roots in order, as written (none set: empty).
+    pub fn roots(&self) -> Vec<String> {
+        let mut v = self.roots.clone();
+        v.extend(self.root.clone().filter(|_| v.is_empty()));
+        v
+    }
     pub fn allow(&self) -> Vec<String> {
         let def = || {
             CLOUD_ALLOW
@@ -509,9 +518,8 @@ pub struct Limits {
     pub min_free_gb: f64,
     /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
-    /// #438: lanes share `CARGO_TARGET_DIR=<build_root>/<repo>` on their host (empty: off; a fleet's own wins); over
-    /// `build_budget_gb` drive trims its unlocked profiles.
-    pub build_root: String,
+    /// #630: each lane's Cargo target, `<root>/.build/<agent>`, on its host (a fleet's own wins); over
+    /// `build_budget_gb` drive trims their unlocked profiles.
     pub build_budget_gb: f64,
     /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,
@@ -589,7 +597,6 @@ impl Default for Limits {
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
-            build_root: "~/.cache/herdsman/target".into(),
             build_budget_gb: 20.0,
             sweep_remote: true,
             stray_roots: vec!["/tmp".into(), "$TMPDIR".into()],

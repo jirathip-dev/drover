@@ -32,12 +32,14 @@ pub mod propose;
 pub mod protection;
 pub mod queue;
 pub mod report;
+pub mod roots;
 pub mod runner;
 pub mod runners;
 pub mod secret;
 pub mod service;
 pub mod setup;
 pub mod shed;
+pub mod sim;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
@@ -101,7 +103,7 @@ impl Ctx {
         Ctx {
             config,
             state,
-            worktrees: env("FLEET_WORKTREES", home().join(".herdr/worktrees")),
+            worktrees: env("FLEET_WORKTREES", home().join(roots::DEFAULT.trim_start_matches("~/"))),
             hermes: env("FLEET_HERMES_PROFILES", home().join(".hermes/profiles")),
             exe: std::env::current_exe().map_or("herdsman".into(), |p| p.to_string_lossy().into()),
             now: now(),
@@ -147,6 +149,9 @@ pub fn migrate(home: &std::path::Path, out: &mut dyn Write) -> Result<()> {
 
 /// Seconds since the epoch.
 pub fn now() -> u64 {
+    if let Some(t) = sim::now() {
+        return t; // #680: a simulated process's clock
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -158,6 +163,13 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     let events = read(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
+    // #667: `x#N` names another fleet unless `x` is `owner/repo`.
+    for b in queue::refs(&d["on"])
+        .iter()
+        .filter(|b| d["op"] == "block" && !b.contains('/'))
+    {
+        cfg.fleet(b.split('#').next().unwrap_or_default())?;
+    }
     // #425: blocking an issue with a lane holds that lane until its blockers merge (#505: all of them).
     let n = d["issues"][0]
         .as_u64()

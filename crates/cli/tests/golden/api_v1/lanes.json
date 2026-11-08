@@ -151,6 +151,26 @@
         ],
         "tone": "a"
       }
+    ],
+    "unsaved": [
+      {
+        "dirty": null,
+        "name": "sendmeter-rev-9-r1",
+        "root": null,
+        "unpushed": null
+      },
+      {
+        "dirty": null,
+        "name": "sendmeter-impl-12",
+        "root": null,
+        "unpushed": null
+      },
+      {
+        "dirty": null,
+        "name": "Let's talk about #30 · t1",
+        "root": null,
+        "unpushed": null
+      }
     ]
   },
   "route": "GET /api/v1/lanes",
@@ -162,7 +182,8 @@
     "pair": "boolean",
     "paired": "boolean",
     "rw": "boolean",
-    "sections": []
+    "sections": [],
+    "unsaved": []
   },
   "type": "LanesTab"
 }
