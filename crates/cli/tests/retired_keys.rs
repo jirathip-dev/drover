@@ -126,6 +126,24 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     );
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
 
+    // #631: the signed build can't read the account token (not in the store nor the retired file): DEST stays.
+    let o = gate(RETIRED, "");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(1), "{out}");
+    assert!(
+        out.contains("can't read the secrets; kept ") && out.contains("✗ account main — "),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    assert!(!dest.with_file_name("herdsman.new").exists());
+
+    // The retired file still serves it (a `!` row): the token check passes and the build goes in.
+    std::fs::create_dir_all(d.join(".config/claude-accounts")).unwrap();
+    std::fs::write(
+        d.join(".config/claude-accounts/tokens.env"),
+        "CLAUDE_CODE_OAUTH_TOKEN_MAIN=tok\n",
+    )
+    .unwrap();
     let o = gate(RETIRED, "");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
@@ -135,5 +153,6 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
         d.display(),
         dest.display()
     );
-    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);
+    // The token-refused build was signed too (the check runs on the signed binary), then the green one.
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed.repeat(2));
 }
