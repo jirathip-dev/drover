@@ -83,7 +83,7 @@ pub fn begin(
 ) -> Result<Seen> {
     let id = id(fleet, issue, step, key);
     (inputs["action_id"], inputs["step"]) = (json!(id), json!(step));
-    (inputs["pid"], inputs["host"]) = (json!(std::process::id()), json!(crate::db::host()));
+    (inputs["pid"], inputs["host"]) = (json!(crate::sim::pid()), json!(crate::db::host()));
     let ev = Event::new(now, fleet, Some(issue), "intent", inputs);
     let intent = |ev: Event| Intent {
         state: state.into(),

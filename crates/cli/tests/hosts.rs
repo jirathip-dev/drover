@@ -11,7 +11,7 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
-const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
+const WT: &str = "/home/me/.local/share/herdsman/work/sendmeter/issue-12"; // #630
 const ADDR: &str = "127.0.0.1:7777";
 const TOKEN: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 
@@ -1372,9 +1372,6 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
 #[test]
 fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     let c = setup("hosts-trim", "", true, 0);
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    let toml = toml.replace("build_root = \"\"", "build_root = \"~/.cache/herdsman/target\"");
-    std::fs::write(&c.config, toml).unwrap();
     let df = |kb: u64| format!("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 {kb} 90% /\n");
     let trim = format!("{SSH}'sh' '-c' 'r=$1;");
     let low = |freed: &str| {
@@ -1390,7 +1387,7 @@ fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     assert_eq!(placed(&c, &r, 12, "impl", Some("bazzite")).as_deref(), Ok("bazzite"));
     let call = r.calls.borrow().iter().find(|l| l.starts_with(&trim)).cloned().unwrap();
     assert!(
-        call.ends_with("'sh' '~/.cache/herdsman/target' '0'"),
+        call.ends_with("'sh' '~/.local/share/herdsman/work/.build' '0'"),
         "every idle profile goes: {call}"
     );
     // Nothing freed: the first reading stands.
@@ -1403,12 +1400,9 @@ fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
 const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'r=$1;";
 
 fn trim_setup(name: &str, extra: &str) -> herdsman::Ctx {
-    let c = setup(name, extra, true, 0);
+    let c = setup(name, &format!("root = \"/srv/herdsman-485\"\n{extra}"), true, 0);
     let toml = std::fs::read_to_string(&c.config).unwrap();
-    let toml = toml.replace(
-        "build_root = \"\"",
-        "build_root = \"/srv/herdsman-485/target\"\nbuild_budget_gb = 2",
-    );
+    let toml = toml.replace("build_root = \"\"", "build_budget_gb = 2");
     std::fs::write(&c.config, toml).unwrap();
     c
 }
@@ -1434,7 +1428,7 @@ fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pa
     let trims: Vec<_> = calls.iter().filter(|l| l.contains("'r=$1;")).collect();
     assert_eq!(trims.len(), 1, "{trims:?}");
     assert!(
-        trims[0].starts_with(QUICK) && trims[0].ends_with("'sh' '/srv/herdsman-485/target' '2097152'"),
+        trims[0].starts_with(QUICK) && trims[0].ends_with("'sh' '/srv/herdsman-485/.build' '2097152'"),
         "{trims:?}"
     );
 }

@@ -1,7 +1,7 @@
 #!/bin/sh
 # install-gate NEW DEST (#539): put the freshly built herdsman binary NEW at DEST only if NEW's
-# `doctor --config-only` loads the live fleet.toml; else keep DEST, print the fix and exit 1 (the
-# auto-install job's failure goes to #fleet-ops).
+# `doctor --config-only` loads the live fleet.toml and, signed, its `doctor --tokens` reads the secrets (#631);
+# else keep DEST, print the fix and exit 1 (the auto-install job's failure goes to #fleet-ops).
 set -u
 new=${1:?usage: install-gate.sh NEW DEST}
 dest=${2:?usage: install-gate.sh NEW DEST}
@@ -26,5 +26,13 @@ if command -v codesign >/dev/null; then
     exit 1
     ;;
   esac
+fi
+# #631: the signed build must read the secrets with no dialog (timed out as KEYCHAIN_LOCKED), or DEST stays.
+if ! out=$("$dest.new" doctor --tokens 2>&1); then
+  rm -f "$dest.new"
+  echo "herdsman install-gate: the new binary can't read the secrets; kept $dest"
+  echo "$out"
+  echo "fix: as the ✗ line says (docs/troubleshooting.md §3), then rerun the install"
+  exit 1
 fi
 mv "$dest.new" "$dest"
