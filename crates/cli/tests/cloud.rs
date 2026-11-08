@@ -118,7 +118,7 @@ fn spawn_fake() -> Fake {
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
-            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
+            &format!("{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' https://github.com/jirathip-dev/sendmeter.git"),
             "",
         )
         .reply(&format!("{SSH}'git' '-C'"), "")
@@ -171,6 +171,15 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     // #256: why it went there, and the lane hook's host.
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
     assert!(r.calls.borrow().iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")));
+    // #646: its first use there clones lean: the integration branch only, `wip/*` never fetched.
+    let clone: Vec<_> = (r.calls.borrow().iter())
+        .filter(|c| c.contains("git clone"))
+        .cloned()
+        .collect();
+    assert!(
+        clone.len() == 1 && clone[0].contains("--single-branch") && clone[0].contains("^refs/heads/wip/*"),
+        "{clone:?}"
+    );
 }
 
 #[test]
@@ -614,8 +623,13 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
         "{out}"
     );
-    let clone = "git clone https://github.com/jirathip-dev/sendmeter.git '/tmp/does-not-matter/sendmeter'";
+    // #646: a lean clone: the integration branch only, and no later fetch brings `wip/*`.
+    let clone = "git clone --single-branch --branch 'staging' https://github.com/jirathip-dev/sendmeter.git \
+                 '/tmp/does-not-matter/sendmeter' && git -C '/tmp/does-not-matter/sendmeter' config remote.origin.fetch \
+                 '+refs/heads/*:refs/remotes/origin/*' && git -C '/tmp/does-not-matter/sendmeter' config --add \
+                 remote.origin.fetch '^refs/heads/wip/*'";
     assert!(r.0.called(&step(clone)), "{:?}", r.0.calls.borrow());
+    assert!(!r.0.called(&step("git clone https://")), "never a full clone");
     assert!(
         !r.0.calls.borrow().iter().any(|c| c.contains("--with-token")),
         "no login pane"

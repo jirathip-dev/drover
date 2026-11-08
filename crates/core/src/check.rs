@@ -971,7 +971,7 @@ fn save(
             return Ok(Some(why));
         }
         Err(Snap::Failed(err) | Snap::Push(err)) => return Ok(Some(format!("wip save failed: {err:#}"))),
-        Ok(()) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
+        Ok(_) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
     };
     let remote = git(&["ls-remote", "origin", &format!("refs/heads/{w}")])?;
     if remote.split_whitespace().next() != Some(sha.as_str()) {
@@ -1646,7 +1646,9 @@ fn kill_as(
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
     if let Some(w) = &wip {
-        save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
+        let skip = save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
+        let _ = skip.is_empty()
+            || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
     }
     herdr::close(&on, e.str("pane").unwrap_or_default())?;
     drop_log(ctx, Some(agent));
@@ -1707,7 +1709,7 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
 }
 
 /// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
-fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<String>> {
     match snapshot(on, wt, w, msg) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
@@ -1721,7 +1723,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<()> {
             "SNAPSHOT_FAILED",
             format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
         ),
-        Ok(()) => Ok(()),
+        Ok(skip) => Ok(skip),
     }
 }
 
@@ -1731,7 +1733,7 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
         return Ok(None);
     }
     let w = wip_branch(ctx, on.r, agent);
-    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|()| Some(w))
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|_| Some(w))
 }
 
 /// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
@@ -1743,7 +1745,7 @@ fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
 
 /// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first).
 pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<()> {
-    snapshot(r, wt, w, msg).map_err(|e| match e {
+    snapshot(r, wt, w, msg).map(drop).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
         Snap::Failed(e) | Snap::Push(e) => e,
     })
@@ -1756,20 +1758,89 @@ enum Snap {
     Push(anyhow::Error),
 }
 
-/// Stage all but `OWN_FILES` and `SHOT_DIRS`, scan the staged and unpushed diff for a secret (#96, the first as `file:line: masked`),
-/// commit any uncommitted change with `msg` and push HEAD to `w`.
-fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(), Snap> {
+/// #646: build output a wip snapshot never stages, whatever `.gitignore` says (`build`); the per-file and per-snapshot
+/// caps.
+const NO_WIP: [&str; 3] = ["target*", "node_modules", ".lane-logs"];
+const CAPS: (u64, u64) = (5 << 20, 50 << 20);
+/// A path under a `NO_WIP` folder.
+fn build(p: &str) -> bool {
+    (p.split('/').rev().skip(1)).any(|c| c.starts_with("target") || NO_WIP[1..].contains(&c))
+}
+
+/// #646 `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration
+/// branch, its issue's state and whether it carries build output; unless `dry`, those of a merged or closed issue with
+/// build output deleted on origin (a branch delete: never a history rewrite or force-push).
+pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
+    let (f, states) = (cfg.fleet(fleet)?, fold(&read(&ctx.state)?));
+    let dir = f.local_path().to_string_lossy().into_owned();
+    let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
+    git(&["fetch", "-q", "--prune", "origin"])?;
+    let integ = format!("origin/{}", f.integration);
+    let refs = git(&[
+        "for-each-ref",
+        "--format=%(refname:lstrip=3)",
+        "refs/remotes/origin/wip/",
+    ])?;
+    for b in refs.lines() {
+        let tip = format!("origin/{b}");
+        let size: u64 = git(&["rev-list", "--objects", "--disk-usage", &tip, "--not", &integ])?
+            .trim()
+            .parse()?;
+        let has = git(&["log", "--name-only", "--format=", &tip, "--not", &integ])?
+            .lines()
+            .any(build);
+        let n = (b.split_once(&format!("{fleet}-"))).and_then(|x| x.1.split('-').nth(1)?.parse::<u64>().ok());
+        let st = n.and_then(|n| states.get(&(fleet.to_string(), n)));
+        let go = has && st.is_some_and(crate::events::IssueState::done);
+        if go && !dry {
+            git(&["push", "origin", "--delete", b])?;
+        }
+        let what = ["kept", "would delete", "kept", "deleted"][usize::from(go) + 2 * usize::from(!dry)];
+        let issue = n.map_or("no issue".into(), |n| format!("#{n} {}", st.map_or("?", |s| &s.state)));
+        let has = ["", " · build output"][usize::from(has)];
+        writeln!(out, "{b} · {} MB · {issue}{has} · {what}", size >> 20)?;
+    }
+    Ok(())
+}
+
+/// Stage all but `OWN_FILES`, `SHOT_DIRS`, `NO_WIP` and files over `CAPS`, scan the staged and unpushed diff for a
+/// secret (#96, the first as `file:line: masked`), commit any staged change with `msg` (the skipped files listed) and
+/// push HEAD to `w`; the skipped files.
+fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<Vec<String>, Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
     let undo = |e: anyhow::Error| {
         let _ = git(&["reset", "-q"]);
         Snap::Failed(e)
     };
-    let mut commit = false;
+    let mut skip = vec![];
     let mut snap = || -> Result<(String, String)> {
-        commit = changes(&git(&["status", "--porcelain"])?) > 0;
-        git(&["add", "-A"])?;
+        let st = git(&["status", "--porcelain"])?;
+        skip = (st
+            .lines()
+            .filter_map(|l| l.strip_prefix("?? "))
+            .filter(|p| build(p))
+            .map(String::from))
+        .collect();
+        let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
+        git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
         git(&[&["reset", "-q", "--"][..], OWN_FILES, SHOT_DIRS].concat())?;
+        let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
+        let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
+        let mut files: Vec<(u64, &str)> = (tree.split('\0').filter_map(|l| l.split_once('\t')))
+            .filter(|(_, p)| changed.split('\0').any(|c| c == *p))
+            .filter_map(|(m, p)| Some((m.split_whitespace().nth(3)?.parse().ok()?, p)))
+            .collect();
+        files.sort_unstable();
+        let mut total = 0;
+        files.retain(|&(n, _)| {
+            total += n;
+            n > CAPS.0 || total > CAPS.1
+        });
+        for (n, p) in files {
+            git(&["reset", "-q", "--", &format!(":(literal){p}")])?;
+            skip.push(format!("{p} ({} MB)", n >> 20));
+        }
         Ok((
             git(&["diff", "--cached"])?,
             git(&["log", "-p", "--format=", "HEAD", "--not", "--remotes"])?,
@@ -1802,7 +1873,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         let _ = git(&["reset", "-q"]);
         return Err(Snap::Secret(hit));
     }
-    if commit {
+    if !staged.is_empty() {
         // A host with no git identity still saves: herdsman signs only when none is configured.
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
@@ -1810,8 +1881,9 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         } else {
             &[]
         };
-        git(&[id, &["commit", "-q", "--no-verify", "-m", msg]].concat()).map_err(undo)?;
+        let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
+        git(&[id, &["commit", "-q", "--no-verify", "-m", &msg]].concat()).map_err(undo)?;
     }
     git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
-    Ok(())
+    Ok(skip)
 }
