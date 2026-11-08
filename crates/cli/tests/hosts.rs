@@ -1317,6 +1317,57 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
     assert!(!r.called("herdr pane close w9:p1"), "never on the main host's herdr");
 }
 
+/// #676: a lane moved off its last host (now off) starts from the pushed branch, with that host's unpushed work on `wip/`.
+#[test]
+fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
+    let c = setup("hosts-move-wip", "enabled = false", true, 0);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    remote_spawn(&c, NOW - 900);
+    ev(
+        &c,
+        NOW - 600,
+        12,
+        "lane-killed",
+        json!({"role": "impl", "agent": "sendmeter-impl-12"}),
+    );
+    let r = fake(2.0, 0.1)
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "1\n")
+        .reply(&format!("{SSH}'git'"), "")
+        .reply("git ", "")
+        .reply(
+            "herdr worktree create",
+            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
+        )
+        .reply(
+            "herdr pane list --workspace w1",
+            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run w1:p1 export", "{}")
+        .reply("herdr agent start sendmeter-impl-12", "{}")
+        .reply("herdr agent wait sendmeter-impl-12", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    let create = calls.iter().find(|l| l.starts_with("herdr worktree create")).unwrap();
+    assert!(create.contains("--base origin/issue-12"), "{create}");
+    assert!(
+        calls
+            .iter()
+            .any(|l| l.starts_with(&format!("{SSH}'git' '-C' '{WT}' 'push'"))),
+        "{calls:?}"
+    );
+    let e = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "spawn")
+        .unwrap();
+    assert_eq!(e.str("host"), Some("mini"));
+    let brief = std::fs::read_to_string(std::path::Path::new(e.str("worktree").unwrap()).join(".brief.md")).unwrap();
+    assert!(brief.contains("work is on `origin/wip/sendmeter-impl-12-"), "{brief}");
+}
+
 /// #438: short of disk on a remote host, its shared build folder is trimmed over ssh first; then its disk is read again.
 #[test]
 fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
