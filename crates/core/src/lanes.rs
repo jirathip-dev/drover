@@ -43,7 +43,7 @@ pub struct Lane {
     /// #609: the runtime it was spawned in (`herdr` | `shed` | `shed-acp`), from its spawn: never the config's now.
     pub runtime: String,
     /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled, then `herdr` or `shed`
-    /// while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, ``).
+    /// while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, or empty).
     pub place: String,
 }
 
