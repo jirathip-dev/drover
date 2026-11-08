@@ -1,0 +1,31 @@
+   Compiling herdsman v0.1.0 (/Users/jkmacmini/.herdr/worktrees/herdsman/issue-662/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running tests/shed.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-662/target/debug/deps/shed-14df4f85ee7feaa5)
+
+running 23 tests
+test a_wait_that_times_out_answers_as_herdr ... ok
+test another_host_is_reached_through_shed_connect_over_ssh ... ok
+test another_product_at_the_same_version_is_refused ... ok
+test another_shed_version_is_refused ... ok
+test an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_to_herdr ... ok
+test a_lane_spawns_on_shed ... ok
+test a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt ... ok
+test a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it ... ok
+test every_adapter_call_is_a_shed_request ... ok
+test the_default_runtime_is_herdr ... ok
+test an_unguardable_acp_lane_refuses_to_start ... ok
+test a_remote_host_without_shed_is_up_when_its_herdr_answers ... ok
+test a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and_restarts ... ok
+test an_acp_lanes_state_follows_its_turn_events ... ok
+test lane_dead_and_waiting_carry_an_acp_lanes_exit_cause ... ok
+test drive_logs_sheds_state_changes_since_its_last_pass ... ok
+test drive_reads_berths_seq_file_once_when_sheds_is_missing ... ok
+test the_lane_hook_reports_its_state_to_shed ... ok
+test the_old_kind_and_env_still_work_with_a_warning ... ok
+test an_acp_conductor_runs_under_the_conductor_guard ... ok
+test a_guarded_command_is_refused_inside_an_acp_lane ... ok
+test an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_worktree_on_another_account ... ok
+test the_service_follows_sheds_events_and_says_when_the_stream_drops ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.11s
+
