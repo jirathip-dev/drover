@@ -1,8 +1,7 @@
 //! #557 `herdsman self-update`, the `dev.herdsman.update` job (every 5 min), no Hermes: the herdsman fleet's
 //! integration head is installed once its CI is all green. Built beside the live binary, signed with "herdsman-local"
-//! (#556), gated by the new binary's `doctor --config-only` on the live config (#539) and its `doctor --tokens` read
-//! through `herdsman-keys` (#631, reinstalled only when its source changes), swapped in atomically, then
-//! `profiles sync` and a serve restart. A failed step keeps the old binary and alerts once per head.
+//! (#556), gated by the new binary's `doctor --config-only` on the live config (#539) and its `doctor --tokens` secret
+//! read (#631), swapped in atomically, then `profiles sync` and a serve restart. A failed step keeps the old binary and alerts once per head.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::runner::{ok, Runner};
@@ -71,16 +70,8 @@ pub fn self_update(
         writeln!(out, "{}", plan.join("\n"))?;
         return Ok(0);
     }
-    let keys = live.with_file_name("herdsman-keys");
-    let staged = stage(r, &local, &home, sha, &new).and_then(|hash| {
-        let k = place_keys(&home, &keys, hash.as_deref())?;
-        gate(r, &home.join("src"), &new, &k).map(|()| (k, hash))
-    });
-    let res = staged.and_then(|(k, hash)| {
-        if k != keys {
-            std::fs::rename(&k, &keys).context("swap in herdsman-keys")?;
-            std::fs::write(keys.with_extension("src"), hash.unwrap_or_default())?;
-        }
+    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &home.join("src"), &new));
+    let res = staged.and_then(|()| {
         std::fs::rename(&new, &live).with_context(|| format!("swap into {}", live.display()))?;
         std::fs::write(home.join("sha"), sha)?;
         let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
@@ -121,12 +112,8 @@ pub fn self_update(
     Ok(1)
 }
 
-/// #631: the helper's source; the sha256 of these files is its version (`herdsman-keys.src` beside it).
-const KEYS_SRC: [&str; 2] = ["crates/keys/Cargo.toml", "crates/keys/src/main.rs"];
-
-/// Check `sha` out in herdsman's own worktree (`<home>/src`), build it there and copy the binary to `new`; the
-/// helper's source hash (None: a head from before it).
-fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<Option<String>> {
+/// Check `sha` out in herdsman's own worktree (`<home>/src`), build it there and copy the binary to `new`.
+fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<()> {
     let (src, target) = (home.join("src"), home.join("target"));
     let (s, t) = (src.to_string_lossy(), target.to_string_lossy());
     std::fs::create_dir_all(home)?;
@@ -137,38 +124,20 @@ fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Re
         ok(r, "git", &["-C", &l, "worktree", "add", "-q", "--detach", &s, sha]).context("checkout")?;
     }
     let manifest = src.join("Cargo.toml");
-    let files: Option<Vec<_>> = KEYS_SRC.iter().map(|f| std::fs::read(src.join(f)).ok()).collect();
-    let hash = files.map(|f| crate::devices::sha256(&f.concat()));
-    let keys: &[&str] = if hash.is_some() { &["-p", "herdsman-keys"] } else { &[] };
-    let build = ["build", "--release", "--locked", "-p", "herdsman"];
-    let rest = ["--manifest-path", &manifest.to_string_lossy(), "--target-dir", &t];
-    ok(r, "cargo", &[&build[..], keys, &rest].concat()).context("build")?;
+    let build = ["build", "--release", "--locked", "-p", "herdsman", "--manifest-path"];
+    ok(
+        r,
+        "cargo",
+        &[&build[..], &[&manifest.to_string_lossy(), "--target-dir", &t]].concat(),
+    )
+    .context("build")?;
     std::fs::copy(target.join("release/herdsman"), new).context("copy the build")?;
-    Ok(hash)
-}
-
-/// #631: where the gate finds the build's `herdsman-keys`: `keys` itself while its source hash is the installed one's
-/// (never reinstalled, so its cdhash and the owner's approval stay) and the first time (nothing reads it yet), else
-/// `herdsman-keys.new`, kept on a failed gate so the owner can authorise it.
-fn place_keys(home: &Path, keys: &Path, hash: Option<&str>) -> Result<PathBuf> {
-    let stamp = keys.with_extension("src");
-    let same = |h: &str| std::fs::read_to_string(&stamp).is_ok_and(|s| s.trim() == h);
-    let Some(h) = hash.filter(|h| !same(h)) else {
-        return Ok(keys.into());
-    };
-    let (built, first) = (home.join("target/release/herdsman-keys"), !keys.exists());
-    let to = if first { keys.into() } else { keys.with_extension("new") };
-    let _ = std::fs::remove_file(&to); // a fresh inode: macOS kills a signed binary rewritten in place
-    std::fs::copy(built, &to).context("copy herdsman-keys")?;
-    if first {
-        std::fs::write(stamp, h)?;
-    }
-    Ok(to)
+    Ok(())
 }
 
 /// Sign `new` with the stable identity by hash (#556, #568: the build's own `signing-identity.sh sign`; refused
-/// without it), run its `doctor --config-only` (#539) and its token check through `keys` (#631).
-fn gate(r: &dyn Runner, src: &Path, new: &Path, keys: &Path) -> Result<()> {
+/// without it), run its `doctor --config-only` (#539) and its `doctor --tokens` secret read (#631).
+fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
     let n = new.to_string_lossy();
     if ok(r, "which", &["codesign"]).is_ok() {
         let script = src.join("scripts/signing-identity.sh");
@@ -183,11 +152,10 @@ fn gate(r: &dyn Runner, src: &Path, new: &Path, keys: &Path) -> Result<()> {
     if o.code != 0 {
         bail!("doctor --config-only on the live config: {}", o.stdout.trim());
     }
-    let k = format!("HERDSMAN_KEYS={}", keys.display());
-    let o = r.run("env", &crate::runner::argv(&[&k, &n, "doctor", "--tokens"]))?;
+    let o = r.run(&n, &crate::runner::argv(&["doctor", "--tokens"]))?;
     if o.code != 0 {
         bail!(
-            "doctor --tokens, the new build can't read the tokens: {}",
+            "doctor --tokens, the new build can't read the secrets: {}",
             o.stdout.trim()
         );
     }

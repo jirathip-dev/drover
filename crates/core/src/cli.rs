@@ -364,7 +364,7 @@ enum Cmd {
         /// Only load the config (the pre-install gate, #539): exit 1 if this binary can't, warnings are fine
         #[arg(long)]
         config_only: bool,
-        /// Only read each account token through herdsman-keys, never a dialog (the install gates' token check, #631)
+        /// Only read each account token from the store, timed out on a dialog (the install gates' secret check, #631)
         #[arg(long, conflicts_with = "config_only")]
         tokens: bool,
     },
