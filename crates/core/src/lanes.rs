@@ -82,7 +82,7 @@ pub fn join(
             pane: pane.map(String::from),
             host: s("host").map(String::from),
             machine: s("machine").map(String::from),
-            runtime: s("runtime").unwrap_or("herdr").into(),
+            runtime: s("runtime").unwrap_or(crate::herdr::BIN).into(),
             ..Lane::default()
         };
         if let Some(e) = sp {
@@ -159,7 +159,8 @@ pub fn join(
 
 /// #609: each lane's `place` and, with `[hosts]`, its host (none: the main host's).
 fn place(cfg: &Config, all: &mut [Lane]) {
-    let word = |l: &Lane| if l.runtime == "herdr" { "herdr" } else { "shed" };
+    let herdr = crate::herdr::BIN;
+    let word = |l: &Lane| if l.runtime == herdr { herdr } else { "shed" };
     let live = all.iter().filter(|l| l.pane.is_some() && l.role != "other");
     let both = live.map(word).collect::<BTreeSet<_>>().len() > 1;
     let hosts = cfg.hosts.values().filter(|h| h.enabled).count() > 1;
@@ -209,7 +210,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         machine: s("machine").or(l.machine),
         worktree: s("worktree"),
         resting: s("resting"),
-        runtime: s("runtime").unwrap_or_else(|| "herdr".into()),
+        runtime: s("runtime").unwrap_or_else(|| crate::herdr::BIN.into()),
         ..l
     }
 }
