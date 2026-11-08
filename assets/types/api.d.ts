@@ -65,7 +65,11 @@ export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: s
  * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
  * fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
  */
-export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, };
+export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, 
+/**
+ * #630: each lane's workspace root and unsaved work.
+ */
+unsaved: Array<LaneUnsaved>, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -81,6 +85,11 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * fleet is not configured), `dead` and the blocked card.
  */
 export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+
+/**
+ * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
+ */
+export type LaneUnsaved = { name: string, root?: string | null, dirty?: number | null, unpushed?: number | null, };
 
 /**
  * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
@@ -527,7 +536,16 @@ busy: number,
 /**
  * #255: a cloud host's gh token, as its card says it.
  */
-github: string, };
+github: string, 
+/**
+ * #630: its set workspace roots.
+ */
+roots: Array<HostRoot>, };
+
+/**
+ * A root as the last look saw it (`hosts.json`, the host card, `/api/v1`).
+ */
+export type HostRoot = { path: string, state: string, free_gb?: number | null, };
 
 /**
  * #234: one row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.
