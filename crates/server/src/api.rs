@@ -316,7 +316,7 @@ pub struct ThreadPage {
 /// `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
 /// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
 /// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
-/// links to.
+/// links to; #669 `run` (a run card, `from` its id).
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
@@ -333,6 +333,24 @@ pub struct Msg {
     pub answer: Option<Answered>,
     pub open: bool,
     pub cmds: Vec<String>,
+    pub run: Option<RunCard>,
+}
+
+/// #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
+/// `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+pub struct RunCard {
+    pub id: String,
+    pub cmd: String,
+    pub why: String,
+    pub blast: String,
+    pub host: String,
+    pub dir: String,
+    pub sha: String,
+    pub exp: u64,
+    pub state: String,
+    pub by: Option<String>,
+    pub code: Option<i64>,
+    pub tail: String,
 }
 
 pub struct FileRef {
@@ -928,6 +946,30 @@ pub struct Reply {
     pub ok: bool,
     pub code: String,
     pub message: String,
+}
+
+/// #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
+pub struct ConductorAttach {
+    pub ok: bool,
+    pub code: String,
+    pub message: String,
+    /// `roles/conductor.md`, the repo and the owner's conductor instructions.
+    pub brief: String,
+    /// The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+    pub settings: String,
+    pub env: AttachEnv,
+    /// #565's ACP guard holds; else `why` not.
+    pub guarded: bool,
+    pub why: String,
+}
+
+pub struct AttachEnv {
+    #[serde(rename = "HERDSMAN_LANE")]
+    pub lane: String,
+    #[serde(rename = "HERDSMAN_THREAD")]
+    pub thread: String,
+    #[serde(rename = "HERDSMAN_PORT")]
+    pub port: String,
 }
 
 }

@@ -6,7 +6,9 @@
 //! sets one), an issue's verdicts and the lessons.
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
-use crate::api::{Ask, ChatDefaults, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun};
+use crate::api::{
+    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
+};
 use crate::api::{Balance, Provider, Providers};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
 use crate::config::Role;
@@ -21,8 +23,19 @@ use std::collections::BTreeSet;
 /// a backlog row's [chat about] (`/thread`'s `new`), then `[chat]`'s defaults and a backlog issue's [close].
 const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
-/// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`); #682 `serve/providers.rs`'.
-const V1_PAIRED: &[&str] = &["qset", "lesson", "sign-in", "key-add", "key-check", "key-remove", "use"];
+/// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
+/// #633: and a cooee thread's conductor link. #682: the providers' ops.
+const V1_PAIRED: &[&str] = &[
+    "qset",
+    "lesson",
+    "conductor-attach",
+    "conductor-detach",
+    "sign-in",
+    "key-add",
+    "key-check",
+    "key-remove",
+    "use",
+];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -166,6 +179,19 @@ impl Server<'_> {
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
+            ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
+                let f = fields(body);
+                let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
+                let cfg = Config::load(&ctx.config);
+                if op == "conductor-detach" {
+                    return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
+                }
+                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, fleet, t));
+                match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
+                    Ok(a) => out("200 OK", &a),
+                    Err(e) => done(Err(e)),
+                }
+            }
             ("POST", Some("lesson")) => {
                 let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
                 done(self.lesson(ctx, &fields(body), by))
