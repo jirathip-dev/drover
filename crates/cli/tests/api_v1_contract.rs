@@ -40,6 +40,7 @@ const POSTS: &[&str] = &[
     "close",
     "qset",
     "lesson",
+    "conductor-detach",
 ];
 
 /// The JSON shape of `v`: each scalar's type name, an object's keys, a list's elements merged.
@@ -204,6 +205,38 @@ fn every_route_keeps_its_fixtures_shape() {
             &mut fails,
         );
     }
+    // #633: a cooee thread attached as the conductor, and an ask in it, as `events` lists them.
+    let since = get("/api/v1/events?since=0")["seq"].clone();
+    let attach = json!({"fleet": "sendmeter", "thread": "cooee-7f3a"});
+    let ty = ("ConductorAttach", schema::<ConductorAttach>());
+    check(
+        "post-conductor-attach",
+        "POST /api/v1/conductor-attach",
+        ty,
+        post("conductor-attach", attach),
+        &mut fails,
+    );
+    let ask = [
+        "ask",
+        "sendmeter",
+        "-",
+        "Which scope?",
+        "--option",
+        "small",
+        "--option",
+        "full",
+        "--recommend",
+        "2",
+    ];
+    assert_eq!(run(&c, &r, &[&ask[..], &["--thread", "cooee-7f3a"]].concat()).0, 0);
+    let got = get(&format!("/api/v1/events?since={since}"));
+    check(
+        "events-conductor-attach",
+        "GET /api/v1/events",
+        ("Events", schema::<Events>()),
+        got,
+        &mut fails,
+    );
     assert!(
         fails.is_empty(),
         "API v1 shapes changed (`BLESS=1` updates the fixtures):\n{}",
