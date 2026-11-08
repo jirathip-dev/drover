@@ -1217,8 +1217,9 @@ pub fn spawn(
                 None => h.kick(r, &p, &pane),
             };
             let mut d = lane_data(&p, &pane, &ws);
-            if bt.is_some() {
-                d["runtime"] = json!("shed");
+            if let Some(b) = &bt {
+                d["runtime"] = json!(["shed", "shed-acp"][usize::from(b.0.acp.is_some())]);
+                // #609
             }
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d["confirmed"] = json!(confirmed);

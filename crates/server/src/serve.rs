@@ -1800,6 +1800,7 @@ impl<'a> Server<'a> {
                     _ => 3,
                 };
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
+                let on = ls.iter().find(|l| !lane.is_empty() && l.name == lane); // #609
                 let pr = gh::cached_pr(ctx, f, n);
                 let head = pr["headRefOid"].as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
@@ -1881,6 +1882,9 @@ impl<'a> Server<'a> {
                         up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
                         down: k.filter(|_| mv).and_then(|k| q.get(k + 1)).map(|x| x.issue),
                         lanes: qls,
+                        runtime: on.map(|l| l.runtime.clone()).unwrap_or_default(),
+                        host: on.map(lanes::Lane::at).unwrap_or_default(),
+                        place: on.map(|l| l.place.clone()).unwrap_or_default(),
                     },
                 ));
             }
@@ -2046,6 +2050,8 @@ impl<'a> Server<'a> {
                         effort: l.effort.clone(),
                         account: l.account.clone(),
                         host: l.host.clone(),
+                        runtime: l.runtime.clone(),
+                        place: l.place.clone(),
                         state: l.state.clone(),
                         shown,
                         tone: tone.into(),
@@ -2220,6 +2226,9 @@ impl<'a> Server<'a> {
         let since = w.filter(|_| sup.is_none()).map_or(l.since, |w| w.since);
         let fc = l.fleet.as_ref().and_then(|f| cfg.fleet.get(f));
         LaneRow {
+            runtime: l.runtime.clone(),
+            host: l.at(),
+            place: l.place.clone(),
             name: l.name.clone(),
             role: l.role.clone(),
             state: l.state.clone(),

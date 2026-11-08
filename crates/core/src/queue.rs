@@ -356,6 +356,7 @@ pub fn board(
     fleet: &str,
     cfg: Option<&crate::config::Config>,
     c: &Conflicts,
+    at: &std::collections::BTreeMap<String, String>,
 ) -> String {
     let now = ctx.now;
     let st = fold(events);
@@ -402,6 +403,9 @@ pub fn board(
         let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
         let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
+        // #609: its own line too, the row is full: where the active lane runs (`on mini · shed`).
+        let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());
+        let warn = place.map_or(String::new(), |p| format!("\n         on {p}")) + &warn;
         let warn = if stale {
             "\n         rules stale: respawn to apply".into()
         } else {

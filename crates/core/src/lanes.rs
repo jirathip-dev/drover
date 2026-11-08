@@ -40,6 +40,11 @@ pub struct Lane {
     pub resting: Option<String>,
     /// #422: a conductor's chat thread (`t6`); with no pane it is `asleep`.
     pub thread: Option<String>,
+    /// #609: the runtime it was spawned in (`herdr` | `shed` | `shed-acp`), from its spawn: never the config's now.
+    pub runtime: String,
+    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled, then `herdr` or `shed`
+    /// while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, ``).
+    pub place: String,
 }
 
 /// Join `herdr agent list` rows with the log. `ws` maps workspace id -> label.
@@ -77,6 +82,7 @@ pub fn join(
             pane: pane.map(String::from),
             host: s("host").map(String::from),
             machine: s("machine").map(String::from),
+            runtime: s("runtime").unwrap_or("herdr").into(),
             ..Lane::default()
         };
         if let Some(e) = sp {
@@ -147,10 +153,30 @@ pub fn join(
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state == "done").map(String::from);
     }
+    place(cfg, &mut out);
     out
 }
 
+/// #609: each lane's `place` and, with `[hosts]`, its host (none: the main host's).
+fn place(cfg: &Config, all: &mut [Lane]) {
+    let word = |l: &Lane| if l.runtime == "herdr" { "herdr" } else { "shed" };
+    let live = all.iter().filter(|l| l.pane.is_some() && l.role != "other");
+    let both = live.map(word).collect::<BTreeSet<_>>().len() > 1;
+    let hosts = cfg.hosts.values().filter(|h| h.enabled).count() > 1;
+    let main = cfg.hosts.iter().find(|h| h.1.machine.is_none()).map(|h| h.0.clone());
+    for l in all {
+        l.host = l.host.take().or_else(|| main.clone());
+        let host = hosts.then(|| l.at());
+        let parts: Vec<String> = host.into_iter().chain(both.then(|| word(l).into())).collect();
+        l.place = parts.join(" · ");
+    }
+}
+
 impl Lane {
+    /// #609: its host as API v1 sends it: `local` with no `[hosts]`.
+    pub fn at(&self) -> String {
+        self.host.clone().unwrap_or_else(|| "local".into())
+    }
     /// #157: `r` on the lane's host.
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
@@ -183,6 +209,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         machine: s("machine").or(l.machine),
         worktree: s("worktree"),
         resting: s("resting"),
+        runtime: s("runtime").unwrap_or_else(|| "herdr".into()),
         ..l
     }
 }

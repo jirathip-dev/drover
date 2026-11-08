@@ -42,15 +42,18 @@
     {
       "fleet": "sendmeter",
       "harness": "claude",
+      "host": "local",
       "issue": 12,
       "model": null,
       "name": "sendmeter-impl-12",
       "role": "impl",
+      "runtime": "herdr",
       "shown": "working",
       "since": 900100,
       "state": "working",
       "title": null,
-      "tone": "g"
+      "tone": "g",
+      "where": ""
     }
   ],
   "mtime": "<mtime>",

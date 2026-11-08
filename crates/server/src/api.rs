@@ -43,6 +43,11 @@ pub struct HerdLane {
     pub effort: Option<String>,
     pub account: Option<String>,
     pub host: Option<String>,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    #[serde(rename = "where")]
+    pub place: String,
     pub state: String,
     pub shown: String,
     pub tone: String,
@@ -224,6 +229,12 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 /// #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
@@ -434,6 +445,12 @@ pub struct Lane {
     pub shown: String,
     pub tone: String,
     pub since: u64,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 pub struct Ask {
@@ -682,6 +699,11 @@ pub struct QueueRow {
     pub up: Option<u64>,
     pub down: Option<u64>,
     pub lanes: Vec<QueueLane>,
+    // #609: its active lane's (`Lane`'s), empty with none.
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 /// #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the

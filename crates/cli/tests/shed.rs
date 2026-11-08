@@ -440,8 +440,8 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let ev = herdsman::events::read(&c.state).unwrap();
     let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(
-        (sp.str("pane"), sp.data["confirmed"].as_bool()),
-        (Some("sendmeter-impl-12"), Some(true))
+        (sp.str("pane"), sp.data["confirmed"].as_bool(), sp.str("runtime")),
+        (Some("sendmeter-impl-12"), Some(true), Some("shed-acp")) // #609: the lane's runtime, as spawned
     );
     assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
 
@@ -1283,4 +1283,193 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     assert_eq!(sys.len(), 1, "{msgs:?}");
     assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
     assert!(thread_events(&c, "conductor-start").is_empty());
+}
+
+/// #609: `GET path` on a fresh board over runner `r` (a server per call: its lane cache starts empty).
+fn board_get(c: &herdsman::Ctx, r: Fake, path: &str) -> Value {
+    let r: &'static Fake = Box::leak(Box::new(r));
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(s, "GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut s, &mut body).unwrap();
+    serde_json::from_str(body.split_once("\r\n\r\n").expect(&body).1).expect(&body)
+}
+
+/// #609: each named lane's `(runtime, host, where)` in `/api/v1/lanes`, `/api/v1/state` and `/herd.json`, which agree.
+fn wheres(c: &herdsman::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, String, String)> {
+    let s = |v: &Value| v.as_str().unwrap_or("?").to_string();
+    let lanes = board_get(c, r(), "/api/v1/lanes");
+    let rows = lanes["sections"].as_array().unwrap_or_else(|| panic!("{lanes}"));
+    let rows = rows.iter().flat_map(|s| {
+        s["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["lanes"].as_array().unwrap())
+    });
+    let got: BTreeMap<_, _> = rows
+        .map(|l| (s(&l["name"]), (s(&l["runtime"]), s(&l["host"]), s(&l["where"]))))
+        .collect();
+    let state = board_get(c, r(), "/api/v1/state");
+    for l in state["lanes"].as_array().unwrap() {
+        assert_eq!(
+            got[&s(&l["name"])],
+            (s(&l["runtime"]), s(&l["host"]), s(&l["where"])),
+            "{state}"
+        );
+    }
+    let herd = board_get(c, r(), "/herd.json");
+    for l in herd["fleets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|f| f["lanes"].as_array().unwrap())
+    {
+        assert_eq!(
+            (s(&l["runtime"]), s(&l["where"])),
+            (got[&s(&l["name"])].0.clone(), got[&s(&l["name"])].2.clone())
+        );
+    }
+    got
+}
+
+/// #609: a herdr lane on another host (`air`) and a shed-acp lane on the main one (`mini`): `/api/v1/lanes` and
+/// `/api/v1/queue` give each its runtime, host and `where`; `where` drops the host while one host is enabled and the
+/// runtime once the last herdr lane is gone (each shape is in tests/golden/api_v1/where.json).
+#[test]
+fn every_lane_says_where_it_runs() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let hosts = |air: bool| format!("\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\nenabled = {air}\n");
+    let c = ctx(
+        &tmpdir("where-lanes"),
+        &(acp_config(&b.sock, "claude", true) + &hosts(true)),
+    );
+    let ev = |n, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(n), "spawn", d)).unwrap()
+    };
+    ev(
+        12,
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12", "host": "mini"}),
+    );
+    ev(
+        9,
+        json!({"role": "rev", "agent": "sendmeter-rev-9", "harness": "claude", "pane": "w9:p1",
+        "worktree": "/w/issue-9", "host": "air", "machine": "air"}),
+    );
+    let air = agents(&[("sendmeter-rev-9", "working", "/w/issue-9", "w9:p1")]);
+    let both = || {
+        Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr --machine air agent list", &air)
+    };
+    let shed_only = || {
+        Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr --machine air agent list", NO_AGENTS)
+    };
+    let t = |rt: &str, h: &str, w: &str| (rt.to_string(), h.to_string(), w.to_string());
+    let (rev, imp) = ("sendmeter-rev-9", "sendmeter-impl-12");
+    let mut shapes = vec![];
+
+    // Two hosts, both runtimes live: host and runtime.
+    let got = wheres(&c, both);
+    assert_eq!(
+        (&got[rev], &got[imp]),
+        (&t("herdr", "air", "air · herdr"), &t("shed-acp", "mini", "mini · shed"))
+    );
+    shapes.push(json!(got));
+    let q = board_get(&c, both(), "/api/v1/queue");
+    let rows: Vec<_> = q["fleets"][0]["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{q}"))
+        .iter()
+        .map(|r| {
+            (
+                r["issue"].as_u64().unwrap(),
+                t(
+                    r["runtime"].as_str().unwrap(),
+                    r["host"].as_str().unwrap(),
+                    r["where"].as_str().unwrap(),
+                ),
+            )
+        })
+        .collect();
+    assert!(rows.contains(&(9, t("herdr", "air", "air · herdr"))), "{rows:?}");
+    assert!(rows.contains(&(12, t("shed-acp", "mini", "mini · shed"))), "{rows:?}");
+
+    // `air` disabled: one host enabled, so the runtime alone.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(false)).unwrap();
+    let got = wheres(&c, both);
+    assert_eq!((&got[rev].2, &got[imp].2), (&"herdr".to_string(), &"shed".to_string()));
+    shapes.push(json!(got));
+
+    // Both hosts again, the last herdr lane ended: the host alone.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(true)).unwrap();
+    let got = wheres(&c, shed_only);
+    assert_eq!(got[imp], t("shed-acp", "mini", "mini"));
+    shapes.push(json!(got));
+
+    // Neither varies: no label.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(false)).unwrap();
+    let got = wheres(&c, shed_only);
+    assert_eq!(got[imp], t("shed-acp", "mini", ""));
+    shapes.push(json!(got));
+
+    // The CLI shows the same label: status's HOST column, board's row, waiting's line.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(true)).unwrap();
+    for cmd in ["status", "board", "waiting"] {
+        let (code, out) = run(&c, &both(), &[cmd, "sendmeter"]);
+        assert!(
+            code == 0 && out.contains("mini · shed") && out.contains("air · herdr"),
+            "{cmd}: {out}"
+        );
+    }
+
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/api_v1/where.json");
+    let fresh = serde_json::to_string_pretty(
+        &json!({"route": "GET /api/v1/lanes, state, queue, herd: each lane's [runtime, host, where]",
+        "shapes": shapes}),
+    )
+    .unwrap()
+        + "\n";
+    if std::env::var_os("BLESS").is_some() {
+        std::fs::write(&file, &fresh).unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap_or_default(),
+        fresh,
+        "`BLESS=1` rewrites it"
+    );
+}
+
+/// #609: a lane keeps the runtime it was spawned with (a shed-acp spawn logs `shed-acp`, the test above): the board
+/// still says `shed-acp` once the fleet's runtime config is gone (new lanes start in herdr).
+#[test]
+fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let c = ctx(&tmpdir("acp-keeps-runtime"), &acp_config(&b.sock, "claude", true));
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let r = || Fake::default().reply("herdr agent list", NO_AGENTS);
+    assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
+    std::fs::write(
+        &c.config,
+        CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""),
+    )
+    .unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert!(
+        cfg.shed_for("sendmeter").is_none(),
+        "the fleet's new lanes start in herdr"
+    );
+    let got = wheres(&c, r);
+    assert_eq!(got["sendmeter-impl-12"].0, "shed-acp", "{got:?}");
 }

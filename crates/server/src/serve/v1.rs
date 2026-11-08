@@ -270,6 +270,9 @@ impl Server<'_> {
                 shown,
                 tone: tone.into(),
                 since: l.since,
+                runtime: l.runtime.clone(),
+                host: l.at(),
+                place: l.place.clone(),
             }
         };
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {

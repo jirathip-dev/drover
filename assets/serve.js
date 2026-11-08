@@ -897,6 +897,7 @@ function tree(p, rows, end) {
     const tag = (cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
     for (const g of (d.dataset.s || '').split(' ').filter(Boolean)) tag('tag m', '🔒' + g, 'serial: one lane at a time');
     if (d.dataset.b && !par(d)) tag('tag r', '! #' + d.dataset.b);
+    if (d.dataset.w) tag('tag m', d.dataset.w); // #609: where its lane runs
     if (deep) tag('m', 'after #' + d.dataset.b);
     const cd = el('div', 'cd');
     cd.append(...[...d.children].filter(c => c.tagName !== 'SUMMARY'));
