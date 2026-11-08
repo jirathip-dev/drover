@@ -138,8 +138,8 @@ fn parked_lane_alerts_once_and_never_stalls() {
     );
     assert_eq!(
         (n("lane-dead", 14), n("stall", 14)),
-        (1, 2),
-        "dead (dirty) keeps its alerts; #425: its stall repeats 2 h later"
+        (1, 1),
+        "dead (dirty) keeps its alerts; #666: its stall once, until the lane changes"
     );
 }
 

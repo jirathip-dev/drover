@@ -572,6 +572,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             "REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman timer install` (#461)".into(),
         );
     }
+    if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
+        return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
+    }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
     }

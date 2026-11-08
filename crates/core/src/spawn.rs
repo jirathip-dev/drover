@@ -30,9 +30,18 @@ fn lane_prompt(f: &Fleet, role: &str) -> String {
         f.role.get(role).and_then(|r| r.prompt.as_deref()).map(|p| {
             std::fs::read_to_string(expand(p)).unwrap_or_else(|e| format!("(prompt file {p} unreadable: {e})"))
         });
-    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
-    let base = role_prompt(if own { role } else { f.family(role) });
+    let base = role_prompt(prompt_kind(f, role));
     extra.map_or_else(|| base.into(), |x| format!("{}\n\n{}", base.trim_end(), x.trim_end()))
+}
+
+/// #577: whose prompt a role gets: `lesson` and a check `verify` their own, any other its family's.
+fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
+    let own = role == "lesson" || role == "verify" && f.family(role) == "rev";
+    if own {
+        role
+    } else {
+        f.family(role)
+    }
 }
 
 /// Each profile once, at its first (fleet, role) in fleet.toml order.
@@ -51,9 +60,9 @@ fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
-        // #173: a role's profile is its kind's: a check role's is read-only, as rev's.
+        // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
         for h in harness::NAMES {
-            harness::get(h).sync(ctx, f.family(role), profile, usage, out)?;
+            harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
@@ -488,7 +497,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
 /// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
-fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
     let settings: Value = std::fs::read_to_string(dir.join("settings.json"))
         .ok()
@@ -613,6 +622,15 @@ pub const OWN_FILES: &[&str] = &[
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
+
+/// #646: a herdsman-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
+    let all = "'+refs/heads/*:refs/remotes/origin/*'";
+    format!(
+        "git clone --single-branch --branch '{branch}' https://github.com/{repo}.git '{dir}' && git -C '{dir}' config \
+         remote.origin.fetch {all} && git -C '{dir}' config --add remote.origin.fetch '^refs/heads/wip/*'"
+    )
+}
 
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
@@ -863,7 +881,7 @@ pub fn spawn(
     // #302: the lane before went unavailable (capped, signed out): its successor carries on, and says from what.
     let unavailable =
         |e: &Event, sp: &Event| e.issue == Some(issue) && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
-    let rest = |e: &&Event| matches!(e.kind.as_str(), "account-capped" | "agent-unavailable");
+    let rest = |e: &&Event| crate::access::rests(&e.kind);
     let chain = !f.role(role)?.fallback.is_empty();
     let gone = prior.filter(|sp| chain && events.iter().filter(rest).any(|e| unavailable(e, sp)));
     let entry = |h: Option<&str>, a: Option<&str>| [h, a].into_iter().flatten().collect::<Vec<_>>().join(":");
@@ -965,8 +983,7 @@ pub fn spawn(
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         // #157: first use on a host: it clones the repo itself; #307: plain git, so its insteadOf/SSH and helpers apply.
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
-            let url = format!("https://github.com/{}.git", f.repo);
-            ok(r, "git", &["clone", &url, &local])?;
+            ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
         }
         ok(
             r,

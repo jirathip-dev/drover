@@ -21,6 +21,16 @@ pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached 
 /// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
 const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
 
+/// #640: Claude Code's own lines: the last transcript block unless a `⏺` reply/tool call heads it, minus prompts.
+fn own_lines(screen: &str) -> String {
+    let body: Vec<String> = chat(screen).0.into_iter().map(strip).collect();
+    let head = body.iter().rposition(|l| l.starts_with(|c: char| !c.is_whitespace()));
+    let block = &body[head.unwrap_or(0)..];
+    let theirs = block.first().is_some_and(|l| l.starts_with(['⏺', '•']));
+    let own = block.iter().filter(|l| !theirs && !l.starts_with(['❯', '>']));
+    own.map(String::as_str).collect::<Vec<_>>().join("\n")
+}
+
 /// Claude Code's `PreToolUse` / `PostToolUse` / `Stop` hooks.
 static DIALECT: Dialect = Dialect {
     sent: |v| {
@@ -45,7 +55,7 @@ pub fn root(ctx: &Ctx) -> PathBuf {
 }
 
 impl Harness for Claude {
-    fn sync(&self, ctx: &Ctx, role: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
+    fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
@@ -56,13 +66,13 @@ impl Harness for Claude {
             .replace("\"{{FLEET_STATUSLINE}}\"", &line)
             .replace("\"{{TRANSCRIPT_DAYS}}\"", &days.to_string());
         std::fs::write(dir.join("settings.json"), settings)?;
-        let role_md = format!("{}\n\n{usage}", role_prompt(role));
+        let role_md = format!("{}\n\n{usage}", role_prompt(prompt));
         std::fs::write(dir.join("role.md"), &role_md)?;
         // #565: an ACP lane (the profile as `CLAUDE_CONFIG_DIR`, `bypassPermissions` as the CLI's flag) reads its role
         // as user memory, since the adapter takes no `--append-system-prompt-file`.
         std::fs::write(dir.join("CLAUDE.md"), role_md)?;
         std::fs::write(dir.join("fleet.md"), usage)?;
-        writeln!(out, "synced {} ({role})", dir.display())?;
+        writeln!(out, "synced {} ({prompt})", dir.display())?;
         Ok(())
     }
 
@@ -160,10 +170,11 @@ impl Harness for Claude {
     }
     fn usage_limited(&self, cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
         let pat = cfg.accounts.cap_pattern.as_deref().unwrap_or(CAP_PATTERN);
-        crate::access::banner(pat, screen).then(|| crate::access::cap_until(cfg, r, screen, now))
+        let s = own_lines(screen);
+        crate::access::banner(pat, &s).then(|| crate::access::cap_until(cfg, r, &s, now))
     }
     fn signed_out(&self, screen: &str) -> bool {
-        AUTH_PATTERN.split('|').any(|p| screen.to_lowercase().contains(p))
+        crate::access::banner(AUTH_PATTERN, &own_lines(screen))
     }
 
     /// #276: `✻ Herding… (4m 12s · ↓ 3k tokens)` is (`✻ Herding…`, `4m`).

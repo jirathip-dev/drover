@@ -243,10 +243,7 @@ fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(
-            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
-            "",
-        )
+        .reply(&format!("{SSH}'sh' '-c' 'git clone --single-branch"), "")
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
@@ -286,7 +283,8 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     );
     assert!(
         calls.iter().any(|c| c.starts_with(&format!(
-            "{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git' '/tmp/does-not-matter/sendmeter'"
+            "{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' \
+             https://github.com/jirathip-dev/sendmeter.git '\\''/tmp/does-not-matter/sendmeter'\\''"
         ))) && !calls.iter().any(|c| c.contains("'gh' 'repo' 'clone'")),
         "#307: first use clones with plain git (the host's insteadOf/SSH applies), never gh: {calls:?}"
     );
@@ -659,6 +657,33 @@ fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(out.contains("\n! stale fleet.toml on bazzite: no longer read"), "{out}");
     assert!(!r.calls.borrow().iter().any(|l| l.contains("'rm'") && l.contains(&conf)));
+}
+
+/// #647 amendment A: doctor names the check that failed on a host; `unreachable` only when ssh itself fails.
+#[test]
+fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
+    let c = setup("hosts-doctor-why", "", true, 0);
+    let mut r = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
+    let list = "herdr --machine bazzite agent list";
+    r.replies.retain(|p| p.0 != list);
+    let no = herdsman::runner::Out {
+        code: 1,
+        stderr: "herdr: no server on bazzite".into(),
+        ..Default::default()
+    };
+    r.replies.insert(0, (list.into(), no));
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("\n✗ host bazzite — herdr agent list: ") && out.contains("no server on bazzite"),
+        "{out}"
+    );
+    assert!(!out.contains("unreachable"), "{out}");
+    // ssh itself fails: unreachable, with ssh's error.
+    let mut r = fake(0.1, 0.1);
+    r.replies.retain(|p| !p.0.starts_with(SSH));
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains("\n✗ host bazzite — unreachable (ssh: "), "{out}");
 }
 
 #[test]
@@ -1436,6 +1461,9 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{g}'status' '--porcelain'"), " M src/a.rs\n")
         .reply(&format!("{g}'rev-list' '--count'"), "0\n")
+        // #646: a commit only when something is staged.
+        .reply(&format!("{g}'diff' '--cached' '--name-only'"), "")
+        .reply(&format!("{g}'diff' '--cached'"), "+fn a() {}\n")
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply("date -r", "20261107-1200\n");
     (f, g)

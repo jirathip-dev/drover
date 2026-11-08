@@ -75,6 +75,14 @@ snapshot`, pushes the branch to `wip/<agent>-<yyyymmdd-hhmm>` (never main/stagin
 refused `SECRET_IN_WIP` when the diff has a secret-looking value), closes the pane and logs
 `lane-killed`. The worktree stays; a killed impl goes back
 to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawnable.
+#646: every wip snapshot (kill, supersede, clean's auto-save, a cloud stop) stages tracked changes and new source
+files only. It always skips `target*/`, `node_modules/` and `.lane-logs/` (whatever `.gitignore` says), any file over
+5 MB, and the largest files once the snapshot passes 50 MB. The skipped files are listed on the kill output and in
+the wip commit message, never committed. `herdsman wip prune <fleet> --dry-run` lists origin's `wip/*` branches
+with the size each adds over the integration branch, its issue's state and whether it carries build output. Without
+`--dry-run` (the owner's, through a run card) it deletes on origin those of a merged or closed issue that carry build
+output: a branch delete, never a history rewrite or force-push. A herdsman-made clone (`hosts bootstrap`, a lane's
+first use of a host) takes the integration branch only, and its later fetches skip `wip/*`.
 `herdsman clean <fleet> --lane <agent>` applies `clean`'s safety to one lane and refuses
 `UNSAFE_CLEAN` with the reason. #605: a merged or closed issue's lane whose agent is not `working` for
 `[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`
@@ -173,6 +181,9 @@ Every fleet is driven by herdsman itself. `herdsman drive [fleet]` does one pass
 | `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
 | FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
 | a lane killed | `spawn impl` (respawn) |
+| a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
+| a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
+| a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
 **`needs-human` is the owner's** (#130). It pushes to phones (`#96 needs you: review rounds ran out (4/3)`,
@@ -239,7 +250,11 @@ repeats for it once a day. The first `check` after #584 sweeps the log once (`as
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
 no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
-`account-capped`. It is idempotent and exits 0, so it can run from cron:
+`account-capped`. #640: a limit banner counts only on the harness's own lines (the pane's last block, unless a `⏺`
+reply or tool call heads it; prompt lines never), and caps only when the account's usage reading agrees: none
+fresh (10 min), or a window the plan has at 100%; otherwise it logs `cap-banner-ignored` with both numbers.
+`claude is signed out` (or a 401 usage reading) is `account-signed-out`, an owner card with no reset time: sign
+in or replace the token, then `herdsman accounts reset <name>`. `herdsman accounts` shows each state's evidence. It is idempotent and exits 0, so it can run from cron:
 
 ```cron
 */5 * * * * herdsman check >/dev/null 2>>"$HOME/Library/Logs/herdsman-check.log"

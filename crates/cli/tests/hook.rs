@@ -458,6 +458,12 @@ fn only_a_conductor_runs_timer_install() {
         assert!(!run(Some(lane), "herdsman timer status").contains("REFUSED"), "{lane}");
     }
     assert!(run(Some("synergy:-:conductor"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
+    // #646: a lane or conductor lists wip branches; deleting them is the owner's run card.
+    for lane in ["synergy:12:impl", "synergy:-:conductor"] {
+        assert_eq!(run(Some(lane), "herdsman wip prune synergy --dry-run"), "", "{lane}");
+        let out = run(Some(lane), "herdsman wip prune synergy");
+        assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
+    }
 }
 
 /// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
