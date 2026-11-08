@@ -1,7 +1,7 @@
 //! #557 `herdsman self-update`, the `dev.herdsman.update` job (every 5 min), no Hermes: the herdsman fleet's
 //! integration head is installed once its CI is all green. Built beside the live binary, signed with "herdsman-local"
-//! (#556), gated by the new binary's `doctor --config-only` on the live config (#539), swapped in atomically, then
-//! `profiles sync` and a serve restart. A failed step keeps the old binary and alerts once per head.
+//! (#556), gated by the new binary's `doctor --config-only` on the live config (#539) and its `doctor --tokens` secret
+//! read (#631), swapped in atomically, then `profiles sync` and a serve restart. A failed step keeps the old binary and alerts once per head.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::runner::{ok, Runner};
@@ -62,7 +62,7 @@ pub fn self_update(
         let plan = [
             format!("would build {sha:.7} in {} (CI green)", home.join("src").display()),
             format!(
-                "would sign it \"herdsman-local\", run its doctor --config-only, then swap it in at {}",
+                "would sign it \"herdsman-local\", run its doctor --config-only and --tokens, then swap it in at {}",
                 live.display()
             ),
             "would run profiles sync and restart serve".into(),
@@ -136,7 +136,7 @@ fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Re
 }
 
 /// Sign `new` with the stable identity by hash (#556, #568: the build's own `signing-identity.sh sign`; refused
-/// without it) and run its `doctor --config-only` (#539).
+/// without it), run its `doctor --config-only` (#539) and its `doctor --tokens` secret read (#631).
 fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
     let n = new.to_string_lossy();
     if ok(r, "which", &["codesign"]).is_ok() {
@@ -151,6 +151,13 @@ fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
     let o = r.run(&n, &crate::runner::argv(&["doctor", "--config-only"]))?;
     if o.code != 0 {
         bail!("doctor --config-only on the live config: {}", o.stdout.trim());
+    }
+    let o = r.run(&n, &crate::runner::argv(&["doctor", "--tokens"]))?;
+    if o.code != 0 {
+        bail!(
+            "doctor --tokens, the new build can't read the secrets: {}",
+            o.stdout.trim()
+        );
     }
     Ok(())
 }
