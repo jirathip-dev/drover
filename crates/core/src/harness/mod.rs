@@ -143,8 +143,8 @@ pub trait Harness: Sync {
     fn acp(&self) -> Option<&'static str> {
         None
     }
-    /// #565: the env its ACP adapter reads its config folder (`profile`) and model from.
-    fn acp_env(&self, _profile: &Path, _model: Option<&str>) -> Vec<(&'static str, String)> {
+    /// #565: the env its ACP adapter reads its model from (#683: its config folder is the account's, `Plan::lane_cmd`).
+    fn acp_env(&self, _model: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
     /// How its lanes sign in (generic: unknown).

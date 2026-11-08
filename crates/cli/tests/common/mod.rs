@@ -734,7 +734,10 @@ impl Runner for Shell<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         if let Some(i) = args.iter().position(|a| a == "export").filter(|_| prog == "herdr") {
             let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
-            let o = std::process::Command::new("sh").arg("-c").arg(line).output()?;
+            // #683: the pane's shell starts with neither credential var of the test's own env.
+            let mut sh = std::process::Command::new("sh");
+            sh.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
+            let o = sh.arg("-c").arg(line).output()?;
             self.2.borrow_mut().push(String::from_utf8_lossy(&o.stdout).into());
         }
         self.0.run(prog, args)

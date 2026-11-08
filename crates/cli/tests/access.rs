@@ -2,8 +2,9 @@
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
+use herdsman::runner::Runner;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");
@@ -30,6 +31,11 @@ fn store(f: Fake) -> Fake {
 
 /// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; the token its pane's shell exported.
 fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
+    spawn_var(c, n, "CLAUDE_CODE_OAUTH_TOKEN")
+}
+
+/// As `spawn`; `var` is what its pane's shell printed of `"$<var>"`.
+fn spawn_var(c: &herdsman::Ctx, n: u64, var: &'static str) -> (Fake, String) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
@@ -49,7 +55,7 @@ fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
         .reply(&format!("herdr pane run {pane} export"), "{}")
         .reply("herdr agent start", "{}")
         .reply("herdr agent wait", "{}");
-    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
+    let sh = Shell(&r, var, Shared::default());
     let (code, out) = run(c, &sh, &["spawn", "sendmeter", &n.to_string(), "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(
@@ -168,6 +174,180 @@ fn capped_account_is_skipped_until_reset() {
     assert_eq!(run(&c, &r, &["check"]).1, "");
     assert_eq!(dry_account(&c, 14), "A");
     no_token_in_log(&c);
+}
+
+/// #683: `[accounts]` A and B as CLI config folders under `d`.
+fn folders(d: &Path, role_extra: &str) -> (String, PathBuf, PathBuf) {
+    let (a, b) = (d.join("accounts/claude/A"), d.join("accounts/claude/B"));
+    let cfg = config(d, role_extra)
+        .replace("\"CLAUDE_CODE_OAUTH_TOKEN_A\"", &format!("\"folder:{}\"", a.display()))
+        .replace("\"CLAUDE_CODE_OAUTH_TOKEN_B\"", &format!("\"folder:{}\"", b.display()));
+    (cfg, a, b)
+}
+
+#[test]
+fn a_folder_account_lane_gets_its_folder_and_no_token_and_a_capped_folder_is_skipped() {
+    let d = tmpdir("acct-folder");
+    let (cfg, a, b) = folders(&d, "accounts = [\"A\", \"B\"]");
+    let mut c = ctx(&d, &cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    // The pane's shell, after the lane's exports and any secrets file: its config folder | its token.
+    let (r, got) = spawn_var(&c, 12, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN");
+    assert_eq!(got, format!("{}|", a.display()), "account A's folder, no token");
+    assert!(
+        !Path::new(&format!("{}.env", c.worktrees.join("sendmeter/issue-12").display())).exists()
+            && !r.calls.borrow().iter().any(|l| l.contains("&& . '")),
+        "no secrets file: {:?}",
+        r.calls.borrow()
+    );
+    // The profile still goes on top of the account's login.
+    let profile = c.config.with_file_name("claude").join("fleet-impl");
+    let start = r
+        .calls
+        .borrow()
+        .iter()
+        .find(|l| l.starts_with("herdr agent start"))
+        .cloned()
+        .unwrap();
+    assert!(
+        start.contains(&format!("--settings {}", profile.join("settings.json").display())),
+        "{start}"
+    );
+    // That profile's `PreToolUse` hook, run as Claude Code runs it in the lane's env, refuses a guarded command.
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(profile.join("settings.json")).unwrap()).unwrap();
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let call = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push origin staging"}, "cwd": wt});
+    let mut ch = std::process::Command::new("sh")
+        .args(["-c", hook])
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("HERDSMAN_LANE", "sendmeter:12:impl")
+        .env("CLAUDE_CONFIG_DIR", &a)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write as _;
+    ch.stdin.take().unwrap().write_all(call.to_string().as_bytes()).unwrap();
+    let o = String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap();
+    let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
+    assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
+
+    // Folder A capped (as #640's `check` logs it): the next spawn takes B's folder; `accounts reset` gives A back.
+    let d = json!({"account": "A", "agent": "sendmeter-impl-12", "until": c.now + 3600});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "account-capped", d)).unwrap();
+    assert_eq!(dry_account(&c, 13), "B");
+    let (_, got) = spawn_var(&c, 13, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN");
+    assert_eq!(got, format!("{}|", b.display()));
+    assert_eq!(run(&c, &Fake::default(), &["accounts", "reset", "A"]).0, 0);
+    assert_eq!(dry_account(&c, 14), "A");
+}
+
+/// #683: `env` runs for real with a fake `claude` first on its PATH that reports signed in only for a folder holding
+/// `.login` and only with no token in its env; each store read is kept.
+struct Status<'a>(&'a Fake, PathBuf, Shared<Vec<String>>);
+
+impl Runner for Status<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        if prog != "env" {
+            return self.0.run(prog, args);
+        }
+        let o = std::process::Command::new("env")
+            .args(args)
+            .env("PATH", format!("{}:/usr/bin:/bin", self.1.display()))
+            .env("CLAUDE_CODE_OAUTH_TOKEN", "from-the-callers-env")
+            .output()?;
+        let s = |b: Vec<u8>| String::from_utf8(b).unwrap();
+        let (stdout, stderr) = (s(o.stdout), s(o.stderr));
+        Ok(herdsman::runner::Out {
+            code: o.status.code().unwrap_or(1),
+            stdout,
+            stderr,
+        })
+    }
+    fn sleep(&self, _: u64) {}
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.2.borrow_mut().push(svc.into());
+        self.0.secret(svc)
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
+        self.0.set_secret(svc, value)
+    }
+}
+
+/// A `Status` runner over `f`, its fake `claude` in `<d>/bin`; folder `a` signed in.
+fn status<'a>(d: &Path, f: &'a Fake, a: &Path) -> Status<'a> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = "#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] || exit 2\n\
+        if [ -f \"$CLAUDE_CONFIG_DIR/.login\" ] && [ -z \"$CLAUDE_CODE_OAUTH_TOKEN\" ]; then echo '{\"loggedIn\": true}';\n\
+        else echo '{\"loggedIn\": false}'; exit 1; fi\n";
+    std::fs::write(bin.join("claude"), script).unwrap();
+    std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::create_dir_all(a).unwrap();
+    std::fs::write(a.join(".login"), "").unwrap();
+    Status(f, bin, Shared::default())
+}
+
+#[test]
+fn doctor_and_accounts_read_each_folders_sign_in_from_the_cli_never_the_keychain() {
+    let d = tmpdir("acct-folder-doctor");
+    let (cfg, a, b) = folders(&d, "account = \"A\"");
+    let c = ctx(&d, &cfg);
+    let f = Fake::default();
+    let r = status(&d, &f, &a);
+    let out = run(&c, &r, &["doctor"]).1;
+    assert!(
+        out.lines()
+            .any(|l| l == format!("✓ account A — signed in ({})", a.display())),
+        "{out}"
+    );
+    let fix = format!(
+        "cooee Settings › Providers, or CLAUDE_CONFIG_DIR={} claude /login",
+        b.display()
+    );
+    let want = format!("✗ account B — signed in ({}) → {fix}", b.display());
+    assert!(out.lines().any(|l| l == want), "{out}");
+    assert!(!out.contains("Keychain") && !out.contains("partition-list"), "{out}");
+    let list = run(&c, &r, &["accounts"]).1;
+    assert!(list.contains(&format!("{} · signed in", a.display())), "{list}");
+    assert!(list.contains(&format!("{} · signed out", b.display())), "{list}");
+    let reads = r.2.borrow();
+    assert!(
+        !reads.iter().any(|s| s.contains("TOKEN_A") || s.contains("TOKEN_B")),
+        "a token read: {reads:?}"
+    );
+}
+
+#[test]
+fn accounts_import_folders_moves_each_signed_in_account_to_its_folder() {
+    let d = tmpdir("acct-import-folders");
+    let (a, b) = (d.join("accounts/A"), d.join("accounts/B"));
+    let usage = format!("\n[accounts.usage]\nA = \"{}\"\nB = \"{}\"\n", a.display(), b.display());
+    let c = ctx(&d, &(config(&d, "account = \"A\"") + &usage));
+    let f = Fake::default();
+    let r = status(&d, &f, &a);
+    let (code, out) = run(&c, &r, &["accounts", "import", "--folders"]);
+    assert_eq!(code, 0, "{out}");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    assert!(toml.contains(&format!("A = \"folder:{}\"", a.display())), "{toml}");
+    assert!(
+        toml.contains("B = \"CLAUDE_CODE_OAUTH_TOKEN_B\""),
+        "B is signed out: kept\n{toml}"
+    );
+    assert!(
+        out.contains("herdsman secret rm all CLAUDE_CODE_OAUTH_TOKEN_A"),
+        "{out}"
+    );
+    assert!(!out.contains("rm all CLAUDE_CODE_OAUTH_TOKEN_B"), "{out}");
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert_eq!(cfg.accounts.folder("A"), Some(a));
 }
 
 #[test]

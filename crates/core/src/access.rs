@@ -222,10 +222,23 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         }
         writeln!(out, "{name:<8} {state:<28} {} lanes {}", lanes.len(), lanes.join(" "))?;
         if let Some(m) = m {
-            let login = cfg.accounts.usage.get(name).map_or("", String::as_str);
-            writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, login, ctx.now))?;
+            let login = cfg.accounts.login(name).unwrap_or_default();
+            writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, &login, ctx.now))?;
         }
         writeln!(out, "{:<8} {}", "", usage::lane_hours(&events, name, ctx.now))?;
+        if let Some(dir) = cfg.accounts.folder(name) {
+            let st = [
+                "signed out → cooee Settings › Providers, or claude /login there",
+                "signed in",
+            ];
+            writeln!(
+                out,
+                "{:<8} {} · {}",
+                "",
+                dir.display(),
+                st[usize::from(signed_in(r, &dir))]
+            )?;
+        }
     }
     match usage::deepseek(ctx, cfg, r) {
         Some(Ok((b, low))) => writeln!(
@@ -237,6 +250,54 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         )?,
         Some(Err(hint)) => writeln!(out, "deepseek · {hint}")?,
         None => {}
+    }
+    Ok(())
+}
+
+/// #683: a folder account's sign-in as its CLI reports it: `claude auth status` with that folder as its config
+/// folder and no token in its env (cooee's read; the login is Claude Code's own, never herdsman's).
+pub fn signed_in(r: &dyn Runner, dir: &std::path::Path) -> bool {
+    let d = format!("CLAUDE_CONFIG_DIR={}", dir.display());
+    let a = [
+        "-u",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "-u",
+        "ANTHROPIC_API_KEY",
+        &d,
+        "claude",
+        "auth",
+        "status",
+    ];
+    let o = r.run("env", &crate::runner::argv(&a));
+    o.is_ok_and(|o| o.code == 0 && serde_json::from_str::<Value>(&o.stdout).is_ok_and(|v| v["loggedIn"] == true))
+}
+
+/// #683 `herdsman accounts import --folders` (owner only): each token account whose `[accounts.usage]` login is signed
+/// in becomes `folder:<that login>` in fleet.toml; the store's old tokens are the owner's to delete, on a run card.
+pub fn import_folders(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let mut text = std::fs::read_to_string(&ctx.config)?;
+    let mut old = vec![];
+    for (name, var) in cfg.accounts.names.iter().filter(|a| !a.1.starts_with("folder:")) {
+        let dir = cfg.accounts.usage.get(name).filter(|d| !d.contains(['"', '\\']));
+        let Some(dir) = dir.filter(|d| signed_in(r, &crate::config::expand(d))) else {
+            writeln!(
+                out,
+                "{name:<8} ✗ no signed-in [accounts.usage] folder → cooee Settings › Providers, or claude /login there"
+            )?;
+            continue;
+        };
+        text = crate::config::set_in(&text, "[accounts]", name, &format!("\"folder:{dir}\""))?;
+        writeln!(out, "{name:<8} ✓ folder:{dir} (signed in)")?;
+        old.push(format!("herdsman secret rm all {var}"));
+    }
+    if !old.is_empty() {
+        Config::parse(&text)?;
+        crate::config::write_atomic(&ctx.config, &text)?;
+        writeln!(
+            out,
+            "once every lane runs on its folder, the old tokens go (owner, on a run card): {}",
+            old.join("; ")
+        )?;
     }
     Ok(())
 }

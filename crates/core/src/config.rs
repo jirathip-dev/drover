@@ -271,8 +271,9 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> its token's secret name (#441: in the store, `herdsman accounts import`), plus the
-/// settings below.
+/// `[accounts]`: account name -> `folder:<dir>`, its CLI config folder (#683: its own `claude /login`, given to a lane
+/// as `CLAUDE_CONFIG_DIR`), else (#441, until it moves to a folder) its token's name in the store; plus the settings
+/// below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
@@ -288,6 +289,18 @@ pub struct Accounts {
     pub pick: Option<String>,
     #[serde(flatten)]
     pub names: BTreeMap<String, String>,
+}
+
+impl Accounts {
+    /// #683: a `folder:<dir>` account's config folder, `~` expanded.
+    pub fn folder(&self, name: &str) -> Option<PathBuf> {
+        self.names.get(name)?.strip_prefix("folder:").map(expand)
+    }
+    /// The login the usage meter reads: `[accounts.usage]`'s, else (#683) the account's folder.
+    pub fn login(&self, name: &str) -> Option<String> {
+        let folder = || self.names.get(name)?.strip_prefix("folder:").map(String::from);
+        self.usage.get(name).cloned().or_else(folder)
+    }
 }
 
 impl Default for Accounts {

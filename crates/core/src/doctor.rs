@@ -141,6 +141,16 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
     }
     for (name, var) in &cfg.accounts.names {
+        // #683: a folder account is the CLI's own login: its sign-in, no Keychain read.
+        if let Some(dir) = cfg.accounts.folder(name) {
+            let fix = format!(
+                "cooee Settings › Providers, or CLAUDE_CONFIG_DIR={} claude /login",
+                dir.display()
+            );
+            let line = format!("account {name} — signed in ({}) → {fix}", dir.display());
+            row(rows, crate::access::signed_in(r, &dir), '✗', &line);
+            continue;
+        }
         let svc = crate::secret::service("all", var);
         let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
         let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it

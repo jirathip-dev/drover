@@ -178,7 +178,7 @@ pub fn cached(ctx: &Ctx, name: &str) -> Option<Meter> {
 /// The account's meter, polled at most every 10 min and one poll at a time; a 429 backs off (at least its
 /// `retry-after`). None when `[accounts.usage]` names no login for it, or its harness has no meter.
 pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Meter> {
-    let login = cfg.accounts.usage.get(name)?;
+    let login = &cfg.accounts.login(name)?;
     let h = crate::harness::accounts()?;
     let how = h.usage_meter()?;
     let mut m = cached(ctx, name).unwrap_or_default();

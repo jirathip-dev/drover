@@ -2335,9 +2335,9 @@ impl<'a> Server<'a> {
             .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
         {
             let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
-            let login = c.accounts.usage.get(name).map_or("", String::as_str);
+            let login = c.accounts.login(name).unwrap_or_default();
             let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
-                .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
+                .map(|m| crate::usage::shown(self.r, &m, &login, ctx.now));
             let (meters, pace, hint) = match usage {
                 Some(Ok((parts, pace))) => (
                     parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),

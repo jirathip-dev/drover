@@ -116,15 +116,17 @@ profile = "lane-design"
 # model = "claude-opus-5-5"
 
 [accounts]
-# Each account: the name of its token secret in the main host's OS store (`herdsman accounts import` from tokens.env).
-A = "CLAUDE_CODE_OAUTH_TOKEN_A"
-B = "CLAUDE_CODE_OAUTH_TOKEN_B"
-C = "CLAUDE_CODE_OAUTH_TOKEN_C"
+# Each account: #683: `folder:<dir>`, its own CLI config folder (cooee's Settings › Providers or `claude /login` there),
+# given to its lanes as CLAUDE_CONFIG_DIR; herdsman keeps no token. An older entry names a token in the store until
+# `herdsman accounts import --folders` moves it to its [accounts.usage] folder.
+A = "folder:~/.config/herdsman/accounts/A"
+B = "folder:~/.config/herdsman/accounts/B"
+C = "folder:~/.config/herdsman/accounts/C"
 # cap_reset_minutes = 300
 # cap_pattern = "usage limit reached|hit your limit"   # `|`-separated, case-insensitive; #640: harness's own banner line only, checked against [accounts.usage]
 # pick = "headroom"   # spawns take the uncapped account with the most 5h/7d headroom; default "order"
 
-# The usage meter: each account's own `claude` login folder (docs/providers.md); never given to lanes.
+# The usage meter: each account's own `claude` login folder (docs/providers.md); a folder account's is its folder.
 # [accounts.usage]
 # A = "~/.config/herdsman/accounts/A"
 

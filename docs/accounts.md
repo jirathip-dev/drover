@@ -1,5 +1,19 @@
 # Accounts and the Keychain
 
+## Accounts are folders (#683)
+
+An `[accounts]` entry `A = "folder:<dir>"` is a Claude Code config folder with its own login: cooee's
+`<cooee data>/accounts/claude/A` (Settings › Providers signs it in or out), or an `[accounts.usage]` folder signed in
+with `CLAUDE_CONFIG_DIR=<dir> claude /login`. A lane on it gets `CLAUDE_CONFIG_DIR=<dir>` and no token; its profile
+goes on top (`--settings`, `--append-system-prompt-file`; an ACP lane's worktree-local settings). Claude Code keeps the
+login in its own signed Keychain item, so no herdsman rebuild prompts. `herdsman accounts` and `doctor` show each
+folder's sign-in from `claude auth status` there. Rotation, caps and `accounts reset` work per folder as per token.
+Remote hosts get no folder: their lanes sign in through the main host's token proxy (#637).
+
+`herdsman accounts import --folders` (owner) moves each token entry whose `[accounts.usage]` folder is signed in to
+`folder:<that folder>` and prints the `herdsman secret rm all <NAME>` lines for the old tokens, for a run card once
+every lane runs on folders. The rest of this page is about the token entries until then.
+
 `[accounts]` tokens and `secret:` env values live in the main host's OS store as `herdsman/<fleet>/<NAME>` (#441);
 on macOS that is the login Keychain.
 

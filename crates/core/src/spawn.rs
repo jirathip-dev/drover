@@ -115,7 +115,8 @@ pub struct Plan {
     pub kick: String,
     /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
     pub lane: String,
-    /// `[accounts]` lanes: the account name and its token's secret name (`all`'s, in the store).
+    /// `[accounts]` lanes: the account name and its entry: `folder:<dir>` (#683), else its token's secret name (`all`'s,
+    /// in the store); empty on a remote host (#683: no folder there).
     pub account: Option<(String, String)>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
@@ -140,6 +141,14 @@ impl Plan {
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
+        // #683: the account's own CLI login; the lane's profile goes on top (`--settings`, ACP's project settings).
+        let dir = |a: &(String, String)| a.1.strip_prefix("folder:").map(expand);
+        let dir = self
+            .account
+            .as_ref()
+            .and_then(dir)
+            .map(|d| d.display().to_string().replace('\'', r"'\''"));
+        c.extend(dir.map(|d| format!("CLAUDE_CONFIG_DIR='{d}'")));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
         if !self.secrets().is_empty() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
@@ -162,6 +171,7 @@ impl Plan {
         let acct = self
             .account
             .iter()
+            .filter(|a| !a.1.is_empty() && !a.1.starts_with("folder:"))
             .zip(token)
             .map(|(a, v)| (v.to_string(), "all", a.1.clone()));
         env.chain(acct).collect()
@@ -495,7 +505,8 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 }
 
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
-/// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
+/// file, with its account's folder as its harness's config folder (#683), its profile's settings and role as the
+/// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
@@ -515,8 +526,8 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
             "profile {} has no herdsman PreToolUse hook; run `herdsman profiles sync`",
             p.profile
         )
-    } else if p.account.is_none() {
-        "an ACP lane signs in with its role's [accounts] token (its config folder is its profile)".into()
+    } else if !p.account.as_ref().is_some_and(|a| a.1.starts_with("folder:")) {
+        "an ACP lane signs in with its role's [accounts] folder: account".into()
     } else {
         String::new()
     };
@@ -531,10 +542,13 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     let mut words = p.lane_cmd("")[3..].to_vec();
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let env = harness::get(&p.harness).acp_env(&dir, p.model.as_deref());
+    let env = harness::get(&p.harness).acp_env(p.model.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
-    let line = words.join(" ") + " && unset SHED BERTH && exec \"$@\"";
+    let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
+    let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
+    let profile = format!(" && mkdir -p .claude && cp {set} .claude/settings.local.json && cp {role} CLAUDE.local.md");
+    let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }
 
@@ -765,6 +779,10 @@ pub fn spawn(
             // #592: its host keeps no fleet.toml: its hook reads the rules this host resolves (written below).
             p.env
                 .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
+            // #683: account folders stay on this host; a remote lane signs in through its token proxy (#637).
+            if let Some(a) = p.account.as_mut().filter(|a| a.1.starts_with("folder:")) {
+                a.1.clear();
+            }
         }
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());

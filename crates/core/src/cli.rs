@@ -724,6 +724,9 @@ enum AccountsCmd {
     Import {
         #[arg(default_value = "~/.config/herdsman/accounts/tokens.env")]
         file: String,
+        /// #683: instead, move each token account to its signed-in `[accounts.usage]` folder in fleet.toml
+        #[arg(long)]
+        folders: bool,
     },
 }
 
@@ -1553,7 +1556,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Accounts {
-                    cmd: Some(AccountsCmd::Import { file }),
+                    cmd: Some(AccountsCmd::Import { folders: true, .. }),
+                } => access::import_folders(ctx, &cfg, r, out)?,
+                Cmd::Accounts {
+                    cmd: Some(AccountsCmd::Import { file, .. }),
                 } => crate::secret::import(ctx, &cfg, r, out, &file)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
