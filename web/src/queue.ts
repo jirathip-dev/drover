@@ -63,7 +63,7 @@ function row(d: QueueTab, c: QueueCard, r: QueueRow): string {
   const lines = [stage, r.live ? link(r.lane, 'live', esc(r.lane)) : esc(r.lane), prLine(r.pr, c.config.repo, n)];
   if (r.dead) lines.push('<span class=r>dead: the log has this lane open, herdr has no such agent</span>');
   // #667: another repo's blockers by its name, each linked.
-  const on = r.blocked_on.map(b => { const [repo, i] = b.split('#'); return `<a href="https://github.com/${esc(repo)}/issues/${i}">${esc(repo.split('/').pop() ?? '')}#${i}</a>`; });
+  const on = (r.blocked_on ?? []).map(b => { const [repo, i] = b.split('#'); return `<a href="https://github.com/${esc(repo)}/issues/${i}">${esc(repo.split('/').pop() ?? '')}#${i}</a>`; });
   if (r.blocked_by != null || on.length) lines.push(`<span class=r>blocked by ${[...(r.blocked_by == null ? [] : [`#${r.blocked_by}`]), ...on].join(', ')}</span>`);
   if (r.check) lines.push('<span class=m>needs-check: from the backlog, spec not checked</span>');
   lines.push(...r.notes.map(x => `<span class=r>${esc(x)}</span>`));
