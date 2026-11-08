@@ -125,8 +125,9 @@ ACP event history (prompts, tool calls with their status, replies), not a screen
 **Fail closed (#508).** A lane that herdsman's hook would not guard does not start: spawn, and its dry run, refuse
 `ACP_UNGUARDED` before anything is made. That happens when the harness and adapter pair is not one known to run the
 hook (today only `claude` with `claude-acp`), when the profile's `settings.json` has no herdsman `PreToolUse` hook
-(run `herdsman profiles sync`), when the role has no `[accounts]` token (its config folder is the profile, which holds
-no login), or when the lane is placed on another host (`shed run --acp` runs on its own host only). shed's
+(run `herdsman profiles sync`), or when the role has no `[accounts]` token (its config folder is the profile, which
+holds no login). #637: on another host an ACP lane runs only on a `runtime = "shed-acp"` host, where its guard is
+proven, and it signs in through the token proxy, never with a token there (docs/hosts.md). shed's
 `--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
 yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
 

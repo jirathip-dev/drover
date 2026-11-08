@@ -35,6 +35,8 @@ pub struct On<'a> {
     pub r: &'a dyn Runner,
     pub machine: Option<&'a str>,
     connect: &'static str,
+    /// #637: a `shed-acp` host: no herdr there, so a herdr call fails here without going out.
+    no_herdr: bool,
 }
 
 impl<'a> On<'a> {
@@ -43,7 +45,13 @@ impl<'a> On<'a> {
             r,
             machine,
             connect: "-oConnectTimeout=10",
+            no_herdr: false,
         }
+    }
+    /// #637: this host runs `shed-acp` (`yes`): herdr is never asked there.
+    #[must_use]
+    pub fn shed_only(self, yes: bool) -> Self {
+        On { no_herdr: yes, ..self }
     }
     /// #485: a maintenance call that must not hold up a pass: a 5 s connect timeout.
     pub fn quick(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
@@ -129,6 +137,13 @@ impl<'a> On<'a> {
 
 impl Runner for On<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
+        if self.no_herdr && prog == crate::herdr::BIN {
+            return Ok(Out {
+                code: 1,
+                stdout: String::new(),
+                stderr: "no herdr on a shed-acp host".into(),
+            });
+        }
         let (p, a) = self.wrap(prog, args);
         self.r.run(&p, &a)
     }
@@ -357,12 +372,21 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             eprintln!("cloud {name}: {e:#}");
         }
-        let a = (!stopped).then(|| host::agents(&on).ok()).flatten();
+        let a = (!stopped).then(|| agents_of(cfg, name, &on).ok()).flatten();
         s.up = a.is_some();
         let live = a.as_ref().is_some_and(|a| !a.is_empty());
         s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
+            // #637: a `shed-acp` host's lanes reach the proxy through their tunnel, kept up from here.
+            if let Some(Err(e)) = h
+                .machine
+                .as_deref()
+                .filter(|_| cfg.host_acp(name).is_some())
+                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)))
+            {
+                eprintln!("proxy {name}: {e:#}");
+            }
             if refresh || s.probed + 3600 <= ctx.now {
                 if let Some((tags, home)) = probe(&on) {
                     (s.tags, s.home, s.probed) = (tags, home, ctx.now);
@@ -466,12 +490,31 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
 pub fn remote_agents(cfg: &Config, r: &dyn Runner) -> Vec<Value> {
     let mut all = vec![];
     for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
-        for mut a in host::agents(&On::new(r, Some(m))).unwrap_or_default() {
+        for mut a in agents_of(cfg, name, &On::new(r, Some(m))).unwrap_or_default() {
             (a["host"], a["machine"]) = (json!(name), json!(m));
             all.push(a);
         }
     }
     all
+}
+
+/// #637: add `row` to host `name`'s last-seen health (a `✗` keeps new lanes off it until the next health look).
+pub fn sick(ctx: &Ctx, name: &str, row: &str) {
+    let mut all = cached(ctx);
+    let s = all.entry(name.into()).or_default();
+    if !s.health.iter().any(|w| w == row) {
+        s.health.push(row.into());
+        let _ = std::fs::write(file(ctx), serde_json::to_string(&all).unwrap_or_default());
+    }
+}
+
+/// #637: host `name`'s live agents: on a `shed-acp` host its shed's lanes alone (no herdr there; a herdr answering
+/// proves nothing), else `host::agents` (herdr's, and shed's when it runs).
+pub fn agents_of(cfg: &Config, name: &str, on: &On) -> Result<Vec<Value>> {
+    match on.shed().filter(|_| cfg.host_acp(name).is_some()) {
+        Some(b) => crate::herdr::Runtime::agents(&crate::herdr::Shed(b), on),
+        None => host::agents(on),
+    }
 }
 
 /// #478: the host spawn `sp`'s lane runs on, when the last look (`survey`) could not reach it.
@@ -575,7 +618,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     let root = cfg.hosts.get(name).and_then(|h| h.root.as_deref());
     let reach = format!("can't reach {}:", f.repo); // #307: a repo only keeps its own fleet's lanes off
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
-    let (hs, refusal) = match cloud.map_or_else(|| host::agents(&on).map_err(|_| None), |c| Err(Some(c))) {
+    let (hs, refusal) = match cloud.map_or_else(|| agents_of(cfg, name, &on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
@@ -613,6 +656,16 @@ command -v launchctl >/dev/null || exit 0; launchctl print gui/$(id -u) | awk -v
 /// its herdr server's version and session, git over SSH for each fleet its `tags` fit, gh and each harness's login
 /// (`Harness::health_check`) in a herdr pane, and its herdsman's version against this one's.
 pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
+    let at = |h: &(&String, &HostCfg)| h.1.machine.is_some() && h.1.machine.as_deref() == on.machine;
+    if let Some(name) = cfg
+        .hosts
+        .iter()
+        .find(at)
+        .map(|h| h.0)
+        .filter(|n| cfg.host_acp(n).is_some())
+    {
+        return acp_health(ctx, cfg, on, (name, tags, home));
+    }
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
     let status = ok(on, "sh", &["-c", "PATH=\"$HOME/.local/bin:$PATH\" herdr status"]).unwrap_or_default();
@@ -655,6 +708,82 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         bad.push(format!("! shed: {e:#}"));
     }
     bad
+}
+
+/// #637: a `shed-acp` host's health (no herdr there): git for each fleet it fits, gh's login over ssh, and for each
+/// Claude role of those fleets the ACP guard (`acp_guard`); a failed guard is `✗ acp guard`, which keeps lanes off.
+fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
+    let mut bad = vec![];
+    let fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
+    let mut seen = std::collections::BTreeSet::new();
+    for (fleet, f) in fits {
+        let url = format!("https://github.com/{}.git", f.repo);
+        if !on
+            .run("git", &argv(&["ls-remote", &url, "HEAD"]))
+            .is_ok_and(|o| o.code == 0)
+        {
+            bad.push(format!(
+                "✗ git {fleet} — can't reach {}: → hosts bootstrap {name}",
+                f.repo
+            ));
+        }
+        for (role, rc) in &f.role {
+            let profile = rc.profile_or(role);
+            let Some(id) = harness::get(&rc.harness).acp().filter(|_| seen.insert(profile.clone())) else {
+                continue;
+            };
+            if let Some(why) = acp_guard(ctx, on, home, (&profile, f.family(role), id)) {
+                bad.push(format!("✗ acp guard {profile} — {why}"));
+            }
+        }
+    }
+    if ok(on, "sh", &["-lc", "gh auth status"]).is_err() {
+        bad.push(format!(
+            "✗ gh — logged out → ssh {} gh auth login",
+            on.machine.unwrap_or_default()
+        ));
+    }
+    bad
+}
+
+/// #637: why a remote ACP lane of `profile` would run unguarded on `on` (`$HOME` `home`), proven there: its herdsman
+/// is this one's version (#573), `profiles sync` gave the profile herdsman's `PreToolUse` hook for `family`, and its
+/// shed lists the hooked adapter `id`. None: guarded.
+pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &str, &str)) -> Option<String> {
+    let theirs = ok(on, &real_exe(ctx, home), &["--version"]).map_or("missing".into(), |v| v.trim().to_string());
+    let mine = format!("herdsman {}", crate::VERSION);
+    if theirs != mine {
+        return Some(format!("herdsman there is {theirs}, not {mine}"));
+    }
+    let dir = rehome(
+        vec![harness::profiles_root(ctx).join(profile).display().to_string()],
+        Some(home),
+    )
+    .remove(0);
+    let s: Value = on
+        .read(&Path::new(&dir).join("settings.json"))
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let pre = s["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+    let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
+    let hook = format!("herdsman' hook --role {family}");
+    if !hooks.any(|h| {
+        h["command"]
+            .as_str()
+            .is_some_and(|c| c.starts_with('\'') && c.ends_with(&hook))
+    }) {
+        return Some(format!(
+            "profile {profile} there has no herdsman PreToolUse hook; `herdsman profiles sync` there"
+        ));
+    }
+    let agents = crate::shed::cli(on, &["agents", "--json"]).ok();
+    let agents: Value = agents
+        .and_then(|o| serde_json::from_str(&o.stdout).ok())
+        .unwrap_or_default();
+    if !agents.as_array().into_iter().flatten().any(|a| a["id"] == id) {
+        return Some(format!("shed there lists no {id} (`shed agents add {id}` there)"));
+    }
+    None
 }
 
 /// #573: this herdsman's real path there (its symlink resolved here): `--root` and the readback are the real binary's.

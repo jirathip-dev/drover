@@ -30,6 +30,7 @@ pub mod overlap;
 pub mod pipeline;
 pub mod propose;
 pub mod protection;
+pub mod proxy;
 pub mod queue;
 pub mod report;
 pub mod runner;

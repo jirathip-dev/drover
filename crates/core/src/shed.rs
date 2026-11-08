@@ -15,6 +15,10 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
+/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with herdsman on the main host.
+pub const GIT: &str = "https://github.com/jirathip-dev/shed";
+pub const REV: &str = "8bac04fdb8542ef496c614b47126d85c50a7892e";
+
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Wire {
