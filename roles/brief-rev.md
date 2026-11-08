@@ -14,3 +14,5 @@
 - A second build or checkout (base, staging, head) goes under `$HERDSMAN_SCRATCH_TARGET` only (builds with
   `CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target`, checkouts in `$HERDSMAN_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
+- #677: a why note that contradicts the diff is a blocking finding (`Proof: spec`: the note line `>` quoted, plus
+  the `file:line`); no why note for the round may be one too.
