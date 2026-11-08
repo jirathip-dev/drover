@@ -344,5 +344,9 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         &Default::default(),
     );
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
-    assert_eq!((l.unsaved, l.unsaved_text().as_deref()), (Some((1, 1)), Some("+1 ⇡1")));
+    let u = l.unsaved(&Git(&f));
+    assert_eq!(
+        (u, herdsman::spawn::unsaved_text(u).as_deref()),
+        (Some((1, 1)), Some("+1 ⇡1"))
+    );
 }

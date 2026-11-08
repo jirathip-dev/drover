@@ -745,6 +745,12 @@ pub fn unsaved(r: &dyn Runner, wt: &Path) -> Option<(u64, u64)> {
     Some((changes(&st) as u64, n.trim().parse().ok()?))
 }
 
+/// #630: `+<files> ⇡<commits>` of unsaved work `u`, none when there is none.
+pub fn unsaved_text(u: Option<(u64, u64)>) -> Option<String> {
+    let (f, c) = u.filter(|u| *u != (0, 0))?;
+    Some(format!("+{f} ⇡{c}"))
+}
+
 /// Why a worktree must not be reused or removed: uncommitted changes (`OWN_FILES` aside) or unpushed commits.
 pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
     let wt = wt.to_string_lossy();

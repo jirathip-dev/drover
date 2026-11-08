@@ -1071,7 +1071,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .filter(|e| !s.done() && e.str("machine").is_none())
                         .and_then(|e| e.str("worktree"));
                     let u = wt.and_then(|wt| crate::spawn::unsaved(r, std::path::Path::new(wt)));
-                    let u = u.filter(|u| *u != (0, 0)).map(|(f, c)| format!(" · +{f} ⇡{c}"));
+                    let u = crate::spawn::unsaved_text(u).map(|u| format!(" · {u}"));
                     root.unwrap_or_default() + &u.unwrap_or_default()
                 };
                 writeln!(

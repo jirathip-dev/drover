@@ -40,6 +40,7 @@
                 },
                 "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
                 "dead": false,
+                "dirty": null,
                 "facts": "rev · round 1 · claude · 100s",
                 "gone": false,
                 "grow": "blocked",
@@ -58,10 +59,12 @@
                 },
                 "repo": "jirathip-dev/sendmeter",
                 "role": "rev",
+                "root": null,
                 "shown": "blocked",
                 "state": "blocked",
                 "thread": null,
                 "tone": "r",
+                "unpushed": null,
                 "why": null,
                 "why_tone": ""
               }
@@ -84,6 +87,7 @@
                 "blocked": null,
                 "coat": "--c:#bd8f4e;--d:#96703a;--m:#241a10;--b:#efe7dc",
                 "dead": false,
+                "dirty": null,
                 "facts": "impl · round 0 · claude · 100s",
                 "gone": false,
                 "grow": "impl",
@@ -102,10 +106,12 @@
                 },
                 "repo": "jirathip-dev/sendmeter",
                 "role": "impl",
+                "root": null,
                 "shown": "working",
                 "state": "working",
                 "thread": null,
                 "tone": "g",
+                "unpushed": null,
                 "why": null,
                 "why_tone": ""
               }
@@ -128,6 +134,7 @@
                 "blocked": null,
                 "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
                 "dead": false,
+                "dirty": null,
                 "facts": "conductor · hermes · opus · 0s",
                 "gone": true,
                 "grow": "impl",
@@ -138,10 +145,12 @@
                 "pr": null,
                 "repo": "jirathip-dev/sendmeter",
                 "role": "conductor",
+                "root": null,
                 "shown": "asleep",
                 "state": "asleep",
                 "thread": "t1",
                 "tone": "m",
+                "unpushed": null,
                 "why": null,
                 "why_tone": ""
               }
