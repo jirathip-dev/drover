@@ -1,6 +1,6 @@
 //! The fixed seed set CI runs on every PR, one note each; a failing seed `just sim` finds joins it with its fix.
 use crate::model::{Ev, Model, Script, FLEET};
-use crate::scenario::{args, config, timers, T0};
+use crate::scenario::{args, timers, T0};
 use crate::sched::Rng;
 
 /// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused NO_PROOF while one kick runs
@@ -28,6 +28,9 @@ pub const PARKED: &[(u64, &str)] = &[
         "NO_PROOF re-review loop: a reviewer that never adds its Proof is told once, then superseded, without end",
     ),
 ];
+
+/// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
+pub const PLANS: &[(&str, &str)] = &[];
 
 /// Seeds 2–24: random fleets (`scenario::random`).
 pub const FIXED: &[(u64, &str)] = &[
@@ -58,7 +61,7 @@ pub const FIXED: &[(u64, &str)] = &[
 
 /// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the
 /// refusal; each reviewer after it writes the same FAIL 5 s in.
-pub fn incident() -> (Model, String) {
+pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
     let s = m.sha();
@@ -82,5 +85,5 @@ pub fn incident() -> (Model, String) {
     m.scripts.insert("rev".into(), rev);
     let push = Script::Push { secs: 200, green: true };
     m.scripts.insert("impl".into(), vec![push; 6]);
-    (m, config(4, 3))
+    (m, (4, 3))
 }

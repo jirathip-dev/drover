@@ -17,3 +17,13 @@ jobs:
           tool: just
       - name: "2000 random seeds (each failure prints its seed, trace and replay line)"
         run: just sim 2000
+      # #688: the coverage-guided hunt, after the batch whatever its result; each failure minimised to a seeds.rs line.
+      - name: "10-minute hunt"
+        if: ${{ !cancelled() }}
+        run: just sim --hunt 10
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: sim-hunt
+          path: target/sim-corpus/
+          if-no-files-found: ignore

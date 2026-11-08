@@ -170,7 +170,10 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
             let o = herdr(sim, w, &a);
             if let (["agent", "start", _, _, _, _, pane, ..], 0) = (&a[..], o.code) {
                 w.procs[me].starting = Some((*pane).into());
-                if w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
+                let agent = Some(a[2].to_string());
+                let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
             }
