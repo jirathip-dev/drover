@@ -140,7 +140,7 @@ export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, olde
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
  * links to.
  */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, handoff?: Handoff | null, };
 
 export type FileRef = { name: string, size: number, };
 
@@ -148,6 +148,35 @@ export type FileRef = { name: string, size: number, };
  * A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
  */
 export type Answered = { n?: number | null, choice: string, by?: string | null, ts: number, };
+
+/**
+ * #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending
+ * conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line;
+ * `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the
+ * receiver's; while pending, the card's `choices`.
+ */
+export type Handoff = { kind: string, id: number, from: HandoffFrom, to: JsonValue, title: string, summary: string, text: string, state: string, error?: string | null, folded: boolean, choices: Array<HandoffChoice>, };
+
+export type HandoffFrom = { agent: string, thread: string, repo: string, };
+
+/**
+ * #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to
+ * (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
+ */
+export type HandoffChoice = { n: number, text: string, thread: string, op: string, fleet: string, id: string, };
+
+/**
+ * #681: API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
+ */
+export type RepoThreads = { repo: string, threads: Array<RepoThread>, };
+
+/**
+ * #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing
+ * one (the first not archived).
+ */
+export type RepoThread = { id: string, title: string, last: LastLine, unread: boolean, awake: boolean, archived: boolean, newest: boolean, };
+
+export type LastLine = { line: string, ts: number, };
 
 /**
  * #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.

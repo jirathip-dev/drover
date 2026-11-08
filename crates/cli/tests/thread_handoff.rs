@@ -742,3 +742,142 @@ fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
     );
     assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
 }
+
+/// #681: `POST /api/v1/<op>` as paired device `cookie`: its JSON reply.
+fn v1_post(s: &Server, cookie: &str, now: u64, op: &str, body: &serde_json::Value) -> serde_json::Value {
+    let body = body.to_string();
+    let req = format!(
+        "POST /api/v1/{op} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let res = String::from_utf8_lossy(&s.respond(&req, now)).into_owned();
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+/// #681: the `handoff` items of thread `t`'s API v1 page.
+fn items(s: &Server, cookie: &str, now: u64, t: &str) -> Vec<serde_json::Value> {
+    let page: serde_json::Value = serde_json::from_str(&api(s, ADDR, cookie, now, &format!("thread/{t}"))).unwrap();
+    let msgs = page["msgs"].as_array().unwrap().iter();
+    msgs.filter(|m| !m["handoff"].is_null())
+        .map(|m| m["handoff"].clone())
+        .collect()
+}
+
+/// #681: a repo handoff is one pending `handoff` item in the sender's API v1 page, with the card's rows and the op
+/// that picks one; the pick through that op makes it `delivered → t2` in t1 (folded) and in t2 (the message form).
+#[test]
+fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_both_threads() {
+    let c = card("handoff-v1", "add facets\nthen reindex");
+    let r = herdr(NO_AGENTS);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
+    let sent = items(&s, &ck, c.now, "t1");
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let h = &sent[0];
+    let card = kinds(&c, "needs-decision").pop().unwrap();
+    assert_eq!(
+        (&h["kind"], &h["id"], &h["state"], &h["folded"]),
+        (&json!("handoff"), &json!(card.seq), &json!("pending"), &json!(true))
+    );
+    assert_eq!(
+        h["from"],
+        json!({"agent": "conductor", "thread": "t1", "repo": "sendmeter"})
+    );
+    assert_eq!(h["to"], json!({"repo": "sendmeter", "pending": true}));
+    assert_eq!(
+        (&h["title"], &h["summary"], &h["text"]),
+        (
+            &json!("Facets"),
+            &json!("add facets"),
+            &json!("add facets\nthen reindex")
+        )
+    );
+    let rows: Vec<_> = h["choices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["n"].clone(), c["thread"].clone()))
+        .collect();
+    assert_eq!(rows, [(json!(1), json!("t2")), (json!(2), json!("new"))]);
+    assert_eq!(h["choices"][1]["text"], "new thread: Facets");
+    assert!(
+        items(&s, &ck, c.now, "t2").is_empty(),
+        "nothing delivered before the pick"
+    );
+
+    // The pick, through the row's op as cooee sends it.
+    let pick = &h["choices"][0];
+    let mtime =
+        serde_json::from_str::<serde_json::Value>(&api(&s, ADDR, &ck, c.now, "state")).unwrap()["mtime"].clone();
+    let body = json!({"fleet": pick["fleet"], "id": pick["id"], "choice": pick["n"], "mtime": mtime});
+    let got = v1_post(&s, &ck, c.now, pick["op"].as_str().unwrap(), &body);
+    assert_eq!(got["ok"], json!(true), "{got}");
+    for (t, folded) in [("t1", true), ("t2", false)] {
+        let got = items(&s, &ck, c.now, t);
+        assert_eq!(got.len(), 1, "{t}: {got:?}");
+        let h = &got[0];
+        assert_eq!(
+            (&h["id"], &h["state"], &h["to"], &h["folded"], &h["choices"]),
+            (
+                &json!(card.seq),
+                &json!("delivered"),
+                &json!("t2"),
+                &json!(folded),
+                &json!([])
+            ),
+            "{t}"
+        );
+        assert_eq!(h["text"], "add facets\nthen reindex", "{t}");
+    }
+}
+
+/// #681: a repo's three threads, newest-active first: t1's late reply puts it before t3 and t2; `newest` on it only.
+#[test]
+fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
+    let c = setup("repo-threads");
+    for (n, t) in [(2, "Search"), (3, "Billing")] {
+        let at = herdsman::Ctx {
+            now: c.now + n * 60,
+            ..c.clone()
+        };
+        assert_eq!(
+            run(&at, &Fake::default(), &["thread", "new", "sendmeter", t]).1,
+            format!("t{n}\n")
+        );
+        assert_eq!(
+            run(&at, &Fake::default(), &["thread", "reply", &format!("t{n}"), "on it"]).0,
+            0
+        );
+    }
+    let late = herdsman::Ctx {
+        now: c.now + 600,
+        ..c.clone()
+    };
+    assert_eq!(run(&late, &Fake::default(), &["thread", "reply", "t1", "grilled"]).0, 0);
+    let r = Fake::default();
+    let s = Server::new(&late, &r, Some(ADDR.into()));
+    let v: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", late.now, "repo/sendmeter/threads")).unwrap();
+    assert_eq!(v["repo"], "sendmeter");
+    let rows: Vec<_> = v["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| (t["id"].clone(), t["newest"].clone(), t["last"]["line"].clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (json!("t1"), json!(true), json!("conductor: grilled")),
+            (json!("t3"), json!(false), json!("conductor: on it")),
+            (json!("t2"), json!(false), json!("conductor: on it"))
+        ]
+    );
+    assert_eq!(v["threads"][0]["last"]["ts"], json!(late.now));
+    assert_eq!(
+        (&v["threads"][0]["title"], &v["threads"][0]["archived"]),
+        (&json!("Grill #12"), &json!(false))
+    );
+    let req = format!("GET /api/v1/repo/nowhere/threads HTTP/1.1\r\nHost: {ADDR}\r\n\r\n");
+    let res = String::from_utf8_lossy(&s.respond(&req, late.now)).into_owned();
+    assert!(res.starts_with("HTTP/1.1 404") && res.contains("NOT_FOUND"), "{res}");
+}

@@ -94,6 +94,17 @@ impl Server<'_> {
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
             ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
             ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
+            // #681: a repo's conductor threads, newest-active first (cooee's side threads).
+            ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
+                let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
+                match Config::load(&ctx.config) {
+                    Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
+                        let ev = shared(&ctx.state).unwrap_or_default();
+                        out("200 OK", &super::chat::repo(ctx, &ev, fleet))
+                    }
+                    _ => reply("404 Not Found", "NOT_FOUND", "no such repo"),
+                }
+            }
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
