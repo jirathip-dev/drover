@@ -10,10 +10,15 @@ pub const FLEET: &str = "herdsman";
 pub const REPO: &str = "jirathip-dev/herdsman";
 
 /// What a lane's agent does once its prompt lands.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Script {
-    /// Works `secs`, pushes a new head (CI then goes green or red), stops.
-    Push { secs: u64, green: bool },
+    /// Works `secs`, pushes a new head (CI then goes green or red, `ci` secs later, else 1–15 min), stops.
+    Push {
+        secs: u64,
+        green: bool,
+        #[serde(default)]
+        ci: Option<u64>,
+    },
     /// Works `secs`, writes verdict.md (`PASS`, or `FAIL` with or without its Proof blocks), stops. Told its FAIL was
     /// refused NO_PROOF, it adds them if it `heeds`, else writes the same file again.
     Review {
@@ -91,7 +96,8 @@ pub struct Model {
     pub agenda: BTreeMap<(u64, u64), Ev>,
     seq: u64,
     shas: u64,
-    /// Scripts queued per role: the next lane of that role takes the first (else `default`).
+    /// Scripts queued per role: the next lane of that role takes the first (else `default`). #686: a `<role>#<issue>`
+    /// list goes first, its last script kept for every later lane.
     pub scripts: BTreeMap<String, Vec<Script>>,
     pub merges: Vec<Merge>,
     pub closed: Vec<u64>,
@@ -295,7 +301,12 @@ fn herdr(sim: &Arc<Sim>, w: &mut World, a: &[&str]) -> Out {
         },
         ["agent", "start", agent, "--kind", _, "--pane", pane, ..] => {
             let role = agent.split('-').nth(1).unwrap_or("impl").to_string();
-            let queued = m.scripts.get_mut(&role).filter(|v| !v.is_empty()).map(|v| v.remove(0));
+            let own = format!("{role}#{}", agent.split('-').nth(2).unwrap_or_default());
+            let queued = match m.scripts.get_mut(&own) {
+                Some(v) if v.len() > 1 => Some(v.remove(0)),
+                Some(v) => v.first().cloned(),
+                None => m.scripts.get_mut(&role).filter(|v| !v.is_empty()).map(|v| v.remove(0)),
+            };
             let script = queued.unwrap_or_else(|| crate::scenario::default_script(&mut w.rng, &role));
             w.log(format!("model: {agent} runs {script:?}"));
             let m = &mut w.model;

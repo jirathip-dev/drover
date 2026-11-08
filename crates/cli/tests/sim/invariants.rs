@@ -152,24 +152,28 @@ pub fn after_step(w: &mut World) {
         }
     }
     if let Some((k, v)) = by.iter().find(|(_, v)| v.len() > 1) {
-        return w.fail(format!(
+        w.fail(format!(
             "I1 one-lane: #{} {} has {} live lanes: {v:?}",
             k.0,
             k.1,
             v.len()
         ));
     }
-    // I4: each merged event names the head that was merged.
-    for x in w.wrote.iter().filter(|x| x.ev.kind == "merged") {
-        let n = x.ev.issue.unwrap_or(0);
-        let merged = w.model.merges.iter().rfind(|m| m.issue == n).map(|m| m.head.clone());
-        if merged.as_deref() != x.ev.str("verdict_sha") {
-            let why = format!(
-                "I4 merged-sha: #{n} merged event names {:?}, the model merged {merged:?}",
-                x.ev.str("verdict_sha")
-            );
-            return w.fail(why);
-        }
+    // I4: each merged event names the head that was merged (I6 below also reads only the log).
+    let now = (w.wrote.len(), w.model.merges.len());
+    let fresh = std::mem::replace(&mut w.checked, now) != now;
+    let bad: Vec<String> = (w.wrote.iter())
+        .filter(|x| fresh && x.ev.kind == "merged")
+        .filter_map(|x| {
+            let n = x.ev.issue.unwrap_or(0);
+            let merged = w.model.merges.iter().rfind(|m| m.issue == n).map(|m| m.head.clone());
+            let named = x.ev.str("verdict_sha");
+            (merged.as_deref() != named)
+                .then(|| format!("I4 merged-sha: #{n} merged event names {named:?}, the model merged {merged:?}"))
+        })
+        .collect();
+    for why in bad {
+        w.fail(why);
     }
     // I5, at a quiet point (no process between a pane's agent start and its spawn event): every live pane is a logged lane.
     if w.procs.iter().all(|p| !p.live() || p.starting.is_none()) {
@@ -179,16 +183,18 @@ pub fn after_step(w: &mut World) {
         });
         if let Some(p) = orphan {
             let why = format!("I5 orphan: pane {} runs {:?}, no spawn logged it", p.id, p.agent);
-            return w.fail(why);
+            w.fail(why);
         }
     }
     if !w.procs.iter().any(|p| p.killed) {
         if let Some(x) = w.wrote.iter().find(|x| x.ev.kind == "spawn-adopted") {
             let why = format!("I5 adopt: {:?} adopted with no process crashed", agent(&x.ev));
-            return w.fail(why);
+            w.fail(why);
         }
     }
-    liveness(w);
+    if fresh {
+        liveness(w);
+    }
 }
 
 /// I6: a queued issue, unblocked, on a fleet with room, gets a lane within `PASSES` full drive passes. A pass that

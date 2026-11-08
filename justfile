@@ -25,5 +25,26 @@ html-lint:
 # #680: the deterministic simulation's long batch: `n` random seeds from HERDSMAN_SIM_FROM (default 1000), each failing
 # seed printed with its trace; replay one with `HERDSMAN_SIM_SEED=<n> cargo test -p herdsman --test sim`. CI runs the
 # fixed seed set (crates/cli/tests/sim/seeds.rs) in `cargo test`; .github/workflows/sim.yml runs `just sim 2000` nightly.
-sim n="500":
-    HERDSMAN_SIM_N={{n}} cargo test --release --locked -p herdsman --test sim random_seeds -- --ignored
+# #686: `just sim --replay <state.db|scenario.json> [--days 7] [--fleet herdsman] [--save scenario.json]` replays a real
+# window of a fleet's log (read-only) in the sim: the invariants' result and the real-vs-sim metrics table.
+sim *args="500":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
+    set -- {{args}}
+    if [ "$1" != --replay ]; then
+      HERDSMAN_SIM_N="$1" cargo test --release --locked -p herdsman --test sim random_seeds -- --ignored
+      exit
+    fi
+    export HERDSMAN_SIM_REPLAY; HERDSMAN_SIM_REPLAY=$(abs "$2"); shift 2
+    while [ $# -gt 1 ]; do
+      case $1 in
+        --days) export HERDSMAN_SIM_DAYS="$2" ;;
+        --fleet) export HERDSMAN_SIM_FLEET="$2" ;;
+        --save) export HERDSMAN_SIM_SAVE; HERDSMAN_SIM_SAVE=$(abs "$2") ;;
+        *) echo "just sim --replay: unknown $1" >&2; exit 2 ;;
+      esac
+      shift 2
+    done
+    test $# -eq 0 || { echo "just sim --replay: $1 needs a value" >&2; exit 2; }
+    cargo test --release --locked -p herdsman --test sim replay_db -- --ignored --nocapture

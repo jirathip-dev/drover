@@ -80,7 +80,11 @@ pub fn incident() -> (Model, String) {
     let mut rev = vec![first];
     rev.extend(std::iter::repeat_n(again, 40));
     m.scripts.insert("rev".into(), rev);
-    let push = Script::Push { secs: 200, green: true };
+    let push = Script::Push {
+        secs: 200,
+        green: true,
+        ci: None,
+    };
     m.scripts.insert("impl".into(), vec![push; 6]);
     (m, config(4, 3))
 }
