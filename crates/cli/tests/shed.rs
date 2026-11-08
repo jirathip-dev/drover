@@ -1247,15 +1247,13 @@ impl Runner for Push<'_> {
     }
 }
 
-const TOKEN_D: &str = concat!("sk", "-ant-oat01-DDDD-secret");
-
-/// #662: the ACP fleet with accounts C then D, and #12's impl lane spawned on C in a real worktree (its `origin` a
+/// #662: the ACP fleet with accounts C then D (#683: folders), and #12's impl lane spawned on C in a real worktree (its `origin` a
 /// bare repo holding `issue-12` at the base commit): (ctx, server, fake, worktree, origin).
 fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let b = Server::new(shed::proto::VERSION, vec![]);
     let cfg = acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]")
-        + "D = \"CLAUDE_CODE_OAUTH_TOKEN_D\"\n";
+        + "D = \"folder:/accounts/claude/D\"\n";
     let c = acp_ctx(name, &cfg);
     let (wt, origin) = (c.worktrees.join("sendmeter/issue-12"), c.worktrees.join("origin.git"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -1266,7 +1264,6 @@ fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
     git(&wt, &["commit", "-q", "--allow-empty", "-m", "base"]);
     git(&wt, &["push", "-q", "origin", "issue-12"]);
     let f = acp_fake(&["true"])
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_D", TOKEN_D)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
