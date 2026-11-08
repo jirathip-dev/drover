@@ -724,10 +724,16 @@ fn kill_skips_build_output_and_names_it() {
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("skipped") && out.contains("target-lane/"), "{out}");
+    let b = out
+        .split("work pushed to ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
     let show = |fmt: &str| {
-        let b = format!("wip/{LANE}-20261031-1200");
         let o = std::process::Command::new("git")
-            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, &b])
+            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, b])
             .output()
             .unwrap();
         String::from_utf8(o.stdout).unwrap()
@@ -751,7 +757,14 @@ fn kill_skips_a_file_over_the_size_cap() {
     );
     let o = std::process::Command::new("git")
         .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format="])
-        .arg(format!("wip/{LANE}-20261031-1200"))
+        .arg(
+            out.split("work pushed to ")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap(),
+        )
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
