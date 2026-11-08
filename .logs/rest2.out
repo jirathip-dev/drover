@@ -96,3 +96,4 @@ herdsman setup_neutral=0
 herdsman setup_terminal=0
 herdsman shed=0
 herdsman sim=0
+herdsman spawn=0
