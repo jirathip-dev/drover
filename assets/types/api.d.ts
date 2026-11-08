@@ -65,7 +65,11 @@ export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: s
  * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
  * fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
  */
-export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, };
+export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, 
+/**
+ * #630: each lane's workspace root and unsaved work.
+ */
+unsaved: Array<LaneUnsaved>, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -80,11 +84,12 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+
 /**
- * #630: its workspace root, and its worktree's uncommitted files and unpushed commits.
+ * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
  */
-root?: string | null, dirty?: number | null, unpushed?: number | null, };
+export type LaneUnsaved = { name: string, root?: string | null, dirty?: number | null, unpushed?: number | null, };
 
 /**
  * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.

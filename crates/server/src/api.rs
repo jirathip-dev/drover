@@ -182,6 +182,16 @@ pub struct LanesTab {
     pub error: Option<String>,
     pub failed: bool,
     pub sections: Vec<LaneSection>,
+    /// #630: each lane's workspace root and unsaved work.
+    pub unsaved: Vec<LaneUnsaved>,
+}
+
+/// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
+pub struct LaneUnsaved {
+    pub name: String,
+    pub root: Option<String>,
+    pub dirty: Option<u64>,
+    pub unpushed: Option<u64>,
 }
 
 /// A state section (`tone`) and its repo groups.
@@ -224,10 +234,6 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
-    /// #630: its workspace root, and its worktree's uncommitted files and unpushed commits.
-    pub root: Option<String>,
-    pub dirty: Option<u64>,
-    pub unpushed: Option<u64>,
 }
 
 /// #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.

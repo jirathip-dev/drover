@@ -92,7 +92,7 @@ impl Server<'_> {
             }
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
-            ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
+            ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
@@ -592,4 +592,45 @@ fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
         }
     }
     tab
+}
+
+impl Server<'_> {
+    /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
+    fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
+        let events = shared(&ctx.state).unwrap_or_default();
+        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
+        let r = self.cached(ctx.now, 30);
+        let rows = tab
+            .sections
+            .iter_mut()
+            .flat_map(|s| &mut s.repos)
+            .flat_map(|g| &mut g.lanes);
+        for row in rows {
+            let Some(l) = all.iter().find(|l| l.name == row.name) else {
+                continue;
+            };
+            let u = l.unsaved(&r);
+            let more = [
+                l.root.as_ref().map(|r| format!("root {r}")),
+                crate::spawn::unsaved_text(u),
+            ];
+            for m in more.into_iter().flatten() {
+                row.facts = [&row.facts[..], &m]
+                    .into_iter()
+                    .filter(|p| !p.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+            let (root, dirty, unpushed) = (l.root.clone(), u.map(|u| u.0), u.map(|u| u.1));
+            let name = row.name.clone();
+            tab.unsaved.push(crate::api::LaneUnsaved {
+                name,
+                root,
+                dirty,
+                unpushed,
+            });
+        }
+        tab
+    }
 }

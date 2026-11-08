@@ -306,11 +306,17 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let mine = b.join(AGENT).join("release");
-    assert!(mine.join("warm").is_file(), "{out}");
-    assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
     let ev = read(&r.c.state).unwrap();
     let cl = ev.iter().find(|e| e.kind == "build-cloned").unwrap();
     assert_eq!(cl.str("from"), Some(&*b.join("sendmeter-rev-11-r1").to_string_lossy()));
+    if reflinks(&b) {
+        assert!(mine.join("warm").is_file(), "{out}");
+        assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
+    } else {
+        // A volume without copy-on-write (CI's ext4): the clone fails and nothing is fully copied instead.
+        assert!(!mine.join("warm").exists(), "{out}");
+        assert_eq!(cl.data["errors"].as_array().map(Vec::len), Some(1), "{out}");
+    }
     let target = format!("{}'", b.join(AGENT).display());
     let calls = f.calls.borrow();
     assert!(
@@ -349,4 +355,23 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         (u, herdsman::spawn::unsaved_text(u).as_deref()),
         (Some((1, 1)), Some("+1 ⇡1"))
     );
+}
+
+/// Whether folder `d`'s volume clones copy-on-write, by the same `cp` flags the spawn uses.
+fn reflinks(d: &std::path::Path) -> bool {
+    let (src, dst) = (d.join(".probe"), d.join(".probe-clone"));
+    std::fs::write(&src, "p").unwrap();
+    let flag = if cfg!(target_os = "macos") {
+        "-c"
+    } else {
+        "--reflink=always"
+    };
+    let ok = std::process::Command::new("cp")
+        .arg(flag)
+        .arg(&src)
+        .arg(&dst)
+        .status()
+        .is_ok_and(|s| s.success());
+    let _ = (std::fs::remove_file(&src), std::fs::remove_file(&dst));
+    ok
 }

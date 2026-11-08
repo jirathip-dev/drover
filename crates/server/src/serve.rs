@@ -2169,7 +2169,6 @@ impl<'a> Server<'a> {
             .as_ref()
             .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 30)), p).ok());
         let (title, tone, shown, a) = view(ctx, l, waits);
-        let unsaved = l.unsaved(&self.cached(ctx.now, 30));
         let issue = l.issue.map(|n| format!("#{n}")).unwrap_or_default();
         let round = s.map(|s| {
             format!(
@@ -2190,8 +2189,6 @@ impl<'a> Server<'a> {
             o(&l.account),
             o(&l.resting),
             o(&l.port),
-            l.root.as_ref().map(|r| format!("root {r}")).unwrap_or_default(),
-            crate::spawn::unsaved_text(unsaved).unwrap_or_default(),
             a,
         ];
         let screen = screen.unwrap_or_default();
@@ -2250,9 +2247,6 @@ impl<'a> Server<'a> {
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state == "dead",
             blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
-            root: l.root.clone(),
-            dirty: unsaved.map(|u| u.0),
-            unpushed: unsaved.map(|u| u.1),
         }
     }
 

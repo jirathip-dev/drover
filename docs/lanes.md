@@ -66,8 +66,8 @@ one release.
 
 #630: a repo's optional `.herdsman/worktree-include` lists ignored files (one path per line, `#` comments), such as
 local env templates or tool config, that each new lane's worktree gets copied from the main checkout when missing.
-Never secrets: those stay in `secret:` env. `herdsman status`, the lane sheet and `/api/v1/lanes` (`dirty`,
-`unpushed`) show each lane's unsaved work, `+<uncommitted files> ⇡<unpushed commits>`, before a kill, supersede
+Never secrets: those stay in `secret:` env. `herdsman status`, the lane sheet and `/api/v1/lanes` (its `unsaved` list:
+`root`, `dirty`, `unpushed` per lane) show each lane's unsaved work, `+<uncommitted files> ⇡<unpushed commits>`, before a kill, supersede
 or eject.
 
 Every lane gets `HERDSMAN_PORT` (#187): a stable hash of `<fleet>/<branch>` into the fleet's `port_range`
