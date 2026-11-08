@@ -96,6 +96,8 @@ macro_rules! each {
             Roles,
             ChatDefaults,
             Reply,
+            ConductorAttach,
+            AttachEnv,
             Event,
             IssueState,
             Waiting,

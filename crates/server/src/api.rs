@@ -917,6 +917,30 @@ pub struct Reply {
     pub message: String,
 }
 
+/// #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
+pub struct ConductorAttach {
+    pub ok: bool,
+    pub code: String,
+    pub message: String,
+    /// `roles/conductor.md`, the repo and the owner's conductor instructions.
+    pub brief: String,
+    /// The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+    pub settings: String,
+    pub env: AttachEnv,
+    /// #565's ACP guard holds; else `why` not.
+    pub guarded: bool,
+    pub why: String,
+}
+
+pub struct AttachEnv {
+    #[serde(rename = "HERDSMAN_LANE")]
+    pub lane: String,
+    #[serde(rename = "HERDSMAN_THREAD")]
+    pub thread: String,
+    #[serde(rename = "HERDSMAN_PORT")]
+    pub port: String,
+}
+
 }
 
 /// A form body (`application/x-www-form-urlencoded`, decoded) as one of the action bodies above.

@@ -425,6 +425,25 @@ export type ChatDefaults = { harness?: string | null, model?: string | null, eff
  */
 export type Reply = { ok: boolean, code: string, message: string, };
 
+/**
+ * #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
+ */
+export type ConductorAttach = { ok: boolean, code: string, message: string, 
+/**
+ * `roles/conductor.md`, the repo and the owner's conductor instructions.
+ */
+brief: string, 
+/**
+ * The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+ */
+settings: string, env: AttachEnv, 
+/**
+ * #565's ACP guard holds; else `why` not.
+ */
+guarded: boolean, why: string, };
+
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, };
+
 export type Event = { 
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
