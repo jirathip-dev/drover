@@ -229,10 +229,9 @@ fn shared_cache_is_exported_into_the_lane() {
     );
 }
 
-/// #438: lanes of one repo on a host share one Cargo build folder; another repo's lanes get their own. #630: under
-/// the lane's root, `<root>/.build/<repo>`.
+/// #630: each lane gets its own Cargo build folder, `<root>/.build/<agent>` (cloned at spawn from its fleet's warmest).
 #[test]
-fn lanes_share_one_cargo_target_per_repo() {
+fn each_lane_gets_its_own_cargo_target_under_its_root() {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/x/other\"\nintegration = \"staging\"\n\n\
                  [fleet.other.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n";
     let cfg = other.to_string() + CONFIG + "\n[hosts.mini]\nroot = \"/c\"\n";
@@ -245,17 +244,18 @@ fn lanes_share_one_cargo_target_per_repo() {
         );
         assert_eq!(code, 0, "{out}");
         let p: Value = serde_json::from_str(&out).unwrap();
-        raw(&p["commands"][2])
-            .into_iter()
-            .find(|w| w.starts_with("CARGO_TARGET_DIR="))
+        let w = raw(&p["commands"][2]).into_iter().find(|w| w.contains("TARGET_DIR="));
+        w.and_then(|w| Some(w.split_once('=')?.1.to_string()))
     };
-    let one = target("sendmeter", "12");
-    assert_eq!(one.as_deref(), Some("CARGO_TARGET_DIR='/c/.build/sendmeter'"));
-    assert_eq!(target("sendmeter", "13"), one);
     assert_eq!(
-        target("other", "12").as_deref(),
-        Some("CARGO_TARGET_DIR='/c/.build/other'")
+        target("sendmeter", "12").as_deref(),
+        Some("'/c/.build/sendmeter-impl-12'")
     );
+    assert_eq!(
+        target("sendmeter", "13").as_deref(),
+        Some("'/c/.build/sendmeter-impl-13'")
+    );
+    assert_eq!(target("other", "12").as_deref(), Some("'/c/.build/other-impl-12'"));
 }
 
 /// #536: each lane gets its own scratch dir, named for its agent; a reviewer's per round. #630: under its root's

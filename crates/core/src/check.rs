@@ -1184,7 +1184,7 @@ fn building(d: &Path, depth: u8) -> bool {
 }
 
 /// #536: the newest mtime of `d` and its entries.
-fn mtime(d: &Path) -> u64 {
+pub fn mtime(d: &Path) -> u64 {
     let m = |p: &Path| {
         p.metadata()
             .map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs())
@@ -1212,7 +1212,7 @@ pub fn trim_builds(ctx: &Ctx, cfg: &Config, budget: f64, live: &Live, out: &mut 
         .sum()
 }
 
-/// #438: over `budget` GB, the shared build folder's profiles (`<root>/.build/<repo>/<profile>`) whose
+/// #438: over `budget` GB, the lane build folders' profiles (`<root>/.build/<agent>/<profile>`, #630) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
 /// too, oldest first; #634: never a `live` lane's. Bytes freed.
 fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
@@ -1228,7 +1228,11 @@ fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bo
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
         .map(|p| (p, 3));
-    let lane = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
+    // #630: a profile's lane is its build folder's (`<root>/.build/<agent>/<profile>`).
+    let lane = |p: &Path, d: u8| {
+        let p = if d > 0 { Some(p) } else { p.parent() };
+        p.and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned())
+    };
     let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
     dirs.sort();
     for (_, dir, depth) in dirs {
@@ -1240,7 +1244,7 @@ fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bo
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
-        if depth > 0 && lane(&dir).is_some_and(|n| live.contains(&n)) {
+        if lane(&dir, depth).is_some_and(|n| live.contains(&n)) {
             writeln!(out, "keep {}: a live lane", dir.display())?;
             continue;
         }

@@ -505,8 +505,8 @@ pub struct Limits {
     pub min_free_gb: f64,
     /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
-    /// #438: lanes share a Cargo target, `<root>/.build/<repo>` (#630), on their host (a fleet's own wins); over
-    /// `build_budget_gb` drive trims its unlocked profiles.
+    /// #630: each lane's Cargo target, `<root>/.build/<agent>`, on its host (a fleet's own wins); over
+    /// `build_budget_gb` drive trims their unlocked profiles.
     pub build_budget_gb: f64,
     /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,

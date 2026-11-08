@@ -2189,6 +2189,8 @@ impl<'a> Server<'a> {
             o(&l.account),
             o(&l.resting),
             o(&l.port),
+            l.root.as_ref().map(|r| format!("root {r}")).unwrap_or_default(),
+            l.unsaved_text().unwrap_or_default(),
             a,
         ];
         let screen = screen.unwrap_or_default();
@@ -2247,6 +2249,9 @@ impl<'a> Server<'a> {
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state == "dead",
             blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
+            root: l.root.clone(),
+            dirty: l.unsaved.map(|u| u.0),
+            unpushed: l.unsaved.map(|u| u.1),
         }
     }
 

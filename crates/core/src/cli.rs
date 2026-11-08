@@ -1062,8 +1062,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 };
                 let root = |s: &crate::events::IssueState| {
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
-                    e.and_then(|e| e.str("root"))
-                        .map_or(String::new(), |r| format!(" · root {r}"))
+                    let root = e.and_then(|e| e.str("root")).map(|r| format!(" · root {r}"));
+                    // #630: a local open lane's unsaved work (`+<files> ⇡<commits>`).
+                    let wt = e
+                        .filter(|e| !s.done() && e.str("machine").is_none())
+                        .and_then(|e| e.str("worktree"));
+                    let u = wt.and_then(|wt| crate::spawn::unsaved(r, std::path::Path::new(wt)));
+                    let u = u.filter(|u| *u != (0, 0)).map(|(f, c)| format!(" · +{f} ⇡{c}"));
+                    root.unwrap_or_default() + &u.unwrap_or_default()
                 };
                 writeln!(
                     out,

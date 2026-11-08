@@ -17,7 +17,7 @@ struct Git<'a>(&'a Fake);
 impl Runner for Git<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
-        if prog == "git" {
+        if prog == "git" || prog == "cp" {
             self.0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             return Real.run(prog, args);
         }
@@ -98,12 +98,14 @@ fn repo(name: &str) -> Repo {
 /// herdr and gh as a spawn on this host needs them; the lane, once restarted, works in `cwd`.
 fn fake(cwd: &Path) -> Fake {
     let wt = cwd.join("sendmeter/issue-12");
-    Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")]),
-        )
-        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+    spawnable(Fake::default().reply(
+        "herdr agent list",
+        &agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")]),
+    ))
+}
+
+fn spawnable(f: Fake) -> Fake {
+    f.reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("herdr pane close", "")
         .reply(
             "herdr pane list",
@@ -274,4 +276,73 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
         r.c.worktrees.join("sendmeter/issue-13/README").is_file() && !cache.exists(),
         "{out}"
     );
+}
+
+/// Amendment A: a new lane's build folder `<root>/.build/<agent>` is a clone of its fleet's newest one on that root
+/// (another fleet's never), the files `.herdsman/worktree-include` lists come from the main checkout, and the lane's
+/// unsaved work shows in `herdsman status` and the Lanes tab's rows.
+#[test]
+fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_files() {
+    let r = repo("roots-warm");
+    let b = r.nvme.join(".build");
+    for (d, f) in [
+        ("sendmeter-impl-9", "old"),
+        ("sendmeter-rev-11-r1", "warm"),
+        ("other-impl-1", "theirs"),
+    ] {
+        std::fs::create_dir_all(b.join(d).join("release")).unwrap();
+        std::fs::write(b.join(d).join("release").join(f), f).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100)); // mtimes in seconds: each newer
+    }
+    std::fs::write(r.local.join(".herdsman-ignored.env"), "PORT=1\n").unwrap();
+    std::fs::write(r.local.join(".git/info/exclude"), ".herdsman-ignored.env\n").unwrap();
+    std::fs::create_dir_all(r.local.join(".herdsman")).unwrap();
+    std::fs::write(
+        r.local.join(".herdsman/worktree-include"),
+        "# setup\n.herdsman-ignored.env\n../escape\nmissing\n",
+    )
+    .unwrap();
+    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let mine = b.join(AGENT).join("release");
+    assert!(mine.join("warm").is_file(), "{out}");
+    assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
+    let ev = read(&r.c.state).unwrap();
+    let cl = ev.iter().find(|e| e.kind == "build-cloned").unwrap();
+    assert_eq!(cl.str("from"), Some(&*b.join("sendmeter-rev-11-r1").to_string_lossy()));
+    let target = format!("{}'", b.join(AGENT).display());
+    let calls = f.calls.borrow();
+    assert!(
+        calls.iter().any(|c| c.contains("TARGET_DIR=") && c.contains(&target)),
+        "{target}"
+    );
+    drop(calls);
+    let wt = r.nvme.join("sendmeter/issue-12");
+    assert_eq!(
+        std::fs::read_to_string(wt.join(".herdsman-ignored.env")).unwrap(),
+        "PORT=1\n"
+    );
+    // Unsaved work: one new file, one local commit.
+    std::fs::write(wt.join("new.txt"), "x").unwrap();
+    std::fs::write(wt.join("README"), "y\n").unwrap();
+    let id = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    git(&wt, &[&id[..], &["commit", "-qam", "local"]].concat());
+    let (_, st) = run(&r.c, &Git(&f), &["status"]);
+    assert!(st.contains(" · +1 ⇡1"), "{st}");
+    let cfg = Config::load(&r.c.config).unwrap();
+    let a: serde_json::Value =
+        serde_json::from_str(&agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")])).unwrap();
+    let st = herdsman::events::states(&r.c.state).unwrap();
+    let ls = herdsman::lanes::join(
+        &cfg,
+        &Git(&f),
+        &r.c.worktrees,
+        &ev,
+        &st,
+        a["result"]["agents"].as_array().unwrap(),
+        &Default::default(),
+    );
+    let l = ls.iter().find(|l| l.name == AGENT).unwrap();
+    assert_eq!((l.unsaved, l.unsaved_text().as_deref()), (Some((1, 1)), Some("+1 ⇡1")));
 }

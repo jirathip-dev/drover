@@ -38,11 +38,14 @@ herdsman clean --orphans --yes        # also remove folders under the worktree r
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `herdsman help --agent`.
 
-A fleet's `env` table is exported into every lane's shell. #438: every lane shares one Cargo build folder per
-host and repo, `CARGO_TARGET_DIR=<root>/.build/<repo>` under the lane's workspace root (#630, docs/hosts.md), so N lanes cost one `target/` plus deltas: new lanes skip full rebuilds, and lanes building at once
-wait on cargo's lock (`Blocking waiting for file lock on build directory`). A fleet's own `CARGO_TARGET_DIR` in `env`
+A fleet's `env` table is exported into every lane's shell. #630: every lane gets its own Cargo build folder,
+`CARGO_TARGET_DIR=<root>/.build/<agent>` under its workspace root (docs/hosts.md). At spawn it is cloned
+copy-on-write (`cp -c`, `--reflink=always`; a `build-cloned` event with `from`) from the newest build folder of the
+same fleet's lanes on that root, never across volumes, so a new lane skips a full rebuild and lanes never wait on
+each other's cargo lock. A fleet's own `CARGO_TARGET_DIR` in `env`
 or `shared_cache` (#361) replaces it. Over `[limits] build_budget_gb` (default 20), drive's pass removes the
-folder's profiles (`<repo>/debug`, ...) whose `.cargo-lock` no cargo holds, never one building: on the main host
+build folders' profiles (`<agent>/debug`, ...), oldest first, whose `.cargo-lock` no cargo holds, never one
+building nor a live lane's: on the main host
 (and in `reclaim`) directly, on each `[hosts]` machine over ssh (there `lsof` tells a building one). A host short
 of disk (`DISK_LOW`) first loses every such profile, then its disk is read again. #536: each lane also gets a private scratch
 dir, `HERDSMAN_SCRATCH_TARGET=<root>/.build/.scratch/<agent>`, for second builds and checkouts (base, staging, head);
@@ -60,6 +63,12 @@ It runs beside the kick once the lane has started, never over a folder the lane 
 and logs the error, never a full copy. The worktree budget and Host disk row count blocks used (`du -k`), not
 apparent size. `clone_node_modules = true` is the old spelling of `clone_build = ["node_modules"]`, kept for
 one release.
+
+#630: a repo's optional `.herdsman/worktree-include` lists ignored files (one path per line, `#` comments), such as
+local env templates or tool config, that each new lane's worktree gets copied from the main checkout when missing.
+Never secrets: those stay in `secret:` env. `herdsman status`, the lane sheet and `/api/v1/lanes` (`dirty`,
+`unpushed`) show each lane's unsaved work, `+<uncommitted files> ⇡<unpushed commits>`, before a kill, supersede
+or eject.
 
 Every lane gets `HERDSMAN_PORT` (#187): a stable hash of `<fleet>/<branch>` into the fleet's `port_range`
 (default `"41000-41999"`), the next free one if a lane of an open issue already holds it; the spawn event

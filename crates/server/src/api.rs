@@ -224,6 +224,10 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
+    /// #630: its workspace root, and its worktree's uncommitted files and unpushed commits.
+    pub root: Option<String>,
+    pub dirty: Option<u64>,
+    pub unpushed: Option<u64>,
 }
 
 /// #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.

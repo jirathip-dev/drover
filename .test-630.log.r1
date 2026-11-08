@@ -1,0 +1,7179 @@
+   Compiling libc v0.2.191
+   Compiling subtle v2.6.1
+   Compiling zeroize v1.9.1
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.5
+   Compiling cmov v0.5.4
+   Compiling const-oid v0.10.2
+   Compiling proc-macro2 v1.0.107
+   Compiling cpubits v0.1.1
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling autocfg v1.5.1
+   Compiling serde_core v1.0.229
+   Compiling ff v0.14.0
+   Compiling serde v1.0.229
+   Compiling ctutils v0.4.7
+   Compiling der v0.8.3
+   Compiling foldhash v0.2.0
+   Compiling group v0.14.0
+   Compiling hashbrown v0.17.1
+   Compiling base16ct v1.0.0
+   Compiling num-traits v0.2.19
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling zmij v1.0.23
+   Compiling cc v1.11.0
+   Compiling vcpkg v0.2.15
+   Compiling hybrid-array v0.4.15
+   Compiling pkg-config v0.3.34
+   Compiling utf8parse v0.2.2
+   Compiling core-foundation-sys v0.8.7
+   Compiling anstyle-parse v1.0.0
+   Compiling serde_json v1.0.154
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling bitflags v2.13.2
+   Compiling anstyle-query v1.1.5
+   Compiling block-buffer v0.12.1
+   Compiling inout v0.2.5
+   Compiling sec1 v0.8.1
+   Compiling equivalent v1.0.3
+   Compiling syn v3.0.9
+   Compiling cpufeatures v0.3.1
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling indexmap v2.14.2
+   Compiling security-framework-sys v2.17.0
+   Compiling core-foundation v0.10.1
+   Compiling crypto-common v0.2.2
+   Compiling anstream v1.0.0
+   Compiling crypto-bigint v0.7.10
+   Compiling spki v0.8.1
+   Compiling libsqlite3-sys v0.39.1
+   Compiling strsim v0.11.1
+   Compiling heck v0.5.0
+   Compiling digest v0.11.3
+   Compiling cipher v0.5.2
+   Compiling universal-hash v0.6.1
+   Compiling clap_lex v1.1.1
+   Compiling anyhow v1.0.104
+   Compiling hmac v0.13.0
+   Compiling polyval v0.7.3
+   Compiling hkdf v0.13.0
+   Compiling signature v3.0.0
+   Compiling memchr v2.8.3
+   Compiling winnow v0.7.15
+   Compiling itoa v1.0.18
+   Compiling toml_write v0.1.2
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.3
+   Compiling ghash v0.6.0
+   Compiling clap_builder v4.6.7
+   Compiling sha2 v0.11.1
+   Compiling aead v0.6.1
+   Compiling security-framework v3.7.0
+   Compiling hashlink v0.12.2
+   Compiling log v0.4.35
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling smallvec v1.16.4
+   Compiling fallible-iterator v0.3.0
+   Compiling herdsman-core v0.1.0 (/Users/jkmacmini/.herdr/worktrees/herdsman/issue-630/crates/core)
+   Compiling aes-gcm v0.11.1
+   Compiling base64 v0.23.1
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling primefield v0.14.0
+   Compiling elliptic-curve v0.14.3
+   Compiling wnaf v0.14.1
+   Compiling rfc6979 v0.6.0
+   Compiling keyring v3.6.3
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.17
+   Compiling ecdsa v0.17.0
+   Compiling primeorder v0.14.0
+   Compiling serde_derive v1.0.229
+   Compiling clap_derive v4.6.7
+   Compiling herdsman v0.1.0 (/Users/jkmacmini/.herdr/worktrees/herdsman/issue-630/crates/cli)
+   Compiling tokio v1.54.1
+   Compiling p256 v0.14.0
+   Compiling clap v4.6.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling shed-proto v0.0.0 (https://github.com/jirathip-dev/shed?rev=1f08d108afc54450d6fdf4b49f68c09d0ca7a8df#1f08d108)
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling rusqlite v0.41.1
+   Compiling herdsman-server v0.1.0 (/Users/jkmacmini/.herdr/worktrees/herdsman/issue-630/crates/server)
+   Compiling herdsman-service v0.1.0 (/Users/jkmacmini/.herdr/worktrees/herdsman/issue-630/crates/service)
+    Finished `release` profile [optimized] target(s) in 1m 14s
+     Running unittests src/lib.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/herdsman-c1883f40b7ce0188)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/herdsman-1533f825142cb085)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/access.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/access-05b76cb01263c4b1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/action_ids.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/action_ids-ae1b130f0f649a10)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/amendments.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/amendments-d0a3c07a0709820f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/answer_delivery.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/answer_delivery-03ba4b9e61e74edf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/api_v1.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/api_v1-c5cfd8d4b46d78a3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/api_v1_contract.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/api_v1_contract-215c9ec5d52354b9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/api_v1_ops.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/api_v1_ops-73bd4a0e9ccba7ba)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/ask_endings.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ask_endings-52dd4c58ddcde088)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/ask_scale.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ask_scale-0534c83fc57d5ca2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/asks.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/asks-2d6c839ea882ba45)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/backlog.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/backlog-64021038533be140)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/blocked_respawn.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/blocked_respawn-1f16f5c58fd1fb01)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/board_errors.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/board_errors-6c8aa8123af54ef3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/board_freeze.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/board_freeze-002986e7a3cb0480)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/brief_golden.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/brief_golden-c32be7fd7e5f322b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/chat_blocks.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/chat_blocks-80e6d3cf5e0975a5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/chat_pick.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/chat_pick-5fb7a94b38f8cf59)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/chat_scale.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/chat_scale-fd5eeb38fd19fef9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/chat_tab.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/chat_tab-87a0727d01fb322b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+     Running tests/check_clean.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/check_clean-c70521d10c89ed16)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+     Running tests/cloud.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/cloud-e515ef2e84169a10)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/compaction.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/compaction-5621ba32a824cc6d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/conductor.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/conductor-8e4b1432c5f4e017)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/conductor_adopt.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/conductor_adopt-d90710e95bdfe7ca)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/conductor_cards.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/conductor_cards-16bfdfe29381c652)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/conductor_default.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/conductor_default-a52e778c46bb2e9d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/conductor_lanes.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/conductor_lanes-bebe9e79c3253700)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/config_card.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/config_card-a57d6b63011a8287)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/demo_export.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/demo_export-f1698d995c0193d3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/design_orphan.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/design_orphan-a50e293f875f08a3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/design_stage.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/design_stage-8c724bb645db9aff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/disk.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/disk-5ba17392599dadc2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/doctor.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/doctor-e268c1ac03d38bf8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/done_close.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/done_close-ea75b763e67c17bc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/drive.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/drive-ca90bff2921d7e36)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 78 filtered out; finished in 0.00s
+
+     Running tests/drive_kicks.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/drive_kicks-4bbb16b59f842db2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+     Running tests/dsh.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/dsh-6de8e0d1cc99ffcf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/dsh_unit.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/dsh_unit-1d46c10c4c93c023)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/empty_env.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/empty_env-ecc697d670222a1a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/events_log.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/events_log-a73d49cf1475aa4f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/events_tab.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/events_tab-aec2bc62c6988028)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/fallback.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/fallback-4c3f6dfaa43e3f55)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/fleet_cards.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/fleet_cards-7de8aecf1b5dbc5e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/fleet_notify.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/fleet_notify-1931941fc1fff83a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/form_only.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/form_only-8817009a0c17f2e3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/gate_unit.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/gate_unit-d5ce3bc3fd9364bc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/generic_harness.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/generic_harness-18a3b7a7d598a627)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/gh_links.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/gh_links-c2d4a8df9ee4d754)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/herd.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/herd-6e233e65ae5a4bda)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/herdr_adapter.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/herdr_adapter-d7005a18b37d304d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/hermes_hooks.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/hermes_hooks-a07b432321c1bf70)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/history.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/history-bb0421529c5a12bd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/hook.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/hook-c888fd5cc4790108)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 38 filtered out; finished in 0.00s
+
+     Running tests/host_history.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/host_history-fb0ebcca77bd1108)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/host_offline.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/host_offline-caa921113bf60ae2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/host_tab.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/host_tab-35d8a655e584466e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/host_words.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/host_words-963a784b87e3545b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/hosts.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/hosts-ccf86b5d92760a80)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+     Running tests/keychain.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/keychain-084af5b329b608ed)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/kick.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/kick-7301ddfb1a7f6954)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/land.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/land-83f9df2ff75f6061)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/lane_actions.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/lane_actions-b0f8729da8b26122)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+     Running tests/lane_asks.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/lane_asks-545e8391f88fcbbe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/lane_events.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/lane_events-66d6e52535e57881)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/lanes_sheet.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/lanes_sheet-d928c91d470028ee)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/lesson.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/lesson-78aade5e8be774fa)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/live.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/live-b2e64a9a24492444)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/live_board.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/live_board-7d731a9c391630d6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/m3.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/m3-5c95af464f5fc55b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/m3_fixes.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/m3_fixes-97625c0cf6ee3694)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/merge.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/merge-cb374e84de48d653)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 0.00s
+
+     Running tests/migrate.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/migrate-e095183c666c4e29)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/needs_human.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/needs_human-79f80dd22b6107d4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/orphan_issue.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/orphan_issue-5683b6691ced16e4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/orphans.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/orphans-39554e894cbfe83d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/outbox.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/outbox-3268f502b1ee194d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/overlap.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/overlap-5737782e9e5683df)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+     Running tests/pair_status.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/pair_status-85cf8f3bfa6ff267)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/parked.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/parked-9a8f33e2479f4e9a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/perf.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/perf-ec0a3b2c8d838c99)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/pipeline.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/pipeline-0444c8a51c3ebb86)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/pr_snapshot.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/pr_snapshot-fc76386f1e8a7460)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/proof.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/proof-c772539a98b63ecb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/protection.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/protection-0ac5de7ea91b7101)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/queue_blockers.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_blockers-26c5dde228c00750)
+error: test failed, to rerun pass `-p herdsman --test queue_blockers`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_blockers-26c5dde228c00750 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_board.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_board-266927c0c6d77ab7)
+error: test failed, to rerun pass `-p herdsman --test queue_board`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_board-266927c0c6d77ab7 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_graph.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_graph-4617435f01d70a99)
+error: test failed, to rerun pass `-p herdsman --test queue_graph`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_graph-4617435f01d70a99 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_lanes.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_lanes-0a86f34a05693340)
+error: test failed, to rerun pass `-p herdsman --test queue_lanes`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_lanes-0a86f34a05693340 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_tab.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_tab-8c73df3c01d1c69a)
+error: test failed, to rerun pass `-p herdsman --test queue_tab`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_tab-8c73df3c01d1c69a ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/queue_titles.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_titles-24baead803e859d9)
+error: test failed, to rerun pass `-p herdsman --test queue_titles`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/queue_titles-24baead803e859d9 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/readme.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/readme-b60b8743de17b15f)
+error: test failed, to rerun pass `-p herdsman --test readme`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/readme-b60b8743de17b15f ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/reap.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/reap-390068531c955bd1)
+error: test failed, to rerun pass `-p herdsman --test reap`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/reap-390068531c955bd1 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/reclaim.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/reclaim-05ab8965ec88193e)
+error: test failed, to rerun pass `-p herdsman --test reclaim`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/reclaim-05ab8965ec88193e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/remote_rules.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/remote_rules-667e273772df412e)
+error: test failed, to rerun pass `-p herdsman --test remote_rules`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/remote_rules-667e273772df412e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/report.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/report-efb8470a35954452)
+error: test failed, to rerun pass `-p herdsman --test report`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/report-efb8470a35954452 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/repro.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/repro-a7629db0fbafa940)
+error: test failed, to rerun pass `-p herdsman --test repro`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/repro-a7629db0fbafa940 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/retired_keys.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/retired_keys-c5829aab6c603f85)
+error: test failed, to rerun pass `-p herdsman --test retired_keys`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/retired_keys-c5829aab6c603f85 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/roots.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/roots-33b0204f2a0fc8b2)
+error: test failed, to rerun pass `-p herdsman --test roots`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/roots-33b0204f2a0fc8b2 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/run_card.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/run_card-80e33e9768803061)
+error: test failed, to rerun pass `-p herdsman --test run_card`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/run_card-80e33e9768803061 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/runners.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/runners-992da6d7f7a50e86)
+error: test failed, to rerun pass `-p herdsman --test runners`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/runners-992da6d7f7a50e86 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/schemes.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/schemes-90c6bc4a9bd385a1)
+error: test failed, to rerun pass `-p herdsman --test schemes`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/schemes-90c6bc4a9bd385a1 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/scratch.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/scratch-0f1029781eda161d)
+error: test failed, to rerun pass `-p herdsman --test scratch`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/scratch-0f1029781eda161d ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/screens_golden.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/screens_golden-e5992dbf218422b1)
+error: test failed, to rerun pass `-p herdsman --test screens_golden`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/screens_golden-e5992dbf218422b1 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/self_update.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/self_update-5a5921e8a5891535)
+error: test failed, to rerun pass `-p herdsman --test self_update`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/self_update-5a5921e8a5891535 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serial_groups.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/serial_groups-dbf2a3dcb5a8c4da)
+error: test failed, to rerun pass `-p herdsman --test serial_groups`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/serial_groups-dbf2a3dcb5a8c4da ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/serve_web.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/serve_web-d5fdfeb77f108e3e)
+error: test failed, to rerun pass `-p herdsman --test serve_web`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/serve_web-d5fdfeb77f108e3e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/service.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/service-aaf7386bf5d17b08)
+error: test failed, to rerun pass `-p herdsman --test service`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/service-aaf7386bf5d17b08 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/set_notify.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/set_notify-e64c74f6621225c9)
+error: test failed, to rerun pass `-p herdsman --test set_notify`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/set_notify-e64c74f6621225c9 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/setup_neutral.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/setup_neutral-19403329e92b2673)
+error: test failed, to rerun pass `-p herdsman --test setup_neutral`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/setup_neutral-19403329e92b2673 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/setup_terminal.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/setup_terminal-6e22208157f394e8)
+error: test failed, to rerun pass `-p herdsman --test setup_terminal`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/setup_terminal-6e22208157f394e8 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/shed.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/shed-d3fc65e048642fb2)
+error: test failed, to rerun pass `-p herdsman --test shed`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/shed-d3fc65e048642fb2 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/spawn.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/spawn-36a19b714f083a7a)
+error: test failed, to rerun pass `-p herdsman --test spawn`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/spawn-36a19b714f083a7a ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/spawn_guard.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/spawn_guard-1dc575349921f20e)
+error: test failed, to rerun pass `-p herdsman --test spawn_guard`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/spawn_guard-1dc575349921f20e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/state_db.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/state_db-d282aa9776114f17)
+error: test failed, to rerun pass `-p herdsman --test state_db`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/state_db-d282aa9776114f17 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/state_write.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/state_write-f1d7dbba586f4686)
+error: test failed, to rerun pass `-p herdsman --test state_write`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/state_write-f1d7dbba586f4686 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/store.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/store-ed9713748f53ba40)
+error: test failed, to rerun pass `-p herdsman --test store`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/store-ed9713748f53ba40 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/synergy.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/synergy-1c98a87579938ac4)
+error: test failed, to rerun pass `-p herdsman --test synergy`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/synergy-1c98a87579938ac4 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/system_sheet.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/system_sheet-fbaabac4be8912df)
+error: test failed, to rerun pass `-p herdsman --test system_sheet`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/system_sheet-fbaabac4be8912df ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/themes.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/themes-0f5bd87f15192256)
+error: test failed, to rerun pass `-p herdsman --test themes`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/themes-0f5bd87f15192256 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/thread_handoff.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/thread_handoff-15a6eb26a682174b)
+error: test failed, to rerun pass `-p herdsman --test thread_handoff`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/thread_handoff-15a6eb26a682174b ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/thread_refs.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/thread_refs-e504f50277f71e32)
+error: test failed, to rerun pass `-p herdsman --test thread_refs`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/thread_refs-e504f50277f71e32 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/tick_stuck.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/tick_stuck-f96e463db0bce7fd)
+error: test failed, to rerun pass `-p herdsman --test tick_stuck`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/tick_stuck-f96e463db0bce7fd ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/timer.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/timer-0927b65cd9b526ea)
+error: test failed, to rerun pass `-p herdsman --test timer`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/timer-0927b65cd9b526ea ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/timer_install.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/timer_install-0d929a91c1ece358)
+error: test failed, to rerun pass `-p herdsman --test timer_install`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/timer_install-0d929a91c1ece358 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/tmpdir.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/tmpdir-e470e2d73eb4bf74)
+error: test failed, to rerun pass `-p herdsman --test tmpdir`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/tmpdir-e470e2d73eb4bf74 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/transcript_tail.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/transcript_tail-2ad5723f14ddfc8e)
+error: test failed, to rerun pass `-p herdsman --test transcript_tail`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/transcript_tail-2ad5723f14ddfc8e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/turn.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/turn-2c1dd2c314cfb700)
+error: test failed, to rerun pass `-p herdsman --test turn`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/turn-2c1dd2c314cfb700 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_audit.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_audit-13ea6b0ebef90991)
+error: test failed, to rerun pass `-p herdsman --test ui_audit`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_audit-13ea6b0ebef90991 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_audit_hang.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_audit_hang-2f7789ccfb849326)
+error: test failed, to rerun pass `-p herdsman --test ui_audit_hang`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_audit_hang-2f7789ccfb849326 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_lock.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_lock-da8dfe6eb0216e1e)
+error: test failed, to rerun pass `-p herdsman --test ui_lock`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_lock-da8dfe6eb0216e1e ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/ui_tokens.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_tokens-009d08f6858da23c)
+error: test failed, to rerun pass `-p herdsman --test ui_tokens`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/ui_tokens-009d08f6858da23c ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/usage.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/usage-38829b0e073ae7db)
+error: test failed, to rerun pass `-p herdsman --test usage`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/usage-38829b0e073ae7db ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/verify_stage.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/verify_stage-42c9631d9a310e58)
+error: test failed, to rerun pass `-p herdsman --test verify_stage`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/verify_stage-42c9631d9a310e58 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/waiting.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/waiting-8908542000c0f003)
+error: test failed, to rerun pass `-p herdsman --test waiting`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/waiting-8908542000c0f003 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/webhook.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/webhook-ee6fbf7d5015628b)
+error: test failed, to rerun pass `-p herdsman --test webhook`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/webhook-ee6fbf7d5015628b ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+     Running tests/webpush.rs (/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/webpush-334a15174f1ba972)
+error: test failed, to rerun pass `-p herdsman --test webpush`
+
+Caused by:
+  could not execute process `/Users/jkmacmini/.cache/herdsman/target/.scratch/herdsman-impl-630/target/release/deps/webpush-334a15174f1ba972 ' --test types
+  herdsman:check_clean
+  herdsman:cloud
+  herdsman:compaction
+  herdsman:conductor
+  herdsman:conductor_adopt
+  herdsman:conductor_cards
+  herdsman:conductor_default
+  herdsman:conductor_lanes
+  herdsman:config_card
+  herdsman:demo_export
+  herdsman:design_orphan
+  herdsman:design_stage
+  herdsman:disk
+  herdsman:doctor
+  herdsman:done_close
+  herdsman:drive
+  herdsman:drive_kicks
+  herdsman:dsh
+  herdsman:dsh_unit
+  herdsman:empty_env
+  herdsman:events_log
+  herdsman:events_tab
+  herdsman:fallback
+  herdsman:fleet_cards
+  herdsman:fleet_notify
+  herdsman:form_only
+  herdsman:gate_unit
+  herdsman:generic_harness
+  herdsman:gh_links
+  herdsman:herd
+  herdsman:herdr_adapter
+  herdsman:hermes_hooks
+  herdsman:history
+  herdsman:hook
+  herdsman:host_history
+  herdsman:host_offline
+  herdsman:host_tab
+  herdsman:host_words
+  herdsman:hosts
+  herdsman:keychain
+  herdsman:kick
+  herdsman:land
+  herdsman:lane_actions
+  herdsman:lane_asks
+  herdsman:lane_events
+  herdsman:lanes_sheet
+  herdsman:lesson
+  herdsman:live
+  herdsman:live_board
+  herdsman:m3
+  herdsman:m3_fixes
+  herdsman:merge
+  herdsman:migrate
+  herdsman:needs_human
+  herdsman:orphan_issue
+  herdsman:orphans
+  herdsman:outbox
+  herdsman:overlap
+  herdsman:pair_status
+  herdsman:parked
+  herdsman:perf
+  herdsman:pipeline
+  herdsman:pr_snapshot
+  herdsman:proof
+  herdsman:protection
+  herdsman:queue_blockers
+  herdsman:queue_board
+  herdsman:queue_graph
+  herdsman:queue_lanes
+  herdsman:queue_tab
+  herdsman:queue_titles
+  herdsman:readme
+  herdsman:reap
+  herdsman:reclaim
+  herdsman:remote_rules
+  herdsman:report
+  herdsman:repro
+  herdsman:retired_keys
+  herdsman:roots
+  herdsman:run_card
+  herdsman:runners
+  herdsman:schemes
+  herdsman:scratch
+  herdsman:screens_golden
+  herdsman:self_update
+  herdsman:serial_groups
+  herdsman:serve_web
+  herdsman:service
+  herdsman:set_notify
+  herdsman:setup_neutral
+  herdsman:setup_terminal
+  herdsman:shed
+  herdsman:spawn
+  herdsman:spawn_guard
+  herdsman:state_db
+  herdsman:state_write
+  herdsman:store
+  herdsman:synergy
+  herdsman:system_sheet
+  herdsman:themes
+  herdsman:thread_handoff
+  herdsman:thread_refs
+  herdsman:tick_stuck
+  herdsman:timer
+  herdsman:timer_install
+  herdsman:tmpdir
+  herdsman:transcript_tail
+  herdsman:turn
+  herdsman:ui_audit
+  herdsman:ui_audit_hang
+  herdsman:ui_lock
+  herdsman:ui_tokens
+  herdsman:usage
+  herdsman:verify_stage
+  herdsman:waiting
+  herdsman:webhook
+  herdsman:webpush'` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+error: 52 targets failed:
+    `-p herdsman --test queue_blockers`
+    `-p herdsman --test queue_board`
+    `-p herdsman --test queue_graph`
+    `-p herdsman --test queue_lanes`
+    `-p herdsman --test queue_tab`
+    `-p herdsman --test queue_titles`
+    `-p herdsman --test readme`
+    `-p herdsman --test reap`
+    `-p herdsman --test reclaim`
+    `-p herdsman --test remote_rules`
+    `-p herdsman --test report`
+    `-p herdsman --test repro`
+    `-p herdsman --test retired_keys`
+    `-p herdsman --test roots`
+    `-p herdsman --test run_card`
+    `-p herdsman --test runners`
+    `-p herdsman --test schemes`
+    `-p herdsman --test scratch`
+    `-p herdsman --test screens_golden`
+    `-p herdsman --test self_update`
+    `-p herdsman --test serial_groups`
+    `-p herdsman --test serve_web`
+    `-p herdsman --test service`
+    `-p herdsman --test set_notify`
+    `-p herdsman --test setup_neutral`
+    `-p herdsman --test setup_terminal`
+    `-p herdsman --test shed`
+    `-p herdsman --test spawn`
+    `-p herdsman --test spawn_guard`
+    `-p herdsman --test state_db`
+    `-p herdsman --test state_write`
+    `-p herdsman --test store`
+    `-p herdsman --test synergy`
+    `-p herdsman --test system_sheet`
+    `-p herdsman --test themes`
+    `-p herdsman --test thread_handoff`
+    `-p herdsman --test thread_refs`
+    `-p herdsman --test tick_stuck`
+    `-p herdsman --test timer`
+    `-p herdsman --test timer_install`
+    `-p herdsman --test tmpdir`
+    `-p herdsman --test transcript_tail`
+    `-p herdsman --test turn`
+    `-p herdsman --test ui_audit`
+    `-p herdsman --test ui_audit_hang`
+    `-p herdsman --test ui_lock`
+    `-p herdsman --test ui_tokens`
+    `-p herdsman --test usage`
+    `-p herdsman --test verify_stage`
+    `-p herdsman --test waiting`
+    `-p herdsman --test webhook`
+    `-p herdsman --test webpush`

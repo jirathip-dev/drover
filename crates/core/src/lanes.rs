@@ -38,6 +38,8 @@ pub struct Lane {
     pub worktree: Option<String>,
     /// #630: its workspace root, from the spawn.
     pub root: Option<String>,
+    /// #630: its worktree's uncommitted files and unpushed commits, when readable.
+    pub unsaved: Option<(u64, u64)>,
     /// #302: `on <entry> (<entries> resting until 18:40)` when a `fallback` entry carries on.
     pub resting: Option<String>,
     /// #422: a conductor's chat thread (`t6`); with no pane it is `asleep`.
@@ -148,11 +150,18 @@ pub fn join(
         let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state == "done").map(String::from);
+        let wt = l.worktree.as_deref().filter(|_| l.thread.is_none());
+        l.unsaved = wt.and_then(|wt| crate::spawn::unsaved(&l.on(r), Path::new(wt)));
     }
     out
 }
 
 impl Lane {
+    /// #630: `+<files> ⇡<commits>` of its unsaved work, none when there is none.
+    pub fn unsaved_text(&self) -> Option<String> {
+        let (f, c) = self.unsaved.filter(|u| *u != (0, 0))?;
+        Some(format!("+{f} ⇡{c}"))
+    }
     /// #157: `r` on the lane's host.
     pub fn on<'a>(&'a self, r: &'a dyn Runner) -> crate::hosts::On<'a> {
         crate::hosts::On::new(r, self.machine.as_deref())
