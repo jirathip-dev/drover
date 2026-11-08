@@ -148,12 +148,19 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
 pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
     let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
-    let at: Vec<u64> = mine
+    let at: Vec<&Event> = mine
         .take_while(|e| !reset.contains(&e.kind.as_str()))
         .filter(|e| e.kind == "respawn")
-        .map(|e| e.ts)
         .collect();
-    (at.len(), at.first().copied().unwrap_or(0))
+    // #662: a resume after an account limit or adapter crash is no lane ending without a push.
+    let resumed = |e: &&&Event| e.str("why").is_some_and(resumed);
+    let n = at.iter().filter(|e| !resumed(e)).count();
+    (n, at.first().map_or(0, |e| e.ts))
+}
+
+/// #662: a gone lane's wait (or `respawn` why) that names a resumable exit cause.
+pub fn resumed(why: &str) -> bool {
+    crate::shed::RESUMABLE.iter().any(|c| why.contains(&format!("({c})")))
 }
 
 /// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
@@ -166,8 +173,8 @@ pub fn reviewed_head(t: &str) -> Option<&str> {
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
-    /// #639: each queued issue's blockers not merged yet.
-    pub blocked: Vec<(&'a str, u64, Vec<u64>)>,
+    /// #639: each queued issue's blockers not merged yet (#667: another repo's too), as `#11, cooee#87`.
+    pub blocked: Vec<(&'a str, u64, String)>,
 }
 
 impl<'a> Log<'a> {
@@ -178,8 +185,8 @@ impl<'a> Log<'a> {
             .collect();
         let blocked = (fleets.into_iter())
             .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
-            .filter(|(_, i)| !i.blockers.is_empty())
-            .map(|(f, i)| (f, i.issue, i.blockers))
+            .map(|(f, i)| (f, i.issue, crate::queue::labels(&i)))
+            .filter(|i| !i.2.is_empty())
             .collect();
         Log {
             all,
@@ -189,9 +196,9 @@ impl<'a> Log<'a> {
     }
 
     /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
-    pub fn blockers(&self, fleet: &str, n: u64) -> &[u64] {
+    pub fn blockers(&self, fleet: &str, n: u64) -> &str {
         let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
-        i.map_or(&[], |i| &i.2)
+        i.map_or("", |i| &i.2)
     }
 }
 
@@ -287,7 +294,7 @@ fn waits(
     // #639: queue blockers hold every lane of the issue (a fix, impl or update respawn too) as they hold its start.
     let on = log.blockers(f, n);
     if !on.is_empty() {
-        let what = format!("blocked by {}", crate::queue::hashes(on));
+        let what = format!("blocked by {on}");
         return w("drive", &what, s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
@@ -739,13 +746,19 @@ pub fn scan(
         } else if idle && (gone || unconfirmed) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
-            let why = if gone { "lane gone" } else { "prompt never landed" };
+            // #662: an ACP lane's exit cause; an account limit or adapter crash with no turn end resumes it.
+            let cause = crate::shed::exit_cause(mine, &built).filter(|_| gone);
+            let why = match cause {
+                Some(c) => format!("lane gone ({c})"),
+                None => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
+            };
+            let resume = waiting_turn.is_none() && resumed(&why);
             (w.who, w.lane) = ("drive", built);
             w.next_cmd = Some(format!("herdsman spawn {} {} {role} --supersede", s.fleet, s.issue));
-            w.what = if n >= 2 {
+            w.what = if n >= 2 && !resume {
                 w.next_cmd = None;
                 format!("lane keeps ending{NO_PUSH}needs you")
-            } else if n > 0 && ctx.now < last + RESPAWN_SECS {
+            } else if last > 0 && ctx.now < last + RESPAWN_SECS {
                 format!(
                     "{why}{NO_PUSH}respawned {} ago, again after 30 min",
                     age(ctx.now - last)

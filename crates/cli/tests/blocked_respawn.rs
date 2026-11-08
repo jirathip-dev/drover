@@ -199,3 +199,59 @@ fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() 
     ok(&at(&c, 120), &r, &["check"]);
     assert_eq!(kinds(&c, "closed-other").len(), 1, "logged once");
 }
+
+/// #679: an issue parked `LANE_ENDS` whose lane exited right after an idle trim gets one respawn in its worktree;
+/// parked that way again, or with no trim before the exit, it stays parked.
+#[test]
+fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
+    let (c, r) = lane("trim-repair", "t");
+    let park = |c: &herdsman::Ctx, ts: u64, trim: bool| {
+        if trim {
+            ev(
+                c,
+                ts,
+                12,
+                "lane-trimmed",
+                json!({"agent": LANE, "killed": ["node", "claude"], "freed_mb": 931}),
+            );
+        }
+        ev(
+            c,
+            ts + 1,
+            12,
+            "lane-state",
+            json!({"agent": LANE, "state": "gone", "why": "exited", "code": 0}),
+        );
+        let gone = json!({"agent": LANE, "role": "impl", "why": "lane gone"});
+        ev(c, ts + 2, 12, "respawn", gone.clone());
+        ev(c, ts + 3, 12, "respawn", gone);
+        lane_ends(c, ts + 4);
+    };
+    park(&c, 20, true);
+    let (out, steps) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 repaired: back to impl"), "{out}");
+    assert_eq!(steps, ["respawn"], "{out}");
+    let fixed = kinds(&c, "repaired");
+    assert_eq!((fixed.len(), fixed[0].data["trimmed"].as_bool()), (1, Some(true)));
+    let sp = kinds(&c, "spawn");
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    assert_eq!(
+        sp.last().unwrap().str("worktree"),
+        Some(wt.to_str().unwrap()),
+        "its own worktree"
+    );
+
+    // Trimmed and parked again: once only.
+    let c2 = at(&c, 100);
+    park(&c2, c2.now, true);
+    let (out, _) = drive(&c2, &r);
+    assert_eq!(kinds(&c2, "repaired").len(), 1, "{out}");
+    assert_eq!(state(&c2), "needs-human");
+
+    // No trim before the exit: parked as before.
+    let (c, r) = lane("trim-repair-none", "t");
+    park(&c, 20, false);
+    let (out, _) = drive(&c, &r);
+    assert!(kinds(&c, "repaired").is_empty(), "{out}");
+    assert_eq!(state(&c), "needs-human");
+}

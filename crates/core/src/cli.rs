@@ -364,6 +364,9 @@ enum Cmd {
         /// Only load the config (the pre-install gate, #539): exit 1 if this binary can't, warnings are fine
         #[arg(long)]
         config_only: bool,
+        /// Only read each account token from the store, timed out on a dialog (the install gates' secret check, #631)
+        #[arg(long, conflicts_with = "config_only")]
+        tokens: bool,
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
@@ -673,16 +676,16 @@ enum QueueCmd {
     /// Hold an issue until others are merged; each `--on` adds a blocker
     Block {
         issue: u64,
-        /// A blocking issue (repeatable)
+        /// A blocking issue (repeatable): `N`, another fleet's `<fleet>#N` or another repo's `<owner/repo>#N`
         #[arg(long, value_name = "ISSUE", required = true)]
-        on: Vec<u64>,
+        on: Vec<String>,
     },
     /// Drop blockers of an issue: those `--on` names, else all
     Unblock {
         issue: u64,
         /// A blocker to drop (repeatable)
         #[arg(long, value_name = "ISSUE")]
-        on: Vec<u64>,
+        on: Vec<String>,
     },
     /// List the queue in order
     Ls {
@@ -1215,10 +1218,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
             for r in rows.as_array().into_iter().flatten().filter(|_| !json) {
-                let b: Vec<u64> = serde_json::from_value(r["blocked_by"].clone())?;
+                let i = queue::Item {
+                    blockers: serde_json::from_value(r["blocked_by"].clone())?,
+                    ext: serde_json::from_value(r["blocked_ext"].clone())?,
+                    ..queue::Item::default()
+                };
                 let mut on = String::new();
-                if !b.is_empty() {
-                    on = format!("  blocked by {}", queue::hashes(&b));
+                if !i.ext.is_empty() || !i.blockers.is_empty() {
+                    on = format!("  blocked by {}", queue::labels(&i));
                 }
                 if r["serial"] == true {
                     on += "  serial";
@@ -1245,7 +1252,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 )?;
             }
         }
-        Cmd::Doctor { json, config_only } => return crate::doctor::doctor(ctx, r, out, json, config_only),
+        Cmd::Doctor { tokens: true, .. } => return crate::doctor::tokens(ctx, r, out),
+        Cmd::Doctor { json, config_only, .. } => return crate::doctor::doctor(ctx, r, out, json, config_only),
         Cmd::Setup { host, name, no_load } => {
             let Some((h, n)) = host.zip(name) else {
                 return crate::timer::setup(ctx, r, out, !no_load);
@@ -1717,6 +1725,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     );
                 }
                 Cmd::Queue { fleet, cmd } => {
+                    let blockers = |on: &[String]| -> Vec<serde_json::Value> {
+                        on.iter()
+                            .map(|b| b.parse::<u64>().map_or(json!(b), |n| json!(n)))
+                            .collect()
+                    };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
                     let d = match cmd {
@@ -1780,8 +1793,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             after,
                         } => queue::op("mv", &[issue], top, before, after, None),
                         QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None, None),
-                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": on}),
-                        QueueCmd::Unblock { issue, on } => json!({"op": "unblock", "issues": [issue], "on": on}),
+                        // #667: `N` is this fleet's issue, `x#N` another fleet's or repo's.
+                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": blockers(&on)}),
+                        QueueCmd::Unblock { issue, on } => {
+                            json!({"op": "unblock", "issues": [issue], "on": blockers(&on)})
+                        }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
                     // #412: a conductor's design mark: the design's approval asks in its thread too.

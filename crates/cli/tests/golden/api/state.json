@@ -58,6 +58,7 @@
   "queue": [
     {
       "blocked_by": null,
+      "blocked_on": [],
       "fleet": "sendmeter",
       "issue": 17,
       "state": "queued",
