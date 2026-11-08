@@ -1865,14 +1865,16 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
 pub(crate) fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
     let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
-    format!("wip/{agent}-{}-{}", if ok { stamp } else { ctx.now.to_string() }, tag())
+    let w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    format!("{w}-{}", tag(&w))
 }
 
-/// #664: 4 random hex digits.
-fn tag() -> String {
-    use std::hash::BuildHasher;
-    let h = std::collections::hash_map::RandomState::new().hash_one(std::time::SystemTime::now());
-    format!("{:04x}", h & 0xffff)
+/// #664: 4 hex digits hashed from `seed` (fixed keys, so a replay names the same branch).
+fn tag(seed: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    seed.hash(&mut h);
+    format!("{:04x}", h.finish() & 0xffff)
 }
 
 /// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
@@ -2019,7 +2021,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
     }
     let push = |w: String| git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map(|_| w);
     match push(w.to_string()) {
-        Err(e) if format!("{e:#}").contains("[rejected]") => push(format!("{w}-{}", tag())),
+        Err(e) if format!("{e:#}").contains("[rejected]") => push(format!("{w}-{}", tag(w))),
         p => p,
     }
     .map(|w| (w, skip))
