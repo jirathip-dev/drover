@@ -124,6 +124,7 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
 
 /// One event, numbered next: a single insert, its own transaction.
 pub fn append(state: &Path, ev: &Event) -> Result<()> {
+    crate::sim::point(&crate::sim::Point::Append(ev));
     with(state, true, (), |c| insert(c, ev, None, false))
 }
 
@@ -153,6 +154,7 @@ pub fn claim(
     id: &str,
     take: &dyn Fn(Option<&Event>) -> bool,
 ) -> Result<(Option<Event>, bool)> {
+    crate::sim::point(&crate::sim::Point::Lease(id));
     with(state, true, (None, false), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "type IN ('intent', 'done', 'failed') AND json_extract(json, '$.action_id') = ?1";
@@ -320,9 +322,10 @@ fn lease(r: &rusqlite::Row) -> rusqlite::Result<Lease> {
 /// Take `key` for `secs` from `now`, as this process: an atomic insert-if-free. Free: no lease, an expired one, or one
 /// `dead` says has lost its holder. `None` while another holds it.
 pub fn take(state: &Path, key: &str, now: u64, secs: u64, data: &str, dead: &dyn Fn(&Lease) -> bool) -> Option<Lease> {
+    crate::sim::point(&crate::sim::Point::Lease(key));
     let l = Lease {
         key: key.into(),
-        pid: std::process::id(),
+        pid: crate::sim::pid(),
         host: host(),
         at: now,
         expires_at: now + secs,
@@ -361,6 +364,7 @@ pub fn renew(state: &Path, old: &Lease, new: &Lease) -> bool {
 
 /// Drop `key`, whoever holds it (`Some(l)`: only while `l` does); true if a lease went.
 pub fn release(state: &Path, key: &str, l: Option<&Lease>) -> bool {
+    crate::sim::point(&crate::sim::Point::Lease(key));
     let n = with(state, false, 0, |c| {
         Ok(match l {
             None => c.execute("DELETE FROM leases WHERE key = ?1", [key])?,

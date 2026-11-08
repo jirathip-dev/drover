@@ -261,16 +261,27 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 }
             }
             // #223: a lane done/idle past `idle_reap_minutes` keeps its agent but not what the agent started.
-            let trim =
-                wt.filter(|_| matches!(status, Some("done" | "idle")) && idle > cfg.limits.idle_reap_minutes * 60);
-            let trimmed = trim.map(|wt| host::reap(r, Path::new(wt), true));
+            // #679: a shed lane's agent (its terminal's pid) and its tree stay too; no pid known: nothing goes. A lane
+            // whose last turn is `working` keeps all: a background job it started on purpose.
+            let shed = agent.is_some_and(|a| a["runtime"] == "shed");
+            let spare = agent.and_then(|a| a["pid"].as_u64()).map(|p| p.to_string());
+            let working = crate::waiting::turn(&events, s).is_some_and(|t| t.str("state") == Some("working"));
+            let trim = wt.filter(|_| {
+                matches!(status, Some("done" | "idle"))
+                    && idle > cfg.limits.idle_reap_minutes * 60
+                    && !working
+                    && (!shed || spare.is_some())
+            });
+            let trimmed = trim.map(|wt| host::reap(r, Path::new(wt), true, spare.as_deref()));
             if let Some((killed, mb)) = trimmed.filter(|t| !t.0.is_empty()) {
                 let d = json!({"agent": lane, "killed": killed, "freed_mb": mb});
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
             // #425: a held lane waits by design. #666: an unheld one alerts once until it changes (drive acts on it).
-            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
+            // #679: a live shed lane whose last turn is `working` is idle between turns, never stalled.
+            let between = shed && working;
+            if idle > stall && status != Some("working") && !between && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
@@ -877,7 +888,7 @@ pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
 pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
-    let names = host::reap(r, Path::new(wt), false).0;
+    let names = host::reap(r, Path::new(wt), false, None).0;
     if !names.is_empty() {
         let d = json!({"worktree": wt, "killed": names.len(), "names": names});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;

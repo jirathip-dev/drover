@@ -48,8 +48,9 @@ pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, Strin
 }
 
 /// #186: TERM every process inside `dir` (#223: with `trim`, all but the pane's shell and the agent, the top two
-/// levels there), wait 5 s, KILL those still there; the commands signalled and the MB they held.
-pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
+/// levels there; #679: and never `spare`'s tree, a shed lane's agent), wait 5 s, KILL those still there; the commands
+/// signalled and the MB they held.
+pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec<String>, u64) {
     let (mut first, ps) = (inside(&cwds(r), dir), stdout(r, "ps", &["-axo", "pid=,ppid=,rss="]));
     let ps = ps.filter(|_| trim).unwrap_or_default();
     let ps: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
@@ -57,6 +58,12 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool) -> (Vec<String>, u64) {
     let all = first.clone();
     let here = |p: Option<&str>| all.iter().any(|a| Some(a.0.as_str()) == p);
     first.retain(|p| !trim || here(col(&p.0, 1)) && here(col(&p.0, 1).and_then(|q| col(q, 1))));
+    let agents = |p: &str| {
+        std::iter::successors(Some(p), |q| col(q, 1))
+            .take(64)
+            .any(|q| Some(q) == spare)
+    };
+    first.retain(|p| !agents(&p.0));
     let kb: u64 = first.iter().filter_map(|p| col(&p.0, 2)?.parse::<u64>().ok()).sum();
     let kill = |sig: &str, ps: &[(String, String, String)]| {
         let mut args = vec![sig.to_string()];
