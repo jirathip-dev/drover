@@ -504,33 +504,46 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
+/// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
+/// account, on a remote host); empty when it would. #633: an attached cooee conductor's `guarded` too.
+pub fn unguarded(
+    ctx: &Ctx,
+    (profile, family, h): (&str, &str, &str),
+    id: &str,
+    (account, remote): (bool, bool),
+) -> String {
+    let settings: Value = std::fs::read_to_string(harness::profiles_root(ctx).join(profile).join("settings.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+    let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
+    let guard = hook_command(ctx, family);
+    if remote {
+        "shed runs ACP sessions on its own host only".to_string()
+    } else if harness::get(h).acp() != Some(id) {
+        format!("ACP agent {id} runs no {h} hook")
+    } else if !hooks.any(|h| h["command"] == guard.as_str()) {
+        format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
+    } else if !account {
+        "an ACP lane signs in with its role's [accounts] folder: account".into()
+    } else {
+        String::new()
+    }
+}
+
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
 /// file, with its account's folder as its harness's config folder (#683), its profile's settings and role as the
 /// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
-    let settings: Value = std::fs::read_to_string(dir.join("settings.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
-    let hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
-    let guard = hook_command(ctx, p.family);
-    let why = if remote {
-        "shed runs ACP sessions on its own host only".to_string()
-    } else if harness::get(&p.harness).acp() != Some(id) {
-        format!("ACP agent {id} runs no {} hook", p.harness)
-    } else if !hooks.into_iter().any(|h| h["command"] == guard.as_str()) {
-        format!(
-            "profile {} has no herdsman PreToolUse hook; run `herdsman profiles sync`",
-            p.profile
-        )
-    } else if !p.account.as_ref().is_some_and(|a| a.1.starts_with("folder:")) {
-        "an ACP lane signs in with its role's [accounts] folder: account".into()
-    } else {
-        String::new()
-    };
+    let why = unguarded(
+        ctx,
+        (&p.profile, p.family, &p.harness),
+        id,
+        (p.account.as_ref().is_some_and(|a| a.1.starts_with("folder:")), remote),
+    );
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
     }
