@@ -485,10 +485,8 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         placed(&c, &r, 14, "impl", None).unwrap_err(),
         "REFUSED NO_HOST: no host with docker"
     );
-    // Its running lane still gets its review and fix rounds there.
+    // Its running lane drains there; #676: the issue's next lanes go to an enabled host.
     remote_spawn(&c, NOW - 60);
-    assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("bazzite"));
-    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = host_tab(&s, ADDR, NOW);
     assert!(
@@ -504,6 +502,46 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         placed(&c, &r, 15, "impl", None).unwrap_err(),
         "REFUSED NO_HOST: no enabled host"
     );
+}
+
+/// #676: an issue whose last lane ran on bazzite leaves it once bazzite is off: its next lanes go to the main host.
+#[test]
+fn after_hosts_off_the_issue_leaves_its_last_host() {
+    let c = setup("hosts-off-sticky", "", true, 0);
+    let r = fake(2.0, 0.1);
+    remote_spawn(&c, NOW - 60);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "sticky while on"
+    );
+    assert_eq!(run(&c, &r, &["hosts", "off", "bazzite"]).0, 0);
+    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("mini"));
+}
+
+/// #676: the sticky host refusing DISK_LOW sends the lane to another enabled host in the same pass; a worktree there
+/// with unpushed work keeps it, and the refusal says why.
+#[test]
+fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work() {
+    let c = setup("hosts-sticky-disk", "", true, 0);
+    remote_spawn(&c, NOW - 60);
+    let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 90% /\n";
+    let low = || fake(2.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
+    assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
+    let kept = low()
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+    let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
+    assert!(
+        e.ends_with("; stays on bazzite: its worktree there has unpushed work"),
+        "{e}"
+    );
+    // A pin holds it there too.
+    let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite"), "{e}");
 }
 
 #[test]
