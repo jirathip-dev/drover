@@ -102,6 +102,8 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
             }
             Ev::Lane { pane, step } => lane(sim, w, &pane, step),
             Ev::Ci { sha, green } => {
+                let since = w.model.ci_since.remove(&sha).unwrap_or(w.now);
+                w.model.ci_wait += w.now - since;
                 w.model.ci.insert(sha, Some(green));
                 w.model.version += 1;
             }
@@ -176,9 +178,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                 merged: None,
             });
             pr.head = sha.clone();
-            w.model.ci.insert(sha.clone(), None);
             w.model.version += 1;
-            let ci = now + 60 * w.rng.range(1, 15);
+            let ci = w.model.ci_start(&sha, now, &mut w.rng);
+            w.model.produced.push(id.into());
             w.model.at(ci, Ev::Ci { sha, green });
             stop(sim, w, i, n);
         }
@@ -193,6 +195,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                     "FAIL\n\nReviewed head: {head}\n\n- blocking [correctness] src/lib.rs:10: wrong\n  Proof: spec\n  > AC 1: it works\n  src/lib.rs:10\n"
                 ),
             };
+            if pass || fixed {
+                w.model.produced.push(id.into());
+            }
             let f = Path::new(&cwd).join("verdict.md");
             std::fs::write(&f, body).unwrap();
             let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);

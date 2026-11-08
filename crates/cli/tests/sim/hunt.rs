@@ -204,7 +204,7 @@ impl Plan {
     }
 }
 
-/// What a run reached: one `pass code kind step` per event (and per drive-pass action), and its metrics (supersedes,
+/// What a run reached: one `pass code kind step` per event (and per drive-pass action), and its peaks (supersedes,
 /// most spawns of one lane, the worst clock lag), each worse the higher.
 pub fn coverage(w: &World) -> (BTreeSet<String>, Vec<u64>) {
     let s = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("-").to_string();
@@ -325,10 +325,10 @@ pub fn hunt(start: &[u64], rng: u64, sabotage: Option<Sabotage>, more: impl Fn(u
                 continue;
             }
             let new = o.cov.difference(&seen).count();
-            let worse = o.metrics.iter().zip(&worst).any(|(m, w)| m > w);
+            let worse = o.peaks.iter().zip(&worst).any(|(m, w)| m > w);
             if new > 0 || worse {
                 seen.extend(o.cov);
-                worst = worst.iter().zip(&o.metrics).map(|(a, b)| *a.max(b)).collect();
+                worst = worst.iter().zip(&o.peaks).map(|(a, b)| *a.max(b)).collect();
                 h.corpus.push(p.clone());
             }
         }
