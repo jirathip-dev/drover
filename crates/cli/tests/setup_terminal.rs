@@ -20,7 +20,9 @@ fn log(c: &herdsman::Ctx) -> String {
 #[test]
 fn only_configured_names_run_and_a_remote_pane_uses_machine() {
     let c = ctx(&tmpdir("setup-names"), &config());
-    let r = Fake::default().reply("herdr", WS);
+    let r = Fake::default()
+        .reply("herdr machine list --json", BAZZITE)
+        .reply("herdr", WS);
     let (code, out) = run(&c, &r, &["setup", "bazzite", "rm -rf ~"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED NO_SUCH_SETUP") && !r.called("herdr"), "{out}");
@@ -57,6 +59,7 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
         "Open this link to sign in:\nhttps://claude.ai/oauth?code=abc&state=12345678\n90abcdef\nPaste code here >\n";
     let r = Fake::default()
         .reply("herdr --machine bazzite pane read", screen)
+        .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", WS);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let post = |path: &str, body: &str, cookie: &str| {
@@ -100,7 +103,9 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
 #[test]
 fn a_setup_closes_on_its_timeout() {
     let c = ctx(&tmpdir("setup-timeout"), &config());
-    let r = Fake::default().reply("herdr", WS);
+    let r = Fake::default()
+        .reply("herdr machine list --json", BAZZITE)
+        .reply("herdr", WS);
     assert_eq!(run(&c, &r, &["setup", "bazzite", "gh"]).0, 0);
     let at = |now| herdsman::Ctx { now, ..c.clone() };
     herdsman::setup::reap(&at(T + 599), &r, &read(&c.state).unwrap()).unwrap();

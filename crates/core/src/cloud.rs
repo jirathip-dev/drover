@@ -281,10 +281,11 @@ const RUST: &str =
 /// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
+    let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
+    crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
     }
-    let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let on = crate::hosts::On::new(r, Some(m));
     let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
@@ -299,8 +300,24 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         if pass(check) {
             return Ok(writeln!(out, "✓ {what} — there")?);
         }
-        // herdr's install is `herdr machine add` from here: this host's version there.
-        let add = || r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]));
+        // herdr's install is `herdr machine add` from here: this host's version there. #641: it replaces the label's
+        // old profile (a recreated box), never adds a second.
+        let add = || {
+            let old = crate::hosts::profiles(r, m)?;
+            for id in &old {
+                crate::runner::ok(r, crate::herdr::BIN, &["machine", "remove", id])?;
+            }
+            if !old.is_empty() {
+                log(
+                    ctx,
+                    cfg,
+                    "host-machine-replaced",
+                    name,
+                    json!({"machine": m, "old": old}),
+                )?;
+            }
+            r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]))
+        };
         let o = if install.is_empty() { add()? } else { sh(install)? };
         let err = o.stderr.lines().last().unwrap_or_default().to_string();
         ensure!(pass(check), "{name}: {what} installed, `{check}` fails: {err}");

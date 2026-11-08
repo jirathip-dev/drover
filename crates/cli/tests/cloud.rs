@@ -523,6 +523,7 @@ fn boot_fake(gh_in: bool) -> Fake {
     let f = Fake::default()
         .stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
         .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
+        .reply("herdr machine list --json", r#"[{"id": "c1", "label": "cloud1"}]"#)
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
         .reply(&step("herdr --version | grep -qx 'herdr 0.9.5'"), "")
         .once(&step("command -v gh"), 1, "")
