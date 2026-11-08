@@ -214,6 +214,14 @@ enum Cmd {
     Waiting(Scope),
     /// Print the issue spec cached at spawn; read this instead of `gh issue view`
     Brief { fleet: String, issue: u64 },
+    /// Why a line is as it is: blame's commit, its issue, the why note on it, the issue's asks and answers
+    Why {
+        /// The line, as `<file>:<line>`
+        at: String,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// The issue PR's head sha, base, mergeable and check rollup: one `gh pr view` per 60 s
     Pr {
         fleet: String,
@@ -367,6 +375,9 @@ enum Cmd {
         /// Only load the config (the pre-install gate, #539): exit 1 if this binary can't, warnings are fine
         #[arg(long)]
         config_only: bool,
+        /// Only read each account token from the store, timed out on a dialog (the install gates' secret check, #631)
+        #[arg(long, conflicts_with = "config_only")]
+        tokens: bool,
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
@@ -676,16 +687,16 @@ enum QueueCmd {
     /// Hold an issue until others are merged; each `--on` adds a blocker
     Block {
         issue: u64,
-        /// A blocking issue (repeatable)
+        /// A blocking issue (repeatable): `N`, another fleet's `<fleet>#N` or another repo's `<owner/repo>#N`
         #[arg(long, value_name = "ISSUE", required = true)]
-        on: Vec<u64>,
+        on: Vec<String>,
     },
     /// Drop blockers of an issue: those `--on` names, else all
     Unblock {
         issue: u64,
         /// A blocker to drop (repeatable)
         #[arg(long, value_name = "ISSUE")]
-        on: Vec<u64>,
+        on: Vec<String>,
     },
     /// List the queue in order
     Ls {
@@ -738,6 +749,8 @@ enum HostsCmd {
     On { name: String },
     /// No new lanes on this host (its lanes finish there); still monitored; logs `host-off`
     Off { name: String },
+    /// Empty a root (default the host's first): new lanes skip it, its lanes are saved and restarted on the next root
+    Eject { name: String, root: Option<String> },
     /// Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`
     #[command(hide = true)]
     Destroy { name: String },
@@ -823,8 +836,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +2 for #668's `cap`).
-pub const HELP_AGENT_MAX: usize = 332;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`).
+pub const HELP_AGENT_MAX: usize = 342;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1002,6 +1015,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 _ => ctx.state.clone(),
             };
             crate::db::migrate(&state, out)?;
+            crate::roots::migrate(ctx, r, out)?; // #630
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
@@ -1074,6 +1088,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
                     c(e.map_or("-", |e| e.str("host").unwrap_or("local")))
                 };
+                let root = |s: &crate::events::IssueState| {
+                    let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
+                    let root = e.and_then(|e| e.str("root")).map(|r| format!(" · root {r}"));
+                    // #630: a local open lane's unsaved work (`+<files> ⇡<commits>`).
+                    let wt = e
+                        .filter(|e| !s.done() && e.str("machine").is_none())
+                        .and_then(|e| e.str("worktree"));
+                    let u = wt.and_then(|wt| crate::spawn::unsaved(r, std::path::Path::new(wt)));
+                    let u = crate::spawn::unsaved_text(u).map(|u| format!(" · {u}"));
+                    root.unwrap_or_default() + &u.unwrap_or_default()
+                };
                 writeln!(
                     out,
                     "{:<12} {:<6} {:<12} {:<24} {:<5}{} WAITING",
@@ -1091,7 +1116,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             Some(format!("on {}: {}", e.str("host")?, e.str("why")?))
                         })
                         .unwrap_or_else(|| "-".into());
-                    writeln!(out, "{:<pad$}{} {w}", status_line(s, ctx.now), host(s))?;
+                    writeln!(out, "{:<pad$}{} {w}{}", status_line(s, ctx.now), host(s), root(s))?;
                 }
                 write!(out, "{}", serial.concat())?;
                 if let Some(t) = look.ts {
@@ -1215,10 +1240,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
             for r in rows.as_array().into_iter().flatten().filter(|_| !json) {
-                let b: Vec<u64> = serde_json::from_value(r["blocked_by"].clone())?;
+                let i = queue::Item {
+                    blockers: serde_json::from_value(r["blocked_by"].clone())?,
+                    ext: serde_json::from_value(r["blocked_ext"].clone())?,
+                    ..queue::Item::default()
+                };
                 let mut on = String::new();
-                if !b.is_empty() {
-                    on = format!("  blocked by {}", queue::hashes(&b));
+                if !i.ext.is_empty() || !i.blockers.is_empty() {
+                    on = format!("  blocked by {}", queue::labels(&i));
                 }
                 if r["serial"] == true {
                     on += "  serial";
@@ -1245,7 +1274,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 )?;
             }
         }
-        Cmd::Doctor { json, config_only } => return crate::doctor::doctor(ctx, r, out, json, config_only),
+        Cmd::Doctor { tokens: true, .. } => return crate::doctor::tokens(ctx, r, out),
+        Cmd::Doctor { json, config_only, .. } => return crate::doctor::doctor(ctx, r, out, json, config_only),
         Cmd::Setup { host, name, no_load } => {
             let Some((h, n)) = host.zip(name) else {
                 return crate::timer::setup(ctx, r, out, !no_load);
@@ -1453,6 +1483,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     Some(HostsCmd::Refresh) => crate::hosts::list(ctx, &cfg, r, out, true)?,
                     Some(HostsCmd::On { name }) => crate::hosts::toggle(ctx, out, &name, true, "cli")?,
                     Some(HostsCmd::Off { name }) => crate::hosts::toggle(ctx, out, &name, false, "cli")?,
+                    Some(HostsCmd::Eject { name, root }) => {
+                        return crate::roots::eject(ctx, &cfg, r, out, &name, root.as_deref());
+                    }
                     Some(HostsCmd::Destroy { name }) => {
                         let wip = crate::cloud::stop(ctx, &cfg, r, &name, "destroy", "owner")?;
                         writeln!(out, "{name}: destroyed; wip {}", wip.join(" "))?;
@@ -1653,14 +1686,24 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
-                    let d = json!({"state": state, "why": why, "role": role});
+                    // #677: a `done` at a new push puts the lane's why.md on its head; a refused note still ends the turn.
+                    let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
+                    let note = note.transpose()?.flatten();
+                    let mut d = json!({"state": state, "why": why, "role": role});
+                    if let Some(w) = &note {
+                        d["note"] = json!(format!("WHY_INVALID: {w}"));
+                    }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
                     if state == "need-input" {
                         writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
+                    if let Some(w) = note {
+                        return gate::refused("WHY_INVALID", w);
+                    }
                 }
+                Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..
@@ -1719,6 +1762,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     );
                 }
                 Cmd::Queue { fleet, cmd } => {
+                    let blockers = |on: &[String]| -> Vec<serde_json::Value> {
+                        on.iter()
+                            .map(|b| b.parse::<u64>().map_or(json!(b), |n| json!(n)))
+                            .collect()
+                    };
                     let groups = &cfg.fleet(&fleet)?.serial;
                     let known = |g: &String| g.is_empty() || groups.iter().any(|x| x.name == *g);
                     let d = match cmd {
@@ -1782,8 +1830,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             after,
                         } => queue::op("mv", &[issue], top, before, after, None),
                         QueueCmd::Rm { issue } => queue::op("rm", &[issue], false, None, None, None),
-                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": on}),
-                        QueueCmd::Unblock { issue, on } => json!({"op": "unblock", "issues": [issue], "on": on}),
+                        // #667: `N` is this fleet's issue, `x#N` another fleet's or repo's.
+                        QueueCmd::Block { issue, on } => json!({"op": "block", "issues": [issue], "on": blockers(&on)}),
+                        QueueCmd::Unblock { issue, on } => {
+                            json!({"op": "unblock", "issues": [issue], "on": blockers(&on)})
+                        }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
                     // #412: a conductor's design mark: the design's approval asks in its thread too.

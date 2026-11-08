@@ -422,7 +422,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     }
     steps += &format!("{RUST}\n");
     if acp {
-        let (git, rev, sv) = (crate::shed::GIT, crate::shed::REV, crate::shed::proto::VERSION);
+        let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
         let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
         steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{SHED}\n");
     }

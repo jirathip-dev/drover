@@ -324,7 +324,8 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         .iter()
         .position(|l| l.starts_with("ssh boat1 'shed' 'run' '--acp' 'claude-acp'"))
         .unwrap();
-    let wt = home.join(".herdr/worktrees/sendmeter/issue-12");
+    let wt = PathBuf::from(sp[0].str("worktree").unwrap());
+    assert!(wt.starts_with(&home), "under its $HOME there: {}", wt.display());
     let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
     assert!(brief.contains("AC: it works"));
     let send = calls

@@ -36,6 +36,67 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
+/// #633: cooee thread `id`'s last `conductor-attached` / `conductor-detached`.
+fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+    let link = |e: &&Event| matches!(e.kind.as_str(), "conductor-attached" | "conductor-detached");
+    events.iter().rfind(|e| link(e) && e.str("thread") == Some(id))
+}
+
+/// #633: cooee thread `id`'s `conductor-attached` while the link holds (not detached, not archived since).
+pub fn attached<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
+    let since = |a: &Event| of(events, id).any(|e| e.kind == "thread-archive" && e.seq > a.seq);
+    link_of(events, id).filter(|e| e.kind == "conductor-attached" && !since(e))
+}
+
+/// Thread `id`'s fleet: an attached cooee thread's, else herdsman's own thread's (`NO_SUCH_THREAD`).
+pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
+    Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
+}
+
+/// #633: `POST /api/v1/conductor-attach`: cooee thread `id` becomes `fleet`'s conductor thread (`conductor-attached`);
+/// what its profile needs: the brief, the synced settings, the env, and whether #565's ACP guard holds (`why` not).
+pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
+    let f = cfg.fleet(fleet)?;
+    let (_, role) = defaults(cfg, fleet)?;
+    let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
+    if id.is_empty() || id.len() > 128 || !id.chars().all(ok) {
+        return refused("BAD_VALUE", "thread: a cooee thread id (letters, digits, `-_.:`)");
+    }
+    let events = read(&ctx.state)?;
+    if find(&events, id).is_ok() {
+        return refused("BAD_VALUE", format!("{id} is herdsman's own thread"));
+    }
+    let t = Event::new(ctx.now, fleet, None, "conductor-attached", json!({"thread": id}));
+    emit(&ctx.state, cfg, t.clone())?;
+    let p = role.profile_or("conductor");
+    let acp = harness::get(&role.harness).acp().unwrap_or(&role.harness);
+    let account = crate::access::pick(ctx, cfg, &events, &role).ok().flatten().is_some();
+    let why = crate::spawn::unguarded(ctx, (&p, "conductor", &role.harness), acp, (account, false));
+    let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/conductor-{id}"), &[]);
+    let settings = harness::profiles_root(ctx).join(&p).join("settings.json");
+    let env = json!({"HERDSMAN_LANE": format!("{fleet}:-:conductor"), "HERDSMAN_THREAD": id,
+        "HERDSMAN_PORT": port.to_string()});
+    let message = format!("{id} is {fleet}'s conductor thread");
+    Ok(
+        json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
+        "settings": settings, "env": env, "guarded": why.is_empty(), "why": why}),
+    )
+}
+
+/// #633: `POST /api/v1/conductor-detach`: the link ends (`conductor-detached`); `NO_SUCH_THREAD` unless attached.
+pub fn detach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<String> {
+    if attached(&read(&ctx.state)?, id).is_none_or(|e| e.fleet != fleet) {
+        return refused("NO_SUCH_THREAD", format!("no cooee thread {id} attached to {fleet}"));
+    }
+    let d = json!({"thread": id});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, None, "conductor-detached", d),
+    )?;
+    Ok(format!("{id} detached from {fleet}"))
+}
+
 /// `herdsman thread new <fleet|all> <title> [--harness <h>]`: its id. #404: the thread keeps its harness (`harness`,
 /// else the default's) for good.
 pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, harness: Option<&str>) -> Result<String> {
@@ -89,7 +150,9 @@ pub fn archived(events: &[Event], id: &str) -> bool {
 /// stay) and folds the thread; `thread restore` unfolds it, and its next message resumes the same session.
 pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> Result<()> {
     let events = read(&ctx.state)?;
-    let t = find(&events, id)?;
+    // #633: archiving an attached cooee thread ends its link.
+    let t = link_of(&events, id).filter(|e| e.kind == "conductor-attached");
+    let t = t.map_or_else(|| find(&events, id), Ok)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("conductor-"));
     if let Some(s) = last.filter(|s| on && s.kind == "conductor-start") {
         if herdr::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
@@ -334,12 +397,16 @@ pub fn handoff_text(e: &Event) -> String {
 }
 
 /// #541: the thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active
-/// one (neither archived); none without a conductor role.
+/// one (neither archived); none without a conductor role. #633: an attached cooee thread is one of them.
 pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
-    role(cfg, fleet).ok()?;
-    let repo = |e: &&'a Event| e.kind == "thread-new" && e.fleet == fleet;
+    let own = role(cfg, fleet).is_ok();
+    let repo = |e: &&'a Event| e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "conductor-attached");
     let ids = events.iter().filter(repo).filter_map(|e| e.str("thread"));
-    let ids: Vec<&str> = ids.filter(|id| !archived(events, id)).collect();
+    let live = |id: &&str| match link_of(events, id) {
+        Some(_) => attached(events, id).is_some_and(|e| e.fleet == fleet),
+        None => !archived(events, id),
+    };
+    let ids: Vec<&str> = ids.filter(live).collect();
     let pin = cfg.fleet.get(fleet).and_then(|f| f.ask_thread.as_deref());
     let newest = || ids.iter().max_by_key(|id| of(events, id).map(|e| e.seq).max()).copied();
     ids.iter().find(|id| Some(**id) == pin).copied().or_else(newest)

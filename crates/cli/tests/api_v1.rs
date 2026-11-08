@@ -239,6 +239,24 @@ fn queue_rows_carry_their_marks_and_qset_sets_one() {
     );
 }
 
+/// #677: `issue/<fleet>/<n>` carries the latest why note's sha, round and Owner line; none before a note.
+#[test]
+fn an_issue_carries_its_latest_why_owner_line() {
+    let (c, none) = (ctx(&tmpdir("api-why"), CONFIG), Fake::default());
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let (_, v) = req(&s, "GET", "/api/v1/issue/sendmeter/12", "", "");
+    assert_eq!(v["why"], json!(null), "{v}");
+    for (round, sha, owner) in [(1, "a", "first"), (2, "b", "retries no longer double the meter")] {
+        let d = json!({"sha": sha.repeat(40), "round": round, "owner": owner, "files": ["a.rs"]});
+        append(&c.state, &Event::new(T - 10 + round, "sendmeter", Some(12), "why", d)).unwrap();
+    }
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let (status, v) = req(&s, "GET", "/api/v1/issue/sendmeter/12", "", "");
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    let want = json!({"sha": "b".repeat(40), "round": 2, "owner": "retries no longer double the meter"});
+    assert_eq!(v["why"], want, "{v}");
+}
+
 /// #576: `issue/<fleet>/<n>` lists the verdicts `herdsman verdict` recorded, newest first: a verify PASS with its two
 /// screenshots (as `/shot/` serves them), a rev PASS with its `Repro: run` block, a rev FAIL with its findings.
 #[test]

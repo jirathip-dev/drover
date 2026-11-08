@@ -55,14 +55,10 @@ fn age(p: &Path, at: u64) {
 
 fn setup(name: &str, budget_bytes: u64) -> (herdsman::Ctx, PathBuf) {
     let d = tmpdir(name);
-    let root = d.join("builds");
+    let root = d.join("worktrees/.build"); // #630: the root's build folder
     let cfg = CONFIG.replace(
         "build_root = \"\"",
-        &format!(
-            "build_root = \"{}\"\nbuild_budget_gb = {}",
-            root.display(),
-            budget_bytes as f64 / 1_073_741_824.0
-        ),
+        &format!("build_budget_gb = {}", budget_bytes as f64 / 1_073_741_824.0),
     );
     (ctx(&d, &cfg), root.join(".scratch"))
 }
@@ -258,17 +254,17 @@ impl herdsman::runner::Runner for Air {
     fn sleep(&self, _: u64) {}
 }
 
-/// A ctx whose fleet has the remote host `air` (build root `AIR_ROOT` there, absent here); air's `$HOME` and its
-/// `.scratch`.
+/// A ctx whose fleet has the remote host `air` (workspace root `AIR_ROOT` there, absent here); air's `$HOME` and its
+/// `.build/.scratch`.
 fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
     let d = tmpdir(name);
-    let cfg = CONFIG.replace(
-        "build_root = \"\"",
-        &format!("build_root = \"{AIR_ROOT}\"\nbuild_budget_gb = 1000"),
+    let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 1000");
+    let c = ctx(
+        &d,
+        &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\nroot = \"{AIR_ROOT}\"\n"),
     );
-    let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
     let home = d.join("air-home");
-    let s = home.join(AIR_ROOT.trim_start_matches("~/")).join(".scratch");
+    let s = home.join(AIR_ROOT.trim_start_matches("~/")).join(".build/.scratch");
     (c, home, s)
 }
 
@@ -318,7 +314,7 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     );
     for a in ["sendmeter-impl-12", "sendmeter-rev-9-r1"] {
         assert!(
-            out.contains(&format!("scratch: air: removed {AIR_ROOT}/.scratch/{a} ")),
+            out.contains(&format!("scratch: air: removed {AIR_ROOT}/.build/.scratch/{a} ")),
             "{out}"
         );
     }
@@ -353,7 +349,7 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
     assert!(!small.exists() && !big.exists(), "{out}");
     assert!(busy.exists(), "a working lane's scratch is never touched: {out}");
     let at = |a: &str| {
-        out.find(&format!("scratch: air: removed {AIR_ROOT}/.scratch/{a} "))
+        out.find(&format!("scratch: air: removed {AIR_ROOT}/.build/.scratch/{a} "))
             .expect(&out)
     };
     assert!(
