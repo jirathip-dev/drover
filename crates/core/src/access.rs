@@ -12,14 +12,50 @@ use std::collections::BTreeMap;
 use std::io::Write;
 
 /// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged
-/// `until`, else `cap_reset_minutes` after it.
+/// `until`, else `cap_reset_minutes` after it (#640: a sign-out, until `accounts reset`).
 pub fn capped_until(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<u64> {
-    let kinds = ["account-capped", "account-reset", "agent-unavailable"];
-    let mine = |e: &&Event| kinds.contains(&e.kind.as_str()) && e.str("account").or(e.str("harness")) == Some(name);
-    let last = events.iter().rev().find(mine)?;
-    let until = last.data.get("until").and_then(Value::as_u64);
+    let last = latest(events, name)?;
+    let out = (last.kind == "account-signed-out").then_some(u64::MAX);
+    let until = last.data.get("until").and_then(Value::as_u64).or(out);
     let until = until.unwrap_or(last.ts + cfg.accounts.cap_reset_minutes * 60);
     (last.kind != "account-reset" && until > now).then_some(until)
+}
+
+/// An event that rests an account (else harness): a cap, a #302 rest, a #640 sign-out.
+pub fn rests(kind: &str) -> bool {
+    ["account-capped", "agent-unavailable", "account-signed-out"].contains(&kind)
+}
+
+/// The account's (else harness's) latest rest or reset.
+fn latest<'a>(events: &'a [Event], name: &str) -> Option<&'a Event> {
+    let who = |e: &Event| e.str("account").or(e.str("harness")) == Some(name);
+    let mine = |e: &&Event| (rests(&e.kind) || e.kind == "account-reset") && who(e);
+    events.iter().rev().find(mine)
+}
+
+/// #640: a limit banner on account `a` caps it only when its usage reading agrees: none fresh (10 min) or a
+/// window it has at 100% (until the later reset); a 401 reading is a sign-out. (kind, until, the reading) for `check`.
+pub fn confirm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, a: Option<&str>, until: u64) -> Seen {
+    let stale = ["agent-unavailable", "account-capped"][usize::from(a.is_some())];
+    let m = a.and_then(|n| usage::reading(ctx, n, || usage::meter(ctx, cfg, r, n)));
+    match m.filter(|m| m.login_needed || ctx.now < m.ts + 600) {
+        Some(m) if m.login_needed => ("account-signed-out", None, "usage 401".into()),
+        Some(m) => {
+            let full = [m.session, m.week].into_iter().flatten().filter(|w| w.0 >= 100.0);
+            let full = full.map(|w| w.1.max(until)).max();
+            let kind = ["cap-banner-ignored", "account-capped"][usize::from(full.is_some())];
+            (kind, full, pcts(&m))
+        }
+        None => (stale, Some(until), "no fresh reading".into()),
+    }
+}
+
+pub type Seen = (&'static str, Option<u64>, String);
+
+/// `5h —, 7d 23%`: a window the plan lacks is `—`.
+fn pcts(m: &usage::Meter) -> String {
+    let p = |w: usage::Window| w.map_or("—".into(), |w| format!("{:.0}%", w.0));
+    format!("5h {}, 7d {}", p(m.session), p(m.week))
 }
 
 /// #302: role `r` on the first of its `fallback` entries (`harness[:account]`) whose harness and account both are not
@@ -179,14 +215,13 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
             .filter(|(a, n)| *n == name && open(a))
             .map(|(a, _)| *a)
             .collect();
-        writeln!(
-            out,
-            "{name:<8} {:<28} {} lanes {}",
-            cap_line(cfg, r, &events, name, ctx.now),
-            lanes.len(),
-            lanes.join(" ")
-        )?;
-        if let Some(m) = usage::reading(ctx, name, || usage::meter(ctx, cfg, r, name)) {
+        let m = usage::reading(ctx, name, || usage::meter(ctx, cfg, r, name));
+        let mut state = cap_line(cfg, r, &events, name, ctx.now);
+        if let (Some(m), "ok") = (&m, state.as_str()) {
+            state = format!("ok: {}", pcts(m));
+        }
+        writeln!(out, "{name:<8} {state:<28} {} lanes {}", lanes.len(), lanes.join(" "))?;
+        if let Some(m) = m {
             let login = cfg.accounts.usage.get(name).map_or("", String::as_str);
             writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, login, ctx.now))?;
         }
@@ -214,11 +249,7 @@ pub fn reset(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, name: &str) -> Result
         writeln!(out, "{name} is not capped")?;
         return Ok(());
     }
-    let cap = events
-        .iter()
-        .rev()
-        .find(|e| e.kind == "account-capped" && e.str("account") == Some(name))
-        .unwrap();
+    let cap = latest(&events, name).unwrap();
     emit(
         &ctx.state,
         cfg,
@@ -228,10 +259,17 @@ pub fn reset(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, name: &str) -> Result
     Ok(())
 }
 
-/// `capped until Nov 4 08:00` while the account's latest cap holds, else `ok`.
+/// #640: `capped until Nov 4 08:00: banner 19:40 + 5h —, 7d 100%` / `signed out: usage 401 at 18:02`, else `ok`.
 pub fn cap_line(cfg: &Config, r: &dyn Runner, events: &[Event], name: &str, now: u64) -> String {
-    let until = |t| usage::date(r, t, "+%b %-d %H:%M");
-    capped_until(cfg, events, name, now).map_or("ok".into(), |t| format!("capped until {}", until(t)))
+    let (Some(t), Some(e)) = (capped_until(cfg, events, name, now), latest(events, name)) else {
+        return "ok".into();
+    };
+    let (at, why) = (usage::date(r, e.ts, "+%H:%M"), e.str("meter").unwrap_or("no reading"));
+    if e.kind == "account-signed-out" {
+        return format!("signed out: {why} at {at}");
+    }
+    let until = usage::date(r, t, "+%b %-d %H:%M");
+    format!("capped until {until}: banner {at} + {why}")
 }
 
 /// `*`-wildcard match on lowercased bytes (callers lowercase both sides).

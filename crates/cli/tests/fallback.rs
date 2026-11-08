@@ -124,12 +124,13 @@ fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
     let out = check(&c, "API Error: 401 · Please run /login");
     assert!(out.contains("signed out"), "{out}");
     let ev = read(&c.state).unwrap();
-    let u = ev.iter().rfind(|e| e.kind == "agent-unavailable").unwrap();
+    // #640: an account's sign-out is its own state, without a reset time.
+    let u = ev.iter().rfind(|e| e.kind == "account-signed-out").unwrap();
     assert_eq!(
         (u.str("account"), u.str("agent")),
         (Some("A"), Some("sendmeter-impl-12"))
     );
-    assert!(u.data["until"].as_u64().unwrap() > c.now);
+    assert!(u.data["until"].is_null());
 
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -179,8 +180,8 @@ fn default_config_is_unchanged() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(dry(&c, 13), (json!("claude"), json!("A")));
     spawn(&c, 12, &[]);
-    // No chain: a sign-out is not detected, and a cap is the account cap it always was.
-    assert_eq!(check(&c, "Please run /login"), "");
+    // No chain: a cap is the account cap it always was; #640: a sign-out is its own state.
+    assert!(check(&c, "Please run /login").contains("account-signed-out"));
     assert!(check(&c, "Claude usage limit reached.").contains("account-capped"));
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
     spawn(&c, 12, &["--supersede"]);
@@ -324,7 +325,8 @@ fn an_entry_that_ran_before_gets_only_the_delta() {
         "{full}"
     );
 
-    c.now += 4000; // A's rest is over; B goes unavailable
+    c.now += 4000; // #640: A was signed in again; B goes unavailable
+    assert_eq!(run(&c, &Fake::default(), &["accounts", "reset", "A"]).0, 0);
     ask(&c, "needs-decision", json!({"id": "late", "question": "q?"}));
     ask(
         &c,
