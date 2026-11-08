@@ -243,10 +243,7 @@ fn remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(
-            &format!("{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git'"),
-            "",
-        )
+        .reply(&format!("{SSH}'sh' '-c' 'git clone --single-branch"), "")
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
@@ -286,7 +283,8 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     );
     assert!(
         calls.iter().any(|c| c.starts_with(&format!(
-            "{SSH}'git' 'clone' 'https://github.com/jirathip-dev/sendmeter.git' '/tmp/does-not-matter/sendmeter'"
+            "{SSH}'sh' '-c' 'git clone --single-branch --branch '\\''staging'\\'' \
+             https://github.com/jirathip-dev/sendmeter.git '\\''/tmp/does-not-matter/sendmeter'\\''"
         ))) && !calls.iter().any(|c| c.contains("'gh' 'repo' 'clone'")),
         "#307: first use clones with plain git (the host's insteadOf/SSH applies), never gh: {calls:?}"
     );
@@ -1430,6 +1428,9 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{g}'status' '--porcelain'"), " M src/a.rs\n")
         .reply(&format!("{g}'rev-list' '--count'"), "0\n")
+        // #646: a commit only when something is staged.
+        .reply(&format!("{g}'diff' '--cached' '--name-only'"), "")
+        .reply(&format!("{g}'diff' '--cached'"), "+fn a() {}\n")
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply("date -r", "20261107-1200\n");
     (f, g)

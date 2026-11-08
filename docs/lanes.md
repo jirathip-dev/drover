@@ -74,6 +74,14 @@ snapshot`, pushes the branch to `wip/<agent>-<yyyymmdd-hhmm>` (never main/stagin
 refused `SECRET_IN_WIP` when the diff has a secret-looking value), closes the pane and logs
 `lane-killed`. The worktree stays; a killed impl goes back
 to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawnable.
+#646: every wip snapshot (kill, supersede, clean's auto-save, a cloud stop) stages tracked changes and new source
+files only. It always skips `target*/`, `node_modules/` and `.lane-logs/` (whatever `.gitignore` says), any file over
+5 MB, and the largest files once the snapshot passes 50 MB. The skipped files are listed on the kill output and in
+the wip commit message, never committed. `herdsman wip prune <fleet> --dry-run` lists origin's `wip/*` branches
+with the size each adds over the integration branch, its issue's state and whether it carries build output. Without
+`--dry-run` (the owner's, through a run card) it deletes on origin those of a merged or closed issue that carry build
+output: a branch delete, never a history rewrite or force-push. A herdsman-made clone (`hosts bootstrap`, a lane's
+first use of a host) takes the integration branch only, and its later fetches skip `wip/*`.
 `herdsman clean <fleet> --lane <agent>` applies `clean`'s safety to one lane and refuses
 `UNSAFE_CLEAN` with the reason. #605: a merged or closed issue's lane whose agent is not `working` for
 `[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`

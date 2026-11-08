@@ -57,7 +57,10 @@ fn kill_dry_run_lists_what_is_lost() {
 #[test]
 fn kill_pushes_wip_then_closes_and_logs() {
     let (c, wt) = lane("kill-yes");
-    let r = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n");
+    // #646: a commit only when something is staged.
+    let r = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
+        .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
+        .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     // #138: the lane's rolling transcript goes with it.
     let log = herdsman::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
@@ -712,4 +715,110 @@ fn a_closed_lane_reads_claudes_saved_session() {
         "{res}"
     );
     assert_eq!(j["live"], 0);
+}
+
+/// #646: build output never rides a wip snapshot: a 60 MB file under `target-lane/` stays out of the pushed branch
+/// (whatever `.gitignore` says) and is named as skipped, on the kill output and in the wip commit message.
+#[test]
+fn kill_skips_build_output_and_names_it() {
+    let (c, wt) = lane("kill-build");
+    let r = repo(&wt, "");
+    std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
+    std::fs::create_dir_all(format!("{wt}/target-lane/release/deps")).unwrap();
+    let big = std::fs::File::create(format!("{wt}/target-lane/release/deps/libx.rlib")).unwrap();
+    big.set_len(60 << 20).unwrap();
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("skipped") && out.contains("target-lane/"), "{out}");
+    let show = |fmt: &str| {
+        let b = format!("wip/{LANE}-20261031-1200");
+        let o = std::process::Command::new("git")
+            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, &b])
+            .output()
+            .unwrap();
+        String::from_utf8(o.stdout).unwrap()
+    };
+    assert_eq!(show("--format=").trim(), "real.rs");
+    let msg = show("--format=%B");
+    assert!(msg.contains("skipped") && msg.contains("target-lane/"), "{msg}");
+}
+
+/// #646: a file over the 5 MB per-file cap stays out of the snapshot and is named, next to the source kept.
+#[test]
+fn kill_skips_a_file_over_the_size_cap() {
+    let (c, wt) = lane("kill-cap");
+    let r = repo(&wt, "");
+    std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
+    std::fs::write(format!("{wt}/dump.bin"), vec![7u8; 6 << 20]).unwrap();
+    let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
+    assert!(
+        code == 0 && out.contains("skipped") && out.contains("dump.bin (6 MB)"),
+        "{out}"
+    );
+    let o = std::process::Command::new("git")
+        .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format="])
+        .arg(format!("wip/{LANE}-20261031-1200"))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
+}
+
+/// #646: `wip prune --dry-run` lists origin's wip branches (size, issue state, build output) and deletes nothing;
+/// without it, only a merged issue's branch that carries build output goes.
+#[test]
+fn wip_prune_dry_run_lists_and_deletes_nothing() {
+    let d = tmpdir("wip-prune");
+    let (origin, local) = (d.join("o.git"), d.join("local"));
+    let (o, l) = (
+        origin.to_string_lossy().into_owned(),
+        local.to_string_lossy().into_owned(),
+    );
+    let git = |a: &[&str]| {
+        let s = std::process::Command::new("git").args(a).output().unwrap();
+        assert!(s.status.success(), "{a:?}: {}", String::from_utf8_lossy(&s.stderr));
+        String::from_utf8(s.stdout).unwrap()
+    };
+    git(&["init", "-q", "--bare", &o]);
+    git(&["clone", "-q", &o, &l]);
+    for (k, v) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        git(&["-C", &l, "config", k, v]);
+    }
+    git(&["-C", &l, "commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["-C", &l, "push", "-q", "origin", "HEAD:refs/heads/staging"]);
+    let wip = |name: &str, file: &str| {
+        git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
+        std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
+        // Incompressible: the size listed is what the branch costs a clone.
+        let mut x = file.len() as u64;
+        let bytes: Vec<u8> = (0..2 << 20)
+            .map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1)
+            .collect();
+        std::fs::write(local.join(file), bytes).unwrap();
+        git(&["-C", &l, "add", "-f", file]);
+        git(&["-C", &l, "commit", "-qm", "wip"]);
+        git(&["-C", &l, "push", "-q", "origin", &format!("HEAD:refs/heads/wip/{name}")]);
+    };
+    wip("sendmeter-impl-7-20261101-1200", "target-lane/libx.rlib");
+    wip("sendmeter-impl-8-20261101-1200", "target-rev/liby.rlib");
+    wip("sendmeter-rev-7-r2-20261101-1300", "src/a.rs");
+    let c = ctx(&d, &CONFIG.replace("/tmp/does-not-matter/sendmeter", &l));
+    append(&c.state, &Event::new(T, "sendmeter", Some(7), "merged", json!({}))).unwrap();
+    let r = RealGit(Fake::default(), "");
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    let want = [
+        "wip/sendmeter-impl-7-20261101-1200 · 2 MB · #7 merged · build output · would delete",
+        "wip/sendmeter-impl-8-20261101-1200 · 2 MB · #8 ? · build output · kept",
+        "wip/sendmeter-rev-7-r2-20261101-1300 · 2 MB · #7 merged · kept",
+    ];
+    assert_eq!(out.lines().collect::<Vec<_>>(), want);
+    let remote = || git(&["ls-remote", "--heads", &o, "wip/*"]).lines().count();
+    assert_eq!(remote(), 3, "a dry run deletes nothing");
+    assert!(!r.0.called(&format!("git -C {l} push")));
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter"]);
+    assert!(
+        code == 0 && out.starts_with(&want[0].replace("would delete", "deleted")),
+        "{out}"
+    );
+    assert_eq!(remote(), 2);
 }

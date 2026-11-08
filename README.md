@@ -77,6 +77,7 @@ Full setup, from install to the board on your phone over Tailscale: [docs/setup.
 | `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
 | `check` / `ask` / `answer` / `asks` | alerts; ask for a decision, answer it, list the open ones |
 | `clean` / `reclaim` / `stop` / `kill` / `close` | reclaim done lanes; idle lanes' build folders; Esc an agent; close its pane, unpushed work to `wip/` first |
+| `wip prune` | origin's `wip/*` branches by size; delete merged issues' ones that carry build output (owner) |
 | `set` / `profiles` / `accounts` / `hosts` | switch a role's model; per-role folders and hooks; accounts; hosts |
 | `setup` / `doctor` / `protection` | install the jobs; host check; branch protection on? |
 | `help --agent` | the usage doc agents get; refusals exit 3 with `REFUSED <CODE>: why` |
