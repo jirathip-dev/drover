@@ -391,3 +391,32 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     assert_eq!(ev.len(), 1);
     assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
 }
+
+/// #679: a live shed lane whose last turn is `working` is idle between turns: `check` alerts no stall; a herdr lane
+/// still does.
+#[test]
+fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
+    for (runtime, stalls) in [("shed", false), ("herdr", true)] {
+        let c = ctx(&tmpdir(&format!("stall-acp-{runtime}")), CONFIG);
+        let wt = c.worktrees.join("sendmeter").join("issue-12");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt = wt.to_string_lossy().into_owned();
+        let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(12), kind, d)).unwrap();
+        ev(
+            "spawn",
+            json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": runtime}),
+        );
+        ev("turn-end", json!({"state": "working", "role": "impl"}));
+        let list = json!({"result": {"agents": [{"name": "impl-12", "agent_status": "done", "cwd": wt,
+            "pane_id": "impl-12", "runtime": runtime, "pid": 200}]}});
+        let r = Fake::default()
+            .reply("herdr agent list", &list.to_string())
+            .reply("lsof", "")
+            .reply("herdr", "{}")
+            .reply("git -C", "");
+        let (code, out) = run(&c, &r, &["check"]);
+        assert_eq!(code, 0, "{out}");
+        let stalled = read(&c.state).unwrap().iter().any(|e| e.kind == "stall");
+        assert_eq!(stalled, stalls, "{runtime}: {out}");
+    }
+}
