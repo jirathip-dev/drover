@@ -138,9 +138,9 @@ export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, olde
  * `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
  * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
- * links to.
+ * links to; #669 `run` (a run card, `from` its id).
  */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, run?: RunCard | null, };
 
 export type FileRef = { name: string, size: number, };
 
@@ -148,6 +148,12 @@ export type FileRef = { name: string, size: number, };
  * A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
  */
 export type Answered = { n?: number | null, choice: string, by?: string | null, ts: number, };
+
+/**
+ * #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
+ * `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+ */
+export type RunCard = { id: string, cmd: string, why: string, blast: string, host: string, dir: string, sha: string, exp: number, state: string, by?: string | null, code?: number | null, tail: string, };
 
 /**
  * #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.
@@ -423,6 +429,25 @@ export type ChatDefaults = { harness?: string | null, model?: string | null, eff
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
  */
 export type Reply = { ok: boolean, code: string, message: string, };
+
+/**
+ * #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
+ */
+export type ConductorAttach = { ok: boolean, code: string, message: string, 
+/**
+ * `roles/conductor.md`, the repo and the owner's conductor instructions.
+ */
+brief: string, 
+/**
+ * The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+ */
+settings: string, env: AttachEnv, 
+/**
+ * #565's ACP guard holds; else `why` not.
+ */
+guarded: boolean, why: string, };
+
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, };
 
 export type Event = { 
 /**
