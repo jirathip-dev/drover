@@ -69,10 +69,7 @@ fn account_rows(cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for (name, var) in &cfg.accounts.names {
         // #683: a folder account is the CLI's own login: its sign-in, no Keychain read.
         if let Some(dir) = cfg.accounts.folder(name) {
-            let fix = format!(
-                "cooee Settings › Providers, or CLAUDE_CONFIG_DIR={} claude /login",
-                dir.display()
-            );
+            let fix = crate::access::sign_in_hint(&dir);
             let line = format!("account {name} — signed in ({}) → {fix}", dir.display());
             row(rows, crate::access::signed_in(r, &dir), '✗', &line);
             continue;

@@ -147,6 +147,19 @@ pub trait Harness: Sync {
     fn acp_env(&self, _model: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
+    /// #683: the env var its CLI reads its config folder (a `folder:` account's own login) from (generic: none).
+    fn config_env(&self) -> Option<&'static str> {
+        None
+    }
+    /// #683: the CLI's own sign-in state of config folder `dir`, with no token in its env (generic: unknown, false).
+    fn signed_in(&self, _r: &dyn Runner, _dir: &Path) -> bool {
+        false
+    }
+    /// #565: the shell words that put a lane's profile (`settings.json`, `role.md`, both quoted) where its ACP
+    /// adapter reads them in the worktree (generic: none).
+    fn acp_profile(&self, _settings: &str, _role: &str) -> String {
+        String::new()
+    }
     /// How its lanes sign in (generic: unknown).
     fn credential(&self) -> Credential {
         Credential::None

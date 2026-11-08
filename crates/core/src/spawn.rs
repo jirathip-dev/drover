@@ -148,7 +148,8 @@ impl Plan {
             .as_ref()
             .and_then(dir)
             .map(|d| d.display().to_string().replace('\'', r"'\''"));
-        c.extend(dir.map(|d| format!("CLAUDE_CONFIG_DIR='{d}'")));
+        let var = harness::get(&self.harness).config_env();
+        c.extend(var.zip(dir).map(|(k, d)| format!("{k}='{d}'")));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
         if !self.secrets().is_empty() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
@@ -562,7 +563,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     words.splice(at..at, own);
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
-    let profile = format!(" && mkdir -p .claude && cp {set} .claude/settings.local.json && cp {role} CLAUDE.local.md");
+    let profile = harness::get(&p.harness).acp_profile(&set, &role);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }

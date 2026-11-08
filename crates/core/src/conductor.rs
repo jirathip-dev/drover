@@ -78,8 +78,8 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     let settings = harness::profiles_root(ctx).join(&p).join("settings.json");
     let mut env = json!({"HERDSMAN_LANE": format!("{fleet}:-:conductor"), "HERDSMAN_THREAD": id,
         "HERDSMAN_PORT": port.to_string()});
-    if let Some(d) = folder {
-        env["CLAUDE_CONFIG_DIR"] = json!(d);
+    if let (Some(k), Some(d)) = (harness::get(&role.harness).config_env(), folder) {
+        env[k] = json!(d);
     }
     let message = format!("{id} is {fleet}'s conductor thread");
     Ok(

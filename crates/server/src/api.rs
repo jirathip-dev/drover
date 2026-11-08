@@ -961,9 +961,10 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "HERDSMAN_PORT")]
     pub port: String,
-    /// #683: the role's `folder:` account, the thread's own Claude login (none: no folder account).
-    #[serde(rename = "CLAUDE_CONFIG_DIR")]
-    pub config_dir: Option<String>,
+    /// #683: the harness's config-folder env (`Harness::config_env`) set to the role's `folder:` account, the
+    /// thread's own login (empty: no folder account).
+    #[serde(flatten)]
+    pub folder: BTreeMap<String, String>,
 }
 
 }

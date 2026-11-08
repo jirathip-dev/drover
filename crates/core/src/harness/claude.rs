@@ -147,6 +147,31 @@ impl Harness for Claude {
     fn acp_env(&self, model: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
+    fn config_env(&self) -> Option<&'static str> {
+        Some("CLAUDE_CONFIG_DIR")
+    }
+    /// #683: `claude auth status` with `dir` as its config folder and no token in its env (cooee's read).
+    fn signed_in(&self, r: &dyn Runner, dir: &Path) -> bool {
+        let d = format!("CLAUDE_CONFIG_DIR={}", dir.display());
+        let a = [
+            "-u",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "-u",
+            "ANTHROPIC_API_KEY",
+            &d,
+            "claude",
+            "auth",
+            "status",
+        ];
+        let o = r.run("env", &crate::runner::argv(&a));
+        o.is_ok_and(|o| {
+            o.code == 0 && serde_json::from_str::<serde_json::Value>(&o.stdout).is_ok_and(|v| v["loggedIn"] == true)
+        })
+    }
+    /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
+    fn acp_profile(&self, settings: &str, role: &str) -> String {
+        format!(" && mkdir -p .claude && cp {settings} .claude/settings.local.json && cp {role} CLAUDE.local.md")
+    }
     /// The env var Claude Code reads its OAuth token from.
     fn credential(&self) -> Credential {
         Credential::Token("CLAUDE_CODE_OAUTH_TOKEN")

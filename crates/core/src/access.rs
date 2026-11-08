@@ -227,17 +227,12 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         }
         writeln!(out, "{:<8} {}", "", usage::lane_hours(&events, name, ctx.now))?;
         if let Some(dir) = cfg.accounts.folder(name) {
-            let st = [
-                "signed out → cooee Settings › Providers, or claude /login there",
-                "signed in",
-            ];
-            writeln!(
-                out,
-                "{:<8} {} · {}",
-                "",
-                dir.display(),
-                st[usize::from(signed_in(r, &dir))]
-            )?;
+            let st = if signed_in(r, &dir) {
+                "signed in".into()
+            } else {
+                format!("signed out → {}", sign_in_hint(&dir))
+            };
+            writeln!(out, "{:<8} {} · {st}", "", dir.display())?;
         }
     }
     match usage::deepseek(ctx, cfg, r) {
@@ -254,22 +249,19 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// #683: a folder account's sign-in as its CLI reports it: `claude auth status` with that folder as its config
-/// folder and no token in its env (cooee's read; the login is Claude Code's own, never herdsman's).
+/// #683: a folder account's sign-in as its CLI reports it (cooee's read; the login is the CLI's own, never herdsman's).
 pub fn signed_in(r: &dyn Runner, dir: &std::path::Path) -> bool {
-    let d = format!("CLAUDE_CONFIG_DIR={}", dir.display());
-    let a = [
-        "-u",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "-u",
-        "ANTHROPIC_API_KEY",
-        &d,
-        "claude",
-        "auth",
-        "status",
-    ];
-    let o = r.run("env", &crate::runner::argv(&a));
-    o.is_ok_and(|o| o.code == 0 && serde_json::from_str::<Value>(&o.stdout).is_ok_and(|v| v["loggedIn"] == true))
+    crate::harness::accounts().is_some_and(|h| h.signed_in(r, dir))
+}
+
+/// #683: how the owner signs folder `dir` in: cooee, or the harness's own login with `dir` as its config folder.
+pub fn sign_in_hint(dir: &std::path::Path) -> String {
+    let h = crate::harness::accounts();
+    let var = h
+        .and_then(crate::harness::Harness::config_env)
+        .unwrap_or("its config folder");
+    let login = h.and_then(crate::harness::Harness::login).unwrap_or("its login");
+    format!("cooee Settings › Providers, or {var}={} {login}", dir.display())
 }
 
 /// #683 `herdsman accounts import --folders` (owner only): each token account whose `[accounts.usage]` login is signed
@@ -282,7 +274,7 @@ pub fn import_folders(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
         let Some(dir) = dir.filter(|d| signed_in(r, &crate::config::expand(d))) else {
             writeln!(
                 out,
-                "{name:<8} ✗ no signed-in [accounts.usage] folder → cooee Settings › Providers, or claude /login there"
+                "{name:<8} ✗ no signed-in [accounts.usage] folder → cooee Settings › Providers"
             )?;
             continue;
         };

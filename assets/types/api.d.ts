@@ -456,11 +456,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, 
-/**
- * #683: the role's `folder:` account, the thread's own Claude login (none: no folder account).
- */
-CLAUDE_CONFIG_DIR?: string | null, };
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
 
 export type Event = { 
 /**
