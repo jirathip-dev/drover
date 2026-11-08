@@ -166,8 +166,8 @@ pub fn reviewed_head(t: &str) -> Option<&str> {
 pub struct Log<'a> {
     pub all: &'a [Event],
     pub asks: Vec<&'a Event>,
-    /// #639: each queued issue's blockers not merged yet.
-    pub blocked: Vec<(&'a str, u64, Vec<u64>)>,
+    /// #639: each queued issue's blockers not merged yet (#667: another repo's too), as `#11, cooee#87`.
+    pub blocked: Vec<(&'a str, u64, String)>,
 }
 
 impl<'a> Log<'a> {
@@ -178,8 +178,8 @@ impl<'a> Log<'a> {
             .collect();
         let blocked = (fleets.into_iter())
             .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
-            .filter(|(_, i)| !i.blockers.is_empty())
-            .map(|(f, i)| (f, i.issue, i.blockers))
+            .map(|(f, i)| (f, i.issue, crate::queue::labels(&i)))
+            .filter(|i| !i.2.is_empty())
             .collect();
         Log {
             all,
@@ -189,9 +189,9 @@ impl<'a> Log<'a> {
     }
 
     /// #639: `fleet` #`n`'s open queue blockers: no lane of any kind starts while one is left.
-    pub fn blockers(&self, fleet: &str, n: u64) -> &[u64] {
+    pub fn blockers(&self, fleet: &str, n: u64) -> &str {
         let i = self.blocked.iter().find(|i| i.0 == fleet && i.1 == n);
-        i.map_or(&[], |i| &i.2)
+        i.map_or("", |i| &i.2)
     }
 }
 
@@ -199,7 +199,26 @@ impl<'a> Log<'a> {
 /// `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
+/// #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push).
 pub fn waiting_on(
+    log: &Log,
+    events: &[Event],
+    s: &IssueState,
+    head: Option<(&str, u64)>,
+    pr: &Value,
+    fc: &Fleet,
+    rev: Option<(&str, &str)>,
+) -> Waiting {
+    let mut w = waits(log, events, s, head, pr, fc, rev);
+    let mut since = events.iter().rev().take_while(|e| !e.is("pushed", &s.fleet, s.issue));
+    let moved = since.find(|e| e.is("root-moved", &s.fleet, s.issue));
+    if let Some(l) = moved.and_then(|e| e.str("lost")).filter(|l| !l.is_empty()) {
+        w.what += &format!(" · root gone, lost {l}");
+    }
+    w
+}
+
+fn waits(
     log: &Log,
     events: &[Event],
     s: &IssueState,
@@ -268,7 +287,7 @@ pub fn waiting_on(
     // #639: queue blockers hold every lane of the issue (a fix, impl or update respawn too) as they hold its start.
     let on = log.blockers(f, n);
     if !on.is_empty() {
-        let what = format!("blocked by {}", crate::queue::hashes(on));
+        let what = format!("blocked by {on}");
         return w("drive", &what, s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
