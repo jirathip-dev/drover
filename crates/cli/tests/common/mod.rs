@@ -104,12 +104,12 @@ impl Fake {
         ));
         self
     }
-    /// #441: `svc` holds `value` in the fake store.
     /// #664: a closed pane leaves herdr's agent list, as on a real host.
     pub fn closing(mut self) -> Self {
         self.closed = Some(Shared::default());
         self
     }
+    /// #441: `svc` holds `value` in the fake store.
     pub fn stored(self, svc: &str, value: &str) -> Self {
         self.store.borrow_mut().insert(svc.into(), value.into());
         self
