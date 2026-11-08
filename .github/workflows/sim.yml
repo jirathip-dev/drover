@@ -1,0 +1,19 @@
+name: sim
+# #680: the simulation's long random batch, nightly (owner, q837). A failing seed joins the fixed set
+# (crates/cli/tests/sim/seeds.rs) with its fix; the PR job runs that set in `cargo test`.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: "2000 random seeds (each failure prints its seed, trace and replay line)"
+        run: just sim 2000
