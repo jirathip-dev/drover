@@ -2,9 +2,8 @@
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
-    Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, HandoffChoice, HandoffFrom, LastLine, Link, Msg, RunCard,
+    Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow, ThreadView,
 };
-use crate::api::{QueuedMsg, RepoThread, RepoThreads, ThreadPage, ThreadRow, ThreadView};
 use crate::conductor::{self, of};
 use crate::config::Config;
 use crate::events::{closed, Event};
@@ -203,37 +202,21 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 ..m("note", s("text"))
             },
             ("thread-msg", _) if s("text").starts_with("DECISION ") => continue,
-            ("thread-handoff", _) => Msg {
-                handoff: e.str("ask").is_none().then(|| handoff(events, e, true)),
-                ..m("handoff", conductor::handoff_text(e))
-            },
+            ("thread-handoff", _) => m("handoff", conductor::handoff_text(e)),
             ("thread-msg", f) => {
                 let file = |f: &Value| FileRef {
                     name: f["name"].as_str().unwrap_or_default().into(),
                     size: f["size"].as_u64().unwrap_or(0),
                 };
                 let fwd = if sent.contains(&e.seq) { " (forwarded)" } else { "" };
-                let got =
-                    |h: &&Event| h.kind == "thread-handoff" && h.str("to") == Some(id) && h.str("from") == Some(f);
-                let got = events.iter().filter(|h| h.seq < e.seq).rfind(got).map(|h| {
-                    let is =
-                        |c: &&Event| c.kind == "needs-decision" && c.fleet == h.fleet && c.str("id") == h.str("ask");
-                    let mut h = handoff(events, events.iter().find(is).unwrap_or(h), false);
-                    h.state = or(fwd.is_empty(), "delivered", "forwarded").into();
-                    h
-                });
                 Msg {
-                    handoff: got,
                     from: f.into(),
                     files: files_of(e).map(file).collect(),
                     ..m("msg", s("text") + fwd)
                 }
             }
             ("thread-cmd", _) => m("cmd", s("cmd")),
-            ("needs-decision", _) => Msg {
-                handoff: e.data.get("handoff").map(|_| handoff(events, e, true)),
-                ..ask(events, e, m("ask", s("question")))
-            },
+            ("needs-decision", _) => ask(events, e, m("ask", s("question"))),
             ("ask-owner", _) => {
                 let Some(mut a) = conductor::lane_of(events, e).cloned() else {
                     continue;
@@ -296,92 +279,6 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
             msgs.retain(|m| pins.contains(&m.seq));
             msgs.into_iter().chain(w).collect()
         },
-    }
-}
-
-/// #681: handoff `o` (a repo handoff's card, or a `thread-handoff` straight to a thread) as one agent→agent item.
-/// A card is delivered once its `thread-handoff` is logged, failed while its last `ask-failed` follows its last tap's
-/// `decision` (or it closed undelivered), else pending with its rows.
-fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
-    let card = o.kind == "needs-decision";
-    let (h, from, id) = (
-        o.data.get("handoff").unwrap_or(&Value::Null),
-        o.str("thread").unwrap_or_default(),
-        o.str("id").unwrap_or_default(),
-    );
-    let s = |k: &str| (if card { h.get(k) } else { o.data.get(k) }).and_then(Value::as_str);
-    let s = |k: &str| s(k).unwrap_or_default().to_string();
-    let mine = |e: &&Event| e.fleet == o.fleet && e.str("id") == Some(id);
-    let sent = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
-    let (to, fail) = if card {
-        let end = |e: &&Event| matches!(e.kind.as_str(), "decision" | "ask-failed") && mine(e);
-        let fail = events.iter().rfind(end).filter(|e| e.kind == "ask-failed");
-        let to = events.iter().rfind(sent).and_then(|e| e.str("to"));
-        let closed = closed(events, o).filter(|_| to.is_none() && fail.is_none());
-        (to, fail.and_then(|e| e.str("reason")).or(closed))
-    } else {
-        (o.str("to"), None)
-    };
-    let state = match (to, fail) {
-        (_, Some(_)) => "failed",
-        (Some(_), None) => "delivered",
-        (None, None) => "pending",
-    };
-    let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
-    let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);
-    let choices = rows.filter(|_| state == "pending").map(|((t, to), n)| HandoffChoice {
-        n,
-        text: t.as_str().unwrap_or_default().into(),
-        thread: to.as_str().unwrap_or_default().into(),
-        op: "answer".into(),
-        fleet: o.fleet.clone(),
-        id: id.into(),
-    });
-    let text = s("text");
-    Handoff {
-        kind: "handoff".into(),
-        id: o.seq,
-        from: HandoffFrom {
-            agent: "conductor".into(),
-            thread: from.into(),
-            repo: o.fleet.clone(),
-        },
-        to: to.map_or_else(|| json!({"repo": s("repo"), "pending": true}), |t| json!(t)),
-        title: s("title"),
-        summary: text.lines().next().unwrap_or_default().into(),
-        text,
-        state: state.into(),
-        error: fail.map(Into::into),
-        folded,
-        choices: choices.collect(),
-    }
-}
-
-/// #681: API v1 `repo/<fleet>/threads`: the repo's conductor threads newest-active first (the chat tab's order), the
-/// first not archived its ongoing one.
-pub fn repo(ctx: &Ctx, events: &[Event], fleet: &str) -> RepoThreads {
-    let ts = events.iter().filter(|t| t.kind == "thread-new" && t.fleet == fleet);
-    let mut rows: Vec<_> = ts.map(|t| (row(ctx, events, t, &[]), t)).collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(r.0 .0));
-    let mut ongoing = true;
-    let threads = rows.into_iter().map(|((at, r), t)| {
-        let archived = conductor::archived(events, &r.id);
-        let lane = of(events, &r.id).rfind(|e| e.kind.starts_with("conductor-"));
-        let newest = ongoing && !archived;
-        ongoing &= !newest;
-        RepoThread {
-            awake: lane.is_some_and(|l| l.kind != "conductor-sleep"),
-            last: LastLine { line: r.line, ts: at },
-            newest,
-            archived,
-            unread: r.unread,
-            title: r.title,
-            id: t.str("thread").unwrap_or_default().into(),
-        }
-    });
-    RepoThreads {
-        repo: fleet.into(),
-        threads: threads.collect(),
     }
 }
 
