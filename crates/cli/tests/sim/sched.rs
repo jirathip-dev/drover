@@ -326,6 +326,10 @@ impl Sim {
                 let next = [wake, crate::scenario::next(&w)].into_iter().flatten().min();
                 match next {
                     Some(t) if t <= until => {
+                        // #685: a live lane not working is idle while the clock moves.
+                        let dt = t.saturating_sub(w.now);
+                        let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
+                        w.model.idle += idle * dt;
                         w.now = w.now.max(t);
                         crate::scenario::due(self, &mut w);
                         continue;
@@ -392,6 +396,9 @@ impl Runner for SimRunner {
             let mut w = self.sim.lock();
             let name = w.procs[self.me].name.clone();
             w.log(format!("{name} sleep {secs}"));
+            if secs == 1 {
+                w.model.polled += 1;
+            }
         }
         self.sim.yield_now(self.me, secs);
     }
