@@ -403,6 +403,10 @@ pub const PASSIVE: &[&str] = &[
     // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
     "turn-end",
     "turn-prompted",
+    // #677: a why note put on a round head, one that failed to push, and drive's one nudge on a refused note.
+    "why",
+    "why-failed",
+    "why-nudged",
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
     "budget-freed",
