@@ -6,7 +6,9 @@
 //! sets one), an issue's verdicts and the lessons.
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
-use crate::api::{Ask, ChatDefaults, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun};
+use crate::api::{
+    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
+};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
 use crate::events::plain;
 use anyhow::{bail, Context};
@@ -18,7 +20,8 @@ use serde_json::Value;
 const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
-const V1_PAIRED: &[&str] = &["qset", "lesson"];
+/// #633: and a cooee thread's conductor link.
+const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach"];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -60,7 +63,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
+            ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
                 let (fleet, n) = x[6..].split_once('/').unwrap_or_default();
@@ -92,7 +95,7 @@ impl Server<'_> {
             }
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
-            ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
+            ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
@@ -156,6 +159,19 @@ impl Server<'_> {
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
+            ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
+                let f = fields(body);
+                let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
+                let cfg = Config::load(&ctx.config);
+                if op == "conductor-detach" {
+                    return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
+                }
+                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, fleet, t));
+                match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
+                    Ok(a) => out("200 OK", &a),
+                    Err(e) => done(Err(e)),
+                }
+            }
             ("POST", Some("lesson")) => {
                 let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
                 done(self.lesson(ctx, &fields(body), by))
@@ -280,6 +296,17 @@ impl Server<'_> {
                 .get(&(f.clone(), i.issue))
                 .map_or("queued".into(), |s| s.state.clone()),
             blocked_by: i.blocked_by,
+            // #667: another fleet's `fleet#N` reads as its repo's `owner/repo#N`.
+            blocked_on: i
+                .ext
+                .iter()
+                .map(|b| match b.split_once('#') {
+                    Some((x, n)) if !x.contains('/') => {
+                        cfg.fleet.get(x).map_or(b.clone(), |x| format!("{}#{n}", x.repo))
+                    }
+                    _ => b.clone(),
+                })
+                .collect(),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
@@ -573,4 +600,64 @@ pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
         })
         .collect();
     Events { seq, refresh, list }
+}
+
+/// #630: each host card's workspace roots (`hosts.json`), a `root` row each: path, state and free space.
+fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+    let seen = crate::hosts::cached(ctx);
+    for c in &mut tab.hosts {
+        for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {
+            let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+            let free = r.free_gb.map(|g| format!("{g:.0} GB free"));
+            c.rows.push(crate::api::Cell {
+                k: "root".into(),
+                t: t.into(),
+                text: r.path.clone(),
+                notes: [Some(r.state.clone()), free].into_iter().flatten().collect(),
+                ..crate::api::Cell::default()
+            });
+        }
+    }
+    tab
+}
+
+impl Server<'_> {
+    /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
+    fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
+        let events = shared(&ctx.state).unwrap_or_default();
+        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
+        let r = self.cached(ctx.now, 30);
+        let rows = tab
+            .sections
+            .iter_mut()
+            .flat_map(|s| &mut s.repos)
+            .flat_map(|g| &mut g.lanes);
+        for row in rows {
+            let Some(l) = all.iter().find(|l| l.name == row.name) else {
+                continue;
+            };
+            let u = l.unsaved(&r);
+            let more = [
+                l.root.as_ref().map(|r| format!("root {r}")),
+                crate::spawn::unsaved_text(u),
+            ];
+            for m in more.into_iter().flatten() {
+                row.facts = [&row.facts[..], &m]
+                    .into_iter()
+                    .filter(|p| !p.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+            let (root, dirty, unpushed) = (l.root.clone(), u.map(|u| u.0), u.map(|u| u.1));
+            let name = row.name.clone();
+            tab.unsaved.push(crate::api::LaneUnsaved {
+                name,
+                root,
+                dirty,
+                unpushed,
+            });
+        }
+        tab
+    }
 }

@@ -65,7 +65,11 @@ export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: s
  * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
  * fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
  */
-export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, };
+export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, 
+/**
+ * #630: each lane's workspace root and unsaved work.
+ */
+unsaved: Array<LaneUnsaved>, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -81,6 +85,11 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * fleet is not configured), `dead` and the blocked card.
  */
 export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+
+/**
+ * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
+ */
+export type LaneUnsaved = { name: string, root?: string | null, dirty?: number | null, unpushed?: number | null, };
 
 /**
  * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
@@ -138,9 +147,9 @@ export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, olde
  * `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
  * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
  * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
- * links to.
+ * links to; #669 `run` (a run card, `from` its id).
  */
-export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, };
+export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, run?: RunCard | null, };
 
 export type FileRef = { name: string, size: number, };
 
@@ -148,6 +157,12 @@ export type FileRef = { name: string, size: number, };
  * A decided ask: the option `n` chosen (none: an "other" answer), its text, by whom, when.
  */
 export type Answered = { n?: number | null, choice: string, by?: string | null, ts: number, };
+
+/**
+ * #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
+ * `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+ */
+export type RunCard = { id: string, cmd: string, why: string, blast: string, host: string, dir: string, sha: string, exp: number, state: string, by?: string | null, code?: number | null, tail: string, };
 
 /**
  * #365: one open issue of the Queue tab's backlog (`data-bl`, by number), as `gh::backlog` reads it.
@@ -183,7 +198,11 @@ export type State = { seq: number, now: number, tz: number, age?: number | null,
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
-export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, };
+export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, 
+/**
+ * #667: its blockers in another fleet or repo, as `owner/repo#N`.
+ */
+blocked_on: Array<string>, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -420,6 +439,25 @@ export type ChatDefaults = { harness?: string | null, model?: string | null, eff
  */
 export type Reply = { ok: boolean, code: string, message: string, };
 
+/**
+ * #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
+ */
+export type ConductorAttach = { ok: boolean, code: string, message: string, 
+/**
+ * `roles/conductor.md`, the repo and the owner's conductor instructions.
+ */
+brief: string, 
+/**
+ * The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+ */
+settings: string, env: AttachEnv, 
+/**
+ * #565's ACP guard holds; else `why` not.
+ */
+guarded: boolean, why: string, };
+
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, };
+
 export type Event = { 
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
@@ -490,7 +528,16 @@ busy: number,
 /**
  * #255: a cloud host's gh token, as its card says it.
  */
-github: string, };
+github: string, 
+/**
+ * #630: its set workspace roots.
+ */
+roots: Array<HostRoot>, };
+
+/**
+ * A root as the last look saw it (`hosts.json`, the host card, `/api/v1`).
+ */
+export type HostRoot = { path: string, state: string, free_gb?: number | null, };
 
 /**
  * #234: one row a minute per host in `<state dir>/host-history.jsonl`, written by the fast step; 24 h kept.

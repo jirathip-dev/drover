@@ -21,3 +21,9 @@ html-lint:
       /^[[:space:]]*(pub(\([a-z]+\))? )?fn [a-z_0-9]+/ { match($0, /fn [a-z_0-9]+/); f = substr($0, RSTART + 3, RLENGTH - 3) }
       $0 ~ ("\"[^\"]*(</(" t ")>|<(" t ") [a-z-]+=)") && f !~ /^(page|pairb|export)$/ { print FILENAME ":" FNR ": " $0 }')
     test -z "$bad" || { echo "HTML built outside the page shell (draw it in web/ from API v1): $bad"; exit 1; }
+
+# #680: the deterministic simulation's long batch: `n` random seeds from HERDSMAN_SIM_FROM (default 1000), each failing
+# seed printed with its trace; replay one with `HERDSMAN_SIM_SEED=<n> cargo test -p herdsman --test sim`. CI runs the
+# fixed seed set (crates/cli/tests/sim/seeds.rs) in `cargo test`; .github/workflows/sim.yml runs `just sim 2000` nightly.
+sim n="500":
+    HERDSMAN_SIM_N={{n}} cargo test --release --locked -p herdsman --test sim random_seeds -- --ignored
