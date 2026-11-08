@@ -220,3 +220,93 @@ fn lines(p: &Path, ext: &str) -> usize {
     };
     each.map(n).sum()
 }
+
+/// #668: the `src/ net +N` a PR body states (`+1,234`, `-20`), if any.
+fn stated_net(body: &str) -> Option<i64> {
+    let rest = body.split("src/ net ").nth(1)?.trim_start();
+    let n: String = rest.chars().take_while(|c| "+-,0123456789".contains(*c)).collect();
+    n.replace([',', '+'], "").parse().ok()
+}
+
+/// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
+/// whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff),
+/// the queued issues with no PR, and the projected total with the ask a crossing lane files.
+pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
+    let f = cfg.fleet(fleet)?;
+    let dir = f.local_path();
+    let _ = git(r, &dir, &["fetch", "-q", "origin"]);
+    let (sha, lines, cap, warn) = cap_at(ctx, cfg, r, fleet).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no ci/cap.toml line_cap at origin/{} in {}",
+            f.integration,
+            dir.display()
+        )
+    })?;
+    writeln!(
+        out,
+        "{fleet}: {lines} / cap {cap} at {} {sha:.7}, headroom {}",
+        f.integration,
+        cap - lines
+    )?;
+    let prs = gh::snapshot(ctx, r, f, fleet, ctx.now)?;
+    let mut prs: Vec<&Value> = (prs.as_object().into_iter().flat_map(|m| m.values()))
+        .filter(|p| p["baseRefName"] == f.integration.as_str())
+        .collect();
+    prs.sort_by_key(|p| p["number"].as_u64());
+    let globs = [":(glob)src/**/*.rs", ":(glob)crates/*/src/**/*.rs"];
+    let measured = |b: &str| -> Option<i64> {
+        let range = format!("{sha}...origin/{b}");
+        let o = git(r, &dir, &[&["diff", "--numstat", &range, "--"][..], &globs].concat()).ok()?;
+        let n = |w: Option<&str>| w.and_then(|w| w.parse::<i64>().ok()).unwrap_or(0);
+        Some(
+            o.lines()
+                .map(|l| l.split('\t'))
+                .map(|mut w| n(w.next()) - n(w.next()))
+                .sum(),
+        )
+    };
+    let (mut sum, mut has) = (0, std::collections::BTreeSet::new());
+    writeln!(out, "open PRs (src/ net):")?;
+    for p in prs {
+        let b = p["headRefName"].as_str().unwrap_or_default();
+        let issue = b.strip_prefix("issue-").and_then(|n| n.parse::<u64>().ok());
+        has.extend(issue);
+        let who = issue.map_or_else(|| b.to_string(), |n| format!("#{n}"));
+        let net = stated_net(p["body"].as_str().unwrap_or_default())
+            .map(|n| (n, "body"))
+            .or_else(|| measured(b).map(|n| (n, "measured")));
+        let num = p["number"].as_u64().unwrap_or(0);
+        match net {
+            Some((n, how)) => {
+                sum += n;
+                writeln!(out, "  {who} (PR #{num}): {n:+} ({how})")?;
+            }
+            None => writeln!(
+                out,
+                "  {who} (PR #{num}): unknown (no `src/ net` in its body, branch not fetched)"
+            )?,
+        }
+    }
+    let (events, st) = (crate::events::read(&ctx.state)?, crate::events::states(&ctx.state)?);
+    let queued: Vec<u64> = (crate::queue::view(&events, &st, fleet).into_iter().map(|i| i.issue))
+        .filter(|n| !has.contains(n))
+        .collect();
+    let none = queued.is_empty().then_some("none");
+    writeln!(
+        out,
+        "queued, no PR: {}",
+        none.map_or_else(|| crate::queue::hashes(&queued), String::from)
+    )?;
+    let projected = lines + sum;
+    writeln!(
+        out,
+        "sum of open PRs: {sum:+}; projected total {projected} / cap {cap}, headroom {}",
+        cap - projected
+    )?;
+    writeln!(
+        out,
+        "ask options: 1. raise to {} in one conductor-filed issue (recommended) 2. trim",
+        projected + warn
+    )?;
+    Ok(0)
+}
