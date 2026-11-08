@@ -324,3 +324,99 @@ fn host_tab_sums_claude_lane_memory_by_state() {
         "the sum by state"
     );
 }
+
+/// #679: a shed-acp lane `done` between turns keeps its agent's tree (adapter, `node`, `claude`, their background job);
+/// while its last turn is `working` nothing is trimmed; after a `turn done` only what is not the agent's goes.
+#[test]
+fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
+    let d = tmpdir("trim-acp");
+    let c = ctx(&d, CONFIG);
+    let wt = c.worktrees.join("sendmeter").join("issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.to_string_lossy().into_owned();
+    let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(12), kind, d)).unwrap();
+    ev(
+        "spawn",
+        json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": "shed", "harness": "claude"}),
+    );
+    let why = "full cargo test running in background";
+    ev("turn-end", json!({"state": "working", "why": why, "role": "impl"}));
+    // shed server 199 (outside) → sh 200 (the terminal's pid) → shed acp-bridge 201 → node 202 → claude 203 → zsh 204
+    // → cargo 205; a stray shell 300 (parent: launchd) → zsh 301 → vite 302, not the agent's.
+    let rows = format!(
+        "p200\ncsh\nfcwd\nn{wt}\np201\ncshed\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}\np203\ncclaude\nfcwd\nn{wt}\n\
+         p204\nczsh\nfcwd\nn{wt}\np205\nccargo\nfcwd\nn{wt}\np300\nczsh\nfcwd\nn{wt}\np301\nczsh\nfcwd\nn{wt}\n\
+         p302\ncvite\nfcwd\nn{wt}/web\n"
+    );
+    let ps = "  199     1   9000\n  200   199   1000\n  201   200   2000\n  202   201 300000\n  203   202 400000\n  \
+              204   203   3000\n  205   204 900000\n  300     1   1000\n  301   300   1000\n  302   301 102400\n";
+    let list = json!({"result": {"agents": [{"name": "impl-12", "agent_status": "done", "cwd": wt, "pane_id": "impl-12",
+        "agent": "claude", "runtime": "shed", "pid": 200}]}});
+    let fake = || {
+        Fake::default()
+            .reply("herdr agent list", &list.to_string())
+            .once("lsof", 0, &rows)
+            .reply("lsof", "")
+            .reply("ps -axo", ps)
+            .reply("herdr", "{}")
+            .reply("git -C", "")
+            .reply("kill", "")
+    };
+    let trimmed = |c: &herdsman::Ctx| {
+        let e = read(&c.state).unwrap();
+        e.into_iter().filter(|e| e.kind == "lane-trimmed").collect::<Vec<_>>()
+    };
+
+    let r = fake();
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        kills(&r).is_empty(),
+        "a working turn keeps everything: {:?}",
+        r.calls.borrow()
+    );
+    assert!(trimmed(&c).is_empty());
+
+    ev("turn-end", json!({"state": "done", "role": "impl"}));
+    let r = fake();
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        kills(&r),
+        ["kill -TERM 302"],
+        "only the stray tree: {:?}",
+        r.calls.borrow()
+    );
+    let ev = trimmed(&c);
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
+}
+
+/// #679: a live shed lane whose last turn is `working` is idle between turns: `check` alerts no stall; a herdr lane
+/// still does.
+#[test]
+fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
+    for (runtime, stalls) in [("shed", false), ("herdr", true)] {
+        let c = ctx(&tmpdir(&format!("stall-acp-{runtime}")), CONFIG);
+        let wt = c.worktrees.join("sendmeter").join("issue-12");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt = wt.to_string_lossy().into_owned();
+        let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(12), kind, d)).unwrap();
+        ev(
+            "spawn",
+            json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": runtime}),
+        );
+        ev("turn-end", json!({"state": "working", "role": "impl"}));
+        let list = json!({"result": {"agents": [{"name": "impl-12", "agent_status": "done", "cwd": wt,
+            "pane_id": "impl-12", "runtime": runtime, "pid": 200}]}});
+        let r = Fake::default()
+            .reply("herdr agent list", &list.to_string())
+            .reply("lsof", "")
+            .reply("herdr", "{}")
+            .reply("git -C", "");
+        let (code, out) = run(&c, &r, &["check"]);
+        assert_eq!(code, 0, "{out}");
+        let stalled = read(&c.state).unwrap().iter().any(|e| e.kind == "stall");
+        assert_eq!(stalled, stalls, "{runtime}: {out}");
+    }
+}
