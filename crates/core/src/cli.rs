@@ -214,6 +214,14 @@ enum Cmd {
     Waiting(Scope),
     /// Print the issue spec cached at spawn; read this instead of `gh issue view`
     Brief { fleet: String, issue: u64 },
+    /// Why a line is as it is: blame's commit, its issue, the why note on it, the issue's asks and answers
+    Why {
+        /// The line, as `<file>:<line>`
+        at: String,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// The issue PR's head sha, base, mergeable and check rollup: one `gh pr view` per 60 s
     Pr {
         fleet: String,
@@ -1631,14 +1639,24 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
                     }
-                    let d = json!({"state": state, "why": why, "role": role});
+                    // #677: a `done` at a new push puts the lane's why.md on its head; a refused note still ends the turn.
+                    let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
+                    let note = note.transpose()?.flatten();
+                    let mut d = json!({"state": state, "why": why, "role": role});
+                    if let Some(w) = &note {
+                        d["note"] = json!(format!("WHY_INVALID: {w}"));
+                    }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
                     if state == "need-input" {
                         writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
+                    if let Some(w) = note {
+                        return gate::refused("WHY_INVALID", w);
+                    }
                 }
+                Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
                 Cmd::Lesson {
                     cmd: Some(LessonCmd::Digest { fleet, days }),
                     ..

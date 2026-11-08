@@ -48,6 +48,7 @@ pub mod verify;
 pub mod waiting;
 pub mod webhook;
 pub mod webpush;
+pub mod why;
 
 use anyhow::{bail, Result};
 pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE, SERVICE};

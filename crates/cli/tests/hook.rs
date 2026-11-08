@@ -1400,3 +1400,25 @@ fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() 
         }
     }
 }
+
+/// #677: only herdsman writes or pushes why notes; reading them stays open.
+#[test]
+fn a_lanes_git_notes_write_or_notes_push_is_refused() {
+    for cmd in [
+        "git notes --ref why add -m x HEAD",
+        "git notes --ref=why edit HEAD",
+        "cd /w && git notes merge refs/notes/x",
+        "git push origin refs/notes/why",
+        "git push origin HEAD:refs/heads/issue-1 refs/notes/why:refs/notes/why",
+    ] {
+        let r = bash(cmd).unwrap_or_default();
+        assert!(r.contains("REFUSED NOTES_HERDSMAN_ONLY"), "{cmd}: {r}");
+    }
+    for cmd in [
+        "git notes --ref why show HEAD",
+        "git log --notes=why -1",
+        "git fetch origin refs/notes/why:refs/notes/why",
+    ] {
+        assert_eq!(bash(cmd), None, "{cmd}");
+    }
+}

@@ -618,6 +618,7 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
+    "why.md", // #677: herdsman attaches it as a note; never committed
 ];
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
@@ -1037,6 +1038,10 @@ pub fn spawn(
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
+            .chain((p.family != "design").then(|| {
+                let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
+                crate::why::brief(r, f, &events, (fleet, issue), rev, body)
+            }).flatten())
             .chain(note.clone())
             .chain(wip.as_ref().map(|w| {
                 format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")

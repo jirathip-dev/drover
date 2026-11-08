@@ -7,7 +7,7 @@
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{Ask, ChatDefaults, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun};
-use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
+use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
 use crate::events::plain;
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -406,10 +406,16 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         .filter(|e| e.is("verdict", fleet, n))
         .map(verdict)
         .collect();
+    let why = ev.iter().rfind(|e| e.is("why", fleet, n)).map(|e| WhyNote {
+        sha: e.str("sha").unwrap_or_default().into(),
+        round: e.data["round"].as_u64().unwrap_or_default(),
+        owner: e.str("owner").unwrap_or_default().into(),
+    });
     IssueView {
         fleet: fleet.into(),
         issue: n,
         verdicts,
+        why,
     }
 }
 

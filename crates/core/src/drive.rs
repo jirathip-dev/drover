@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #677: drive's one prompt on a `done` whose why note was refused.
+pub const WHY_NUDGE: &str = "your why note was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
 const STALE_LOCK_SECS: u64 = 3600;
 
@@ -859,7 +861,7 @@ fn pass(
             writeln!(out, "{fleet} land: {e:#}")?;
         }
     }
-    if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
+    if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
@@ -1370,6 +1372,7 @@ fn update_lane(
 fn handoff(
     ctx: &Ctx,
     cfg: &Config,
+    r: &dyn Runner,
     out: &mut dyn Write,
     fleet: &str,
     ev: &[Event],
@@ -1405,6 +1408,23 @@ fn handoff(
         }
         if handed {
             continue;
+        }
+        // #677: a `done` whose why note was refused is told once (WHY_NUDGE); its next `done` (or 10 min) goes to review.
+        if let Some(why) = turn.and_then(|t| t.str("note").map(|w| (t.ts, w))) {
+            let sp = crate::events::last_spawn(ev, &w.lane).map_or(0, |e| e.ts);
+            let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
+            match ev.iter().rfind(told) {
+                None => {
+                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix why.md, then `herdsman turn done`.", why.1);
+                    let sent = tell(r, ev, &w.lane, &text);
+                    writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
+                    let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
+                    append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "why-nudged", d))?;
+                    continue;
+                }
+                Some(p) if why.0 <= p.ts && ctx.now < p.ts + 600 => continue,
+                Some(_) => {}
+            }
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
         let d = json!({"sha": head, "via": "pr"});

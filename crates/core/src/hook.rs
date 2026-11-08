@@ -183,6 +183,19 @@ fn resolve(w: &str, cwd: &str) -> String {
     out.to_string_lossy().into_owned()
 }
 
+/// #677: only herdsman writes why notes: a lane's `git notes` write, or a push naming `refs/notes`, is refused.
+fn notes(t: &[&str]) -> Option<String> {
+    let rest = &t[t.iter().position(|w| *w == "git")? + 1..];
+    let writes = ["add", "append", "edit", "copy", "merge", "remove", "prune"];
+    let write = (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest[i..].iter().any(|w| writes.contains(w)));
+    let push = rest.contains(&"push") && rest.iter().any(|w| w.contains("refs/notes"));
+    (write || push).then(|| {
+        "REFUSED NOTES_HERDSMAN_ONLY: only herdsman writes or pushes why notes: write why.md, then \
+        `herdsman turn done` (#677)"
+            .into()
+    })
+}
+
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     // #537: a quoted argument's text (`gh issue create --body "…docker…"`) is no command word.
     if let Some(d) = denied(&dups(&unquote(cmd, true)), &p.deny) {
@@ -219,6 +232,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let found = gh(&t)
             .or_else(|| git_push(&t, &cwd, p, cur_branch))
             .or_else(|| reviewer_git(&t, p))
+            .or_else(|| notes(&t))
             .or_else(|| target_dir(&t, p));
         if let Some(r) = found.or_else(|| design_spawn(&t, p)) {
             return Some(r);
