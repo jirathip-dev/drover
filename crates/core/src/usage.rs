@@ -133,23 +133,23 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
     let cached: Option<Balance> = load(&path);
     let b = match cached {
         Some(b) if ctx.now < b.ts + POLL => b,
-        _ => {
-            let got = curl(
-                r,
-                "https://api.deepseek.com/user/balance",
-                &format!("header = \"Authorization: Bearer {}\"\n", q(&key)),
-            );
-            match got.filter(|g| g.0 == 200).and_then(|g| parse_balance(&g.2, ctx.now)) {
-                Some(b) => {
-                    let _ = save(&path, &b);
-                    b
-                }
-                None => cached?,
+        _ => match read_balance(r, &key, ctx.now) {
+            Some(b) => {
+                let _ = save(&path, &b);
+                b
             }
-        }
+            None => cached?,
+        },
     };
     let low = b.total < p.warn_below;
     Some(Ok((b, low)))
+}
+
+/// #682: `DeepSeek`'s balance for `key` now (the key in curl's config on stdin), None when refused or unread.
+pub fn read_balance(r: &dyn Runner, key: &str, now: u64) -> Option<Balance> {
+    let conf = format!("header = \"Authorization: Bearer {}\"\n", q(key));
+    let got = curl(r, "https://api.deepseek.com/user/balance", &conf);
+    got.filter(|g| g.0 == 200).and_then(|g| parse_balance(&g.2, now))
 }
 
 /// (utilization %, reset epoch) of one usage window, if read.

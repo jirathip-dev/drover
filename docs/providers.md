@@ -129,6 +129,15 @@ The key goes in a curl config on stdin, never in argv, so `ps` can't show it. Th
 lacks the variable, a dim `deepseek · key not found in <file>` row shows instead.
 `herdsman check` logs `provider-low` once each time the balance drops below `warn_below`.
 
+## From the phone (#682)
+
+cooee-drover's fleets/system plugin draws these from `/api/v1` (paired devices only; [serve](serve.md)): `GET providers`
+lists every account and API key with its state, usage or balance, the roles, fleets and live lanes on it, and the name of
+the store item holding its secret, never its value. `POST sign-in` runs `claude setup-token` for an account in a setup
+terminal and stores the token it prints straight into the account's store item. `key-add`, `key-check` and `key-remove`
+handle DeepSeek keys: a key goes from the request body (over the tailnet) straight into the store, and only its name is
+logged. `use` switches roles to an account (or DeepSeek) only as a config proposal card the owner applies.
+
 ## Hermes lanes
 
 Hermes profiles own their provider keys, in `~/.hermes/profiles/<profile>/.env`. herdsman never

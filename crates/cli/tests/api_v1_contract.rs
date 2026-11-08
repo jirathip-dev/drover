@@ -14,7 +14,7 @@ use std::path::Path;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Every POST answers `Reply`: the form ops (`serve.rs` `write`, `PAIRED_OPS`), #555's and #576's.
+/// Every POST answers `Reply`: the form ops (`serve.rs` `write`, `PAIRED_OPS`), #555's, #576's and #682's.
 const POSTS: &[&str] = &[
     "mv",
     "pause",
@@ -41,6 +41,11 @@ const POSTS: &[&str] = &[
     "qset",
     "lesson",
     "conductor-detach",
+    "sign-in",
+    "key-add",
+    "key-check",
+    "key-remove",
+    "use",
 ];
 
 /// The JSON shape of `v`: each scalar's type name, an object's keys, a list's elements merged.
@@ -151,6 +156,10 @@ fn call(s: &Server, c: &herdsman::Ctx, (method, path): (&str, &str), body: &str,
 fn every_route_keeps_its_fixtures_shape() {
     let (c, r) = v1_board("v1-contract");
     let r = r.reply("gh", "");
+    // #682: an account and a DeepSeek key for `providers` to list.
+    let accounts = "\n[accounts]\nA = \"TOK_A\"\n\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\n";
+    let cfg = std::fs::read_to_string(&c.config).unwrap() + accounts;
+    std::fs::write(&c.config, cfg).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
@@ -183,6 +192,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),
         ("issue/<fleet>/<n>", "/api/v1/issue/sendmeter/12", IssueView),
         ("lessons", "/api/v1/lessons", Lessons),
+        ("providers", "/api/v1/providers", Providers),
         (
             "lessons/<fleet>/digest",
             "/api/v1/lessons/sendmeter/digest?days=7",

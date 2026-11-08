@@ -930,6 +930,27 @@ pub struct ChatDefaults {
     pub harnesses: Vec<Harness>,
 }
 
+/// #682: `providers` (paired): each `[accounts]` account and `DeepSeek` API key; a secret by its store name only.
+pub struct Providers {
+    pub providers: Vec<Provider>,
+}
+
+/// One account (`anthropic`) or API key (`deepseek`): `state` `ok`, `capped`, `signed out` (`until`; `account.cap` the
+/// #640 evidence), a key's `ok`, `low`, `rejected` or `unchecked`; its usage (`account`) or `balance`; the store item
+/// holding its secret; the `<fleet>.<role>`s and fleets on it and its live `lanes`.
+pub struct Provider {
+    pub name: String,
+    pub kind: String,
+    pub state: String,
+    pub until: Option<u64>,
+    pub account: Option<Account>,
+    pub balance: Option<Balance>,
+    pub secret: String,
+    pub roles: Vec<String>,
+    pub fleets: Vec<String>,
+    pub lanes: u64,
+}
+
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
 pub struct Reply {
     pub ok: bool,

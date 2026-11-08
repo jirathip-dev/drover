@@ -91,6 +91,11 @@ pub fn accounts() -> Option<&'static dyn Harness> {
         .find(|h| matches!(h.credential(), Credential::Token(_)))
 }
 
+/// #682: the `[accounts]` harness's name with it.
+pub fn accounts_named() -> Option<(&'static str, &'static dyn Harness)> {
+    all().find(|h| matches!(h.1.credential(), Credential::Token(_)))
+}
+
 pub trait Harness: Sync {
     /// Write this harness's files for a `role`-family `profile` (hooks) with `prompt`'s role prompt.
     fn sync(
@@ -153,6 +158,10 @@ pub trait Harness: Sync {
     }
     /// The interactive login a person runs for it (setup panes, login hints).
     fn login(&self) -> Option<&'static str> {
+        None
+    }
+    /// #682: its accounts' (provider kind, sign-in command printing a long-lived token, that token's prefix).
+    fn sign_in(&self) -> Option<(&'static str, &'static str, &'static str)> {
         None
     }
     /// The shell line that installs it on a fresh host (`hosts bootstrap`; generic: none).

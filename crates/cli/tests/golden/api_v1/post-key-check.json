@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "BAD_VALUE",
+    "message": "a key's name is A-Z, 0-9 and _",
+    "ok": false
+  },
+  "route": "POST /api/v1/key-check",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}

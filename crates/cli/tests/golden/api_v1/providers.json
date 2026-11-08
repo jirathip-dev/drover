@@ -1,0 +1,44 @@
+{
+  "response": {
+    "providers": [
+      {
+        "account": {
+          "cap": "ok",
+          "capped": false,
+          "hint": null,
+          "hours": "5h 0.0 · 7d 0.0 herdsman lane-hours",
+          "meters": [],
+          "name": "A",
+          "pace": null,
+          "tone": "g"
+        },
+        "balance": null,
+        "fleets": [],
+        "kind": "anthropic",
+        "lanes": 0,
+        "name": "A",
+        "roles": [],
+        "secret": "herdsman/all/TOK_A",
+        "state": "ok",
+        "until": null
+      },
+      {
+        "account": null,
+        "balance": null,
+        "fleets": [],
+        "kind": "deepseek",
+        "lanes": 0,
+        "name": "DEEPSEEK_API_KEY",
+        "roles": [],
+        "secret": "herdsman/all/DEEPSEEK_API_KEY",
+        "state": "unchecked",
+        "until": null
+      }
+    ]
+  },
+  "route": "GET /api/v1/providers",
+  "schema": {
+    "providers": []
+  },
+  "type": "Providers"
+}

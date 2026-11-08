@@ -159,6 +159,9 @@ impl Harness for Claude {
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
     }
+    fn sign_in(&self) -> Option<(&'static str, &'static str, &'static str)> {
+        Some(("anthropic", "claude setup-token", "sk-ant-"))
+    }
     fn install(&self) -> Option<&'static str> {
         Some("curl -fsSL https://claude.ai/install.sh | bash")
     }

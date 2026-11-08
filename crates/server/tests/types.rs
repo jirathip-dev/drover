@@ -96,6 +96,8 @@ macro_rules! each {
             SetupScreen,
             Roles,
             ChatDefaults,
+            Providers,
+            Provider,
             Reply,
             ConductorAttach,
             AttachEnv,
