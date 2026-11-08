@@ -1027,6 +1027,11 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, doc) = run(&c, &f, &["doctor"]);
     assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
+    // #647 amendment A: a `!` row, never `✗ unreachable`.
+    assert!(
+        doc.contains("\n! host bazzite shed: ") && !doc.contains("unreachable"),
+        "{doc}"
+    );
 }
 
 /// #634: over `build_budget_gb`, drive's pass never trims a running shed ACP lane's scratch (shed lists it, herdr does

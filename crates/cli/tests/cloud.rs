@@ -655,6 +655,121 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         .any(|c| c.contains(KEY) || c.contains("SEKRIT")));
 }
 
+/// #647: a fake cloud1 whose files are real: an ssh line naming its fleet.toml (`.1`, the path bootstrap uses there)
+/// runs in a real `sh` against `.2/fleet.toml`, its herdsman this build's.
+struct Remote<'a>(&'a Fake, String, std::path::PathBuf);
+
+impl Runner for Remote<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let Some(line) = args.last().filter(|l| prog == "ssh" && l.contains(&self.1)) else {
+            return self.0.run(prog, args);
+        };
+        let there = self.2.join("fleet.toml").display().to_string();
+        let line = line
+            .replace(&self.1, &there)
+            .replace("/opt/herdsman/bin/herdsman", env!("CARGO_BIN_EXE_herdsman"));
+        let o = std::process::Command::new("sh")
+            .args(["-c", &line])
+            .env("HOME", &self.2)
+            .env("HERDSMAN_HOME", &self.2)
+            .env("FLEET_CONFIG", &there)
+            .env("FLEET_STATE", self.2.join("state/events.jsonl"))
+            .env("FLEET_HERMES_PROFILES", self.2.join("hermes"))
+            .output()?;
+        Ok(Out {
+            code: o.status.code().unwrap_or(1),
+            stdout: String::from_utf8_lossy(&o.stdout).into(),
+            stderr: String::from_utf8_lossy(&o.stderr).into(),
+        })
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+}
+
+/// #647: the fleet.toml a pre-#592 bootstrap wrote there: the `[fleet.*]` tables (a role's account pin, no
+/// `[accounts]`) and this host's command rules.
+const OLD_CONF: &str = r#"[fleet.sendmeter]
+integration = "staging"
+local = "/tmp/does-not-matter/sendmeter"
+repo = "jirathip-dev/sendmeter"
+
+[fleet.sendmeter.role.impl]
+account = "C"
+harness = "claude"
+profile = "fleet-impl"
+
+[hosts.cloud1]
+allow_commands = ["docker"]
+"#;
+
+/// boot_fake(true) past the logins, git over https and the clone.
+fn boot_again() -> Fake {
+    boot_fake(true)
+        .reply(&step("git config --global --get credential"), "")
+        .reply(&step("test -d"), "")
+}
+
+#[test]
+fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there() {
+    let (c, cfg) = running("cloud-boot-old-conf");
+    let there = c.config.parent().unwrap().parent().unwrap().join("cloud1");
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::write(there.join("fleet.toml"), OLD_CONF).unwrap();
+    let f = boot_again();
+    let conf = c.config.display().to_string();
+    let r = Remote(&f, conf.clone(), there.clone());
+    let sync = format!("test ! -e '{conf}' || '{}' profiles sync", c.exe);
+    // The old file fails to load there, as on boat1.
+    let o = r.run("ssh", &["cloud1".into(), sync.clone()]).unwrap();
+    assert!(o.stderr.contains("account 'C' is not in [accounts]"), "{o:?}");
+    let mut out = vec![];
+    let res = herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
+    let out = String::from_utf8(out).unwrap();
+    assert!(res.is_ok(), "{res:?} {out}");
+    assert!(out.contains("✓ profiles sync"), "{out}");
+    let left = there.join("fleet.toml");
+    assert!(
+        !left.exists() || Config::load(&left).is_ok(),
+        "{:?}",
+        std::fs::read_to_string(&left)
+    );
+    let o = r.run("ssh", &["cloud1".into(), sync]).unwrap();
+    assert_eq!(o.code, 0, "profiles sync passes there: {o:?}");
+}
+
+#[test]
+fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them() {
+    let (c, cfg) = running("cloud-boot-fail");
+    let err = "invalid config /home/me/.config/herdsman/fleet.toml: fleet.berth.role.conductor: account 'C' is not in [accounts]";
+    let f = boot_again()
+        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"))
+        .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"));
+    let mut out = vec![];
+    let res = herdsman::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
+    let out = String::from_utf8(out).unwrap();
+    let shown = format!("{out}\n{:#}", res.unwrap_err());
+    let cmd = format!(
+        "test ! -e '{}' || '/opt/herdsman/bin/herdsman' profiles sync",
+        c.config.display()
+    );
+    assert!(shown.contains(&cmd) && shown.contains("exit 1"), "{shown}");
+    assert!(shown.contains(err) && shown.contains("warming up"), "{shown}");
+    let log = read(&c.state).unwrap();
+    let e = log
+        .iter()
+        .rev()
+        .find(|e| e.kind == "host-bootstrap")
+        .expect("the bootstrap event");
+    let d = serde_json::Value::Object(e.data.clone());
+    assert_eq!(
+        (d["step"].as_str(), d["code"].as_i64()),
+        (Some("profiles sync"), Some(1)),
+        "{d}"
+    );
+    assert!(d["cmd"] == cmd && d["tail"].as_str().unwrap().contains(err), "{d}");
+}
+
 #[test]
 fn the_token_expiry_parses_and_warns_from_14_days() {
     let day = 86_400;
