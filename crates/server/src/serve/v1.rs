@@ -17,8 +17,8 @@ use serde_json::Value;
 /// a backlog row's [chat about] (`/thread`'s `new`), then `[chat]`'s defaults and a backlog issue's [close].
 const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
-/// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
-const V1_PAIRED: &[&str] = &["qset", "lesson"];
+/// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`); #682 `serve/providers.rs`'.
+const V1_PAIRED: &[&str] = &["qset", "lesson", "sign-in", "key-add", "key-check", "key-remove", "use"];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -52,7 +52,9 @@ impl Server<'_> {
             // #501: the devices unread: no unpaired view or 401, the page keeps its last draw and retries.
             (_, Some(x))
                 if busy(auth)
-                    && (lane.or(setup).is_some() || ["needs", "lanes", "chat"].contains(&x) || paired_op(x)) =>
+                    && (lane.or(setup).is_some()
+                        || ["needs", "lanes", "chat", "providers"].contains(&x)
+                        || paired_op(x)) =>
             {
                 reply("503 Service Unavailable", "BUSY", "board busy, retrying")
             }
@@ -116,9 +118,13 @@ impl Server<'_> {
                     &events(ctx, n("since").unwrap_or(0), n("until").unwrap_or(u64::MAX), 500),
                 )
             }
-            ("GET", _) if lane.or(setup).is_some() && !paired => {
+            ("GET", x) if (lane.or(setup).is_some() || x == Some("providers")) && !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
+            ("GET", Some("providers")) => self.providers(ctx).map_or_else(
+                |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
+                |p| out("200 OK", &p),
+            ),
             // #555: a setup pane's screen (the old board's `/lane?setup=`).
             ("GET", _) if setup.is_some() => crate::setup::screen(ctx, self.r, setup.unwrap_or_default()).map_or_else(
                 |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
@@ -159,6 +165,10 @@ impl Server<'_> {
             ("POST", Some("lesson")) => {
                 let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
                 done(self.lesson(ctx, &fields(body), by))
+            }
+            ("POST", Some(op @ ("sign-in" | "key-add" | "key-check" | "key-remove" | "use"))) => {
+                let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
+                done(self.provider_op(ctx, op, &fields(body), by))
             }
             ("POST", Some(op)) => {
                 let f = fields(body).into_iter().chain([("op".into(), op.into())]).collect();

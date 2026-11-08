@@ -14,23 +14,65 @@ use std::path::Path;
 
 /// `herdsman config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
+    Ok(writeln!(out, "{}", card(ctx, cfg, thread, &text, json!({}))?)?)
+}
+
+/// The new fleet.toml `text` as a card in `thread`, `extra` merged into its event; its id.
+pub fn card(ctx: &Ctx, cfg: &Config, thread: &str, text: &str, extra: serde_json::Value) -> Result<String> {
     let events = read(&ctx.state)?;
     let t = conductor::find(&events, thread)?;
-    let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
-    Config::parse(&text).context("the proposed fleet.toml is invalid")?;
+    Config::parse(text).context("the proposed fleet.toml is invalid")?;
     let cur = std::fs::read_to_string(&ctx.config)?;
-    let diff = diff(&cur, &text);
+    let diff = diff(&cur, text);
     if diff.is_empty() {
         return refused("BAD_VALUE", "the proposal changes nothing");
     }
     let id = format!("c{}", events.iter().filter(|e| e.kind == "config-propose").count() + 1);
-    let d = json!({"thread": thread, "id": id, "diff": diff, "text": text, "base": sha256(cur.as_bytes())});
+    let mut d = json!({"thread": thread, "id": id, "diff": diff, "text": text, "base": sha256(cur.as_bytes())});
+    if let serde_json::Value::Object(m) = extra {
+        d.as_object_mut().unwrap().extend(m);
+    }
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "config-propose", d),
     )?;
-    Ok(writeln!(out, "{id}")?)
+    Ok(id)
+}
+
+/// #682 `[use]`: fleet.toml `text` with each role in `scope` (`all`, `<fleet>`, `<fleet>.<role>`) switched to `to`: an
+/// `[accounts]` name first on its claude roles, `deepseek` as the `dsh` harness; the `<fleet>.<role>`s it changes.
+pub fn switch(cfg: &Config, text: &str, scope: &str, to: &str) -> Result<(String, Vec<String>)> {
+    let (sf, sr) = scope.split_once('.').map_or((scope, None), |(f, r)| (f, Some(r)));
+    let deepseek = to == "deepseek";
+    if !deepseek && !cfg.accounts.names.contains_key(to) {
+        return refused("BAD_VALUE", format!("{to} is neither an [accounts] name nor deepseek"));
+    }
+    let (mut new, mut roles) = (text.to_string(), vec![]);
+    for (f, fc) in cfg.fleet.iter().filter(|(f, _)| sf == "all" || sf == *f) {
+        for (name, r) in fc.role.iter().filter(|(n, r)| sr.is_none_or(|x| x == *n) && !r.default) {
+            let (key, lit) = if deepseek {
+                if r.harness == "dsh" {
+                    continue;
+                }
+                ("harness", "\"dsh\"".to_string())
+            } else if r.harness != "claude" || r.account_list().first().map(String::as_str) == Some(to) {
+                continue;
+            } else if r.accounts.is_empty() {
+                ("account", format!("\"{to}\""))
+            } else {
+                let rest = r.accounts.iter().filter(|a| *a != to).map(|a| format!(", \"{a}\""));
+                ("accounts", format!("[\"{to}\"{}]", rest.collect::<String>()))
+            };
+            new = crate::config::set_in(&new, &format!("[fleet.{f}.role.{name}]"), key, &lit)?;
+            roles.push(format!("{f}.{name}"));
+        }
+    }
+    if roles.is_empty() {
+        return refused("BAD_VALUE", format!("no role in {scope} to switch to {to}"));
+    }
+    Ok((new, roles))
 }
 
 /// The changed lines of `a` → `b` (`- ` / `+ `, by longest common subsequence), each run under its `[section]`.

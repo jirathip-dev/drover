@@ -392,6 +392,12 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
+| `GET providers` | #682 (paired): each `[accounts]` account (`kind` `anthropic`) and DeepSeek API key (`deepseek`): `state` (`ok`, `capped`, `signed out`, with `until`; a key's `ok`, `low`, `rejected`, `unchecked`), the Host tab's `account` row (`cap`, the #640 evidence; `meters`, 5 h / 7 d; lane-hours) or the key's `balance`, the `secret` holding it by store name only (never a value), the `<fleet>.<role>` `roles` and `fleets` on it and its live `lanes` |
+| `POST sign-in` | #682 (paired): `{account}`: `claude setup-token` in a setup terminal on this host (the reply's message is its pane: read it at `setup/<pane>`, answer with `send`); the token it prints goes straight to the account's store item, the pane closes (`captured`) and the account's cap or sign-out is reset; `NO_SUCH_ACCOUNT` |
+| `POST key-add` | #682 (paired): `{name, key}`: the key straight into the store as `herdsman/all/<name>` (logged `secret-set` with its name only), then checked as `key-check`; `BAD_VALUE` for a bad name or an `[accounts]` token's name |
+| `POST key-check` | #682 (paired): `{name}`: the key's DeepSeek balance read now, logged `key-checked` (`ok`, `balance`, `low`; never the key); `NO_SUCH_KEY` |
+| `POST key-remove` | #682 (paired): `{name}`: `secret rm all <name>`; `NO_SUCH_KEY` |
+| `POST use` | #682 (paired): `{to, scope, thread, move}`: `to` (an `[accounts]` name, first on each claude role in `scope`, or `deepseek`, the `dsh` harness) as a config proposal card in `thread` (`all`, `<fleet>` or `<fleet>.<role>`; default `all`); fleet.toml changes only when the owner applies it. The message counts the running lanes on the roles it moves, and with `move` the card's `use.move` names them |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own

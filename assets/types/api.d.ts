@@ -416,6 +416,18 @@ export type Roles = { fleet: string, config: ConfigSheet, chat: ChatDefaults, };
 export type ChatDefaults = { harness?: string | null, model?: string | null, effort?: string | null, harnesses: Array<Harness>, };
 
 /**
+ * #682: `providers` (paired): each `[accounts]` account and `DeepSeek` API key; a secret by its store name only.
+ */
+export type Providers = { providers: Array<Provider>, };
+
+/**
+ * One account (`anthropic`) or API key (`deepseek`): `state` `ok`, `capped`, `signed out` (`until`; `account.cap` the
+ * #640 evidence), a key's `ok`, `low`, `rejected` or `unchecked`; its usage (`account`) or `balance`; the store item
+ * holding its secret; the `<fleet>.<role>`s and fleets on it and its live `lanes`.
+ */
+export type Provider = { name: string, kind: string, state: string, until?: number | null, account?: Account | null, balance?: Balance | null, secret: string, roles: Array<string>, fleets: Array<string>, lanes: number, };
+
+/**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
  */
 export type Reply = { ok: boolean, code: string, message: string, };

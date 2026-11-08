@@ -1059,6 +1059,8 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
         let v = eq + l[eq..].len() - l[eq..].trim_start().len();
         let end = if l[v..].starts_with('"') {
             l[v + 1..].find('"').map(|c| v + c + 2)
+        } else if l[v..].starts_with('[') && lit.starts_with('[') {
+            l[v..].find(']').map(|c| v + c + 1)
         } else if lit.starts_with('"') {
             None
         } else {

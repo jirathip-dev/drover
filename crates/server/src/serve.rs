@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod providers;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -1988,6 +1989,48 @@ impl<'a> Server<'a> {
         d
     }
 
+    /// The Host tab's (and #682 `providers`') row of `[accounts]` account `name`: cap state, meter, lane-hours.
+    pub(super) fn account(&self, ctx: &Ctx, c: &Config, events: &[Event], name: &str) -> Account {
+        let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
+        let login = c.accounts.usage.get(name).map_or("", String::as_str);
+        let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
+            .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
+        let (meters, pace, hint) = match usage {
+            Some(Ok((parts, pace))) => (
+                parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
+                pace,
+                None,
+            ),
+            Some(Err(hint)) => (vec![], None, Some(hint)),
+            None => (vec![], None, None),
+        };
+        Account {
+            name: name.into(),
+            capped: crate::access::capped_until(c, events, name, ctx.now).is_some(),
+            tone: tone(cap.split(' ').next().unwrap_or_default()).into(),
+            hours: crate::usage::lane_hours(events, name, ctx.now),
+            cap,
+            meters,
+            pace,
+            hint,
+        }
+    }
+
+    /// The `DeepSeek` balance, or the hint why none was read.
+    pub(super) fn balance(&self, ctx: &Ctx, c: &Config) -> Option<Balance> {
+        crate::usage::deepseek(ctx, c, self.r).map(|b| match b {
+            Ok((b, low)) => Balance {
+                balance: Some(format!("{} {:.2}", b.currency, b.total)),
+                low,
+                hint: String::new(),
+            },
+            Err(hint) => Balance {
+                hint,
+                ..Balance::default()
+            },
+        })
+    }
+
     /// herdr's agents joined with the log (None when herdr cannot be read).
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.herdr_json(now, "agent")?;
@@ -2334,43 +2377,9 @@ impl<'a> Server<'a> {
             .into_iter()
             .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
         {
-            let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
-            let login = c.accounts.usage.get(name).map_or("", String::as_str);
-            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
-                .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
-            let (meters, pace, hint) = match usage {
-                Some(Ok((parts, pace))) => (
-                    parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
-                    pace,
-                    None,
-                ),
-                Some(Err(hint)) => (vec![], None, Some(hint)),
-                None => (vec![], None, None),
-            };
-            d.accounts.push(Account {
-                name: name.clone(),
-                capped: crate::access::capped_until(c, events, name, ctx.now).is_some(),
-                tone: tone(cap.split(' ').next().unwrap_or_default()).into(),
-                hours: crate::usage::lane_hours(events, name, ctx.now),
-                cap,
-                meters,
-                pace,
-                hint,
-            });
+            d.accounts.push(self.account(ctx, c, events, name));
         }
-        d.deepseek = cfg
-            .and_then(|c| crate::usage::deepseek(ctx, c, self.r))
-            .map(|b| match b {
-                Ok((b, low)) => Balance {
-                    balance: Some(format!("{} {:.2}", b.currency, b.total)),
-                    low,
-                    hint: String::new(),
-                },
-                Err(hint) => Balance {
-                    hint,
-                    ..Balance::default()
-                },
-            });
+        d.deepseek = cfg.and_then(|c| self.balance(ctx, c));
         // Each fleet's last `driven` result in plain words, the raw line on tap; an owner's pause is grey (no problem).
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);

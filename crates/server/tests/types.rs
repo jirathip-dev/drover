@@ -94,6 +94,8 @@ macro_rules! each {
             SetupScreen,
             Roles,
             ChatDefaults,
+            Providers,
+            Provider,
             Reply,
             Event,
             IssueState,
