@@ -149,6 +149,10 @@ fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
     let (c, r) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
     let (w, _) = texts(&c, &r);
     assert!(w.contains("idle without pushing"), "{w}");
+    // #677: with its why note (git and gh writes are the Fake's).
+    ev(&c, 11, "decision", json!({"id": "q1", "choice": "yes", "by": "owner"}));
+    let note = "Decided: d\nBecause: q1\nRejected: r — x\nCheck: c\nOwner: o\n";
+    std::fs::write(c.worktrees.join("sendmeter/issue-12/why.md"), note).unwrap();
     turn(&c, &r, &["done"]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["review"], "{out}");

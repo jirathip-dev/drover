@@ -915,11 +915,19 @@ pub struct Ev {
     pub run: Option<String>,
 }
 
-/// #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first.
+/// #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
 pub struct IssueView {
     pub fleet: String,
     pub issue: u64,
     pub verdicts: Vec<Verdict>,
+    pub why: Option<WhyNote>,
+}
+
+/// #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.
+pub struct WhyNote {
+    pub sha: String,
+    pub round: u64,
+    pub owner: String,
 }
 
 /// A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`

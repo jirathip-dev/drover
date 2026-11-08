@@ -93,6 +93,7 @@ macro_rules! each {
             Events,
             Ev,
             IssueView,
+            WhyNote,
             Verdict,
             Repro,
             Lessons,
@@ -244,6 +245,7 @@ fn serde_json_fits_the_types() {
             "IssueView",
             json!(IssueView {
                 verdicts: vec![verdict],
+                why: Some(WhyNote::default()),
                 ..IssueView::default()
             }),
         ),
@@ -339,6 +341,7 @@ fn serde_json_fits_the_types() {
         Events,
         Ev,
         IssueView,
+        WhyNote,
         Verdict,
         Repro,
         Lessons,

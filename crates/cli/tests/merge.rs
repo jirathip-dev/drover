@@ -233,6 +233,23 @@ fn merges_with_exact_head_pass_and_green_ci() {
     assert_eq!(st.state, "merged");
 }
 
+/// #677: the closing comment carries the latest why note's Owner line.
+#[test]
+fn the_closing_comment_carries_the_why_owner_line() {
+    let (_d, c) = setup("why-owner", CONFIG, &[("PASS", HEAD)]);
+    for (ts, owner) in [(30, "first round"), (31, "retries no longer double the meter")] {
+        let d = json!({"sha": HEAD, "round": 1, "owner": owner});
+        append(&c.state, &Event::new(ts, "sendmeter", Some(12), "why", d)).unwrap();
+    }
+    let r = pr("staging", green());
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    assert_eq!(exit, 0, "{out}");
+    let calls = r.calls.borrow();
+    let body = calls.iter().find(|c| c.starts_with("gh issue comment")).unwrap();
+    assert!(body.ends_with("\nWhy: retries no longer double the meter"), "{body}");
+    assert!(body.lines().count() <= 5, "{body}");
+}
+
 #[test]
 fn merge_twice_says_already_merged_and_logs_nothing() {
     let (_d, c) = setup("twice", CONFIG, &[("PASS", HEAD)]);

@@ -412,9 +412,14 @@ export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
 
 /**
- * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first.
+ * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
  */
-export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, };
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, };
+
+/**
+ * #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.
+ */
+export type WhyNote = { sha: string, round: number, owner: string, };
 
 /**
  * A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
