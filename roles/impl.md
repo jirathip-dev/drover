@@ -23,6 +23,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Implement the smallest change that meets the acceptance criteria; follow the repo's
   AGENTS.md / CLAUDE.md. Don't refactor unrelated code or add deps without approval.
 - If the repo has a `justfile`, run `just --list` once and use its recipes.
+- Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
   raw exit status; `cmd | grep` is never PASS/FAIL evidence.
 - Form fixes (PR body, re-date, format, docs) are edits in a new commit: never a history rewrite or force-push.
@@ -67,6 +68,10 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
+- Never edit `ci/cap.toml` (the hook refuses it): one conductor-filed issue raises it for the whole queue.
+  Your cap ask carries `herdsman cap <fleet>`'s queue-wide view, with its two options: raise to the
+  projected total plus margin in one conductor-filed issue (recommended), or trim. A `DECISION` to wait
+  for that issue: `herdsman queue <fleet> block --on N <issue>` and end the turn.
 - Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
   the cap after another merge is a fix round: trim, or ask under the same rule.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed

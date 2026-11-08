@@ -419,7 +419,9 @@ fn clean_reclaims_merged_lanes() {
 /// #605: drive's pass over #12's impl lane, its pane listed as `status`, `s` seconds after `c.now`.
 fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf, impl Fn(u64) -> Fake) {
     let c = setup(name);
-    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: an open issue's lane spawned a minute ago, so no pass here finds it stalled.
+    let t = if merged { 10 } else { c.now - 60 };
+    let wt = lane(&c, t, "impl", "sendmeter-impl-12", "issue-12");
     if merged {
         ev(&c, 30, "merged", json!({"pr": "100"}));
     }
@@ -493,7 +495,8 @@ fn a_working_lane_of_a_merged_issue_is_never_closed() {
 #[test]
 fn an_open_issues_idle_lane_is_kept() {
     let (c, _, r) = idle_lane("drive-open-idle", false, "idle");
-    for s in [0, 900, 3600] {
+    // #666: past `stall_minutes` it is superseded instead (tests/stalled_lanes.rs).
+    for s in [0, 900, 1500] {
         let r = r(s);
         let (code, out) = run(&at(&c, s), &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
@@ -1503,7 +1506,8 @@ fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_h
 #[test]
 fn a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done() {
     let c = setup("drive-handoff");
-    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: idle past the handoff's 2 min, short of `stall_minutes`.
+    let wt = lane(&c, c.now - 300, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("bee");
     let r = |ci: &str| {
         fake(&agents(&[(
@@ -2045,7 +2049,8 @@ fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (he
     ev(&c, 20, "pushed", json!({"sha": head}));
     let d = json!({"verdict": "FAIL", "sha": head, "body": body, "stage": stage, "loop": "rev"});
     ev(&c, 30, "verdict", d);
-    let wt = lane(&c, 40, "impl", "sendmeter-impl-12", "issue-12");
+    // #666: the fix lane spawned 15 min ago: idle, not stalled yet.
+    let wt = lane(&c, c.now - 900, "impl", "sendmeter-impl-12", "issue-12");
     assert_eq!(state(&c), "fix(1)");
     let r = fake(&agents(&[(
         "sendmeter-impl-12",
@@ -2114,7 +2119,7 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     idle(&c, &r);
     assert!(kinds(&c, "fix-no-change").is_empty());
     assert_eq!(state(&c), "fix(1)");
-    let (code, out) = run(&c, &r, &["check"]);
+    let (code, out) = run(&at(&c, 1800), &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     let s = &kinds(&c, "stall")[0];
     let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
