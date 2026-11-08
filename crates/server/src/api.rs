@@ -931,6 +931,9 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "HERDSMAN_PORT")]
     pub port: String,
+    /// #683: the role's `folder:` account, the thread's own Claude login (none: no folder account).
+    #[serde(rename = "CLAUDE_CONFIG_DIR")]
+    pub config_dir: Option<String>,
 }
 
 }
