@@ -145,7 +145,7 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
 }
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
-fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
+pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
     let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let at: Vec<u64> = mine

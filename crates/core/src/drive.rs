@@ -4,7 +4,7 @@ use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::waiting::Waiting;
-use crate::{gh, queue, waiting, Ctx};
+use crate::{gh, queue, stall, waiting, Ctx};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
@@ -845,6 +845,10 @@ fn pass(
     for s in st.values().filter(|s| s.fleet == fleet && s.state == "design" && !fast) {
         crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
     }
+    // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
+    if !fast {
+        crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
+    }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
@@ -1063,6 +1067,28 @@ fn pass(
                 updated = true;
                 if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
                     writeln!(out, "{fleet} auto-update: {e:#}")?;
+                }
+            }
+        } else if let Some(a) = (!fast)
+            .then(|| stall::stalled(ctx, cfg, r, &events, &agents, w))
+            .flatten()
+        {
+            // #666: a live lane stalled or never started: superseded once, then the owner's.
+            match a {
+                stall::Act::Respawn(role, why) => {
+                    let args = ["spawn", fleet, &n, &role, "--supersede"];
+                    let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
+                    if code.is_none() {
+                        let d = json!({"role": role, "agent": w.lane, "why": why});
+                        append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
+                    }
+                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
+                }
+                stall::Act::Escalate(code, why) => {
+                    writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+                    let d = json!({"code": code, "reason": why, "agent": w.lane});
+                    let e = Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d);
+                    emit(&ctx.state, cfg, e)?;
                 }
             }
         } else if s.state == "blocked" && s.last_event != "no-action" {
