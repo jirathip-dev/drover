@@ -788,7 +788,8 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
             continue;
         };
-        let gone = (round.iter()).all(|(_, e)| e.kind != "respawn" || e.str("why") == Some("lane gone"));
+        let gone = (round.iter())
+            .all(|(_, e)| e.kind != "respawn" || e.str("why").is_some_and(|w| w.starts_with("lane gone")));
         if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
             continue;
         }
@@ -810,6 +811,43 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         )?;
     }
     Ok(())
+}
+
+/// #662: push gone lane `lane`'s local commits (never its dirty files) to its issue branch, on its own host; a push
+/// that moved the branch is logged `lane-pushed`, a failed one says why.
+fn save(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    f: &crate::config::Fleet,
+    (events, n, lane): (&[Event], u64, &str),
+    why: &str,
+) -> Result<()> {
+    let sp = crate::events::last_spawn(events, lane);
+    let (Some(wt), Some(branch)) = (sp.and_then(|e| e.str("worktree")), sp.and_then(|e| e.str("branch"))) else {
+        return Ok(());
+    };
+    if [f.integration.as_str(), "main", "master"].contains(&branch) {
+        return Ok(());
+    }
+    let on = crate::hosts::On::of(r, sp);
+    let to = format!("HEAD:refs/heads/{branch}");
+    let o = on.run("git", &crate::runner::argv(&["-C", wt, "push", "origin", &to]))?;
+    let fleet = sp.map_or("", |e| e.fleet.as_str());
+    if o.code != 0 {
+        return Ok(writeln!(
+            out,
+            "{fleet} #{n} push of {lane}'s commits failed: {}",
+            o.stderr.trim()
+        )?);
+    }
+    if o.stderr.contains("up-to-date") {
+        return Ok(());
+    }
+    writeln!(out, "{fleet} #{n} pushed {lane}'s local commits to {branch} ({why})")?;
+    let d = json!({"agent": lane, "branch": branch, "why": why});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
 fn pass(
@@ -1058,6 +1096,11 @@ fn pass(
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
+            }
+            // #662: a lane that exited on an account limit or adapter crash has its local commits pushed first.
+            let cause = crate::shed::exit_cause(&events, &w.lane).filter(|c| crate::shed::RESUMABLE.contains(c));
+            if let Some(why) = cause.filter(|_| args[0] == "spawn") {
+                save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
