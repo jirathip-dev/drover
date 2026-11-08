@@ -1,13 +1,14 @@
 //! #686: a real stretch of one fleet's state.db as a scenario: when issues were queued (and blocked, unblocked,
 //! removed), what each lane's agent did and how long it took (push, verdict, death, usage cap), each push's CI time and
 //! colour, and the host's busy and offline windows. Today's herdsman then drives it in the sim; its invariants hold or
-//! fail as for any seed, and its metrics are set beside the real ones. Only ids, timings and outcomes enter the
+//! fail as for any seed, and its #685 metrics are set beside the real ones. Only ids, timings and outcomes enter the
 //! scenario: no issue text, verdict body, path or secret.
 use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
 use herdsman::events::Event;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -26,28 +27,17 @@ pub struct Scenario {
     pub busy: Vec<(u64, u64)>,
     pub offline: Vec<(u64, u64)>,
     /// What really happened that week.
-    pub real: Metrics,
+    pub real: Run,
 }
 
-/// One run's numbers (#685's, those the log carries), from its events alone: the real log's or the sim's.
+/// A run's outcome beside the other's: the merge order, lane deaths, verdicts logged and #685's metrics (those its
+/// log carries: a real log has no idle, CI or lock wait times).
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
-pub struct Metrics {
-    /// Issues in the order they merged.
+pub struct Run {
     pub merged: Vec<u64>,
-    /// Hours from queued (or the window's start) to merged: p50 and p90.
-    pub queue_to_merge_h: (f64, f64),
-    pub spawns: usize,
-    /// Spawns whose lane handed nothing on before the next lane of its role: no push, `turn-end done` or reviewer
-    /// after it (impl), no verdict (rev).
-    pub wasted: usize,
-    pub supersedes: usize,
     pub deaths: usize,
-    /// Distinct heads a reviewer was spawned on.
-    pub reviewed_heads: usize,
     pub verdicts: usize,
-    /// Verdicts on merged issues per merge.
-    pub rounds_per_merge: f64,
-    pub host_busy: usize,
+    pub metrics: BTreeMap<String, f64>,
 }
 
 /// `fleet`'s events of the last `days` before its newest one, read-only.
@@ -210,7 +200,7 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         offline.push((at(e), on.map_or(to - from, at)));
     }
     s.offline = merge(offline);
-    s.real = metrics(evs, from);
+    s.real = real(evs, from);
     s
 }
 
@@ -230,65 +220,64 @@ fn push(evs: &[Event], n: u64, secs: u64) -> Script {
     }
 }
 
-/// The run's metrics from its events (`start`: when an issue never queued in them counts as queued).
-pub fn metrics(evs: &[Event], start: u64) -> Metrics {
-    let mut m = Metrics::default();
-    let (mut queued, mut waits) = (BTreeMap::new(), vec![]);
-    let mut open: BTreeMap<(u64, String), bool> = BTreeMap::new();
-    let mut verdicts: BTreeMap<u64, usize> = BTreeMap::new();
-    let mut heads = BTreeSet::new();
+/// What the log `evs` (from `from` on) says happened. A spawn produced if its lane handed something on before the
+/// next lane of its role: a push, `turn-end done` or a reviewer after it (impl), a verdict (rev). An issue already in
+/// flight at `from` counts as queued then, as the replay queues it.
+pub fn real(evs: &[Event], from: u64) -> Run {
+    let mut produced = BTreeSet::new();
+    let mut last: BTreeMap<(u64, String), *const Event> = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    let mut adds = vec![];
     for e in evs {
         let n = e.issue.unwrap_or(0);
-        match e.kind.as_str() {
+        let r = role(e);
+        let done = match e.kind.as_str() {
             "queue" if e.str("op") == Some("add") => {
-                for n in issues(e) {
-                    queued.entry(n).or_insert(e.ts);
-                }
+                seen.extend(issues(e));
+                None
             }
-            "spawn" => {
-                m.spawns += 1;
-                let r = role(e);
-                if r == "rev" {
-                    open.insert((n, "impl".into()), true);
-                    if let Some(sha) = e.str("sha") {
-                        heads.insert((n, sha.to_string()));
-                    }
-                }
-                if open.insert((n, r), false) == Some(false) {
-                    m.wasted += 1;
-                }
-            }
-            "pushed" => drop(open.insert((n, "impl".into()), true)),
-            "turn-end" if e.str("state") == Some("done") => drop(open.insert((n, "impl".into()), true)),
-            "verdict" => {
-                m.verdicts += 1;
-                *verdicts.entry(n).or_default() += 1;
-                open.insert((n, "rev".into()), true);
-            }
-            "supersede" => m.supersedes += 1,
-            "lane-dead" => m.deaths += 1,
-            "driven" if e.str("code") == Some("HOST_BUSY") => m.host_busy += 1,
-            "merged" if !m.merged.contains(&n) => {
-                m.merged.push(n);
-                let q = queued.get(&n).copied().unwrap_or(start).max(start);
-                waits.push(e.ts.saturating_sub(q) as f64 / 3600.0);
-            }
-            _ => {}
+            "spawn" if r == "rev" => Some("impl"),
+            "pushed" => Some("impl"),
+            "turn-end" if e.str("state") == Some("done") => Some("impl"),
+            "verdict" => Some("rev"),
+            _ => None,
+        };
+        if let Some(p) = done.and_then(|d| last.get(&(n, d.to_string()))) {
+            produced.insert(*p);
+        }
+        if e.kind == "spawn" {
+            last.insert((n, r), e as *const Event);
+        }
+        if ["spawn", "pushed", "verdict", "merged"].contains(&e.kind.as_str()) && seen.insert(n) {
+            adds.push(Event::new(
+                from,
+                &e.fleet,
+                None,
+                "queue",
+                json!({"op": "add", "issues": [n]}),
+            ));
         }
     }
-    m.wasted += open.values().filter(|done| !**done).count();
-    m.reviewed_heads = heads.len();
-    waits.sort_by(f64::total_cmp);
-    let pct = |p: f64| {
-        waits
-            .get(((waits.len() as f64 - 1.0) * p).round() as usize)
-            .copied()
-            .unwrap_or(0.0)
-    };
-    m.queue_to_merge_h = (pct(0.5), pct(0.9));
-    let rounds: usize = m.merged.iter().map(|n| verdicts.get(n).copied().unwrap_or(0)).sum();
-    m.rounds_per_merge = rounds as f64 / m.merged.len().max(1) as f64;
-    m
+    let log = adds.iter().map(|e| (from, e)).chain(evs.iter().map(|e| (e.ts, e)));
+    let mut m = crate::metrics::summary(&[crate::metrics::log(log, |e| produced.contains(&(e as *const Event)))]);
+    m.retain(|k, _| !["idle_lane_min", "ci_wait_min", "lock_wait_min"].contains(k));
+    Run {
+        merged: merged(evs),
+        deaths: evs.iter().filter(|e| e.kind == "lane-dead").count(),
+        verdicts: evs.iter().filter(|e| e.kind == "verdict").count(),
+        metrics: m.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+    }
+}
+
+/// The issues in the order `evs` merged them.
+fn merged(evs: &[Event]) -> Vec<u64> {
+    let mut out = vec![];
+    for n in evs.iter().filter(|e| e.kind == "merged").filter_map(|e| e.issue) {
+        if !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out
 }
 
 /// The sim's world for `s`: its timers, the queue verbs at their times, each lane's script, the busy windows.
@@ -314,55 +303,33 @@ pub fn model(s: &Scenario) -> (Model, String) {
     (m, config(4, 6))
 }
 
-/// Replay `s` to its end; the run and the sim's metrics.
-pub fn run(s: &Scenario) -> (crate::Outcome, Metrics) {
+/// Replay `s` to its end; the run and what the sim did.
+pub fn run(s: &Scenario) -> (crate::Outcome, Run) {
     let (m, cfg) = model(s);
     let o = crate::play(s.from, m, &cfg, T0 + (s.to - s.from), u64::MAX / 2, true);
-    let sim = metrics(&o.events, T0);
+    let metrics = crate::metrics::summary(std::slice::from_ref(&o.metrics));
+    let sim = Run {
+        merged: merged(&o.events),
+        deaths: o.events.iter().filter(|e| e.kind == "lane-dead").count(),
+        verdicts: o.events.iter().filter(|e| e.kind == "verdict").count(),
+        metrics: metrics.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+    };
     (o, sim)
 }
 
-/// The real-vs-sim table.
-pub fn table(real: &Metrics, sim: &Metrics) -> String {
-    let rows: [(&str, String, String); 11] = [
-        ("merged", real.merged.len().to_string(), sim.merged.len().to_string()),
-        (
-            "queue→merge p50 h",
-            format!("{:.1}", real.queue_to_merge_h.0),
-            format!("{:.1}", sim.queue_to_merge_h.0),
-        ),
-        (
-            "queue→merge p90 h",
-            format!("{:.1}", real.queue_to_merge_h.1),
-            format!("{:.1}", sim.queue_to_merge_h.1),
-        ),
-        ("spawns", real.spawns.to_string(), sim.spawns.to_string()),
-        ("wasted spawns", real.wasted.to_string(), sim.wasted.to_string()),
-        ("supersedes", real.supersedes.to_string(), sim.supersedes.to_string()),
-        ("lane deaths", real.deaths.to_string(), sim.deaths.to_string()),
-        (
-            "reviewed heads",
-            real.reviewed_heads.to_string(),
-            sim.reviewed_heads.to_string(),
-        ),
-        ("verdicts", real.verdicts.to_string(), sim.verdicts.to_string()),
-        (
-            "rounds per merge",
-            format!("{:.2}", real.rounds_per_merge),
-            format!("{:.2}", sim.rounds_per_merge),
-        ),
-        (
-            "HOST_BUSY refusals",
-            real.host_busy.to_string(),
-            sim.host_busy.to_string(),
-        ),
-    ];
+/// The real-vs-sim table: the merges, then each #685 metric (`-` where the real log has none).
+pub fn table(real: &Run, sim: &Run) -> String {
     let same = (real.merged.iter().zip(&sim.merged))
         .take_while(|(a, b)| a == b)
         .count();
     let mut t = String::from("| metric | real | sim |\n|---|---:|---:|\n");
-    for (k, a, b) in rows {
-        t += &format!("| {k} | {a} | {b} |\n");
+    t += &format!("| merges | {} | {} |\n", real.merged.len(), sim.merged.len());
+    t += &format!("| same merge order (leading issues) | {same} | |\n");
+    t += &format!("| lane deaths | {} | {} |\n", real.deaths, sim.deaths);
+    t += &format!("| verdicts logged | {} | {} |\n", real.verdicts, sim.verdicts);
+    for (k, v) in &sim.metrics {
+        let r = real.metrics.get(k).map_or("-".into(), ToString::to_string);
+        t += &format!("| {k} | {r} | {v} |\n");
     }
-    t + &format!("| same merge order (leading issues) | {same} | |\n")
+    t
 }

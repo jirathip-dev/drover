@@ -106,12 +106,29 @@ pub struct Model {
     pub died: Vec<String>,
     /// Test-only break switches (AC 3).
     pub sabotage: Option<crate::invariants::Sabotage>,
+    /// #685: every head's CI takes this long (else 1–15 min, drawn).
+    pub ci_secs: Option<u64>,
+    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
+    /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
+    /// a head or wrote a verdict herdsman takes.
+    pub ci_since: BTreeMap<String, u64>,
+    pub ci_wait: u64,
+    pub idle: u64,
+    pub polled: u64,
+    pub produced: Vec<String>,
 }
 
 impl Model {
     pub fn at(&mut self, t: u64, e: Ev) {
         self.seq += 1;
         self.agenda.insert((t, self.seq), e);
+    }
+    /// A new head's CI starts at `now`; its end is drawn from `rng` unless `secs` (#686: a replayed push's) or
+    /// `ci_secs` fixes it.
+    pub fn ci_start(&mut self, sha: &str, now: u64, secs: Option<u64>, rng: &mut crate::sched::Rng) -> u64 {
+        self.ci.insert(sha.into(), None);
+        self.ci_since.insert(sha.into(), now);
+        now + secs.or(self.ci_secs).unwrap_or_else(|| 60 * rng.range(1, 15))
     }
     pub fn sha(&mut self) -> String {
         self.shas += 1;
@@ -484,9 +501,9 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             if let Some(p) = m.prs.get_mut(branch) {
                 p.head = head.clone();
             }
-            m.ci.insert(head.clone(), None);
             m.version += 1;
-            let (t, green) = (w.now + 60 * w.rng.range(1, 15), w.rng.chance(90));
+            let t = w.model.ci_start(&head, w.now, None, &mut w.rng);
+            let green = w.rng.chance(90);
             w.model.at(t, Ev::Ci { sha: head, green });
             ok("")
         }

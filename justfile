@@ -25,26 +25,35 @@ html-lint:
 # #680: the deterministic simulation's long batch: `n` random seeds from HERDSMAN_SIM_FROM (default 1000), each failing
 # seed printed with its trace; replay one with `HERDSMAN_SIM_SEED=<n> cargo test -p herdsman --test sim`. CI runs the
 # fixed seed set (crates/cli/tests/sim/seeds.rs) in `cargo test`; .github/workflows/sim.yml runs `just sim 2000` nightly.
+# #685: `just sim --metrics [N] [--json]` prints the fleet metrics over N seeds (default 50) as a table, or JSON;
+# HERDSMAN_SIM_BASELINE=<metrics.json> adds a baseline column and a warning per metric over 20% worse.
 # #686: `just sim --replay <state.db|scenario.json> [--days 7] [--fleet herdsman] [--save scenario.json]` replays a real
 # window of a fleet's log (read-only) in the sim: the invariants' result and the real-vs-sim metrics table.
-sim *args="500":
+sim *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
     set -- {{args}}
-    if [ "$1" != --replay ]; then
-      HERDSMAN_SIM_N="$1" cargo test --release --locked -p herdsman --test sim random_seeds -- --ignored
-      exit
+    abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
+    if [ "${1:-}" = --replay ]; then
+        export HERDSMAN_SIM_REPLAY; HERDSMAN_SIM_REPLAY=$(abs "$2"); shift 2
+        while [ $# -gt 1 ]; do
+            case $1 in
+                --days) export HERDSMAN_SIM_DAYS="$2" ;;
+                --fleet) export HERDSMAN_SIM_FLEET="$2" ;;
+                --save) export HERDSMAN_SIM_SAVE; HERDSMAN_SIM_SAVE=$(abs "$2") ;;
+                *) echo "just sim --replay: unknown $1" >&2; exit 2 ;;
+            esac
+            shift 2
+        done
+        test $# -eq 0 || { echo "just sim --replay: $1 needs a value" >&2; exit 2; }
+        exec cargo test --release --locked -p herdsman --test sim replay_db -- --ignored --nocapture
     fi
-    export HERDSMAN_SIM_REPLAY; HERDSMAN_SIM_REPLAY=$(abs "$2"); shift 2
-    while [ $# -gt 1 ]; do
-      case $1 in
-        --days) export HERDSMAN_SIM_DAYS="$2" ;;
-        --fleet) export HERDSMAN_SIM_FLEET="$2" ;;
-        --save) export HERDSMAN_SIM_SAVE; HERDSMAN_SIM_SAVE=$(abs "$2") ;;
-        *) echo "just sim --replay: unknown $1" >&2; exit 2 ;;
-      esac
-      shift 2
-    done
-    test $# -eq 0 || { echo "just sim --replay: $1 needs a value" >&2; exit 2; }
-    cargo test --release --locked -p herdsman --test sim replay_db -- --ignored --nocapture
+    if [ "${1:-}" != --metrics ]; then
+        HERDSMAN_SIM_N="${1:-500}" exec cargo test --release --locked -p herdsman --test sim random_seeds -- --ignored
+    fi
+    n=50 ext=md
+    for a in "${@:2}"; do if [ "$a" = --json ]; then ext=json; else n="$a"; fi; done
+    out="${HERDSMAN_SIM_OUT:-${CARGO_TARGET_DIR:-target}/sim-metrics}"
+    mkdir -p "$out" && out=$(cd "$out" && pwd)
+    HERDSMAN_SIM_N="$n" HERDSMAN_SIM_OUT="$out" cargo test --release --locked -p herdsman --test sim metrics_batch -- --ignored >&2
+    cat "$out/metrics.$ext"

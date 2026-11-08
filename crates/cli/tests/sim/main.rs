@@ -5,6 +5,7 @@
 //! `HERDSMAN_SIM_SEED=<n> cargo test -p herdsman --test sim` replays one seed (`HERDSMAN_SIM_TRACE=full`: its whole
 //! trace); `just sim [N]` runs N random seeds.
 mod invariants;
+mod metrics;
 mod model;
 mod replay;
 mod scenario;
@@ -29,6 +30,7 @@ pub struct Outcome {
     /// #686: every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
     pub events: Vec<herdsman::events::Event>,
     pub violations: Vec<String>,
+    pub metrics: metrics::Metrics,
 }
 
 impl Outcome {
@@ -53,11 +55,16 @@ impl Outcome {
 
 /// Run `seed` (seed 1 is the #370 incident, any other a random fleet), `sabotage` breaking one invariant on purpose.
 pub fn run(seed: u64, sabotage: Option<Sabotage>) -> Outcome {
-    let (mut m, cfg) = if seed == seeds::INCIDENT {
+    let world = if seed == seeds::INCIDENT {
         seeds::incident()
     } else {
         scenario::random(seed)
     };
+    run_world(seed, world, sabotage)
+}
+
+/// Run fleet `world` (its model and fleet.toml) under `seed`'s scheduler.
+pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), sabotage: Option<Sabotage>) -> Outcome {
     m.sabotage = sabotage;
     play(seed, m, &cfg, scenario::T0 + HOURS * 3600, STEPS, false)
 }
@@ -91,6 +98,7 @@ pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, steps: u64, keep_go
         drop(w);
         failure = sim.run(t + 1800, steps + 1000);
     }
+    let metrics = metrics::of(&sim.lock());
     sim.stop();
     let mut w = sim.lock();
     let trace = std::mem::take(&mut w.trace);
@@ -101,6 +109,7 @@ pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, steps: u64, keep_go
         trace,
         events,
         violations: std::mem::take(&mut w.violations),
+        metrics,
     }
 }
 
@@ -112,14 +121,19 @@ fn seeds() -> Vec<u64> {
     }
 }
 
-/// Run `seeds` side by side (each run is its own world); the failures, each report printed.
-fn check(seeds: &[u64]) -> Vec<String> {
+/// Run `seeds` side by side (each run is its own world).
+fn batch(seeds: &[u64]) -> Vec<Outcome> {
     let runs: Vec<_> = seeds
         .iter()
         .map(|&s| std::thread::spawn(move || run(s, None)))
         .collect();
+    runs.into_iter().map(|h| h.join().expect("a run")).collect()
+}
+
+/// Run `seeds`; the failures, each report printed.
+fn check(seeds: &[u64]) -> Vec<String> {
     let mut bad = vec![];
-    for o in runs.into_iter().map(|h| h.join().expect("a run")) {
+    for o in batch(seeds) {
         if let Some(f) = &o.failure {
             eprintln!("{}", o.report());
             bad.push(format!("seed {}: {f}", o.seed));
@@ -199,6 +213,36 @@ fn a_broken_invariant_fails_with_seed_and_trace() {
     }
 }
 
+fn env(k: &str, default: u64) -> u64 {
+    std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+}
+
+/// #685 `just sim --metrics [N]`: the fleet metrics over N random seeds from `HERDSMAN_SIM_FROM`, failing seeds
+/// included (the nightly job's invariant check is `just sim`'s). Written to `$HERDSMAN_SIM_OUT/metrics.{json,md}`,
+/// the table beside `HERDSMAN_SIM_BASELINE` (a metrics.json) with each >20% regression a warning; never fails on them.
+#[test]
+#[ignore = "long: `just sim --metrics`"]
+fn metrics_batch() {
+    let (n, from) = (env("HERDSMAN_SIM_N", 50), env("HERDSMAN_SIM_FROM", 1000));
+    let all: Vec<u64> = (from..from + n).collect();
+    let runs: Vec<metrics::Metrics> = all.chunks(16).flat_map(batch).map(|o| o.metrics).collect();
+    let s = metrics::summary(&runs);
+    let base = std::env::var("HERDSMAN_SIM_BASELINE")
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let base: Option<serde_json::Value> = base.and_then(|b| serde_json::from_str(&b).ok());
+    let table = metrics::table(runs.len(), &s, base.as_ref());
+    let json = metrics::to_json(runs.len(), &s).to_string();
+    match std::env::var("HERDSMAN_SIM_OUT") {
+        Ok(d) => {
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(format!("{d}/metrics.json"), json + "\n").unwrap();
+            std::fs::write(format!("{d}/metrics.md"), table + "\n").unwrap();
+        }
+        Err(_) => println!("{table}\n{json}"),
+    }
+}
+
 /// `just sim [N]`: N random seeds from `HERDSMAN_SIM_FROM` (default 1000); every failing seed printed.
 #[test]
 #[ignore = "long: `just sim`"]
@@ -219,6 +263,77 @@ fn random_seeds() {
     assert!(bad.is_empty(), "{} of {n} seeds failed:\n{}", bad.len(), bad.join("\n"));
 }
 
+/// #685 AC 2: the known-answer fleet (`seeds::known`) gives exact metric values. Queued at true t+2, #201 merges at
+/// t+1029 and #202 at t+1338 (each: the first kick's start at t+91 and a 3 s agent start, 600 s impl, the reviewer's
+/// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
+/// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
+/// to the clean (1482 + 1158 + 1783 + 1148 s) and the refused reviewer's 14 s; one reviewed head per merge.
+#[test]
+fn the_known_fleet_gives_exact_metrics() {
+    let o = run_world(seeds::KNOWN, seeds::known(), None);
+    assert!(o.failure.is_none(), "{}", o.report());
+    let want = metrics::Metrics {
+        to_merge: vec![1027, 1336],
+        spawns: 5,
+        wasted: 1,
+        supersedes: 1,
+        lanes: 4,
+        idle: 5585,
+        ci_wait: 600,
+        lock_wait: 13,
+        serial: 0,
+        host_busy: 0,
+        caps: 0,
+        merges: 2,
+        rounds: 2,
+    };
+    assert_eq!(o.metrics, want, "{}", o.report());
+    let s = metrics::summary(&[o.metrics]);
+    let got: Vec<(&str, f64)> = s.iter().map(|(k, v)| (*k, *v)).collect();
+    assert_eq!(
+        got,
+        [
+            ("caps", 0.0),
+            ("ci_wait_min", 10.0),
+            ("host_busy", 0.0),
+            ("idle_lane_min", 93.08),
+            ("lock_wait_min", 0.22),
+            ("queue_to_merge_p50_min", 17.12),
+            ("queue_to_merge_p90_min", 22.27),
+            ("review_rounds_per_merge", 1.0),
+            ("serial_busy", 0.0),
+            ("supersedes_per_lane", 0.25),
+            ("wasted_spawns", 1.0),
+        ]
+    );
+}
+
+/// #685 AC 3: against a baseline, a metric over 20% worse is a warning in the table; one within 20%, or better, is not.
+#[test]
+fn a_metric_over_20_percent_worse_is_a_warning() {
+    let o = run_world(seeds::KNOWN, seeds::known(), None);
+    let s = metrics::summary(&[o.metrics]);
+    // ci_wait_min is 10: 8 is +25%, 9 is +11%; wasted_spawns 1 against 0; idle_lane_min better than its 200.
+    let base = serde_json::json!({"seeds": 1, "metrics": {"ci_wait_min": 8.0, "supersedes_per_lane": 0.24,
+        "wasted_spawns": 0.0, "idle_lane_min": 200.0}});
+    let t = metrics::table(1, &s, Some(&base));
+    let warns: Vec<&str> = t.lines().filter(|l| l.starts_with("WARNING")).collect();
+    assert_eq!(
+        warns,
+        [
+            "WARNING ci_wait_min: 8 -> 10 (+25%) against the last staging baseline",
+            "WARNING wasted_spawns: 0 -> 1 (from 0) against the last staging baseline",
+        ],
+        "{t}"
+    );
+    assert!(
+        t.contains("| ci_wait_min | 10 | 8 |\n") && t.contains("| caps | 0 | - |\n"),
+        "{t}"
+    );
+    let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
+    assert!(metrics::regressions(&s, &back).is_empty());
+}
+
 /// #686 AC 2: a small db (one issue straight through, one FAIL then fixed, one blocked on it, one whose lane dies)
 /// replays to the same merge order and counts.
 #[test]
@@ -237,8 +352,15 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
             serde_json::json!({"role": role, "agent": agent, "sha": format!("{n}-{s}")}),
         )
     };
-    let pass = serde_json::json!({"body": "PASS\n\nall good"});
-    let fail = serde_json::json!({"body": "FAIL\n\n- blocking [correctness] x"});
+    let verdict = |s, n, body: &str| {
+        ev(
+            s,
+            n,
+            "verdict",
+            serde_json::json!({"body": body, "sha": format!("{n}-{s}")}),
+        )
+    };
+    let (pass, fail) = ("PASS\n\nall good", "FAIL\n\n- blocking [correctness] x");
     let driven = |s, n, step: &str| ev(s, n, "driven", serde_json::json!({"step": step, "code": null}));
     let pushed = |s, n| ev(s, n, "pushed", serde_json::json!({"sha": "a".repeat(40)}));
     let queue = |s, n| {
@@ -266,10 +388,10 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
         ),
         driven(2100, 12, "review"),
         spawn(2100, 12, "rev", "fx-rev-12-r1"),
-        ev(2400, 11, "verdict", pass.clone()),
+        verdict(2400, 11, pass),
         driven(2400, 11, "merge"),
         ev(2400, 11, "merged", serde_json::json!({})),
-        ev(3000, 12, "verdict", fail),
+        verdict(3000, 12, fail),
         spawn(3100, 12, "impl", "fx-impl-12"),
         queue(3600, 13),
         herdsman::events::Event::new(
@@ -285,13 +407,13 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
         pushed(5000, 12),
         driven(5300, 12, "review"),
         spawn(5300, 12, "rev", "fx-rev-12-r2"),
-        ev(5900, 12, "verdict", pass.clone()),
+        verdict(5900, 12, pass),
         ev(5900, 12, "merged", serde_json::json!({})),
         spawn(6000, 13, "impl", "fx-impl-13"),
         pushed(6600, 13),
         driven(6900, 13, "review"),
         spawn(6900, 13, "rev", "fx-rev-13-r1"),
-        ev(7500, 13, "verdict", pass),
+        verdict(7500, 13, pass),
         ev(7500, 13, "merged", serde_json::json!({})),
         ev(4 * 3600, 0, "drive-pass", serde_json::json!({})),
     ];
@@ -310,17 +432,14 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
         o.report()
     );
     assert_eq!(sim.merged, s.real.merged, "{}", o.report());
+    let rounds = |r: &replay::Run| r.metrics.get("review_rounds_per_merge").copied();
     assert_eq!(
-        (sim.reviewed_heads, sim.verdicts, sim.deaths, sim.rounds_per_merge),
-        (
-            s.real.reviewed_heads,
-            s.real.verdicts,
-            s.real.deaths,
-            s.real.rounds_per_merge
-        ),
+        (sim.verdicts, sim.deaths, rounds(&sim)),
+        (s.real.verdicts, s.real.deaths, rounds(&s.real)),
         "{}",
         o.report()
     );
+    assert_eq!(rounds(&s.real), Some(1.33));
     // The scenario carries no issue text or verdict body: only ids, timings and outcomes.
     let saved = serde_json::to_string(&s).unwrap();
     assert!(!saved.contains("all good") && !saved.contains("blocking"), "{saved}");

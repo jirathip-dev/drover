@@ -83,6 +83,8 @@ pub struct World {
     /// #686: a replay records each violation (once per invariant and subject) with its step and runs on.
     pub keep_going: bool,
     pub violations: Vec<String>,
+    /// Every `(agent, pane)` a spawn event logged (I5's index).
+    pub spawned: std::collections::BTreeSet<(String, String)>,
     /// `(wrote, merges)` at the last full check of I4's merged sha and I6 (both read only those).
     pub checked: (usize, usize),
 }
@@ -125,6 +127,7 @@ impl Sim {
                 next_pid: 40_000,
                 keep_going: false,
                 violations: vec![],
+                spawned: Default::default(),
                 checked: (usize::MAX, 0),
             }),
             cv: Condvar::new(),
@@ -280,6 +283,9 @@ impl Sim {
                     ));
                     if ev.kind == "spawn" {
                         w.procs[me].starting = None;
+                        let (a, p) = (ev.str("agent"), ev.str("pane"));
+                        w.spawned
+                            .insert((a.unwrap_or_default().into(), p.unwrap_or_default().into()));
                     }
                     let busy = w.model.load >= 25;
                     w.wrote.push(Wrote {
@@ -334,6 +340,10 @@ impl Sim {
                 let next = [wake, crate::scenario::next(&w)].into_iter().flatten().min();
                 match next {
                     Some(t) if t <= until => {
+                        // #685: a live lane not working is idle while the clock moves.
+                        let dt = t.saturating_sub(w.now);
+                        let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
+                        w.model.idle += idle * dt;
                         w.now = w.now.max(t);
                         crate::scenario::due(self, &mut w);
                         continue;
@@ -409,6 +419,9 @@ impl Runner for SimRunner {
             let mut w = self.sim.lock();
             let name = w.procs[self.me].name.clone();
             w.log(format!("{name} sleep {secs}"));
+            if secs == 1 {
+                w.model.polled += 1;
+            }
         }
         self.sim.yield_now(self.me, secs);
     }

@@ -72,6 +72,7 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     let new = format!("{}.new", live.display());
     let r = host("SUCCESS")
         .reply(&format!("{new} doctor --config-only"), "✓ config — ok\n")
+        .reply(&format!("{new} doctor --tokens"), "✓ account A\n")
         .reply(&format!("{} profiles sync", live.display()), "");
     let (code, out) = run(&c, &r, &["self-update", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
@@ -91,6 +92,7 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
         at("cargo build"),
         at(&format!("sh {} sign {new}", sign_script(&c))),
         at(&format!("{new} doctor --config-only")),
+        at(&format!("{new} doctor --tokens")),
         at(&format!("{} profiles sync", live.display())),
         at(if cfg!(target_os = "macos") {
             "launchctl kickstart -k gui/"
@@ -128,6 +130,35 @@ fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     assert_eq!(run(&c, &r2, &["self-update"]).0, 1);
     assert!(!r2.called("profiles sync"));
     assert_eq!(kinds(&c, "self-update-failed").len(), 1);
+}
+
+/// #631: a build whose secret read fails (the Keychain would prompt it) is never swapped in, serve keeps running.
+#[test]
+fn a_build_that_cannot_read_the_tokens_keeps_the_old_binary_alerts_once_and_leaves_serve() {
+    let (c, live) = setup("upd-tokens");
+    let new = format!("{}.new", live.display());
+    let bad =
+        "✗ account A — herdsman/all/T_A prompts for Keychain access → approve herdsman in the Keychain dialog: …\n";
+    let r = || {
+        host("SUCCESS")
+            .reply(&format!("{new} doctor --config-only"), "✓ config — ok\n")
+            .once(&format!("{new} doctor --tokens"), 1, bad)
+    };
+    for _ in 0..2 {
+        let r = r();
+        let (code, out) = run(&c, &r, &["self-update"]);
+        assert_eq!(code, 1, "{out}");
+        assert!(
+            out.contains("doctor --tokens, the new build can't read the secrets: ✗ account A"),
+            "{out}"
+        );
+        assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD");
+        assert!(!PathBuf::from(&new).exists());
+        assert!(!r.called("launchctl") && !r.called("systemctl") && !r.called(&format!("{} profiles", live.display())));
+    }
+    let failed = kinds(&c, "self-update-failed");
+    assert_eq!(failed.len(), 1, "once per head");
+    assert!(failed[0].str("reason").unwrap().contains("prompts for Keychain access"));
 }
 
 #[test]
