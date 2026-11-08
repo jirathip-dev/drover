@@ -391,7 +391,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         });
         Verdict {
             role: e.str("stage").unwrap_or("rev").into(),
-            round: e.data["round"].as_u64().unwrap_or_default(),
+            round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
             sha: e.str("sha").unwrap_or_default().into(),
             verdict: e.str("verdict").unwrap_or_default().into(),
             ts: e.ts,
@@ -408,7 +408,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         .collect();
     let why = ev.iter().rfind(|e| e.is("why", fleet, n)).map(|e| WhyNote {
         sha: e.str("sha").unwrap_or_default().into(),
-        round: e.data["round"].as_u64().unwrap_or_default(),
+        round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
         owner: e.str("owner").unwrap_or_default().into(),
     });
     IssueView {

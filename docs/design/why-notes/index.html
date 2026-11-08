@@ -47,7 +47,7 @@
 <body>
 <main>
 <h1>Why notes: each lane commit linked to its reasoning</h1>
-<p class="sub">Design for jirathip-dev/herdsman#677 · branch <code>issue-677</code> · design lane, 2026-11-08</p>
+<p class="sub">Design for herdsman#677 · branch <code>issue-677</code> · design lane, 2026-11-08</p>
 <div class="chips"><span>git notes <code>refs/notes/why</code></span><span>no new dependency</span><span>no old-board UI file</span><span>src/ estimate <b>+215</b> (issue guess +150)</span></div>
 
 <p>A lane writes a short <code>why.md</code>. On <code>herdsman turn done</code> herdsman checks it and attaches it to the pushed head as a git note. The note is also copied into the PR body and logged as a <code>why</code> event. Briefs, reviewers and <code>herdsman why &lt;file:line&gt;</code> read it back. Only herdsman writes notes, and it writes them from the main host's clone, never from a lane.</p>

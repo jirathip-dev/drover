@@ -155,7 +155,7 @@ pub fn turn(
             .ok()?;
         (o.code == 0).then(|| o.stdout.lines().count())
     };
-    let short = sp.data["update"] == true;
+    let short = sp.data.get("update") == Some(&Value::Bool(true));
     let owner = match check(&text, short, spec["body"].as_str().unwrap_or_default(), &answered, &len) {
         Ok(o) => o,
         Err(e) => return Ok(Some(e)),
@@ -300,7 +300,7 @@ pub fn brief(
             let sha = e.str("sha")?;
             Some(format!(
                 "round {} · {sha:.7}\n{}\n\n",
-                e.data["round"],
+                e.data.get("round").unwrap_or(&Value::Null),
                 note(r, &local, sha)?
             ))
         };
@@ -316,7 +316,7 @@ pub fn brief(
         let (Some(sha), Some(i)) = (e.str("sha"), e.issue) else {
             continue;
         };
-        for p in (e.data["files"].as_array().into_iter().flatten())
+        for p in (e.data.get("files").and_then(Value::as_array).into_iter().flatten())
             .filter_map(Value::as_str)
             .filter(|p| named(p))
         {
@@ -405,7 +405,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     let round = |h: &str| {
         whys.iter()
             .find(|e| e.str("sha") == Some(h))
-            .map(|e| e.data["round"].clone())
+            .and_then(|e| e.data.get("round").cloned())
     };
     let note = on(&sha).or_else(|| whys.iter().copied().find(|e| head(e)).and_then(|e| on(e.str("sha")?)));
     let note = note.map(|(h, t)| {
