@@ -227,8 +227,14 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         return Ok(());
     };
     for _ in 0..30 {
+        // #680: each pass decides at its own time: under the kick's start time a reviewer it spawned looked already
+        // told of its refusal and was superseded again every pass (#370's 25 supersedes in one logged second).
+        let ctx = &Ctx {
+            now: crate::now().max(ctx.now),
+            ..ctx.clone()
+        };
         // #333: a running kick's lease stays unexpired.
-        let expires_at = crate::now().max(ctx.now) + ttl;
+        let expires_at = ctx.now + ttl;
         crate::db::renew(
             &ctx.state,
             &k.1,

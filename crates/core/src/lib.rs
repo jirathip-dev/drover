@@ -38,6 +38,7 @@ pub mod secret;
 pub mod service;
 pub mod setup;
 pub mod shed;
+pub mod sim;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
@@ -147,6 +148,9 @@ pub fn migrate(home: &std::path::Path, out: &mut dyn Write) -> Result<()> {
 
 /// Seconds since the epoch.
 pub fn now() -> u64 {
+    if let Some(t) = sim::now() {
+        return t; // #680: a simulated process's clock
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
