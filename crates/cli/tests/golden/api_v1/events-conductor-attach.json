@@ -1,0 +1,65 @@
+{
+  "response": {
+    "list": [
+      {
+        "act": "idle",
+        "coat": "",
+        "data": {
+          "thread": "cooee-7f3a"
+        },
+        "fleet": "sendmeter",
+        "glyph": "·",
+        "imp": false,
+        "issue": null,
+        "k": null,
+        "plain": "sendmeter conductor-attached",
+        "pr": null,
+        "run": null,
+        "seq": 13,
+        "text": "conductor-attached",
+        "tone": "m",
+        "ts": 1000000,
+        "type": "conductor-attached"
+      },
+      {
+        "act": "blocked",
+        "coat": "",
+        "data": {
+          "agent": null,
+          "host": null,
+          "id": "q1",
+          "kind": "owner",
+          "options": [
+            "small",
+            "full"
+          ],
+          "question": "Which scope?",
+          "recommend": 2,
+          "thread": "cooee-7f3a"
+        },
+        "fleet": "sendmeter",
+        "glyph": "!",
+        "imp": true,
+        "issue": null,
+        "k": "needs-you",
+        "plain": "sendmeter needs you (? asks q1): Which scope?\n  1) small\n  2) full (recommended)\n  herdsman answer sendmeter q1 <n|\"text\">",
+        "pr": null,
+        "run": null,
+        "seq": 14,
+        "text": "asks you (q1) · Which scope?",
+        "tone": "r",
+        "ts": 1000000,
+        "type": "needs-decision"
+      }
+    ],
+    "refresh": false,
+    "seq": 14
+  },
+  "route": "GET /api/v1/events",
+  "schema": {
+    "list": [],
+    "refresh": "boolean",
+    "seq": "number"
+  },
+  "type": "Events"
+}

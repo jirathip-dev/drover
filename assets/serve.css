@@ -645,18 +645,20 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
 .chq .more>summary,.chg>summary{display:flex;align-items:center;min-height:var(--hit);color:var(--mute)}
 .chq .more>button{margin-top:var(--s2)}
 /* #387: a config proposal's diff with [apply] [discard], and a secret's masked input with [save] [dismiss]: both amber. */
-.df{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
+.df,.rc{margin:var(--s1) 0 0;padding:var(--s2);overflow-x:auto;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px;white-space:pre}
 /* #409: a fenced block in a message: its exact text in a box that scrolls sideways, [copy] in its top corner (no
    scrollbar: WebKit leaves a classic one out of the box's height inside a flex column). */
 .cb{position:relative}.cb pre{margin:0;padding:var(--ctl) var(--s2) var(--s2);overflow-x:auto;scrollbar-width:none;white-space:pre;font-size:var(--fs-meta);background:var(--bg);border:1px solid var(--edge);border-radius:6px}
 .cb .cpy{position:absolute;top:0;right:var(--s2)}
-:is(.chc,.chs){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
+/* #669: a run card's command in the same box, its [approve] [deny] in the config card's row. */
+.rc{white-space:pre-wrap}
+:is(.chc,.chs,.chr){display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2)}
 .chs input{flex:1;min-width:0;font:inherit;font-size:var(--fs-input);color:var(--fg);background:var(--bg);border:1px solid var(--edge);border-radius:6px;padding:var(--s1) var(--s2)}
-.blk:has(>.md+:is(.chc,.chs)){--k:var(--a)}
+.blk:has(>.md+:is(.chc,.chs,.chr)){--k:var(--a)}
 .ans{margin:var(--s2) 0 0;color:var(--g)}.ans .m{font-size:var(--fs-meta)}
 .qid{font-size:var(--fs-meta);color:var(--mute)}
 /* A device that is not a paired owner device reads the thread; its choices and composer are inert. */
-.cvp :is(.chq,.chc):has([disabled]),.cvp .tw:has([disabled])>*{opacity:.6}
+.cvp :is(.chq,.chc,.chr):has([disabled]),.cvp .tw:has([disabled])>*{opacity:.6}
 .cvp>.ns{margin:0;font-size:var(--fs-meta)}
 /* The live line and the composer are the sheet's (.live, .reply). */
 .tlv{margin:0;padding-top:var(--s1);color:var(--mute);font-size:var(--fs-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

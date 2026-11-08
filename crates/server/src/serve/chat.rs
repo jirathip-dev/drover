@@ -2,7 +2,7 @@
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
 use crate::api::{
-    Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, HandoffChoice, HandoffFrom, LastLine, Link, Msg,
+    Answered, ChatRepo, ChatTab, Chip, FileRef, Handoff, HandoffChoice, HandoffFrom, LastLine, Link, Msg, RunCard,
 };
 use crate::api::{QueuedMsg, RepoThread, RepoThreads, ThreadPage, ThreadRow, ThreadView};
 use crate::conductor::{self, of};
@@ -127,6 +127,36 @@ fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     }
 }
 
+/// #669: run card `e` and how it stands: open (15 min), then approved (running until its `run-done`), denied or expired.
+fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
+    let s = |e: &Event, k: &str| e.str(k).unwrap_or_default().to_string();
+    let id = s(e, "id");
+    let set = crate::card::settled(events, &id);
+    let done = events.iter().find(|d| d.kind == "run-done" && d.str("id") == Some(&id));
+    let exp = e.ts + crate::card::TTL;
+    let state = match set {
+        Some(x) if x.data["approved"] != true => "denied",
+        Some(_) if done.is_none() => "running",
+        Some(_) => "approved",
+        None if ctx.now > exp => "expired",
+        None => "open",
+    };
+    RunCard {
+        id,
+        cmd: s(e, "cmd"),
+        why: s(e, "why"),
+        blast: s(e, "blast"),
+        host: s(e, "host"),
+        dir: s(e, "dir"),
+        sha: s(e, "sha"),
+        exp,
+        state: state.into(),
+        by: set.and_then(|x| x.str("by")).map(Into::into),
+        code: done.and_then(|d| d.data["code"].as_i64()),
+        tail: done.map(|d| s(d, "tail")).unwrap_or_default(),
+    }
+}
+
 /// #408: the thread's last `n` messages before seq `before` (web/src/chat.ts draws each block, tagged `data-n`), under
 /// `thread started …` or, older ones left, the marker serve.js loads them from (API v1 `thread/<t>?before=`). #407: a
 /// finished turn's commands fold, each run of them one `fold` (tagged as its first command); a run after `open` (the
@@ -222,6 +252,15 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 Msg {
                     from: s("name"),
                     ..m("secret", s("why"))
+                }
+            }
+            ("run-card", _) => {
+                let run = run_card(ctx, events, e);
+                Msg {
+                    from: s("id"),
+                    open: run.state == "open",
+                    run: Some(run),
+                    ..m("run", s("cmd"))
                 }
             }
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
@@ -653,6 +692,11 @@ pub fn post(
             );
             crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
             Ok(format!("answered {}", g("id")))
+        }
+        // #669: a run card's [approve] (with the sha prefix the owner saw) / [deny].
+        "card" => {
+            let approve = g("act") == "approve";
+            crate::card::settle(ctx, &cfg, r, g("id"), approve, approve.then(|| g("sha")))
         }
         "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
         "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),

@@ -81,6 +81,7 @@
               "open": false,
               "retry": false,
               "routine": false,
+              "run": null,
               "seq": 6,
               "signin": null,
               "text": "Let's talk about #30",

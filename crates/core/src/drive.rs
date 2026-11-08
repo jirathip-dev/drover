@@ -226,9 +226,16 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         flag();
         return Ok(());
     };
+    let start = crate::now();
     for _ in 0..30 {
+        // #680: each pass decides at its own time: under the kick's start time a reviewer it spawned looked already
+        // told of its refusal and was superseded again every pass (#370's 25 supersedes in one logged second).
+        let ctx = &Ctx {
+            now: ctx.now + crate::now().saturating_sub(start),
+            ..ctx.clone()
+        };
         // #333: a running kick's lease stays unexpired.
-        let expires_at = crate::now().max(ctx.now) + ttl;
+        let expires_at = ctx.now + ttl;
         crate::db::renew(
             &ctx.state,
             &k.1,
@@ -718,7 +725,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
                 continue;
             }
         }
-        let why = format!("blocked by {}", queue::hashes(on));
+        let why = format!("blocked by {on}");
         writeln!(out, "{} #{} repaired: back to queued ({why})", s.fleet, s.issue)?;
         let d = json!({"state": "queued", "reason": why});
         emit(
@@ -745,6 +752,36 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         }
         let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
         let round = &mine[from.map_or(0, |i| i + 1)..at];
+        // #679: a `LANE_ENDS` whose lane exited right after an idle trim killed its agent gets one respawn in the
+        // same worktree (its work is there): back to the state before the park.
+        let exited = |e: &Event| e.kind == "lane-state" && e.str("state") == Some("gone");
+        let trimmed = round
+            .windows(2)
+            .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+        let again = mine
+            .iter()
+            .any(|(_, e)| e.kind == "repaired" && e.data["trimmed"] == true);
+        if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
+            let Some(was) = fold(&events[..mine[at].0])
+                .remove(&(s.fleet.clone(), s.issue))
+                .map(|b| b.state)
+            else {
+                continue;
+            };
+            writeln!(
+                out,
+                "{} #{} repaired: back to {was} (its lane ended after an idle trim)",
+                s.fleet, s.issue
+            )?;
+            let why = "the lane ended after an idle trim killed its agent: one respawn in its worktree";
+            let d = json!({"code": "LANE_ENDS", "state": was, "reason": why, "trimmed": true});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+            )?;
+            continue;
+        }
         let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
         let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
             continue;
@@ -854,6 +891,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
+    ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
             writeln!(out, "{fleet} land: {e:#}")?;
@@ -1488,6 +1526,39 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         (d["pr"], d["by"]) = (json!(num), json!("external"));
         writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
+    }
+    Ok(())
+}
+
+/// #667: each open blocker of the fleet's queue in another fleet or repo, read on GitHub at most once per 5 min
+/// (`gh issue view`, cached): one read closed logs `blocker-closed`, and the queue drops it.
+fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
+        .into_iter()
+        .flat_map(|i| i.ext)
+        .collect();
+    for b in refs {
+        let Some((repo, n)) = b.rsplit_once('#') else { continue };
+        let repo = match cfg.fleet.get(repo) {
+            Some(f) => &f.repo,
+            None => repo,
+        };
+        let p = gh::cache_path(ctx, "blocker", &b.replace(['/', '#'], "-"), 0);
+        let ts = crate::usage::load::<Value>(&p).and_then(|c| c["ts"].as_u64());
+        if ts.is_some_and(|t| ctx.now < t + 300) {
+            continue;
+        }
+        let v = crate::runner::json(r, "gh", &["issue", "view", n, "-R", repo, "--json", "state"]);
+        gh::store(&p, &json!({"ts": ctx.now}))?;
+        if v.is_ok_and(|v| v["state"] == "CLOSED") {
+            writeln!(out, "{fleet}: blocker {b} closed")?;
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, None, "blocker-closed", json!({"ref": b})),
+            )?;
+        }
     }
     Ok(())
 }

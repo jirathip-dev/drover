@@ -32,12 +32,14 @@ pub mod propose;
 pub mod protection;
 pub mod queue;
 pub mod report;
+pub mod roots;
 pub mod runner;
 pub mod runners;
 pub mod secret;
 pub mod service;
 pub mod setup;
 pub mod shed;
+pub mod sim;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
@@ -101,7 +103,7 @@ impl Ctx {
         Ctx {
             config,
             state,
-            worktrees: env("FLEET_WORKTREES", home().join(".herdr/worktrees")),
+            worktrees: env("FLEET_WORKTREES", home().join(roots::DEFAULT.trim_start_matches("~/"))),
             hermes: env("FLEET_HERMES_PROFILES", home().join(".hermes/profiles")),
             exe: std::env::current_exe().map_or("herdsman".into(), |p| p.to_string_lossy().into()),
             now: now(),
@@ -147,6 +149,9 @@ pub fn migrate(home: &std::path::Path, out: &mut dyn Write) -> Result<()> {
 
 /// Seconds since the epoch.
 pub fn now() -> u64 {
+    if let Some(t) = sim::now() {
+        return t; // #680: a simulated process's clock
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -158,6 +163,13 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     let events = read(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
+    // #667: `x#N` names another fleet unless `x` is `owner/repo`.
+    for b in queue::refs(&d["on"])
+        .iter()
+        .filter(|b| d["op"] == "block" && !b.contains('/'))
+    {
+        cfg.fleet(b.split('#').next().unwrap_or_default())?;
+    }
     // #425: blocking an issue with a lane holds that lane until its blockers merge (#505: all of them).
     let n = d["issues"][0]
         .as_u64()
@@ -309,7 +321,7 @@ pub fn ask(
     }
     let events = read(&ctx.state)?;
     if let Some(t) = thread {
-        conductor::find(&events, t)?; // #355: its options become the thread's choice rows
+        conductor::fleet_of(&events, t)?; // #355: its options become the thread's choice rows (#633: or a cooee card)
     }
     let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
@@ -341,7 +353,8 @@ pub fn ask(
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     emit(&ctx.state, cfg, ev.clone())?;
-    if let Some(t) = routed {
+    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman conductor to type it into.
+    if let Some(t) = routed.filter(|t| conductor::attached(&events, t).is_none()) {
         if let Err(e) = conductor::lane_ask(ctx, cfg, r, t, &ev) {
             conductor::to_owner(ctx, cfg, t, &ev, None, &format!("conductor not reached: {e:#}"))?;
         }
@@ -376,7 +389,7 @@ pub fn conductor_answer(
     let Some(ask) = events.iter().find(is) else {
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
     };
-    if ask.str("routed").is_none() || conductor::find(&events, t)?.fleet != ask.fleet {
+    if ask.str("routed").is_none() || conductor::fleet_of(&events, t)? != ask.fleet {
         return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
     }
     let text = chosen(ask, choice);
@@ -588,6 +601,10 @@ fn answer_with(
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
+    // #633: an attached cooee thread reads the decision from `/api/v1/events`.
+    if let Some(t) = ask.str("thread").filter(|t| conductor::attached(&events, t).is_some()) {
+        return Ok(writeln!(out, "{fleet} {id}: {text} -> {t}")?);
+    }
     // #584: a typed answer's conductor ran it, the owner's line already in its conversation.
     if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
         let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation

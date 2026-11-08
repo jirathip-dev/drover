@@ -393,6 +393,8 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
+| `POST conductor-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's conductor thread (`conductor-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `ConductorAttach`: `brief`, `settings` (the synced conductor Claude settings), `env` (`HERDSMAN_LANE`, `HERDSMAN_THREAD`, `HERDSMAN_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
+| `POST conductor-detach` | #633 (paired): `{fleet, thread}`, the link ends (`conductor-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
