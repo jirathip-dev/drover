@@ -42,14 +42,14 @@ pub fn card(ctx: &Ctx, cfg: &Config, thread: &str, text: &str, extra: serde_json
 }
 
 /// #682 `[use]`: fleet.toml `text` with each role in `scope` (`all`, `<fleet>`, `<fleet>.<role>`) switched to `to`: an
-/// `[accounts]` name first on its claude roles, `deepseek` as the `dsh` harness; the `<fleet>.<role>`s it changes.
+/// `[accounts]` name first on its accounts harness's roles, `deepseek` as the `dsh` harness; the `<fleet>.<role>`s it changes.
 pub fn switch(cfg: &Config, text: &str, scope: &str, to: &str) -> Result<(String, Vec<String>)> {
     let (sf, sr) = scope.split_once('.').map_or((scope, None), |(f, r)| (f, Some(r)));
     let deepseek = to == "deepseek";
     if !deepseek && !cfg.accounts.names.contains_key(to) {
         return refused("BAD_VALUE", format!("{to} is neither an [accounts] name nor deepseek"));
     }
-    let (mut new, mut roles) = (text.to_string(), vec![]);
+    let (mut new, mut roles, acc) = (text.to_string(), vec![], crate::harness::accounts_named().map(|h| h.0));
     for (f, fc) in cfg.fleet.iter().filter(|(f, _)| sf == "all" || sf == *f) {
         for (name, r) in fc.role.iter().filter(|(n, r)| sr.is_none_or(|x| x == *n) && !r.default) {
             let (key, lit) = if deepseek {
@@ -57,7 +57,7 @@ pub fn switch(cfg: &Config, text: &str, scope: &str, to: &str) -> Result<(String
                     continue;
                 }
                 ("harness", "\"dsh\"".to_string())
-            } else if r.harness != "claude" || r.account_list().first().map(String::as_str) == Some(to) {
+            } else if Some(r.harness.as_str()) != acc || r.account_list().first().map(String::as_str) == Some(to) {
                 continue;
             } else if r.accounts.is_empty() {
                 ("account", format!("\"{to}\""))

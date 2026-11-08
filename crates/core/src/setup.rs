@@ -45,14 +45,18 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     opened(ctx, &on, &line, json!({"host": host, "name": name, "via": via}))
 }
 
-/// #682: `[accounts]` account `account`'s sign-in, `claude setup-token` in a setup terminal on this host; `screen`
-/// stores the token it prints straight into the store as the account's secret, never shown or logged.
+/// #682: `[accounts]` account `account`'s sign-in, its harness's token command (`Harness::sign_in`) in a setup
+/// terminal on this host; `screen` stores the token it prints straight into the store, never shown or logged.
 pub fn sign_in(ctx: &Ctx, cfg: &Config, r: &dyn Runner, account: &str, via: &str) -> Result<String> {
-    let Some(var) = cfg.accounts.names.get(account) else {
-        return refused("NO_SUCH_ACCOUNT", format!("no [accounts] {account}"));
+    let (Some(var), Some((_, cmd, prefix))) = (
+        cfg.accounts.names.get(account),
+        crate::harness::accounts().and_then(crate::harness::Harness::sign_in),
+    ) else {
+        return refused("NO_SUCH_ACCOUNT", format!("no [accounts] {account} to sign in"));
     };
-    let d = json!({"host": "main", "name": "setup-token", "account": account, "secret": var, "via": via});
-    opened(ctx, &On::new(r, None), "claude setup-token", d)
+    let d =
+        json!({"host": "main", "name": "setup-token", "account": account, "secret": var, "prefix": prefix, "via": via});
+    opened(ctx, &On::new(r, None), cmd, d)
 }
 
 /// `line` in a new herdr workspace on `on`; logs `setup` with `d`, the pane and machine (no command line, no input).
@@ -115,10 +119,8 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
     let s = o.stdout;
     let ls: Vec<&str> = s.lines().map(str::trim_end).collect();
     // #682: a sign-in's token goes straight to the store, then its pane closes (its scrollback with it).
-    let token = ls
-        .iter()
-        .position(|l| l.contains("sk-ant-"))
-        .map(|i| joined(&ls, i, "sk-ant-"));
+    let prefix = e.str("prefix").filter(|p| !p.is_empty());
+    let token = prefix.and_then(|p| Some(joined(&ls, ls.iter().position(|l| l.contains(p))?, p)));
     if let (Some(t), Some(var)) = (token, e.str("secret")) {
         let svc = crate::secret::service("all", var);
         r.set_secret(&svc, Some(&t))?;
