@@ -41,6 +41,7 @@ pub mod setup;
 pub mod shed;
 pub mod snapshot;
 pub mod spawn;
+pub mod stall;
 pub mod timer;
 pub mod update;
 pub mod usage;
