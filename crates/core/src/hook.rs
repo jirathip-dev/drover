@@ -532,7 +532,7 @@ fn gh(t: &[&str]) -> Option<String> {
 fn group(r: &[&str]) -> Option<&'static str> {
     let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
     Some(match (*r.first()?, r.get(1).copied()) {
-        ("spawn", _) if r[1..].contains(&"design") => "design",
+        ("spawn", _) if r[1..].iter().any(|w| crate::events::STAGES.contains(w)) => "design",
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",

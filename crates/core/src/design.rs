@@ -1,4 +1,5 @@
 //! #412: an issue's optional design stage: the design lane's hand-off for review, and the owner's decision on it.
+//! #730: an architect stage works the same way; its events name `role: architect` (none: `design`).
 use crate::config::Config;
 use crate::events::{emit, last_spawn, read, Event, IssueState};
 use crate::runner::{ok, Runner};
@@ -16,13 +17,13 @@ pub fn is_ask(e: &Event) -> bool {
     e.kind == "needs-decision" && e.data.get("design") == Some(&Value::Bool(true))
 }
 
-/// The head the issue's design started from: the first design spawn's since the last reject.
-fn pre<'a>(ev: &'a [Event], f: &str, n: u64) -> Option<&'a str> {
+/// The head the issue's `role` stage started from: its first spawn's since the last reject.
+fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
     let from = ev
         .iter()
         .rposition(|e| e.is("design-rejected", f, n))
         .map_or(0, |i| i + 1);
-    let design = |e: &&Event| e.is("spawn", f, n) && e.str("role") == Some("design");
+    let design = |e: &&Event| e.is("spawn", f, n) && e.str("role") == Some(role);
     ev[from..]
         .iter()
         .filter(design)
@@ -61,13 +62,17 @@ pub fn handoff(
         return Ok(());
     }
     let (f, n) = (s.fleet.as_str(), s.issue);
-    let pre = pre(&ev, f, n).unwrap_or(head);
-    let names = ok(
-        r,
-        "git",
-        &["-C", wt, "diff", "--name-only", pre, head, "--", "docs/design"],
-    )
-    .unwrap_or_default();
+    let role = sp.str("role").unwrap_or("design");
+    let pre = pre(&ev, f, n, role).unwrap_or(head);
+    let dir = if role == "architect" {
+        "docs/architecture"
+    } else {
+        "docs/design"
+    };
+    let names = ok(r, "git", &["-C", wt, "diff", "--name-only", pre, head, "--", dir]).unwrap_or_default();
+    // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
+    let adr = names.lines().next().filter(|_| role == "architect");
+    let adr = adr.map(|l| l.split('/').take(3).collect::<Vec<_>>().join("/"));
     let png = |l: &&str| l.to_ascii_lowercase().ends_with(".png");
     let files: Vec<Value> = names
         .lines()
@@ -75,12 +80,12 @@ pub fn handoff(
         .map(|l| json!({"name": l, "path": Path::new(wt).join(l)}))
         .collect();
     writeln!(out, "{f} #{n} design-review: {head:.7}")?;
-    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files});
+    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files, "role": role, "adr": adr});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "design-review", d))?;
     let mark = |e: &&Event| {
         e.kind == "queue"
             && e.fleet == f
-            && e.data.get("design").is_some()
+            && (e.data.get("design").is_some() || e.data.get("architect").is_some())
             && e.data["issues"].as_array().is_some_and(|a| a.contains(&json!(n)))
     };
     let thread = ev
@@ -89,9 +94,14 @@ pub fn handoff(
         .and_then(|e| e.str("design_thread"))
         .filter(|t| !t.is_empty());
     let id = format!("q{}", ev.iter().filter(|e| e.kind == "needs-decision").count() + 1);
-    let q = format!("Design for #{n} is ready ({head:.7}): approve, revise (type a note) or reject?");
+    let what = if role == "architect" {
+        "Architecture (ADR)"
+    } else {
+        "Design"
+    };
+    let q = format!("{what} for #{n} is ready ({head:.7}): approve, revise (type a note) or reject?");
     let d = json!({"id": id, "question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
-        "thread": thread});
+        "thread": thread, "role": role});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-decision", d))
 }
 
@@ -131,5 +141,9 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         (d["pre"], d["sha"]) = (json!(pre), json!(c));
     }
     (d["id"], d["by"]) = (ask.data["id"].clone(), json!(by));
+    (d["role"], d["adr"]) = (
+        ask.data["role"].clone(),
+        review.map_or(Value::Null, |e| e.data["adr"].clone()),
+    );
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))
 }
