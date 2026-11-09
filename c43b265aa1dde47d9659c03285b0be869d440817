@@ -1,0 +1,12 @@
+Decided: a branch held by another worktree has its work saved to wip/, then that worktree is removed and the lane made again at the new root
+Because: "save it to `wip/` first as clean does (#254), then proceed"
+Rejected: reusing the old worktree in place — the lane would stay at the herdr root and the move would never finish
+Decided: the lookup runs only after worktree add or herdr worktree create fails
+Because: crates/core/src/spawn.rs:1116
+Rejected: looking up on every spawn — each extra Runner call is a sim yield point; it reshuffled the sim and turned 3 seeds red
+Decided: a live agent in the holding worktree is refused LANE_LIVE, matched by cwd, whatever its name
+Because: crates/core/src/spawn.rs:1122
+Decided: --force only after a plain remove fails, once the work is saved or pushed (only lane scratch is left)
+Because: crates/core/src/spawn.rs:1131
+Check: cargo test -p herdsman --test shed -- herdr_era fails at d04e614 and passes at head
+Owner: fix rounds of lanes from before the shed move no longer fail; any unsaved work in the old worktree goes to wip/ first
