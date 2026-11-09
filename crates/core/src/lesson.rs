@@ -222,7 +222,10 @@ pub fn prose_only(diff: &str) -> bool {
     for l in diff.lines() {
         if let Some(p) = l.strip_prefix("diff --git a/") {
             file = p.split(" b/").next().unwrap_or(p);
-            if !file.ends_with(".md") {
+            if !std::path::Path::new(file)
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("md"))
+            {
                 return false;
             }
         } else if file == ".herdsman/rules.md" && l.starts_with('-') && !l.starts_with("---") {
