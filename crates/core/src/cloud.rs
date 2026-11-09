@@ -359,13 +359,13 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
 /// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
 /// #637: a `shed-acp` host's own runtime instead of herdr: shed at herdsman's pin with its launchd or systemd job,
-/// node for the `claude-acp` adapter, and that adapter in shed's agent list.
+/// node for the ACP adapter (`{acp}`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
 systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
 launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }
 node\tcommand -v node && command -v npx\tapt_ nodejs npm
-claude-acp\tshed agents --json | grep -q '\"claude-acp\"'\tshed agents add claude-acp";
+{acp}\tshed agents --json | grep -q '\"{acp}\"'\tshed agents add {acp}";
 const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
@@ -424,7 +424,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if acp {
         let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
         let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-        steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{SHED}\n");
+        let adapter = SHED.replace("{acp}", crate::harness::default_acp().unwrap_or_default());
+        steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{adapter}\n");
     }
     steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;

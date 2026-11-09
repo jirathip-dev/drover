@@ -55,7 +55,7 @@ impl Default for ProxyCfg {
     fn default() -> Self {
         ProxyCfg {
             port: 41990,
-            upstream: "https://api.anthropic.com".into(),
+            upstream: crate::harness::PROXY_UPSTREAM.into(),
             key_hours: 12,
         }
     }

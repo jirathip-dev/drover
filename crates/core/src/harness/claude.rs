@@ -16,6 +16,14 @@ const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 pub struct Claude;
 
 /// `|`-separated, case-insensitive substrings of Claude Code's usage-limit banner (`[accounts].cap_pattern` overrides).
+/// #637: the token proxy's default upstream, the beta header it adds the OAuth beta to, and the env an ACP adapter
+/// reads its proxy URL and lane key from.
+pub const PROXY_UPSTREAM: &str = "https://api.anthropic.com";
+pub const BETA_HEADER: &str = "anthropic-beta";
+pub const OAUTH_BETA: &str = "oauth-2025-04-20";
+pub const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
+pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
+
 pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
 /// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.

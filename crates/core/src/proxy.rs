@@ -4,6 +4,7 @@
 //! sha256, live for `key_hours`, end with their lane, and `hosts keys revoke` ends one at once.
 use crate::config::{write_atomic, Config};
 use crate::events::{ends, fold, read, Event};
+use crate::harness::{BETA_HEADER, OAUTH_BETA};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -12,7 +13,6 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
 /// One lane key as kept (`<state dir>/proxy-keys.json`): never the key itself, only its sha256.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,19 +249,19 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         q(&path),
         q(&token)
     );
-    let mut beta: Vec<&str> = get("anthropic-beta")
+    let mut beta: Vec<&str> = get(BETA_HEADER)
         .unwrap_or_default()
         .split(',')
         .map(str::trim)
         .filter(|b| !b.is_empty())
         .collect();
-    if !beta.contains(&"oauth-2025-04-20") {
-        beta.push("oauth-2025-04-20");
+    if !beta.contains(&OAUTH_BETA) {
+        beta.push(OAUTH_BETA);
     }
-    conf += &format!("header = \"anthropic-beta: {}\"\n", beta.join(","));
+    conf += &format!("header = \"{BETA_HEADER}: {}\"\n", beta.join(","));
     for (k, v) in heads
         .iter()
-        .filter(|h| !DROP.contains(&h.0.as_str()) && h.0 != "anthropic-beta")
+        .filter(|h| !DROP.contains(&h.0.as_str()) && h.0 != BETA_HEADER)
     {
         conf += &format!("header = \"{k}: {}\"\n", q(v));
     }
@@ -282,16 +282,9 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     } else {
         format!("request = \"{}\"\ndump-header = \"-\"\n", q(&method))
     };
-    let mut ch = Command::new("curl")
-        .args(argv(&["-sS", "-N", "--http1.1", "-K", "-"]))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .context("cannot run curl")?;
-    ch.stdin.take().context("curl stdin")?.write_all(conf.as_bytes())?;
-    let mut up = BufReader::new(ch.stdout.take().context("curl stdout")?);
-    let res = relay(&mut up, &mut c);
-    let _ = ch.wait();
+    let res = r
+        .stream("curl", &argv(&["-sS", "-N", "--http1.1", "-K", "-"]), &conf)
+        .and_then(|up| relay(&mut BufReader::new(up), &mut c));
     let _ = std::fs::remove_file(&tmp);
     if res.is_err() {
         return reply(&mut c, 502, "upstream did not answer");

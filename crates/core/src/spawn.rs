@@ -206,10 +206,9 @@ pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Resu
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
     // #637: a remote ACP lane holds no account token, only its proxy key.
-    text += &p
-        .lane_key
-        .as_ref()
-        .map_or_else(String::new, |k| format!("export ANTHROPIC_AUTH_TOKEN='{k}'\n"));
+    text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
+        format!("export {}='{k}'\n", crate::harness::AUTH_TOKEN_ENV)
+    });
     let file = (!text.is_empty()).then(|| p.secrets_file());
     if let Some(f) = &file {
         on.write_private(f, &text)?;
@@ -590,7 +589,8 @@ fn remote_acp(
             ),
         );
     }
-    p.env.insert("ANTHROPIC_BASE_URL".into(), crate::proxy::url(cfg));
+    p.env
+        .insert(crate::harness::BASE_URL_ENV.into(), crate::proxy::url(cfg));
     p.lane_key = Some(crate::proxy::new_key()?);
     Ok(())
 }
