@@ -29,6 +29,7 @@ main = "{accounts}/main"
 
 [serve]
 allowed_hosts = ["mac.tail.ts.net"]
+webhook_secret_file = "{hook}"
 
 [[notify]]
 type = "webpush"
@@ -36,6 +37,7 @@ sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
         accounts = d.join("accounts").display(),
+        hook = d.join("config/secrets/GITHUB_WEBHOOK_SECRET").display(),
     )
 }
 
@@ -53,6 +55,8 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
     std::fs::create_dir_all(&c.worktrees).unwrap();
     // #683: account main's own login folder, signed in.
     write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
+    // #707: the webhook secret's 0600 file.
+    write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
         &c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist"),
         PLIST,
@@ -80,8 +84,6 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
 
 fn good() -> Fake {
     Fake::default()
-        .stored("herdsman/all/TOKEN_MAIN", TOKEN)
-        .stored("herdsman/all/GITHUB_WEBHOOK_SECRET", "hook")
         .reply("herdr status", HERDR)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1")
         .reply("vm_stat", "Swapouts: 5.\n")
@@ -95,7 +97,6 @@ fn good() -> Fake {
         .reply("tailscale serve status", "|-- / proxy http://127.0.0.1:7777\n")
         .reply("launchctl print gui/", "state = running\n")
         .reply("systemctl --user is-active", "active\n")
-        .reply("codesign -v -R", "")
 }
 
 fn line<'a>(out: &'a str, check: &str) -> &'a str {
@@ -116,17 +117,17 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
-        "account main",
+        "accounts",
         "harness",
         "serve hosts",
         "serve",
         "tailscale",
         "launchd",
-        "signature",
         "phone",
+        "webhook",
     ] {
-        // The launchd job and the signature are macOS only; Linux has no row for them.
-        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
+        // The launchd job is macOS only; Linux has no row for it.
+        if check == "launchd" && !cfg!(target_os = "macos") {
             assert!(!out.contains(&format!(" {check} — ")), "{out}");
             continue;
         }
@@ -135,9 +136,22 @@ fn all_good_exits_zero_and_never_writes() {
     for check in ["vapid.key", "push", "watchdog check", "watchdog drive", "timer"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
+    // #707 (q855): one account-source row, no per-account rows, no Keychain read, no signature row.
     assert!(
-        line(&out, "account main").contains("signed in (") && !out.contains("TOKEN_MAIN"),
+        line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
         "{out}"
+    );
+    assert!(
+        !out.contains(" account main — ") && !out.contains(" signature — "),
+        "{out}"
+    );
+    assert!(
+        !r.calls
+            .borrow()
+            .iter()
+            .any(|c| c.starts_with("security ") || c.starts_with("codesign ")),
+        "{:?}",
+        r.calls.borrow()
     );
     let writes = [
         "gh pr",
@@ -178,7 +192,7 @@ fn all_good_exits_zero_and_never_writes() {
 
 #[test]
 fn secrets_never_echo() {
-    // #441: the account's token is in the store; doctor checks it is there, never shows it.
+    // #707: the webhook secret and VAPID key are files; doctor checks them, never shows them.
     let (c, _) = setup("doc-secret", "claude");
     for args in [&["doctor"][..], &["doctor", "--json"]] {
         let (code, out) = run(&c, &good(), args);
@@ -189,7 +203,10 @@ fn secrets_never_echo() {
         );
     }
     let (_, out) = run(&c, &good(), &["doctor"]);
-    assert!(line(&out, "account main").starts_with('✓'), "{out}");
+    assert!(
+        line(&out, "webhook").starts_with('✓') && !out.contains("— hook"),
+        "{out}"
+    );
 }
 
 /// Each failure: (what breaks, the check, its fix).
@@ -218,14 +235,6 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "worktrees",
             "→ mkdir -p",
         ),
-        (
-            |_, d, r| {
-                std::fs::remove_file(d.join("accounts/main/.claude.json")).unwrap();
-                r
-            },
-            "account main",
-            "→ cooee Settings › Providers, or CLAUDE_CONFIG_DIR=",
-        ),
         (|_, _, r| r.once("which claude", 1, ""), "harness", "→ install claude"),
         (
             |_, _, r| r.once("lsof ", 1, ""),
@@ -249,18 +258,6 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             },
             "launchd",
             "no plist runs herdsman serve",
-        ),
-        (
-            // #556: an ad-hoc signed build (or no "herdsman-local" identity) fails codesign's requirement test.
-            |_, _, r| r.once("codesign -v -R", 3, ""),
-            "signature",
-            "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall",
-        ),
-        (
-            // #568: the identity is there, but codesign waits on the key's dialog: the fix sets its partition list.
-            |_, _, r| r.once("codesign -v -R", 3, "").reply("security find-certificate -c herdsman-local", ""),
-            "signature",
-            "→ security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db (asks the login password), then sh scripts/signing-identity.sh sign ",
         ),
         (
             |c, _, r| {
@@ -306,7 +303,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
-        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
+        if check == "launchd" && !cfg!(target_os = "macos") {
             continue;
         }
         let (c, d) = setup(&format!("doc-fail-{i}"), "claude");
@@ -348,9 +345,6 @@ fn tailscale_missing_is_a_warning() {
             self.0.run(prog, args)
         }
         fn sleep(&self, _: u64) {}
-        fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-            self.0.secret(svc)
-        }
     }
     let (c, _) = setup("doc-nots", "claude");
     let (code, out) = run(&c, &NoTailscale(good()), &["doctor"]);
@@ -417,11 +411,10 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
 
     let r = good();
-    r.store.borrow_mut().clear();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == warn), "{out}");
-    assert!(line(&out, "account main").starts_with('✓'), "{out}");
+    assert!(line(&out, "accounts").starts_with('✓'), "{out}");
     assert!(!out.contains(TOKEN), "{out}");
 
     std::fs::write(&c.config, &text).unwrap();

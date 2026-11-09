@@ -12,8 +12,6 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// The usage meter's Keychain service and reply parser, at their old paths (#316 moved them to its harness).
-pub use crate::harness::{keychain_service, parse_usage};
 /// Poll and cache period of the meter and the balance.
 const POLL: u64 = 600;
 
@@ -117,17 +115,16 @@ pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
 /// Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
 pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balance, bool), String>> {
     let p = cfg.providers.deepseek.as_ref()?;
-    let stored = || r.secret(&crate::secret::service("all", &p.key_env)).ok().flatten();
+    // #707: the env file is a secret file (0600, refused if looser); no store.
     let key = match p.env_file.as_deref() {
-        Some(f) => match std::fs::read_to_string(expand(f))
-            .ok()
-            .and_then(|t| env_value(&t, &p.key_env))
-            .filter(|k| !k.is_empty())
-        {
-            Some(k) => k,
-            None => return Some(Err(format!("key not found in {f}"))),
+        Some(f) => match crate::secret::file(&expand(f)) {
+            Err(e) => return Some(Err(format!("{e:#}"))),
+            Ok(t) => match t.and_then(|t| env_value(&t, &p.key_env)).filter(|k| !k.is_empty()) {
+                Some(k) => k,
+                None => return Some(Err(format!("key not found in {f}"))),
+            },
         },
-        None => stored().or(std::env::var(&p.key_env).ok()).filter(|k| !k.is_empty())?,
+        None => std::env::var(&p.key_env).ok().filter(|k| !k.is_empty())?,
     };
     let path = dir(ctx).join("deepseek.json");
     let cached: Option<Balance> = load(&path);
@@ -155,102 +152,18 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
 /// (utilization %, reset epoch) of one usage window, if read.
 pub type Window = Option<(f64, u64)>;
 
-/// One account's usage meter as cached in `<state>/usage/<name>.json`: numbers and reset times only.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[serde(default)]
+/// One account's usage reading: when it was read, and the (utilization %, reset epoch) of the 5-hour session and
+/// the 7-day week.
+#[derive(Debug, Default, Clone)]
 pub struct Meter {
-    /// Last poll, and last good read.
-    pub checked: u64,
     pub ts: u64,
-    /// (utilization %, reset epoch) of the 5-hour session and the 7-day week.
     pub session: Window,
     pub week: Window,
-    pub login_needed: bool,
-    pub retry_at: u64,
-    pub fails: u32,
 }
 
-/// The cached meter (no poll).
-pub fn cached(ctx: &Ctx, name: &str) -> Option<Meter> {
-    load(&dir(ctx).join(format!("{name}.json")))
-}
-
-/// The account's meter, polled at most every 10 min and one poll at a time; a 429 backs off (at least its
-/// `retry-after`). None when `[accounts.usage]` names no login for it, or its harness has no meter.
-pub fn meter(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Option<Meter> {
-    let login = cfg.accounts.usage.get(name)?;
-    let h = crate::harness::accounts()?;
-    let how = h.usage_meter()?;
-    let mut m = cached(ctx, name).unwrap_or_default();
-    if ctx.now < m.checked + POLL || ctx.now < m.retry_at {
-        return Some(m);
-    }
-    let d = dir(ctx);
-    let lock = d.join(".poll");
-    let _ = std::fs::create_dir_all(&d);
-    if std::fs::metadata(&lock)
-        .and_then(|x| x.modified())
-        .is_ok_and(|t| t.elapsed().is_ok_and(|e| e.as_secs() > 60))
-    {
-        let _ = std::fs::remove_file(&lock);
-    }
-    if std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)
-        .is_err()
-    {
-        return Some(m);
-    }
-    m.checked = ctx.now;
-    match how.poll(r, &expand(login), ctx.now) {
-        Poll::Got(session, week) => {
-            m = Meter {
-                checked: ctx.now,
-                ts: ctx.now,
-                session,
-                week,
-                ..Default::default()
-            }
-        }
-        Poll::Login => m.login_needed = true,
-        Poll::Lost => {
-            m.login_needed = true;
-            let why = format!(
-                "account {name}: the refreshed usage login could not be stored in the Keychain; run {} in {login}",
-                h.login().unwrap_or("its login")
-            );
-            let _ = crate::events::emit(
-                &ctx.state,
-                cfg,
-                Event::new(
-                    ctx.now,
-                    "accounts",
-                    None,
-                    "usage-login-lost",
-                    json!({"account": name, "reason": why}),
-                ),
-            );
-        }
-        Poll::Busy(after) => {
-            m.fails += 1;
-            m.retry_at = ctx.now + after.max(POLL << m.fails.min(4));
-        }
-        Poll::Failed => {}
-    }
-    let _ = save(&d.join(format!("{name}.json")), &m);
-    let _ = std::fs::remove_file(&lock);
-    Some(m)
-}
-
-/// One meter read (`UsageMeter::poll`).
-pub enum Poll {
-    Got(Window, Window),
-    Login,
-    /// A refresh rotated the login but storing it back failed: it must be logged in again.
-    Lost,
-    Busy(u64),
-    Failed,
+/// #707: `row`, as the frozen board (#552) still calls it.
+pub fn meter(ctx: &Ctx, _cfg: &Config, _r: &dyn Runner, name: &str) -> Option<Meter> {
+    row(ctx, name)
 }
 
 /// RFC 3339 (`2026-10-31T12:59:59.5+07:00`, or `Z`) as epoch seconds.
@@ -282,14 +195,10 @@ pub fn out_at((pct, reset): (f64, u64), now: u64) -> Option<u64> {
 /// The meter's (text, percent) parts and the pace warning.
 pub type Shown = (Vec<(String, f64)>, Option<String>);
 
-/// The meter's (text, percent) parts and the pace warning, or Err(the login hint).
-pub fn shown(r: &dyn Runner, m: &Meter, login: &str, now: u64) -> Result<Shown, String> {
-    if m.login_needed {
-        let how = crate::harness::accounts()
-            .and_then(crate::harness::Harness::login)
-            .unwrap_or("its login");
-        return Err(format!("usage: login needed ({how} in {login})"));
-    }
+/// The meter's (text, percent) parts and the pace warning (#707: never Err now the login poll is gone; `_login` and
+/// the Result stay for the frozen board's call).
+#[allow(clippy::unnecessary_wraps)]
+pub fn shown(r: &dyn Runner, m: &Meter, _login: &str, now: u64) -> Result<Shown, String> {
     let mut parts = vec![];
     if let Some((p, t)) = m.session {
         let read = now.saturating_sub(m.ts);
@@ -358,20 +267,19 @@ pub fn rows(ctx: &Ctx) -> std::collections::BTreeMap<String, Row> {
     rows.map(|r| (r.account.clone(), r)).collect()
 }
 
-/// The account's reading: its status-line row while fresh, else `login()` (the `/login` meter), else an older row.
-pub fn reading(ctx: &Ctx, name: &str, login: impl FnOnce() -> Option<Meter>) -> Option<Meter> {
-    let row = rows(ctx).remove(name).map(|w| Meter {
-        checked: w.ts,
+/// `row`, else `old` (#707: as the frozen board still calls it).
+pub fn reading(ctx: &Ctx, name: &str, old: impl FnOnce() -> Option<Meter>) -> Option<Meter> {
+    row(ctx, name).or_else(old)
+}
+
+/// #707: the account's newest status-line reading (`herdsman statusline`), fresh or stale; no `/api/oauth/usage`
+/// poll, so an account with no live lane keeps its last row.
+pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
+    rows(ctx).remove(name).map(|w| Meter {
         ts: w.ts,
         session: w.five_hour_pct.zip(w.five_hour_reset),
         week: w.seven_day_pct.zip(w.seven_day_reset),
-        ..Default::default()
-    });
-    match (row, login()) {
-        (Some(w), _) if ctx.now < w.ts + POLL => Some(w),
-        (w, Some(m)) if !m.login_needed || w.is_none() => Some(m),
-        (w, _) => w,
-    }
+    })
 }
 
 /// `herdsman statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one

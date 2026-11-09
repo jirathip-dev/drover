@@ -132,6 +132,8 @@ pub struct Plan {
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
     pub lane_key: Option<String>,
+    /// #707: a local lane's `token-file:` account: the env var and the file `deliver` exports it from.
+    pub token: Option<(String, PathBuf)>,
 }
 
 impl Plan {
@@ -147,7 +149,7 @@ impl Plan {
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if !self.secrets().is_empty() || self.lane_key.is_some() {
+        if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
@@ -192,13 +194,27 @@ impl Plan {
     }
 }
 
-/// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
-/// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
+/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`, its `token-file:`) and
+/// written 0600 beside its worktree on its host (over the ssh channel's stdin to a remote one), never in argv, a pane
+/// or the log; the guard removes the file when dropped.
+pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
-    for (var, fleet, name) in p.secrets() {
-        let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
-        let why = || format!("{var}: secret {name} is not in the store (`herdsman secret request`)");
+    let named = p
+        .secrets()
+        .into_iter()
+        .map(|(var, _, n)| (var, crate::secret::path(ctx, &n), n));
+    let token = p
+        .token
+        .iter()
+        .map(|(var, f)| (var.clone(), f.clone(), "token-file".into()));
+    for (var, f, name) in named.chain(token) {
+        let v = crate::secret::file(&f)?.or_else(|| cfg.legacy_secret(&name)); // #539
+        let why = || {
+            format!(
+                "{var}: secret {name} is not in {} (`herdsman secret request`)",
+                f.display()
+            )
+        };
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
     // #637: a remote ACP lane holds no account token, only its proxy key.
@@ -365,6 +381,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         resting,
         session: None,
         lane_key: None,
+        token: None,
     })
 }
 
@@ -907,6 +924,7 @@ pub fn spawn(
     // one gets none, its host signs in through the main host's token proxy (#637).
     if let Some(a) = p.account.as_mut().filter(|_| on.machine.is_none()) {
         a.1 = access::account_env(cfg, base, &p.harness, &a.0)?;
+        p.token = access::token_file(cfg, &p.harness, &a.0);
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
@@ -1295,7 +1313,7 @@ pub fn spawn(
         crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), (&pl.name, acct))?;
         crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
-    let _secrets = deliver(&on, cfg, &p)?;
+    let _secrets = deliver(ctx, &on, cfg, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {

@@ -38,7 +38,6 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> herdsman::Ctx 
 /// Both hosts reachable; mini at `mini` load/cpu, bazzite at `remote` (load ÷ 4 cpus, Linux `/proc`).
 fn fake(mini: f64, remote: f64) -> Fake {
     Fake::default()
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", TOKEN)
         .reply("herdr agent list", NO_AGENTS)
         .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))

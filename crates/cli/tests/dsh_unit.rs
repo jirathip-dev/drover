@@ -58,6 +58,7 @@ fn kick_with_non_ascii_path_does_not_panic() {
         resting: None,
         session: None,
         lane_key: None,
+        token: None,
     };
     assert!(!p.kick.is_char_boundary(20));
     let r = Fake(Default::default());

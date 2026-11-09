@@ -146,16 +146,23 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
 }
 
 /// The account token `key` signs with, or why it is refused.
-fn authorize(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (key, now): (&str, u64)) -> std::result::Result<String, String> {
+fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
     let (all, h) = (keys(ctx), sha(key));
     let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
     match state(now, &read(&ctx.state).unwrap_or_default(), k) {
         "live" => {}
         st => return Err(format!("lane key {} {st}", k.id)),
     }
-    let v = crate::secret::lookup(r, "all", &k.account).map_err(|e| format!("{e:#}"))?;
-    v.or_else(|| cfg.legacy_secret(&k.account))
-        .ok_or_else(|| format!("account secret {} is not in the store", k.account))
+    // #707: the account's `[accounts]` value is its hand-placed `token-file:<path>` (0600).
+    let f = k.account.strip_prefix("token-file:").map(crate::config::expand);
+    let v = f
+        .as_deref()
+        .map(crate::secret::file)
+        .transpose()
+        .map_err(|e| format!("{e:#}"))?;
+    v.flatten()
+        .or_else(|| cfg.legacy_secret(&k.account))
+        .ok_or_else(|| format!("account {}: no token file", k.account))
 }
 
 /// Headers never forwarded: hop-by-hop ones, the lane's own credentials, compression (curl passes bytes through).
@@ -243,7 +250,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         return reply(&mut c, 400, "bad request path");
     }
     let bearer = get("authorization").and_then(|a| a.strip_prefix("Bearer "));
-    let token = match authorize(ctx, cfg, r, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
+    let token = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
         Ok(t) => t,
         Err(why) => return reply(&mut c, 401, &why),
     };

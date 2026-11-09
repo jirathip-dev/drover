@@ -18,7 +18,6 @@ pub use claude::{
     remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, OAUTH_BETA,
     PROXY_UPSTREAM,
 };
-pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
@@ -78,10 +77,8 @@ pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
 /// (used %, reset epoch) of a usage window, either part unread.
 pub type Part = (Option<f64>, Option<u64>);
 
-/// A harness's usage meter for an `[accounts]` login (#258).
+/// A harness's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
 pub trait UsageMeter: Sync {
-    /// Read the 5-hour and 7-day windows of the login in `dir` (`[accounts.usage]`).
-    fn poll(&self, r: &dyn Runner, dir: &Path, now: u64) -> crate::usage::Poll;
     /// The (5-hour, 7-day) parts of its status-line JSON (`herdsman statusline`).
     fn status(&self, v: &Value) -> (Part, Part);
 }
@@ -235,6 +232,8 @@ impl Harness for Generic {}
 
 /// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
 pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
+/// #707: the provider -> env var a hand-placed `token-file:` account's token is exported as, to its lane only.
+pub const TOKEN_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CODE_OAUTH_TOKEN")];
 
 pub fn get(name: &str) -> &'static dyn Harness {
     match name {

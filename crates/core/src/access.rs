@@ -34,12 +34,11 @@ fn latest<'a>(events: &'a [Event], name: &str) -> Option<&'a Event> {
 }
 
 /// #640: a limit banner on account `a` caps it only when its usage reading agrees: none fresh (10 min) or a
-/// window it has at 100% (until the later reset); a 401 reading is a sign-out. (kind, until, the reading) for `check`.
-pub fn confirm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, a: Option<&str>, until: u64) -> Seen {
+/// window it has at 100% (until the later reset). (kind, until, the reading) for `check`.
+pub fn confirm(ctx: &Ctx, a: Option<&str>, until: u64) -> Seen {
     let stale = ["agent-unavailable", "account-capped"][usize::from(a.is_some())];
-    let m = a.and_then(|n| usage::reading(ctx, n, || usage::meter(ctx, cfg, r, n)));
-    match m.filter(|m| m.login_needed || ctx.now < m.ts + 600) {
-        Some(m) if m.login_needed => ("account-signed-out", None, "usage 401".into()),
+    let m = a.and_then(|n| usage::row(ctx, n));
+    match m.filter(|m| ctx.now < m.ts + 600) {
         Some(m) => {
             let full = [m.session, m.week].into_iter().flatten().filter(|w| w.0 >= 100.0);
             let full = full.map(|w| w.1.max(until)).max();
@@ -94,7 +93,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         return Ok(None);
     }
     let week = |n: &String| {
-        crate::usage::cached(ctx, n)
+        usage::row(ctx, n)
             .filter(|m| m.ts + 1800 > now)
             .and_then(|m| m.week)
             .map(|w| w.0)
@@ -105,7 +104,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         .collect();
     // Headroom: the lowest live 5h/7d use first; an account never read goes last.
     let used = |n: &String| {
-        let m = usage::reading(ctx, n, || usage::cached(ctx, n));
+        let m = usage::row(ctx, n);
         let live = m.map(|m| [m.session, m.week].into_iter().flatten().filter(|w| w.1 > now));
         live.map_or(f64::INFINITY, |w| w.map(|w| w.0).fold(0.0, f64::max))
     };
@@ -217,7 +216,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
             .filter(|(a, n)| *n == name && open(a))
             .map(|(a, _)| *a)
             .collect();
-        let m = usage::reading(ctx, name, || usage::meter(ctx, cfg, r, name));
+        let m = usage::row(ctx, name);
         let mut state = cap_line(cfg, r, &events, name, ctx.now);
         if let (Some(m), "ok") = (&m, state.as_str()) {
             state = format!("ok: {}", pcts(m));
@@ -258,6 +257,9 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
         return Ok(BTreeMap::new());
     };
     let Some(cmd) = &cfg.accounts.account_env else {
+        if token_file(cfg, harness, name).is_some() {
+            return Ok(BTreeMap::new()); // #707: its token goes in the lane's secrets file (`spawn::deliver`)
+        }
         let var = crate::harness::CONFIG_ENV
             .iter()
             .find(|p| p.0 == provider)
@@ -287,6 +289,20 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
     }
 }
 
+/// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var
+/// its lane gets the token as (`harness::TOKEN_ENV`) and the file.
+pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, std::path::PathBuf)> {
+    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+        return None;
+    };
+    let f = cfg.accounts.names.get(name)?.strip_prefix("token-file:")?;
+    let var = crate::harness::TOKEN_ENV.iter().find(|p| p.0 == provider)?.1;
+    cfg.accounts
+        .account_env
+        .is_none()
+        .then(|| (var.to_string(), crate::config::expand(f)))
+}
+
 /// #683: account `name`'s sign-in for `herdsman accounts` and doctor: whether it passes, and its line (` → ` its fix):
 /// its env's config folder holds its CLI's login (a file read, never the Keychain), or why its env failed.
 pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
@@ -294,6 +310,14 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     let Some(hn) = crate::harness::NAMES.iter().find(on) else {
         return (false, "no harness runs on [accounts]".into());
     };
+    if let Some((var, f)) = token_file(cfg, hn, name) {
+        let ok = crate::secret::file(&f).map(|v| v.is_some());
+        let why = ok.as_ref().map_or_else(|e| format!(" ({e:#})"), |_| String::new());
+        return (
+            ok.unwrap_or(false),
+            format!("{var} from token file {}{why} → place it, mode 600", f.display()),
+        );
+    }
     let (h, env) = (crate::harness::get(hn), account_env(cfg, r, hn, name));
     let env = match env {
         Ok(env) => env,
