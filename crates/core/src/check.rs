@@ -1808,6 +1808,11 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
 }
 
+/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
+pub fn unsaved(on: &On, wt: &Path) -> bool {
+    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
+}
+
 /// #664: close `pane` on the lane's host, then any pane herdr there still shows for `agent` or inside `wt` (a stale id
 /// in the log, a shell its harness left); fails, naming it, unless the host confirms none is left.
 fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
