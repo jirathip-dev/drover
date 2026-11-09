@@ -1,0 +1,7 @@
+Decided: the login-shell token var comes from a new Harness::token_env hook, since #683 removed Credential::Token
+Because: crates/core/src/harness/mod.rs:40
+Because: crates/core/src/harness/claude.rs:164
+Rejected: Credential::Account's provider string — it names the provider, not the env var a shell token overrides
+Rejected: hard-coding the name in doctor.rs — the harness-neutral rule (#316) keeps harness names in harness/
+Check: the ci.yml harness-neutral grep finds nothing; a_login_shell_exporting_the_token_warns and claude_role_dry_run_uses_synced_profile pass
+Owner: no behaviour change from round 1; it just compiles again after the accounts change on staging.
