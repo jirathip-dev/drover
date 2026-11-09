@@ -57,12 +57,6 @@ impl Runner for Git<'_> {
     fn sleep(&self, secs: u64) {
         self.fake.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.fake.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.fake.set_secret(svc, value)
-    }
 }
 
 /// `git -C dir args` in a fixture, its stdout; it must succeed.

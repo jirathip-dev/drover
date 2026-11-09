@@ -406,16 +406,12 @@ impl Runner for Cli<'_> {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
 }
 
 /// A shed-acp spawn's fake: shed's CLI answers, and the installed agent is `adapter` (`shed agents --json`).
 fn acp_fake(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     spawn_fake()
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C", TOKEN_C)
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -1248,9 +1244,6 @@ impl Runner for Push<'_> {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
 }
 
 /// #662: the ACP fleet with accounts C then D (#683: folders), and #12's impl lane spawned on C in a real worktree (its `origin` a

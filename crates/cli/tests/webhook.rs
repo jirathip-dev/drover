@@ -8,12 +8,14 @@ use serde_json::json;
 use std::io::{Read, Write};
 
 const SECRET: &str = "s3cret-hook";
-const KEY: &str = "herdsman/all/GITHUB_WEBHOOK_SECRET";
 const KICK: &str = "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 7 --why webhook --now";
 
-/// A sendmeter fleet with an impl lane on `issue-7`.
+/// A sendmeter fleet with an impl lane on `issue-7`; #707: its webhook secret in the 0600 file `[serve]` names.
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
+    let f = secret_file(&c, "GITHUB_WEBHOOK_SECRET", SECRET, 0o600);
+    let line = format!("\n[serve]\nwebhook_secret_file = \"{}\"\n", f.display());
+    std::fs::write(&c.config, CONFIG.to_string() + &line).unwrap();
     let d = json!({"role": "impl", "agent": "sendmeter-impl-7", "branch": "issue-7"});
     append(&c.state, &Event::new(10, "sendmeter", Some(7), "spawn", d)).unwrap();
     c
@@ -62,9 +64,7 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
 
     herdsman::db::put(&c.state, "board", 1, &herdsman::snapshot::Snapshot::default()).unwrap();
     let board = herdsman::db::stamp(&c.state, "board");
-    let r = Fake::default()
-        .stored(KEY, SECRET)
-        .reply("gh pr view issue-7", &pr("COMPLETED", Some("SUCCESS")));
+    let r = Fake::default().reply("gh pr view issue-7", &pr("COMPLETED", Some("SUCCESS")));
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let res = send(&c, &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
@@ -92,9 +92,7 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
 #[test]
 fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
     let c = setup("hook-401");
-    let r = Fake::default()
-        .stored(KEY, SECRET)
-        .reply("gh pr view", &pr("COMPLETED", Some("SUCCESS")));
+    let r = Fake::default().reply("gh pr view", &pr("COMPLETED", Some("SUCCESS")));
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let other = suite("jirathip-dev/sendmeter", "issue-8");
     let sigs = [
@@ -122,7 +120,7 @@ fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
 #[test]
 fn an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200() {
     let c = setup("hook-202");
-    let r = Fake::default().stored(KEY, SECRET);
+    let r = Fake::default();
     for body in [
         suite("someone/else", "issue-7"),
         suite("jirathip-dev/sendmeter", "feature-x"),
@@ -139,7 +137,7 @@ fn an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200() {
 
 #[test]
 fn with_no_secret_the_endpoint_is_503_and_doctor_warns() {
-    let c = setup("hook-503");
+    let c = ctx(&tmpdir("hook-503"), CONFIG);
     let r = Fake::default();
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let res = send(&c, &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
@@ -147,9 +145,38 @@ fn with_no_secret_the_endpoint_is_503_and_doctor_warns() {
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
-        out.contains("\n! webhook — no secret → herdsman secret request"),
+        out.contains("\n! webhook — no secret → put the secret in a file, chmod 600"),
         "{out}"
     );
+}
+
+#[test]
+fn a_webhook_secret_file_others_can_read_is_refused() {
+    let c = setup("hook-0644");
+    let f = secret_file(&c, "GITHUB_WEBHOOK_SECRET", SECRET, 0o644);
+    let r = Fake::default().reply("gh pr view issue-7", &pr("COMPLETED", Some("SUCCESS")));
+    let body = suite("jirathip-dev/sendmeter", "issue-7");
+    let res = send(&c, &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
+    assert!(res.starts_with("HTTP/1.1 503 Service Unavailable"), "{res}");
+    assert!(res.contains("SECRET_FILE_OPEN") && !res.contains(SECRET), "{res}");
+    assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
+    let (_, out) = run(&c, &r, &["doctor"]);
+    let want = format!(
+        "! webhook — REFUSED SECRET_FILE_OPEN: {} is readable by others",
+        f.display()
+    );
+    assert!(out.contains(&want), "{out}");
+    assert!(!out.contains(SECRET), "{out}");
+}
+
+#[test]
+fn a_webhook_secret_inline_in_fleet_toml_is_still_refused() {
+    let c = ctx(&tmpdir("hook-inline"), CONFIG);
+    let inline = "\n[serve]\nwebhook_secret_file = \"ghp_0123456789abcdefghijABCDEFGHIJ012345\"\n";
+    std::fs::write(&c.config, CONFIG.to_string() + inline).unwrap();
+    let (code, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("SECRET_IN_CONFIG"), "{out}");
 }
 
 #[test]
@@ -188,7 +215,7 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || listen(&c2, &Fake::default().stored(KEY, SECRET), &l));
+    std::thread::spawn(move || listen(&c2, &Fake::default(), &l));
     for req in [
         "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
         "GET /live HTTP/1.1\r\nHost: x\r\n\r\n",
@@ -241,7 +268,6 @@ fn open_pr() -> String {
 fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery() {
     let c = setup("hook-catchup");
     let r = Fake::default()
-        .stored(KEY, SECRET)
         .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
@@ -273,7 +299,7 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
     assert_eq!(r.count("gh api graphql"), 3, "{:?}", r.calls.borrow());
 
     // Without the secret, the fast step probes each minute as before.
-    r.store.borrow_mut().clear();
+    std::fs::remove_file(c.config.with_file_name("secrets/GITHUB_WEBHOOK_SECRET")).unwrap();
     step(720);
     assert!(r.count("gh api -i") > 0, "{:?}", r.calls.borrow());
 }

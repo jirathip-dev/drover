@@ -19,7 +19,6 @@ pub use claude::{
     remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, OAUTH_BETA,
     PROXY_UPSTREAM,
 };
-pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
@@ -104,10 +103,8 @@ pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
 /// (used %, reset epoch) of a usage window, either part unread.
 pub type Part = (Option<f64>, Option<u64>);
 
-/// A harness's usage meter for an `[accounts]` login (#258).
+/// A harness's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
 pub trait UsageMeter: Sync {
-    /// Read the 5-hour and 7-day windows of the login in `dir` (`[accounts.usage]`).
-    fn poll(&self, r: &dyn Runner, dir: &Path, now: u64) -> crate::usage::Poll;
     /// The (5-hour, 7-day) parts of its status-line JSON (`herdsman statusline`).
     fn status(&self, v: &Value) -> (Part, Part);
 }

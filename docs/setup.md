@@ -14,9 +14,6 @@ adapter: a herdr CLI change touches that file only.
 gh auth status
 herdr --version
 cargo install --path crates/cli --locked --root ~/.local/share/herdsman
-# macOS (#556): sign with one local identity, so the keychain's "Always Allow" outlasts every reinstall.
-sh scripts/signing-identity.sh   # once: creates "herdsman-local", lets codesign use it (asks the login password)
-sh scripts/signing-identity.sh sign ~/.local/share/herdsman/bin/herdsman   # by hash; fails, never hangs, on a dialog
 echo 'export PATH="$HOME/.local/share/herdsman/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
@@ -61,8 +58,8 @@ herdsman profiles sync
 ```
 
 Check it worked: `herdsman status` prints no error. Every other key is in
-[fleet.example.toml](../fleet.example.toml). Claude accounts and the DeepSeek key live in env files, never
-in fleet.toml: see [providers.md](providers.md).
+[fleet.example.toml](../fleet.example.toml). Claude accounts sign in with their own login folders, and secrets live in
+0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
 
 ## 3. First lane
 
@@ -110,9 +107,7 @@ herdsman needs no Hermes: `herdsman setup` (or `timer install`) also writes two 
 
 - `dev.herdsman.update` runs `herdsman self-update` every 5 minutes. It fetches the herdsman fleet's integration
   branch (the fleet whose repo is `…/herdsman`) and installs a new head only once its CI is all green: it builds in
-  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, signs the build by hash with
-  "herdsman-local" through `scripts/signing-identity.sh sign` (#556, #568; refused without it:
-  `sh scripts/signing-identity.sh` once), runs the new binary's
+  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, runs the new binary's
   `doctor --config-only` against the live fleet.toml (#539), swaps it in atomically, then runs `profiles sync` and
   restarts the board job. Any failed step keeps the old binary and alerts `self-update-failed` once per head, with
   the exact failure. `herdsman self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
@@ -122,7 +117,7 @@ herdsman needs no Hermes: `herdsman setup` (or `timer install`) also writes two 
   closes each herdr workspace whose checkout folder is gone. A refusal or failure alerts `clean-failed` once; a clean
   no-op is silent.
 
-Moving off Hermes: once both jobs have run (`self-updated` in the log after a staging merge, no keychain prompt),
+Moving off Hermes: once both jobs have run (`self-updated` in the log after a staging merge),
 remove the old Hermes fleet jobs, once:
 
 ```sh

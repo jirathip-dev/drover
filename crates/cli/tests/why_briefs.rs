@@ -30,12 +30,6 @@ impl Runner for Notes<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.0.set_secret(svc, value)
-    }
 }
 
 fn g(dir: &Path, args: &[&str]) -> String {

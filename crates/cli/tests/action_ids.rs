@@ -51,9 +51,6 @@ impl Runner for Hooked<'_> {
         }
         out
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.fake.secret(svc)
-    }
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
