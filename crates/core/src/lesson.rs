@@ -204,6 +204,42 @@ pub fn done(
     Ok(writeln!(out, "closed {fleet}#{n}: {why}")?)
 }
 
+/// #733: rev's rule for a lesson PR, the finding a prose-only one's PASS is recorded as a FAIL with.
+pub const PROSE_ONLY: &str = "- blocking [lesson] .herdsman/rules.md:1: this lesson PR adds or changes no enforcer \
+(a CI step, a test, a type, a lint rule, a lesson check) and retires no rules line\n  Proof: spec\n  > A PR that only \
+edits prose is a FAIL in rev, unless it retires lines.\n  roles/lesson.md:3 says each class is fixed by a check";
+
+/// #733: whether issue `n` is a lessons issue: its lane's build, else its title (#639: drive may start it as `impl`).
+pub fn is_lesson(ctx: &Ctx, st: Option<&crate::events::IssueState>, (fleet, n): (&str, u64)) -> bool {
+    st.is_some_and(|s| s.build.as_deref() == Some("lesson"))
+        || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "))
+}
+
+/// #733: whether a PR's unified `diff` only edits prose: every file Markdown, no `.herdsman/rules.md` line removed or
+/// changed (a retirement or promotion), no lesson check added.
+pub fn prose_only(diff: &str) -> bool {
+    let (mut file, mut added) = ("", String::new());
+    for l in diff.lines() {
+        if let Some(p) = l.strip_prefix("diff --git a/") {
+            file = p.split(" b/").next().unwrap_or(p);
+            if !std::path::Path::new(file)
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("md"))
+            {
+                return false;
+            }
+        } else if file == ".herdsman/rules.md" && l.starts_with('-') && !l.starts_with("---") {
+            return false;
+        } else if let Some(a) = l
+            .strip_prefix('+')
+            .filter(|_| file == ".herdsman/rules.md" && !l.starts_with("+++"))
+        {
+            added += &format!("{a}\n");
+        }
+    }
+    checks(&added).is_empty()
+}
+
 /// #517: the one prompt a lesson lane gets when its turn ends with no push and no `done`.
 pub fn prompt(fleet: &str, n: u64) -> String {
     format!("no repeated class? end with `herdsman done --no-change \"no repeated class\" {fleet} {n}`")
