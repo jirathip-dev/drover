@@ -809,12 +809,14 @@ pub fn clean(
             }
             dirty(&on, Path::new(wt))
         };
+        // #716: what a verified save left behind (build folders, scratch, big files) never keeps the worktree.
+        let saved = keep.is_some() && yes && !live && lane.is_none();
         let keep = match keep {
             Some(why) if !yes && !live && lane.is_none() => {
                 writeln!(out, "would save {shown} to wip/ ({why}), then remove it")?;
                 continue;
             }
-            Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, &on, out, &events, e, wt)?,
+            Some(_) if saved => save(ctx, cfg, &on, out, &events, e, wt)?,
             k => k,
         };
         if let Some(reason) = keep {
@@ -836,6 +838,7 @@ pub fn clean(
             e.str("workspace")
                 .or_else(|| pane.split(':').next())
                 .unwrap_or_default(),
+            saved,
         ) {
             writeln!(out, "failed {shown}: {err:#}")?;
             failed += 1;
@@ -1003,7 +1006,7 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
 fn save(
     ctx: &Ctx,
     cfg: &Config,
-    r: &dyn Runner,
+    r: &On,
     out: &mut dyn Write,
     events: &[Event],
     e: &Event,
@@ -1597,11 +1600,12 @@ fn closed_issues<'a>(
 }
 
 /// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES` and `SHOT_DIRS`.
-pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<()> {
+/// `saved`: its work is on `wip/` (#716), so what is left goes too (`--force`).
+pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str, saved: bool) -> Result<()> {
     if !ws.is_empty() && herdr::worktree_remove(r, ws)? {
         return Ok(());
     }
-    if let Some(why) = dirty(r, Path::new(wt)) {
+    if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
     }
     for f in OWN_FILES {
@@ -1619,7 +1623,11 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<(
         None => cfg.fleet(fleet)?.local_path().to_string_lossy().into_owned(),
         Some(_) => wt.into(),
     };
-    ok(r, "git", &["-C", &local, "worktree", "remove", wt])?;
+    let mut args = vec!["-C", &local, "worktree", "remove", wt];
+    if saved {
+        args.insert(4, "--force");
+    }
+    ok(r, "git", &args)?;
     Ok(())
 }
 
@@ -1716,7 +1724,7 @@ fn kill_as(
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
     let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
-    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
+    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, &on, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
         gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
@@ -1862,15 +1870,20 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
     if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
-    let w = wip_branch(ctx, on.r, agent);
+    let w = wip_branch(ctx, on, agent);
     save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|(w, _)| Some(w))
 }
 
-/// `wip/<agent>-<YYYYmmdd-HHMMSS>-<tag>` (the epoch when `date` is unreadable); #664: never another save's name.
-pub(crate) fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
-    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M%S");
+/// `wip/<agent>-<YYYYmmdd-HHMMSS>[-<machine>]-<tag>` (the epoch when `date` is unreadable); #664: never another
+/// save's name; #716: another host's save of the same lane in the same second neither.
+pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
+    let stamp = crate::usage::date(on, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
-    let w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    let mut w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    if let Some(m) = on.machine {
+        w += "-";
+        w.extend(m.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }));
+    }
     format!("{w}-{}", tag(&w))
 }
 
