@@ -648,23 +648,25 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false), true)
+    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false, false), true)
 }
 
 /// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub). Dry run unless `yes`.
-/// `--lane` (one agent's worktree) refuses `UNSAFE_CLEAN` with the reason when it cannot go.
+/// `--lane` (one agent's worktree) refuses `UNSAFE_CLEAN` with the reason when it cannot go. #678: `all` (an explicit
+/// run) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
 pub fn clean(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
     fleet: Option<&str>,
-    (issue, lane, sched): (Option<u64>, Option<&str>, bool),
+    (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
     yes: bool,
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let states = fold(&events);
     let agents = crate::hosts::all_agents(cfg, r).context("cannot list herdr agents; refusing to clean blind")?;
+    let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
     let mut failed = 0;
     let (mut freed, mut removed) = (0, 0);
@@ -701,10 +703,15 @@ pub fn clean(
         }
         let on = On::of(r, Some(e));
         // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
+        // #678: an explicit run's probe decides for a disabled host.
         let away = e.str("host").filter(|_| on.machine.is_some());
-        let held = match away.and_then(|h| cfg.hosts.get(h)) {
-            Some(h) if !h.enabled => Some("on a disabled host (not cleaned)"),
-            _ => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
+        let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
+            Some(h) => match off.iter().find(|o| o.0 == h) {
+                Some((.., Some(_))) => None,
+                Some(_) => Some("host offline (not cleaned)"),
+                None => Some("on a disabled host (not cleaned)"),
+            },
+            None => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
         };
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
         let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
@@ -875,6 +882,9 @@ pub fn clean(
             ),
         )?;
     }
+    if lane.is_none() && issue.is_none() {
+        sweep_off(ctx, cfg, r, out, &off, !yes)?;
+    }
     if yes {
         idle.retain(|n, _| {
             fresh.contains(n) || (agents.iter()).any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
@@ -905,7 +915,7 @@ const IDLE: &str = "idle-merged";
 /// then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed`
 /// once (until a run passes); a clean no-op is silent.
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean(ctx, cfg, r, out, None, (None, None, true), true).and_then(|()| {
+    let res = clean(ctx, cfg, r, out, None, (None, None, true, false), true).and_then(|()| {
         let list = herdr::list(r, "workspace")?;
         let all = list["result"]["workspaces"].as_array().cloned().unwrap_or_default();
         for w in all {
@@ -1128,6 +1138,61 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
 }
 
 pub type Live = std::collections::BTreeSet<String>;
+
+type Off<'c> = Vec<(&'c str, &'c str, Option<Vec<Value>>)>;
+
+/// #678: each disabled remote host, its machine and live agents (None: it did not answer `Pass`'s one bounded probe).
+fn disabled<'c>(cfg: &'c Config, r: &dyn Runner) -> Off<'c> {
+    let hosts = cfg.hosts.iter().filter(|h| !h.1.enabled);
+    let hosts = hosts.filter_map(|(n, h)| Some((n.as_str(), h.machine.as_deref()?)));
+    hosts
+        .map(|(n, m)| (n, m, crate::hosts::agents_of(cfg, n, &On::new(r, Some(m))).ok()))
+        .collect()
+}
+
+/// #678: on each disabled host that answered, every `.scratch/<agent>` no live agent of that name there holds goes (a
+/// lane moved to another host keeps no copy here); `dry`: listed. Bytes freed.
+fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: &Off, dry: bool) -> Result<u64> {
+    let mut freed = 0;
+    for (name, m, agents) in off {
+        let Some(agents) = agents else {
+            writeln!(out, "scratch: {name}: host offline (not cleaned)")?;
+            continue;
+        };
+        let on = On::new(r, Some(m));
+        for b in build_dirs(ctx, cfg, &on) {
+            let res = scratch(&on, &b, &[]).and_then(|v| {
+                let held = |n: &String| agents.iter().any(|a| a["name"] == n.as_str());
+                let gone: Vec<String> = v.into_iter().map(|n| n.0).filter(|n| !held(n)).collect();
+                match () {
+                    () if dry || gone.is_empty() => Ok(gone.into_iter().map(|n| (n, 0)).collect()),
+                    () => scratch(&on, &b, &gone),
+                }
+            });
+            let gone = match res {
+                Ok(g) => g,
+                Err(e) => {
+                    writeln!(out, "scratch: {name}: {e:#}")?;
+                    continue;
+                }
+            };
+            for (n, bytes) in gone {
+                let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
+                freed += bytes;
+                if dry {
+                    writeln!(out, "would remove scratch {name}:{p}")?;
+                } else {
+                    writeln!(
+                        out,
+                        "scratch: {name}: removed {p} {:.2} GB (no live lane there)",
+                        gb(bytes)
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(freed)
+}
 
 /// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or
 /// one spawned in the last `stall_minutes`.
@@ -1431,6 +1496,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
         }
     }
     total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
+    total += sweep_off(ctx, cfg, r, o, &disabled(cfg, r), !yes)?; // #678
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {

@@ -1316,7 +1316,7 @@ impl<'a> Server<'a> {
                 self.r,
                 &mut out,
                 Some(&fleet),
-                (None, Some(agent), false),
+                (None, Some(agent), false, true),
                 yes,
             )?,
             "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,

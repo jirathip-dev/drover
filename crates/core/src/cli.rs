@@ -1308,7 +1308,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
             let cfg = Config::load(&ctx.config)?;
-            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            // #561: check, clean, drive (#678: and reclaim) probe each remote host once and bound every remote call.
             let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
             let pass = if fast {
                 crate::hosts::Pass::fast(r)
@@ -1316,7 +1316,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::hosts::Pass::new(r, None)
             };
             let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
             };
             let kick = |f: &str, n, why| {
@@ -1631,7 +1631,15 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
+                    check::clean(
+                        ctx,
+                        &cfg,
+                        r,
+                        out,
+                        fleet.as_deref(),
+                        (None, lane.as_deref(), false, true),
+                        yes,
+                    )?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
