@@ -1,0 +1,12 @@
+Decided: herdsman serve itself is the plugin backend: /plugin/<tab>.js embeds web/plugin/dist, and a bearer token stands for the paired device's hd= cookie
+Because: "herdsman serves the built plugin (manifest + assets) the way cooee loads plugins today"
+Because: crates/server/src/serve.rs:386
+Decided: cooee-drover's Rust binary is dropped; its proxy is this server, its answer-undelivered poller duplicated herdsman's notifiers
+Because: crates/core/src/check.rs:177
+Decided: the tab modules are imported byte-identical (db41383); /design/ and /shot/ answer data: URLs to a bearer call instead of a TS change
+Because: "the `ui` job's 390 screenshots match cooee-drover's at its last staging sha"
+Rejected: git subtree import — cooee-drover's (#N) commit subjects would link to this repo's unrelated issues
+Rejected: a separate DROVER token per tab — the modules hold no secret; the paired-device check already guards every op
+Check: cargo test --test cooee_plugin and verify_stage pass; web/plugin npm test passes; web/plugin/dist equals cooee-drover@db41383's
+Check: board-freeze needs a board-fix line in the issue: the route can only live in serve.rs
+Owner: cooee now loads the Queue, Asks, Fleets and Lanes tabs straight from herdsman; give each tab a paired device's token.
