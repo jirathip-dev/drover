@@ -533,7 +533,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 
 /// #248: when lane `e` handed off: the latest `pushed`/`verdict` since it spawned (design: its latest commit since).
 fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
-    if e.str("role") == Some("design") {
+    if crate::events::design(e) {
         let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"]).ok()?;
         let t = t.trim().parse().ok();
         return t.filter(|t| *t > e.ts);
@@ -651,7 +651,7 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         let (Some(wt), Some(pane), on) = (e.str("worktree"), e.str("pane"), On::of(r, Some(e))) else {
             continue;
         };
-        if e.str("role") == Some("design") || !seen.insert(wt) || !on.exists(Path::new(wt)) {
+        if crate::events::design(e) || !seen.insert(wt) || !on.exists(Path::new(wt)) {
             continue;
         }
         match dirty(&on, Path::new(wt)) {
