@@ -437,3 +437,113 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
         "{page}"
     );
 }
+
+/// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the herdr fake (the
+/// run prints `load 0.42`), and a paired owner device's cookie.
+fn card_between_replies(c: &herdsman::Ctx) -> (String, Fake, String) {
+    let at = |n: u64| herdsman::Ctx {
+        now: T + n,
+        ..c.clone()
+    };
+    let say = |n: u64, text: &str| run(&at(n), &Fake::default(), &["thread", "reply", "t1", text]);
+    say(0, "before the card");
+    let args = [
+        "card",
+        "post",
+        "t1",
+        "--cmd",
+        "uptime",
+        "--why",
+        "owner asked",
+        "--blast",
+        "read-only",
+        "--dir",
+        "/srv/app",
+    ];
+    assert_eq!(run(&at(10), &Fake::default(), &args).1, "r1\n");
+    say(20, "after the card");
+    let sha = kinds(c, "run-card")[0].str("sha").unwrap().to_string();
+    let r = herdr(&live()).reply("sh -c", "load 0.42\n");
+    let cookie = pair(&Server::new(c, &r, Some(ADDR.into())), c, "Mozilla/5.0 (iPhone)", T);
+    (sha, r, cookie)
+}
+
+/// Thread t1's view in the [chat] tab's HTML, and where `w` first is in it.
+fn t1(page: &str) -> &str {
+    &page[page.find("<div class=cvp data-t=\"t1\">").unwrap()..]
+}
+fn pos(page: &str, w: &str) -> usize {
+    page.find(w).unwrap_or_else(|| panic!("{w} not in {page}"))
+}
+
+/// #702: a run card the conductor posts between two of its replies renders in the chat tab (API v1 `chat` and its
+/// HTML) in order, with its command, why, blast and open [approve]/[deny].
+#[test]
+fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
+    let c = setup("cards-run-order", "", "");
+    let (sha, r, cookie) = card_between_replies(&c);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "chat")).unwrap();
+    let t = j["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap();
+    let msgs: Vec<(&str, &str)> = t["page"]["msgs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| ["msg", "run"].contains(&m["kind"].as_str().unwrap()))
+        .map(|m| (m["kind"].as_str().unwrap(), m["text"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        msgs,
+        [("msg", "before the card"), ("run", "uptime"), ("msg", "after the card")],
+        "{t}"
+    );
+
+    let all = chat(&s, &cookie, T + 60);
+    let page = t1(&all);
+    let form = format!("<form class=chr data-id=\"r1\" data-sha=\"{}\"><button name=act value=approve>approve</button><button name=act value=deny>deny</button></form>", &sha[..12]);
+    let order = [
+        "before the card",
+        "<pre class=rc>uptime</pre>",
+        "why: owner asked",
+        "touches: read-only",
+        &form,
+        "after the card",
+    ];
+    let at: Vec<usize> = order.iter().map(|w| pos(page, w)).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} out of order in {page}");
+}
+
+/// #702: the card approved from the CLI, its row shows the outcome (no buttons) and the run's exit code and output
+/// tail post to the thread, rendered under it.
+#[test]
+fn a_settled_run_cards_result_renders_in_the_chat_tab() {
+    let c = setup("cards-run-result", "", "");
+    let (sha, r, cookie) = card_between_replies(&c);
+    let out = run(
+        &herdsman::Ctx {
+            now: T + 120,
+            ..c.clone()
+        },
+        &r,
+        &["card", "approve", "r1", "--sha", &sha[..12]],
+    );
+    assert!(out.1.contains("run r1 approved by owner"), "{out:?}");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let all = chat(&s, &cookie, T + 130);
+    let page = t1(&all);
+    let order = [
+        "<pre class=rc>uptime</pre>",
+        "✓ approved by owner · exit 0",
+        "load 0.42",
+        "after the card",
+        "run r1 approved by owner, ran in /srv/app: exit 0",
+    ];
+    let at: Vec<usize> = order.iter().map(|w| pos(page, w)).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} out of order in {page}");
+    assert!(!page.contains("data-id=\"r1\""), "{page}");
+}
