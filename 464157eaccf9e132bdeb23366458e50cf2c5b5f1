@@ -1,0 +1,7 @@
+Decided: fix round 2 merges origin/staging (#707) again instead of rebasing
+Because: q966
+Rejected: rebasing onto staging — the branch is pushed and lanes never rewrite history or force-push
+Decided: untrack pr-body.md and CLAUDE.local.md, which the wip snapshot committed; neither is on staging
+Because: crates/core/src/arch.rs:1
+Check: the PR body's evidence names head 464157eaccf9e132bdeb23366458e50cf2c5b5f1 and the evidence check is green
+Owner: No new behaviour; it takes in the latest staging and drops two files committed by accident.
