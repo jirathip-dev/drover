@@ -766,16 +766,23 @@ impl Config {
             Ok(c) => return Ok((c, text)),
             Err(e) => e,
         };
-        let (msg, at) = match e.downcast_ref::<toml::de::Error>() {
-            Some(t) => (t.message().replace('\n', "; "), t.span().map(|s| s.start)),
-            None => (format!("{e:#}"), None),
+        let rf = e.downcast_ref::<crate::gate::Refusal>();
+        let (msg, at) = match (e.downcast_ref::<toml::de::Error>(), rf) {
+            (Some(t), _) => (t.message().replace('\n', "; "), t.span().map(|s| s.start)),
+            (_, Some(r)) => (r.msg.clone(), None),
+            _ => (format!("{e:#}"), None),
         };
         // A check's error quotes the value it rejects (`account 'C'`): its first line in the file.
         let quoted = msg.split(['\'', '"']).nth(1).filter(|q| !q.is_empty());
         let at = at.or_else(|| text.find(&format!("\"{}\"", quoted?)));
         let file = path.file_name().map_or("fleet.toml".into(), |f| f.to_string_lossy());
         let line = at.map_or(String::new(), |i| format!(":{}", text[..i].matches('\n').count() + 1));
-        bail!("config invalid: {msg} ({file}{line})")
+        let line = format!("config invalid: {msg} ({file}{line})");
+        // A refusal (SECRET_IN_CONFIG) stays one: the CLI still exits 3 on it.
+        match rf {
+            Some(r) => crate::gate::refused(r.code, line),
+            None => bail!(line),
+        }
     }
 
     /// #709: the config, else (it fails to load) the error and the last good one, which each load keeps beside the
