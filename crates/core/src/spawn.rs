@@ -1881,7 +1881,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let res = if let Some(why) = stale {
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
-                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
+                    let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
                 }
                 herdr::close(&on, pane)?;
