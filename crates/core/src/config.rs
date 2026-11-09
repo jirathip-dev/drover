@@ -422,6 +422,9 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
+    /// #754: the repo's own line-cap script `herdsman cap` reads `N / cap M` lines from; unset = the first `premerge`
+    /// check naming a cap, else the built-in Rust count.
+    pub cap_script: Option<String>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
     /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.

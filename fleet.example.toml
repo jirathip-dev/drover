@@ -55,6 +55,7 @@ integration = "staging"
 # serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # premerge = ["herdsman cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
+# cap_script = "scripts/line-cap.sh"   # #754: `herdsman cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 # merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves past it (a pure merge of integration keeps it)
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `herdsman cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
