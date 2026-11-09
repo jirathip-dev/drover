@@ -131,6 +131,30 @@ proven, and it signs in through the token proxy, never with a token there (docs/
 `--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
 yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
 
+**Agent and provider per role (#732).** A role may name its own ACP agent over the runtime's `acp`, with its `model`
+and `effort`; `harness` then follows from the agent (`claude-acp` is `claude`, `codex-acp` is `codex`):
+
+```toml
+[fleet.herdsman.role.rev]
+agent = "codex-acp"
+account = "X"        # an [accounts] folder holding Codex's own login (`CODEX_HOME`)
+model = "gpt-5.5"
+effort = "high"
+```
+
+Each agent's provider is known (`claude-acp` anthropic, `codex-acp` openai, `gemini-acp` google). Once a fleet's
+`impl` or `rev` names an `agent`, its config refuses to load (`REVIEW_SAME_PROVIDER`) while `rev` runs on `impl`'s
+provider (a role without `agent` counts as the runtime's), unless the fleet sets `rev_same_provider = true # <why>`;
+the reason comment on that line is required. The verify role may share either. A fleet naming no `agent` loads as
+before.
+
+A codex lane signs in with its account's env (`account_env`'s with `{provider}` = `codex`, else its folder as
+`CODEX_HOME`). Its guard is the same `herdsman hook`, given to codex-acp in its session config (`CODEX_CONFIG`, from
+the profile's `codex-config.json`) with Codex's hook-trust review bypassed, since a lane has no one to answer it;
+Codex hooks speak Claude Code's protocol, and an `apply_patch` edit is judged on its patch text. The role prompt goes
+first in `AGENTS.override.md`, ahead of the repo's own `AGENTS.md`. `herdsman config apply` runs `profiles sync`
+itself, so a role it adds is guarded (and a Hermes profile's hook approved) before doctor looks.
+
 **Conductors (#608).** A thread whose fleet (for an `all` thread, the fleet whose conductor role it runs on) is on
 `shed-acp` starts its conductor the same way: `shed run --acp <acp> --policy <acp_policy> --name conductor-<thread>
 --cwd <state dir>/conductor/<thread>/` with the labels `fleet`, `issue=-`, `role=conductor`, `harness`,

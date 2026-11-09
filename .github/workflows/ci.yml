@@ -121,6 +121,8 @@ jobs:
           c=$(npx -y @puppeteer/browsers@2.6.1 install chrome-headless-shell@156.0.8078.80 --path "$RUNNER_TEMP/chs" | tail -1 | cut -d' ' -f2-)
           test -x "$c" || { echo "::error::chrome-headless-shell install gave no binary: '$c'"; exit 1; }
           echo "CHROME=$c" >> "$GITHUB_ENV"
+      - name: the lifeboat page for the audit (#725)
+        run: LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
       - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
       # #566: every hung Chrome run in the job summary; views still hung after 2 retries go to the soft `ui-flaky` check.

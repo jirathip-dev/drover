@@ -61,7 +61,7 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
-        for h in harness::NAMES {
+        for h in harness::known() {
             harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
@@ -437,10 +437,12 @@ fn brief(
     let contract = contract.trim_end().to_string() + "\n" + steps + play;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    // #733: the shared rules pack, then (#419) the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let shared = include_str!("../rules/shared.md").trim_end();
+    let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
@@ -566,7 +568,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
     let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
-    let env = harness::get(&p.harness).acp_env(p.model.as_deref());
+    let env = harness::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
@@ -929,7 +931,12 @@ pub fn spawn(
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
     let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
-        herdr::Shed(crate::shed::Shed { wire, ..b })
+        // #732: an ACP lane runs its role's own agent over the runtime's.
+        let acp = b
+            .acp
+            .clone()
+            .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
+        herdr::Shed(crate::shed::Shed { wire, acp, ..b })
     });
     // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
     if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
@@ -1885,7 +1892,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let res = if let Some(why) = stale {
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
-                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
+                    let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
                 }
                 herdr::close(&on, pane)?;
