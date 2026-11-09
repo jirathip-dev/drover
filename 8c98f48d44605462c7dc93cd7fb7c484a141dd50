@@ -1,0 +1,7 @@
+Decided: fix round 3 merges origin/staging (up to #754) again instead of rebasing
+Because: q966
+Rejected: rebasing onto staging — the branch is pushed and lanes never rewrite history or force-push
+Decided: drop the unpushed wip snapshot commit; it only re-added CLAUDE.local.md, which round 3 untracked
+Because: crates/core/src/arch.rs:1
+Check: the PR body's evidence names head 8c98f48d44605462c7dc93cd7fb7c484a141dd50 and the evidence check is green
+Owner: No new behaviour; it takes in the latest staging and refreshes the test evidence for the new head.
