@@ -32,11 +32,11 @@ pub fn lookup(r: &dyn Runner, fleet: &str, name: &str) -> Result<Option<String>>
     }
 }
 
-/// #441: a main host with no usable OS store refuses at startup when `cfg` names a secret (an `[accounts]` token or a
-/// `secret:` env); there is no plain-file fallback.
+/// #441: a main host with no usable OS store refuses at startup when `cfg` names a secret (a `secret:` env; #683: no
+/// `[accounts]` token any more); there is no plain-file fallback.
 pub fn probe(r: &dyn Runner, cfg: &Config) -> Result<()> {
     let env = cfg.fleet.values().flat_map(|f| f.env.values());
-    if cfg.accounts.names.is_empty() && !env.into_iter().any(|v| v.starts_with("secret:")) {
+    if !env.into_iter().any(|v| v.starts_with("secret:")) {
         return Ok(());
     }
     match r.secret(&service("all", "HERDSMAN_PROBE")) {
@@ -143,36 +143,4 @@ pub fn rm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, name: &str) -> R
         cfg,
         Event::new(ctx.now, fleet, None, "secret-rm", json!({"name": name})),
     )
-}
-
-/// #441 `herdsman accounts import [FILE]` (owner only): each `[accounts]` token in the old `tokens.env` copied into the
-/// store as `all`'s secret of its variable name, read back and checked by sha256; the file is left for the owner.
-pub fn import(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, file: &str) -> Result<()> {
-    use sha2::{Digest, Sha256};
-    let path = crate::config::expand(file);
-    let text = std::fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
-    let hash = |v: &str| Sha256::digest(v.as_bytes());
-    for (account, var) in &cfg.accounts.names {
-        let Some(v) = crate::usage::env_value(&text, var).filter(|v| !v.is_empty()) else {
-            writeln!(out, "{account:<8} ✗ {var} not in {}", path.display())?;
-            continue;
-        };
-        let svc = service("all", var);
-        r.set_secret(&svc, Some(&v))?;
-        let back = r.secret(&svc)?.unwrap_or_default();
-        anyhow::ensure!(
-            hash(&back) == hash(&v),
-            "{svc}: the store's copy does not match {}",
-            path.display()
-        );
-        let d = json!({"name": var, "account": account, "by": "owner"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "secret-set", d))?;
-        writeln!(out, "{account:<8} ✓ {svc} (sha256 matches)")?;
-    }
-    writeln!(
-        out,
-        "lanes now read the store, never {}; delete it when you are ready",
-        path.display()
-    )?;
-    Ok(())
 }

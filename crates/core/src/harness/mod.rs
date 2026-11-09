@@ -32,12 +32,12 @@ pub fn efforts(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// How a harness's lanes sign in: unknown, an `[accounts]` token (`access::pick`) exported as this env var, or the
-/// harness's own login on the host.
+/// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from
+/// `access::account_env`), or the harness's own login on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credential {
     None,
-    Token(&'static str),
+    Account(&'static str),
     Own,
 }
 
@@ -83,12 +83,12 @@ pub trait UsageMeter: Sync {
     fn status(&self, v: &Value) -> (Part, Part);
 }
 
-/// The harness `[accounts]` tokens are for: the first that runs on one.
+/// The harness `[accounts]` are for: the first that runs on one.
 pub fn accounts() -> Option<&'static dyn Harness> {
     NAMES
         .iter()
         .map(|n| get(n))
-        .find(|h| matches!(h.credential(), Credential::Token(_)))
+        .find(|h| matches!(h.credential(), Credential::Account(_)))
 }
 
 pub trait Harness: Sync {
@@ -147,12 +147,9 @@ pub trait Harness: Sync {
     fn acp_env(&self, _model: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
-    /// #683: the env var its CLI reads its config folder (a `folder:` account's own login) from (generic: none).
-    fn config_env(&self) -> Option<&'static str> {
-        None
-    }
-    /// #683: the CLI's own sign-in state of config folder `dir`, with no token in its env (generic: unknown, false).
-    fn signed_in(&self, _r: &dyn Runner, _dir: &Path) -> bool {
+    /// #683: whether config folder `dir` holds its CLI's own login, read from its files (never a Keychain or a CLI
+    /// call; generic: unknown, false).
+    fn signed_in(&self, _dir: &Path) -> bool {
         false
     }
     /// #565: the shell words that put a lane's profile (`settings.json`, `role.md`, both quoted) where its ACP

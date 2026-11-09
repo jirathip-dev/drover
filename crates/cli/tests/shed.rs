@@ -355,7 +355,7 @@ fn a_lane_spawns_on_shed() {
 }
 
 /// #565: the fleet piloting ACP lanes: its own `[fleet.<n>.runtime]` (no global one), a `harness` role signed in with
-/// account C (`account`), #683: a CLI config folder.
+/// account C (`account`), #683: its default login folder (no `account_env`).
 fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
     let acct = if account { "\naccount = \"C\"" } else { "" };
     let cfg = CONFIG.replace(
@@ -363,13 +363,18 @@ fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
         &format!("harness = \"{harness}\"{acct}"),
     );
     format!(
-        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"folder:{ACCT_C}\"\n",
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         sock.display()
     )
 }
 
-/// #683: account C's config folder, its own `claude /login`.
-const ACCT_C: &str = "/accounts/claude/C";
+/// #683: account C's default config folder, its own `claude /login`.
+fn acct_c() -> String {
+    herdsman::config::home()
+        .join(".config/herdsman/accounts/C")
+        .display()
+        .to_string()
+}
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 
@@ -507,7 +512,7 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
     let dump = cli.2.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
     // #683: the account's folder is its config folder (its own login); no token reaches the lane.
-    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&ACCT_C));
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
     assert!(!dump.contains(TOKEN_C));
     assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:12:impl"));
@@ -569,7 +574,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     let cases = [
         (
             acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false)),
-            "folder: account",
+            "[accounts] account env",
         ),
         (
             acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes", true)),
@@ -1252,8 +1257,8 @@ impl Runner for Push<'_> {
 fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let cfg = acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]")
-        + "D = \"folder:/accounts/claude/D\"\n";
+    let cfg =
+        acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]") + "D = \"D\"\n";
     let c = acp_ctx(name, &cfg);
     let (wt, origin) = (c.worktrees.join("sendmeter/issue-12"), c.worktrees.join("origin.git"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -1504,7 +1509,7 @@ fn an_acp_conductor_runs_under_the_conductor_guard() {
     assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
     assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
-    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&ACCT_C));
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
     // The profile's `PreToolUse` hook, from its session folder's local settings, run in the adapter's env as Claude
     // Code runs it.
     let cwd = c.state.with_file_name("conductor").join("t1");
@@ -1553,7 +1558,7 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
-        out.contains("REFUSED ACP_UNGUARDED") && out.contains("folder: account"),
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] account env"),
         "{out}"
     );
     let calls = f.calls.borrow();

@@ -105,7 +105,8 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
 lane's exports (`HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env`, `HERDSMAN_ACCOUNT`, and #683 the role's
-`folder:` account as `CLAUDE_CONFIG_DIR`, so the adapter signs in with that folder's own login and gets no token). It
+account env, `account_env`'s or its folder as `CLAUDE_CONFIG_DIR`, so the adapter signs in with that login and gets no
+token). It
 sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/herdsman/claude/<profile>`)
 into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
 runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:

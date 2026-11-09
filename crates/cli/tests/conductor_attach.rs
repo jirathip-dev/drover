@@ -42,9 +42,12 @@ fn an_attached_cooee_thread_is_the_repos_conductor_until_detached() {
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
         "harness = \"claude\"\naccount = \"C\"",
-    ) + "\n[accounts]\nC = \"folder:/accounts/claude/C\"\n";
+    ) + "\n[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\nC = \"C\"\n";
     let c = ctx(&tmpdir("conductor-attach"), &cfg);
-    let r = Fake::default().reply("herdr", "{}").reply("gh", "");
+    let r = Fake::default().reply("herdr", "{}").reply("gh", "").reply(
+        "fake-cooee accounts env claude C",
+        r#"{"CLAUDE_CONFIG_DIR": "/accounts/claude/C"}"#,
+    );
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &ck, ("POST", &format!("/api/v1/{op}")), &v.to_string());

@@ -280,15 +280,17 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> `folder:<dir>`, its CLI config folder (#683: its own `claude /login`, given to a lane
-/// as `CLAUDE_CONFIG_DIR`), else (#441, until it moves to a folder) its token's name in the store; plus the settings
-/// below.
+/// `[accounts]`: the account names (#683: each value is unused, once its token's name in the store; a lane signs in
+/// with `account_env`'s env, else its folder, `Accounts::folder`), plus the settings below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
     /// #539: retired by #441, a warning (`Config::warnings`), never a load error; its tokens still back the store's
     /// missing ones, read-only, until the import and the line's removal.
     pub accounts_env: Option<String>,
+    /// #683 (q846): the command (words; `{provider}` and `{name}` filled in) that prints an account's lane env as a JSON
+    /// object, e.g. `cooee accounts env {provider} {name}`; unset: `Accounts::folder` as the provider's config folder.
+    pub account_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -301,14 +303,11 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    /// #683: a `folder:<dir>` account's config folder, `~` expanded.
-    pub fn folder(&self, name: &str) -> Option<PathBuf> {
-        self.names.get(name)?.strip_prefix("folder:").map(expand)
-    }
-    /// The login the usage meter reads: `[accounts.usage]`'s, else (#683) the account's folder.
-    pub fn login(&self, name: &str) -> Option<String> {
-        let folder = || self.names.get(name)?.strip_prefix("folder:").map(String::from);
-        self.usage.get(name).cloned().or_else(folder)
+    /// #683: account `name`'s own CLI login folder with no `account_env`: its `[accounts.usage]` one, else
+    /// `~/.config/herdsman/accounts/<name>`.
+    pub fn folder(&self, name: &str) -> PathBuf {
+        let d = self.usage.get(name).cloned();
+        expand(&d.unwrap_or_else(|| format!("~/.config/herdsman/accounts/{name}")))
     }
 }
 
@@ -316,6 +315,7 @@ impl Default for Accounts {
     fn default() -> Self {
         Accounts {
             accounts_env: None,
+            account_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),

@@ -79,13 +79,15 @@ pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(R
     Ok((to, until.map(|t| (format!("on {entry} ({resting} resting until"), t))))
 }
 
-/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min) and its
-/// token's secret name (#441: `spawn::deliver` reads it from the store); None unless the role's harness runs on an
-/// `[accounts]` token (`Credential::Token`).
-pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<(String, String)>> {
+/// #683: an account's name and the env its lane signs in with (`account_env`, filled in where the lane starts).
+pub type Account = (String, BTreeMap<String, String>);
+
+/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min), its env
+/// still empty; None unless the role's harness runs on `[accounts]` (`Credential::Account`).
+pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<Account>> {
     let now = ctx.now;
     let mut names = role.account_list();
-    let Credential::Token(_) = crate::harness::get(&role.harness).credential() else {
+    let Credential::Account(_) = crate::harness::get(&role.harness).credential() else {
         return Ok(None);
     };
     if names.is_empty() {
@@ -124,7 +126,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         let why = format!("every account {all:?} is capped; the first resets in {at}");
         return refused("ALL_CAPPED", why);
     };
-    Ok(Some((name.clone(), cfg.accounts.names[name].clone())))
+    Ok(Some((name.clone(), BTreeMap::new())))
 }
 
 /// The banner's `resets 9am` / `resets Nov 4, 8am` (host local time); else `cap_reset_minutes` on (a day if weekly).
@@ -222,18 +224,17 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         }
         writeln!(out, "{name:<8} {state:<28} {} lanes {}", lanes.len(), lanes.join(" "))?;
         if let Some(m) = m {
-            let login = cfg.accounts.login(name).unwrap_or_default();
-            writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, &login, ctx.now))?;
+            let login = cfg.accounts.usage.get(name).map_or("", String::as_str);
+            writeln!(out, "{:<8} {}", "", usage::meter_line(r, &m, login, ctx.now))?;
         }
         writeln!(out, "{:<8} {}", "", usage::lane_hours(&events, name, ctx.now))?;
-        if let Some(dir) = cfg.accounts.folder(name) {
-            let st = if signed_in(r, &dir) {
-                "signed in".into()
-            } else {
-                format!("signed out → {}", sign_in_hint(&dir))
-            };
-            writeln!(out, "{:<8} {} · {st}", "", dir.display())?;
-        }
+        let (ok, line) = sign_in(cfg, r, name);
+        let shown = if ok {
+            line.split(" → ").next().unwrap_or_default()
+        } else {
+            &line
+        };
+        writeln!(out, "{:<8} {}{shown}", "", if ok { "" } else { "✗ " })?;
     }
     match usage::deepseek(ctx, cfg, r) {
         Some(Ok((b, low))) => writeln!(
@@ -249,49 +250,69 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// #683: a folder account's sign-in as its CLI reports it (cooee's read; the login is the CLI's own, never herdsman's).
-pub fn signed_in(r: &dyn Runner, dir: &std::path::Path) -> bool {
-    crate::harness::accounts().is_some_and(|h| h.signed_in(r, dir))
+/// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
+pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
+
+/// #683 (q846): the env account `name` signs a lane of `harness` in with, exactly: `[accounts] account_env`'s JSON
+/// object of env vars (else refused `ACCOUNT_ENV` with its stderr), or with none set its folder (`Accounts::folder`)
+/// as its provider's config folder. Never a token; empty for a harness on no `[accounts]`.
+pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> Result<BTreeMap<String, String>> {
+    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(cmd) = &cfg.accounts.account_env else {
+        let var = CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1.to_string());
+        let var = var.with_context(|| format!("no config folder env for provider {provider}"))?;
+        return Ok(BTreeMap::from([(var, cfg.accounts.folder(name).display().to_string())]));
+    };
+    let fill = |w: &str| w.replace("{provider}", provider).replace("{name}", name);
+    let words: Vec<String> = cmd.split_whitespace().map(fill).collect();
+    let fail = |why: String| refused("ACCOUNT_ENV", format!("account {name}: `{}` {why}", words.join(" ")));
+    let Some((prog, args)) = words.split_first() else {
+        return fail("is empty".into());
+    };
+    let o = match r.run_for(prog, args, "", std::time::Duration::from_secs(30)) {
+        Ok(o) => o,
+        Err(e) => return fail(format!("did not run: {e:#}")),
+    };
+    let var = |k: &String| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let env = serde_json::from_str::<BTreeMap<String, String>>(&o.stdout).ok();
+    match env.filter(|e| o.code == 0 && e.keys().all(var)) {
+        Some(env) => Ok(env),
+        None => fail(format!(
+            "exited {} without a JSON object of env vars: {}",
+            o.code,
+            o.stderr.trim()
+        )),
+    }
 }
 
-/// #683: how the owner signs folder `dir` in: cooee, or the harness's own login with `dir` as its config folder.
-pub fn sign_in_hint(dir: &std::path::Path) -> String {
-    let h = crate::harness::accounts();
-    let var = h
-        .and_then(crate::harness::Harness::config_env)
-        .unwrap_or("its config folder");
-    let login = h.and_then(crate::harness::Harness::login).unwrap_or("its login");
-    format!("cooee Settings › Providers, or {var}={} {login}", dir.display())
-}
-
-/// #683 `herdsman accounts import --folders` (owner only): each token account whose `[accounts.usage]` login is signed
-/// in becomes `folder:<that login>` in fleet.toml; the store's old tokens are the owner's to delete, on a run card.
-pub fn import_folders(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let mut text = std::fs::read_to_string(&ctx.config)?;
-    let mut old = vec![];
-    for (name, var) in cfg.accounts.names.iter().filter(|a| !a.1.starts_with("folder:")) {
-        let dir = cfg.accounts.usage.get(name).filter(|d| !d.contains(['"', '\\']));
-        let Some(dir) = dir.filter(|d| signed_in(r, &crate::config::expand(d))) else {
-            writeln!(
-                out,
-                "{name:<8} ✗ no signed-in [accounts.usage] folder → cooee Settings › Providers"
-            )?;
-            continue;
-        };
-        text = crate::config::set_in(&text, "[accounts]", name, &format!("\"folder:{dir}\""))?;
-        writeln!(out, "{name:<8} ✓ folder:{dir} (signed in)")?;
-        old.push(format!("herdsman secret rm all {var}"));
-    }
-    if !old.is_empty() {
-        Config::parse(&text)?;
-        crate::config::write_atomic(&ctx.config, &text)?;
-        writeln!(
-            out,
-            "once every lane runs on its folder, the old tokens go (owner, on a run card): {}",
-            old.join("; ")
-        )?;
-    }
-    Ok(())
+/// #683: account `name`'s sign-in for `herdsman accounts` and doctor: whether it passes, and its line (` → ` its fix):
+/// its env's config folder holds its CLI's login (a file read, never the Keychain), or why its env failed.
+pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
+    let on = |n: &&&str| matches!(crate::harness::get(n).credential(), Credential::Account(_));
+    let Some(hn) = crate::harness::NAMES.iter().find(on) else {
+        return (false, "no harness runs on [accounts]".into());
+    };
+    let (h, env) = (crate::harness::get(hn), account_env(cfg, r, hn, name));
+    let env = match env {
+        Ok(env) => env,
+        Err(e) => return (false, format!("{e:#}")),
+    };
+    let Credential::Account(provider) = h.credential() else {
+        return (false, String::new());
+    };
+    let var = CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1);
+    let Some((var, dir)) = var.and_then(|v| Some((v, env.get(v)?))) else {
+        let keys: Vec<&String> = env.keys().collect();
+        return (true, format!("env {keys:?} from account_env"));
+    };
+    let login = h.login().unwrap_or("its login");
+    let fix = format!("cooee Settings › Providers, or {var}={dir} {login}");
+    (
+        h.signed_in(std::path::Path::new(dir)),
+        format!("signed in ({dir}) → {fix}"),
+    )
 }
 
 /// `herdsman accounts reset <name>`: spawns may use a capped account again.
