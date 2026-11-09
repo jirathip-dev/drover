@@ -1209,9 +1209,10 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
             };
             for (n, bytes) in gone {
                 let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
-                let line = match dry {
-                    true => format!("would remove scratch {name}:{p}"),
-                    false => format!("scratch: {name}: removed {p} {:.2} GB (no live lane there)", gb(bytes)),
+                let line = if dry {
+                    format!("would remove scratch {name}:{p}")
+                } else {
+                    format!("scratch: {name}: removed {p} {:.2} GB (no live lane there)", gb(bytes))
                 };
                 freed += bytes;
                 writeln!(out, "{line}")?;
