@@ -21,7 +21,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Read narrowly: the brief, the exact target files. No repo-wide scans
   unless the brief requires them.
 - Implement the smallest change that meets the acceptance criteria; follow the repo's
-  AGENTS.md / CLAUDE.md. Don't refactor unrelated code or add deps without approval.
+  agent instruction files (`AGENTS.md`, `CLAUDE.md`). Don't refactor unrelated code or add deps without approval.
 - If the repo has a `justfile`, run `just --list` once and use its recipes.
 - Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
@@ -418,11 +418,11 @@ UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any vis
 
 ## Tool guard, accounts, MCP
 
-Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
-`gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and Hermes
+Lanes skip permission prompts; the lane's hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
+`gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and agent
 profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. Design lanes are owner-only: started by the owner or a conductor thread (`herdsman spawn … design`), never by a lane; never in verdict or merge.
 The hook also refuses `deny_commands` (default: containers: docker, colima, orb, podman, `supabase start`… → `REFUSED NO_CONTAINERS`) and, for every lane, `pkill`, `killall` and `pgrep … | xargs kill` (`REFUSED NO_BROAD_KILL`); a call it can't judge (input not JSON, fleet.toml not loading, an unknown fleet) `REFUSED HOOK_FAILED_CLOSED`.
-Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` signs the lane in with the first uncapped one's env (`[accounts] account_env`'s JSON, else its folder as `CLAUDE_CONFIG_DIR`; never a token);
+Accounts (`herdsman accounts`): a role's `account`/`accounts` signs the lane in with the first uncapped one's env (`[accounts] account_env`'s JSON for its agent's provider, else its folder as that agent's config folder; never a token);
 an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. Secrets (`secret:<NAME>` env) live only in the main host's OS store as `herdsman/<fleet>/<NAME>`; spawn writes a lane's to a 0600 file beside its worktree (over ssh stdin to a remote host), the pane's shell sources it, spawn deletes it. MCP: only the role's `mcp` (default none).
 
 ## Events
