@@ -569,6 +569,7 @@ fn boot_fake(gh_in: bool) -> Fake {
     );
     let f = Fake::default()
         .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
+        .reply("herdr machine list --json", r#"[{"id": "c1", "label": "cloud1"}]"#)
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
         .reply(&step("herdr --version | grep -qx 'herdr 0.9.5'"), "")
         .once(&step("command -v gh"), 1, "")
@@ -845,4 +846,107 @@ fn a_snapshot_needs_a_green_health_check_first() {
         herdsman::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"
     );
+}
+
+/// #641: herdr's saved machines as `herdr machine list --json` shows them; `machine add`/`remove` change the list.
+struct Machines(Fake, Shared<Vec<(String, String)>>);
+
+impl Runner for Machines {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let a: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut list = self.1.borrow_mut();
+        let ok = |s: String| {
+            Ok(Out {
+                code: 0,
+                stdout: s,
+                stderr: String::new(),
+            })
+        };
+        match (prog, &a[..]) {
+            ("herdr", ["machine", "list", "--json"]) => {
+                let v: Vec<_> = list
+                    .iter()
+                    .map(|(id, l)| json!({"id": id, "label": l, "target": l}))
+                    .collect();
+                ok(json!(v).to_string())
+            }
+            ("herdr", ["machine", "add", _, "--label", l]) => {
+                let id = format!("new{}", list.len());
+                list.push((id, (*l).into()));
+                drop(list);
+                self.0.run(prog, args)
+            }
+            ("herdr", ["machine", "remove", id]) => {
+                list.retain(|p| p.0 != *id);
+                drop(list);
+                ok(String::new())
+            }
+            _ => {
+                drop(list);
+                self.0.run(prog, args)
+            }
+        }
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+}
+
+fn machines(f: Fake, ids: &[&str]) -> Machines {
+    let list = ids.iter().map(|id| ((*id).into(), "cloud1".into())).collect();
+    let s = Shared::default();
+    *s.borrow_mut() = list;
+    Machines(f, s)
+}
+
+#[test]
+fn bootstrap_refuses_an_ambiguous_machine_label_and_opens_no_pane_anywhere() {
+    let (c, _) = running("cloud-ambiguous");
+    let r = machines(boot_fake(false), &["aaa1", "bbb2"]);
+    let (code, out) = run(&c, &r, &["hosts", "bootstrap", "cloud1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED HOST_AMBIGUOUS") && out.contains("aaa1") && out.contains("bbb2"),
+        "{out}"
+    );
+    let calls = r.0.calls.borrow();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.contains("workspace create") || c.contains("pane run")),
+        "{calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("ssh") || c.contains("machine add")),
+        "no step ran: {calls:?}"
+    );
+}
+
+#[test]
+fn a_setup_pane_for_a_host_with_no_machine_profile_is_refused_never_opened_here() {
+    let (c, _) = running("cloud-unknown");
+    let r = machines(boot_fake(false), &[]);
+    let (code, out) = run(&c, &r, &["setup", "cloud1", "gh"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED HOST_UNKNOWN"), "{out}");
+    assert!(
+        !r.0.calls.borrow().iter().any(|c| c.contains("workspace create")),
+        "{:?}",
+        r.0.calls.borrow()
+    );
+}
+
+#[test]
+fn recreating_a_cloud_host_replaces_its_machine_profile() {
+    let (c, cfg) = running("cloud-recreate");
+    // A new box under the same name: no herdr there yet, so bootstrap's herdr step runs `machine add` again.
+    let f = boot_fake(false).once(&step("herdr --version | grep -qx 'herdr 0.9.5'"), 1, "");
+    let r = machines(f.reply("herdr machine add cloud1 --label cloud1", ""), &["old1"]);
+    let e = herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("log in in pane w7:p1"), "{e:#}");
+    let list = r.1.borrow();
+    assert_eq!(list.len(), 1, "exactly one profile for cloud1: {list:?}");
+    assert_ne!(list[0].0, "old1", "the old profile is gone");
+    let log = herdsman::events::jsonl(&c.state).unwrap();
+    assert!(log.contains("host-machine-replaced") && log.contains("old1"), "{log}");
 }

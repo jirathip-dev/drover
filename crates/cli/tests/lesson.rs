@@ -481,3 +481,157 @@ fn lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_c
         "{out}"
     );
 }
+
+/// #733: every brief carries the shared rules pack before the repo's rules, and without them too.
+#[test]
+fn briefs_carry_the_shared_pack_before_the_repo_rules() {
+    let c = ctx(&tmpdir("lesson-shared"), CONFIG);
+    let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
+    std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
+    std::fs::write(wt.join(".herdsman/rules.md"), "- don't X (enforced by: none)\n").unwrap();
+    let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert!(code == 0 || code == 4, "{code} {out}");
+    let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
+    let (shared, repo) = (
+        brief.find("## Shared rules (rules/shared.md)\n\n- Subtract before you add"),
+        brief.find("## Repo rules"),
+    );
+    assert!(shared.is_some() && shared < repo, "{brief}");
+    let c = ctx(&tmpdir("lesson-shared-none"), CONFIG);
+    let (code, out) = run(&c, &spawner(12), &["spawn", "sendmeter", "12", "impl"]);
+    assert!(code == 0 || code == 4, "{code} {out}");
+    let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
+    assert!(
+        brief.contains("## Shared rules") && !brief.contains("Repo rules"),
+        "{brief}"
+    );
+}
+
+/// #733: a fleet without `lessons` is weekly: `check` alerts `lessons-missed` once its last lesson run is over 8 days
+/// old (a new fleet: its first event), once per run; `off` and a paused fleet never.
+#[test]
+fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
+    let c = ctx(&tmpdir("lesson-missed"), &(CONFIG.to_string() + OFF));
+    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    append(
+        &c.state,
+        &Event::new(OLD - 2 * 86400, "quiet", Some(1), "queued", json!({})),
+    )
+    .unwrap();
+    ev(&c, NOW - 7 * 86400, None, "lesson-skipped", json!({"why": "quiet"}));
+    let check = |now: u64| {
+        let (code, out) = run(&herdsman::Ctx { now, ..c.clone() }, &r, &["check"]);
+        assert_eq!(code, 0, "{out}");
+        out.lines()
+            .filter(|l| l.contains("lessons-missed"))
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    assert!(check(NOW).is_empty(), "7 days: not yet");
+    let missed = check(NOW + 2 * 86400);
+    assert_eq!(missed.len(), 1, "{missed:?}");
+    assert!(
+        missed[0].contains("sendmeter") && missed[0].contains("9 days"),
+        "{missed:?}"
+    );
+    assert!(check(NOW + 3 * 86400).is_empty(), "once per last run");
+    // A lesson lane resets it.
+    ev(
+        &c,
+        NOW + 3 * 86400,
+        Some(80),
+        "spawn",
+        json!({"role": "lesson", "agent": "sendmeter-lesson-80"}),
+    );
+    assert!(check(NOW + 10 * 86400).is_empty(), "7 days after the lane");
+    assert_eq!(check(NOW + 12 * 86400).len(), 1);
+    // Paused: skipped.
+    let c = ctx(
+        &tmpdir("lesson-missed-paused"),
+        &CONFIG.replace("[fleet.sendmeter]\n", "[fleet.sendmeter]\npaused = true\n"),
+    );
+    ev(&c, OLD - 86400, Some(1), "queued", json!({}));
+    let (code, out) = run(&c, &r, &["check"]);
+    assert!(code == 0 && !out.contains("lessons-missed"), "{out}");
+}
+
+/// #733: rev's PASS of a lesson PR that only edits prose is recorded as a FAIL with the rule; one that adds a check
+/// or retires a rules line passes.
+#[test]
+fn a_prose_only_lesson_pr_is_a_fail() {
+    let head = "b".repeat(40);
+    let prose = "diff --git a/roles/impl.md b/roles/impl.md\n--- a/roles/impl.md\n+++ b/roles/impl.md\n@@ -1 +1,2 @@\n x\n+- be careful with unwrap\n";
+    let check = "diff --git a/.herdsman/rules.md b/.herdsman/rules.md\n--- a/.herdsman/rules.md\n+++ b/.herdsman/rules.md\n@@ -0,0 +1 @@\n+- don't unwrap (enforced by: no-unwrap `! grep -rn unwrap src`, shadow since 1970-01-12)\n";
+    let retire = "diff --git a/.herdsman/rules.md b/.herdsman/rules.md\n--- a/.herdsman/rules.md\n+++ b/.herdsman/rules.md\n@@ -1 +0,0 @@\n-- don't X (enforced by: none)\n";
+    let code_pr = "diff --git a/src/x.rs b/src/x.rs\n+fn typed() {}\n";
+    for (diff, want) in [(prose, "FAIL"), (check, "PASS"), (retire, "PASS"), (code_pr, "PASS")] {
+        let c = ctx(&tmpdir("lesson-prose"), CONFIG);
+        ev(
+            &c,
+            NOW - 2 * HOUR,
+            Some(12),
+            "spawn",
+            json!({"role": "lesson", "agent": "sendmeter-lesson-12"}),
+        );
+        let f = c.state.with_file_name("verdict.md");
+        std::fs::write(&f, "PASS\n\nlooks fine\n").unwrap();
+        let r = Fake::default()
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", &head)
+            .reply("gh pr diff issue-12 -R jirathip-dev/sendmeter", diff)
+            .reply("herdr agent list", NO_AGENTS);
+        let args = [
+            "verdict",
+            "sendmeter",
+            "12",
+            "PASS",
+            "--sha",
+            &head,
+            "--file",
+            f.to_str().unwrap(),
+        ];
+        let (code, out) = run(&c, &r, &args);
+        assert_eq!(code, 0, "{out}");
+        let events = read(&c.state).unwrap();
+        let v = events.iter().rfind(|e| e.is("verdict", "sendmeter", 12)).unwrap();
+        assert_eq!(v.str("verdict"), Some(want), "{diff}: {out}");
+        if want == "FAIL" {
+            let body = v.str("body").unwrap();
+            assert!(
+                body.starts_with("FAIL\n\n- blocking [lesson]") && body.contains("A PR that only edits prose"),
+                "{body}"
+            );
+            assert!(herdsman::gate::no_proof(body).is_none(), "{body}");
+        }
+    }
+    // Not a lesson issue: a prose PR passes and its diff is never read.
+    let c = ctx(&tmpdir("lesson-prose-impl"), CONFIG);
+    ev(
+        &c,
+        NOW - 2 * HOUR,
+        Some(12),
+        "spawn",
+        json!({"role": "impl", "agent": "sendmeter-impl-12"}),
+    );
+    let f = c.state.with_file_name("verdict.md");
+    std::fs::write(&f, "PASS\n").unwrap();
+    let r = Fake::default()
+        .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", &head)
+        .reply("herdr agent list", NO_AGENTS);
+    let (code, out) = run(
+        &c,
+        &r,
+        &[
+            "verdict",
+            "sendmeter",
+            "12",
+            "PASS",
+            "--sha",
+            &head,
+            "--file",
+            f.to_str().unwrap(),
+        ],
+    );
+    assert!(code == 0 && out.contains("recorded PASS"), "{out}");
+    assert!(!r.called("gh pr diff"), "{out}");
+}

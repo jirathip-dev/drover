@@ -30,6 +30,33 @@ const CM: [&str; 3] = [
     "-oControlPersist=10m",
 ];
 
+/// #641: the ids of herdr's saved machine profiles labelled `m` (`herdr machine list` here).
+pub fn profiles(r: &dyn Runner, m: &str) -> Result<Vec<String>> {
+    let v = crate::runner::json(r, crate::herdr::BIN, &["machine", "list", "--json"])?;
+    let mine = v.as_array().into_iter().flatten().filter(|p| p["label"] == m);
+    Ok(mine.filter_map(|p| p["id"].as_str().map(String::from)).collect())
+}
+
+/// #641: label `m` names exactly one herdr machine profile, else `HOST_AMBIGUOUS` (listing them) or `HOST_UNKNOWN`
+/// (none; `none_ok` lets bootstrap add the first), each with its fix; nothing runs on a host it can't pin down.
+pub fn resolve(r: &dyn Runner, m: &str, none_ok: bool) -> Result<()> {
+    match &profiles(r, m)?[..] {
+        [_] => Ok(()),
+        [] if none_ok => Ok(()),
+        [] => refused(
+            "HOST_UNKNOWN",
+            format!("no herdr machine labelled {m}: `herdr machine add {m} --label {m}` (or hosts bootstrap)"),
+        ),
+        ids => refused(
+            "HOST_AMBIGUOUS",
+            format!(
+                "herdr machine label {m} names {}: keep one, `herdr machine remove <id>` the rest",
+                ids.join(", ")
+            ),
+        ),
+    }
+}
+
 /// A lane's host; `machine` None is this one (every call and file exactly as before).
 pub struct On<'a> {
     pub r: &'a dyn Runner,
@@ -838,7 +865,7 @@ pub fn place(
     let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
     let pre = (events, last.and_then(|e| e.str("root")));
     // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
-    let design = f.family(role) == "design";
+    let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
     if let Some(h) = force.or(pin).or(design.then_some("main")) {
         let main = cfg
@@ -855,7 +882,7 @@ pub fn place(
         if design && machine.is_some() {
             return refused(
                 "DESIGN_MAIN_ONLY",
-                format!("host {h}: design lanes run on the main host only"),
+                format!("host {h}: {role} lanes run on the main host only"),
             );
         }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));

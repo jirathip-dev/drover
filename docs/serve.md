@@ -365,6 +365,8 @@ missed.
 transcript, a setup screen, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host, bqueue, cond, and
 #555's send, menu, act, setup, chat-about, chat, close) refuse an unpaired one.
 
+#725: `/api/v1/lifeboat` is a plain HTML page, not JSON: the fallback for when cooee is down ([lifeboat.md](lifeboat.md)).
+
 | route | answer |
 |---|---|
 | `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |

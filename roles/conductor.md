@@ -43,7 +43,9 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   --for <new id>`).
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
-  Redo a design by hand by spawning its `design` role with `--supersede`.
+  Redo a design by hand by spawning its `design` role with `--supersede`. #730: queue an issue that needs its
+  architecture decided first (an ADR, data shapes, module boundaries, a statechart) with `--architect`: the architect
+  lane runs and is approved like a design, before the design (if `--design` too) and impl.
 - #552: the old phone board is frozen for features. A new issue touching its UI (serve.js/css, herd.*, web/, serve.rs,
   serve/ but v1.rs, themes) gets a `board-fix` line only if it fixes broken behaviour; CI's `board-freeze` fails the
   rest. File feature requests against cooee core or the drover plugins; shared data and actions go in `/api/v1`.

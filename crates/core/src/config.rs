@@ -118,7 +118,7 @@ pub struct ConductorCfg {
 
 /// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
-    ("design", "`spawn … design`"),
+    ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
     ("hosts", "`hosts on|off|refresh`"),
     ("reclaim", "`reclaim`"),
@@ -1040,6 +1040,7 @@ impl Fleet {
     pub fn family(&self, role: &str) -> &'static str {
         match role {
             "design" => "design",
+            "architect" => "architect",
             "conductor" => "conductor",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",

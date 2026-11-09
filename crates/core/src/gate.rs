@@ -94,7 +94,6 @@ pub fn verdict(
         return refused("STALE_SHA", format!("{branch} head is {head}, not {sha}"));
     }
     let head = sha.to_ascii_lowercase();
-    let v = if pass { "PASS" } else { "FAIL" };
     // #173: a review lane's verdict is its check stage's; any other (CI red while ready) is the gate's, and counts
     // against the rounds of the check its fix goes back to.
     let p = f.flow();
@@ -103,6 +102,17 @@ pub fn verdict(
         _ => p.gate(),
     };
     let lp = p.loop_of(stage);
+    // #733: rev's PASS of a lesson PR that only edits prose (retiring no line) is recorded as a FAIL.
+    let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
+        crate::lesson::prose_only(&ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?)
+    };
+    let (pass, body) = if prose {
+        writeln!(out, "prose-only lesson PR: recorded as a FAIL")?;
+        (false, format!("FAIL\n\n{}\n\n{body}", crate::lesson::PROSE_ONLY))
+    } else {
+        (pass, body)
+    };
+    let v = if pass { "PASS" } else { "FAIL" };
     // #420: a `--repro` issue's PASS (rev's, not verify's) proves its test fails on the base and passes at the head.
     let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
         let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
