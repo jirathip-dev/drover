@@ -267,6 +267,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
     },
+    /// Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)
+    #[command(hide = true)]
+    Proxy,
     /// Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort
     Serve {
         #[command(subcommand)]
@@ -752,6 +755,17 @@ enum HostsCmd {
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
     #[command(hide = true)]
     Snapshot { name: String },
+    /// The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once
+    Keys {
+        #[command(subcommand)]
+        cmd: Option<KeysCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeysCmd {
+    /// Owner only: this key stops signing at once; logs `proxy-key-revoked`
+    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -817,8 +831,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`).
-pub const HELP_AGENT_MAX: usize = 339;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`).
+pub const HELP_AGENT_MAX: usize = 342;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1479,7 +1493,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
                     Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
+                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
+                    Some(HostsCmd::Keys {
+                        cmd: Some(KeysCmd::Revoke { id }),
+                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
+                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }

@@ -14,7 +14,10 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub use claude::{remove_tmp, root as profiles_root, CAP_PATTERN};
+pub use claude::{
+    remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, OAUTH_BETA,
+    PROXY_UPSTREAM,
+};
 pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;

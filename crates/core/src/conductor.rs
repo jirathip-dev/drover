@@ -981,6 +981,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         head,
         resting,
         session: Some((session.clone(), resume)),
+        lane_key: None,
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
     // #683: the conductor runs on this host: its account's env is its sign-in.
@@ -990,7 +991,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
     let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {
-        Some((aid, b)) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, false) {
+        Some((aid, b)) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
             Ok(cmd) => Some((b, cmd)),
             Err(e) => {
                 if e.downcast_ref::<crate::gate::Refusal>().is_some() {
