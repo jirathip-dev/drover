@@ -272,6 +272,7 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     std::fs::create_dir_all(lane.join("shots")).unwrap();
     std::fs::write(lane.join("shots/home-390.png"), b"\x89PNG narrow").unwrap();
     std::fs::write(lane.join("shots/home-1440.png"), b"\x89PNG wide").unwrap();
+    std::fs::write(lane.join("shots/home-console.log"), "console error: boom\n").unwrap();
     let file = lane.join("verdict.md").to_string_lossy().to_string();
     let spawn = |ts, role: &str| {
         let (w, check) = (lane.to_string_lossy(), role != "impl");
@@ -295,7 +296,11 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     spawn(4, "rev");
     verdict("PASS", &b, &format!("PASS\n\n{repro}"));
     spawn(5, "verify");
-    verdict("PASS", &b, "PASS\n\nshots/home-390.png and shots/home-1440.png\n");
+    verdict(
+        "PASS",
+        &b,
+        "PASS\n\nshots/home-390.png and shots/home-1440.png\n\n- `shots/home-console.log`\n",
+    );
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let (status, v) = req(&s, "GET", "/api/v1/issue/sendmeter/12", "", "");
@@ -304,7 +309,8 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     let row = |i: usize| (vs[i]["role"].clone(), vs[i]["verdict"].clone(), vs[i]["sha"].clone());
     assert_eq!(vs.len(), 3, "{v}");
     assert_eq!(row(0), (json!("verify"), json!("PASS"), json!(b)));
-    assert_eq!(vs[0]["shots"], json!(["shots/home-390.png", "shots/home-1440.png"]));
+    let want = json!(["shots/home-390.png", "shots/home-1440.png", "shots/home-console.log"]);
+    assert_eq!(vs[0]["shots"], want);
     assert_eq!(vs[0]["repro"], json!(null));
     assert_eq!(row(1), (json!("rev"), json!("PASS"), json!(b)));
     assert_eq!(vs[1]["repro"]["kind"], json!("run"));
@@ -318,6 +324,14 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
     assert!(r.starts_with("HTTP/1.1 200") && r.ends_with("PNG wide"), "{r}");
+    // #731: a listed console log is served as plain text.
+    let r =
+        String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/2 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
+            .into_owned();
+    assert!(
+        r.contains("text/plain; charset=utf-8") && r.ends_with("console error: boom\n"),
+        "{r}"
+    );
 }
 
 /// #576: `lessons` shows a fleet's last lesson lane and when tick runs the next; the digest is the CLI's; `POST

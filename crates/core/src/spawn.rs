@@ -693,7 +693,11 @@ pub const OWN_FILES: &[&str] = &[
     "verdict.md",
     ".review-brief.md",
     "why.md", // #677: herdsman attaches it as a note; never committed
+    VERIFY_BROWSER,
 ];
+
+/// #731: `scripts/verify-browser.mjs`, written into each verify lane's worktree.
+pub const VERIFY_BROWSER: &str = ".verify-browser.mjs";
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
@@ -1278,6 +1282,13 @@ pub fn spawn(
         herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
+    if p.role == "verify" {
+        // #731: the browser evidence helper, for any repo's recipe (`node .verify-browser.mjs`).
+        on.write(
+            &p.worktree.join(VERIFY_BROWSER),
+            include_str!("../../../scripts/verify-browser.mjs"),
+        )?;
+    }
     if on.machine.is_none() {
         copy_included(&f.local_path(), &p.worktree)?;
     }
