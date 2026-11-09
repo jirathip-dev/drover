@@ -22,7 +22,6 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 - CI_NOT_GREEN: a check at the head sha is missing, pending or failed
 - BAD_SHA: verdict --sha is not 40 hex chars
 - STALE_SHA: verdict --sha is not the branch head. NO_PROOF: verdict FAIL: a `- blocking [<category>] file:line: what` finding lacks a `Proof:` block right under it: `Proof: run` (a fenced command, then its output; or a screenshot path) or `Proof: spec` (a `>` quoted AC, amendment or rule line, plus a `file:line`). Names each finding; notes and PASS are free-form. NO_REPRO: verdict PASS on a `--repro` issue: no `Repro:` block, a `Repro: run` without the fenced command and both fenced outputs (base plus commit 1 failing, then head), or a `Repro: verify` without a `>` quoted reason from the PR's `## Repro` section; merge: a `Repro: verify` PASS has no verify PASS at the head
-- ACCOUNT_ENV: spawn: `[accounts] account_env` failed, or printed no JSON object of env vars (its stderr in the refusal); the lane does not start
 - HOST_BUSY: spawn: memory pressure, sustained swap-out (with pressure) or load/cpu over [limits]; --force overrides (logged). MEM_LOW: under [limits] min_free_mem_gb memory free (default 2). DISK_LOW: under [limits] min_free_gb free (default 10); `herdsman clean --yes`. DISK_BUDGET: worktrees over [limits] worktree_budget_gb (default 25) after drive freed the idlest lanes' build folders. HOST_OFFLINE: the lane's host is unreachable; its lanes show `host offline` and wait for it
 - LANE_LIVE: spawn: a herdr agent is live in the worktree, or the log has an unfinished lane for it; --supersede
 - WORKTREE_DIRTY: spawn: the worktree has unpushed or uncommitted work from no known lane; --supersede
@@ -36,7 +35,7 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 - STALE: serve: fleet.toml changed since the page was rendered; reload and retry
 - NO_SUCH_AGENT / IS_LANE / SECRET_IN_WIP / SNAPSHOT_FAILED / UNSAFE_CLEAN: stop/kill: no such live lane; close: a logged lane (use stop/kill/clean); kill: a secret-looking value in the wip diff, or the wip snapshot failed (index restored, nothing pushed, pane stays); clean --lane: not merged/closed, dirty, unpushed or live
 - DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
-- MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`). ACP_UNGUARDED: spawn: an ACP lane (`shed-acp`) herdsman's hook would not guard (an adapter that runs no hook, no synced hook, no account token, another host) does not start. SHED_MISSING: spawn: a shed runtime's `shed` is not on the spawning PATH (drive's is the timer's); nothing is made
+- MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`). ACP_UNGUARDED: spawn: an ACP lane (`shed-acp`) herdsman's hook would not guard (an adapter that runs no hook, no synced hook, no account env, another host) does not start. SHED_MISSING: spawn: a shed runtime's `shed` is not on the spawning PATH (drive's is the timer's); nothing is made. ACCOUNT_ENV: spawn: `[accounts] account_env` failed or printed no JSON object of env vars (its stderr in the refusal)
 
 ## Lessons
 

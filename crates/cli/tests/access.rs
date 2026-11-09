@@ -2,9 +2,8 @@
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
-use herdsman::runner::Runner;
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");

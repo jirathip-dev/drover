@@ -704,7 +704,7 @@ impl Config {
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s
     /// `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
+        let run = |_| "retired (#441): drop the line (#683: accounts sign in with their own login)".to_string();
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
