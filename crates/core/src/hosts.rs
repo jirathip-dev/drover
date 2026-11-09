@@ -145,11 +145,22 @@ impl Runner for On<'_> {
             });
         }
         let (p, a) = self.wrap(prog, args);
+        if p == "ssh" {
+            return self.r.run_for(&p, &a, "", crate::runner::limit(prog, args));
+        }
         self.r.run(&p, &a)
     }
+    /// #713: a call over ssh keeps the limit of the command it carries (a remote `git fetch` its 10 min, not ssh's 60 s).
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         let (p, a) = self.wrap(prog, args);
+        if p == "ssh" {
+            return self.r.run_for(&p, &a, input, crate::runner::limit(prog, args));
+        }
         self.r.run_in(&p, &a, input)
+    }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
+        let (p, a) = self.wrap(prog, args);
+        self.r.run_for(&p, &a, input, limit)
     }
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);

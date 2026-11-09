@@ -236,6 +236,7 @@ impl Real {
 /// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
 /// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
 /// - `cargo`: 30 min; self-update's release build.
+/// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
 /// - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let a = |i: usize| args.get(i).map_or("", String::as_str);

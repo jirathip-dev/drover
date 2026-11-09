@@ -118,3 +118,35 @@ fn nothing_in_src_starts_a_process_but_the_runner() {
         "Command::new outside crates/core/src/runner.rs (use the Runner): {hits:?}"
     );
 }
+
+/// Each call's program and the limit it was given (0: none, the runner's own table).
+#[derive(Default)]
+struct Limits(std::sync::Mutex<Vec<(String, u64)>>);
+
+impl Runner for Limits {
+    fn run(&self, prog: &str, _: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.lock().unwrap().push((prog.into(), 0));
+        Ok(herdsman::runner::Out::default())
+    }
+    fn run_for(&self, prog: &str, _: &[String], _: &str, l: Duration) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.lock().unwrap().push((prog.into(), l.as_secs()));
+        Ok(herdsman::runner::Out::default())
+    }
+}
+
+#[test]
+fn a_remote_call_keeps_the_limit_of_the_command_it_carries() {
+    let r = Limits::default();
+    let on = herdsman::hosts::On::new(&r, Some("air"));
+    on.run("git", &argv(&["-C", "/r", "fetch", "origin"])).unwrap();
+    on.run("cargo", &argv(&["install", "x"])).unwrap();
+    on.run("sh", &argv(&["-c", "true"])).unwrap();
+    on.run_for("sh", &argv(&["-c", "cargo install x"]), "", Duration::from_secs(1800))
+        .unwrap();
+    herdsman::hosts::On::new(&r, None)
+        .run("git", &argv(&["status"]))
+        .unwrap();
+    let seen = r.0.lock().unwrap().clone();
+    let want = [("ssh", 600), ("ssh", 1800), ("ssh", 60), ("ssh", 1800), ("git", 0)];
+    assert_eq!(seen, want.map(|(p, s)| (p.to_string(), s)));
+}
