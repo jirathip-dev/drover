@@ -179,7 +179,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             "=certificate leaf[subject.CN] = \"herdsman-local\"",
             &ctx.exe,
         ];
-        let signed = ok(r, "codesign", &req).is_ok();
+        let code = r.run("codesign", &argv(&req)).map_or(1, |o| o.code);
+        let signed = code == 0;
         // #568: the identity is there but signing never took: codesign waits on the key's dialog.
         let has = !signed && ok(r, "security", &["find-certificate", "-c", "herdsman-local"]).is_ok();
         let fix = if has {
@@ -187,7 +188,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         } else {
             "sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall".into()
         };
-        let line = format!("signature — {} signed by \"herdsman-local\" → {fix}", ctx.exe);
+        // #713: a Keychain that stops answering cuts codesign at its limit (exit 124).
+        let late = if code == 124 { ": codesign timed out" } else { "" };
+        let line = format!("signature — {} signed by \"herdsman-local\"{late} → {fix}", ctx.exe);
         row(rows, signed, '✗', &line);
     }
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();

@@ -14,9 +14,7 @@ use p256::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Sub {
@@ -170,40 +168,31 @@ fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
         jwt(k, &s.endpoint, sub, crate::now()),
         B64.encode(public(k))
     );
-    let mut c = Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "10",
-            "-X",
-            "POST",
-            "-o",
-            "/dev/null",
-            "-w",
-            "%{http_code}",
-            "--data-binary",
-            "@-",
-            "-H",
-            &auth,
-        ])
-        .args([
-            "-H",
-            "Content-Encoding: aes128gcm",
-            "-H",
-            "Content-Type: application/octet-stream",
-            "-H",
-            "TTL: 86400",
-            &s.endpoint,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let _ = c.stdin.take().map(|mut i| i.write_all(body));
-    Ok(String::from_utf8_lossy(&c.wait_with_output()?.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0))
+    let args = crate::runner::argv(&[
+        "-sS",
+        "--max-time",
+        "10",
+        "-X",
+        "POST",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "--data-binary",
+        "@-",
+        "-H",
+        &auth,
+        "-H",
+        "Content-Encoding: aes128gcm",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "-H",
+        "TTL: 86400",
+        &s.endpoint,
+    ]);
+    // #713: through the runner, bounded past curl's own 10 s.
+    let o = crate::runner::Real.within("curl", &args, body, std::time::Duration::from_secs(15))?;
+    Ok(o.stdout.trim().parse().unwrap_or(0))
 }
 
 /// Push `ev` once to every subscription, or only to endpoint `only` (no retry): a 404/410 prunes it, any
