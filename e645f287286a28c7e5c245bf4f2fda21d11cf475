@@ -1,0 +1,5 @@
+Decided: merge origin/staging twice; in crates/cli/tests/shed.rs keep this branch's #737 hook tests and staging's #732 codex/claude ACP test side by side
+Because: crates/cli/tests/shed.rs:1897
+Because: crates/cli/tests/shed.rs:1938
+Rejected: none
+Owner: The fix for lanes refused after a profiles sync through the shortcut link is brought up to date with staging, nothing else changes.
