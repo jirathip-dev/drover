@@ -1041,7 +1041,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             .and_then(|a| a["pane_id"].as_str())
             .map(String::from)
     };
-    let mut retried = false;
+    let (mut retried, mut answered, mut screen) = (false, false, String::new());
     let (new, o, up) = loop {
         let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
         herdr::ok(r, &p.lane_cmd(&new))?;
@@ -1051,6 +1051,15 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         }
         // #477: a start that timed out (or found its name taken) whose agent is up in the thread's folder is adopted.
         let has = |c: &str| herdr::failed_with(&o, c);
+        // #736: a first-start prompt (an account's config folder that never trusted this one) is answered as spawn's.
+        if has("agent_not_ready") {
+            let d = |prompt: &str| json!({"thread": id, "agent": agent, "pane": new, "prompt": prompt});
+            let ev = |prompt: &str| Event::new(ctx.now, &t.fleet, None, "startup-prompt", d(prompt));
+            (answered, screen) = crate::spawn::unblock(r, h, &new, |p| emit(&ctx.state, cfg, ev(p)))?;
+            if answered {
+                break (new.clone(), o, Some(new));
+            }
+        }
         let lost = has("agent_name_not_found") || herdr::message(&o).contains("no longer owns the target terminal");
         let seen = if has("timeout") || has("agent_name_taken") || lost {
             herdr::agents(r)?
@@ -1086,7 +1095,8 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let pane = match (o.code, up) {
         (0, _) => new.clone(),
         (_, Some(p)) => p,
-        _ => bail!("herdr agent start failed: {}", herdr::message(&o)),
+        _ if screen.is_empty() => bail!("herdr agent start failed: {}", herdr::message(&o)),
+        _ => bail!("herdr agent start failed: {}\nscreen:\n{screen}", herdr::message(&o)),
     };
     // Its own new pane gets the kick; one elsewhere (the name taken) or a kick that didn't land gets the line.
     let kicked = pane == new && h.kick(r, &p, &pane).unwrap_or(false);
@@ -1095,7 +1105,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     }
     let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
         "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
-    if o.code != 0 {
+    if o.code != 0 && !answered {
         d["adopted"] = json!(true);
     }
     started(ctx, cfg, r, t, &p, d)
