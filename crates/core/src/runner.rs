@@ -41,6 +41,11 @@ pub trait Runner: Sync {
     fn local(&self) -> bool {
         false
     }
+    /// #637: `prog args` with `input` on stdin, its stdout as it arrives (the token proxy relays a streamed model call);
+    /// the child is reaped when the reader drops. Fakes run the real child too: the proxy's tests use a local upstream.
+    fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
+        Real::stream(prog, args, input)
+    }
     /// #441: keychain service `svc`'s secret in the main host's OS store (None: not set); fakes and wrappers forward.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         bail!("no secret store on this host (wanted {svc})")
@@ -155,7 +160,35 @@ fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
     )
 }
 
+/// #637: a streamed child's stdout; dropping it waits for the child.
+struct Streamed(std::process::Child, std::process::ChildStdout);
+
+impl std::io::Read for Streamed {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.1.read(buf)
+    }
+}
+
+impl Drop for Streamed {
+    fn drop(&mut self) {
+        let _ = self.0.wait();
+    }
+}
+
 impl Real {
+    fn stream(prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut c = Command::new(prog)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("cannot run {prog}"))?;
+        c.stdin.take().context("stdin")?.write_all(input.as_bytes())?;
+        let out = c.stdout.take().context("stdout")?;
+        Ok(Box::new(Streamed(c, out)))
+    }
     /// `run_in`, killed (exit 124) once `limit` has passed.
     pub fn within(&self, prog: &str, args: &[String], input: &str, limit: Option<Duration>) -> Result<Out> {
         use std::io::Write;

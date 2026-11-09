@@ -130,6 +130,8 @@ pub struct Plan {
     pub resting: Option<(String, u64)>,
     /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
+    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
+    pub lane_key: Option<String>,
 }
 
 impl Plan {
@@ -145,7 +147,7 @@ impl Plan {
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if !self.secrets().is_empty() {
+        if !self.secrets().is_empty() || self.lane_key.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
@@ -199,6 +201,10 @@ pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Resu
         let why = || format!("{var}: secret {name} is not in the store (`herdsman secret request`)");
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
+    // #637: a remote ACP lane holds no account token, only its proxy key.
+    text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
+        format!("export {}='{k}'\n", crate::harness::AUTH_TOKEN_ENV)
+    });
     let file = (!text.is_empty()).then(|| p.secrets_file());
     if let Some(f) = &file {
         on.write_private(f, &text)?;
@@ -358,6 +364,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         title,
         resting,
         session: None,
+        lane_key: None,
     })
 }
 
@@ -491,7 +498,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 }
 
 /// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
-/// account, on a remote host); empty when it would. #633: an attached cooee conductor's `guarded` too.
+/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
 pub fn unguarded(
     ctx: &Ctx,
     (profile, family, h): (&str, &str, &str),
@@ -505,11 +512,10 @@ pub fn unguarded(
     let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
     let guard = hook_command(ctx, family);
-    if remote {
-        "shed runs ACP sessions on its own host only".to_string()
-    } else if harness::get(h).acp() != Some(id) {
+    // #637: a remote host's profile is proven there (`hosts::acp_guard`), before this.
+    if harness::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
-    } else if !hooks.any(|h| h["command"] == guard.as_str()) {
+    } else if !remote && !hooks.any(|h| h["command"] == guard.as_str()) {
         format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
     } else if !account {
         "an ACP lane signs in with its role's [accounts] account env".into()
@@ -522,13 +528,19 @@ pub fn unguarded(
 /// file, with its account's env as its sign-in (#683), its profile's settings and role as the
 /// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
-pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
+    let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
     let why = unguarded(
         ctx,
         (&p.profile, p.family, &p.harness),
         id,
-        (p.account.as_ref().is_some_and(|a| !a.1.is_empty()), remote),
+        (
+            p.account
+                .as_ref()
+                .is_some_and(|a| !a.1.is_empty() || p.lane_key.is_some()),
+            remote.is_some(),
+        ),
     );
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
@@ -538,9 +550,10 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     let cmd: Vec<String> = agent
         .and_then(|a| serde_json::from_value(a["cmd"].clone()).ok())
         .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
-    let mut words = p.lane_cmd("")[3..].to_vec();
+    let mut words = home(p.lane_cmd("")[3..].to_vec());
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
+    let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
     let env = harness::get(&p.harness).acp_env(p.model.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
@@ -549,6 +562,42 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     let profile = harness::get(&p.harness).acp_profile(&set, &role);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
+}
+
+/// #637: an ACP lane on another host: its profile synced there by name (#592; not on a dry run), then the guard proven
+/// there (`hosts::acp_guard`). Unguarded, the host gets a `✗ acp guard` row (the next placement goes elsewhere) and
+/// spawn refuses `ACP_UNGUARDED`; guarded, the lane gets a fresh proxy key and the proxy's URL, never a token.
+fn remote_acp(
+    ctx: &Ctx,
+    cfg: &Config,
+    on: &crate::hosts::On,
+    p: &mut Plan,
+    (pl, id): (&crate::hosts::Placed, &str),
+    dry: bool,
+) -> Result<()> {
+    let home = pl.home.as_deref().unwrap_or_default();
+    if !dry {
+        let exe = crate::hosts::rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+        ok(
+            on,
+            &exe,
+            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
+        )?;
+    }
+    if let Some(why) = crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
+        crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
+        return refused(
+            "ACP_UNGUARDED",
+            format!(
+                "{}: {why}; the lane does not start, the next placement skips the host",
+                pl.name
+            ),
+        );
+    }
+    p.env
+        .insert(crate::harness::BASE_URL_ENV.into(), crate::proxy::url(cfg));
+    p.lane_key = Some(crate::proxy::new_key()?);
+    Ok(())
 }
 
 /// #722: the linked worktree of `local`'s repo where `branch` is checked out, if any.
@@ -836,7 +885,8 @@ pub fn spawn(
     // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
     let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
     let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
-    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
+    let acp_host = placed.as_ref().is_some_and(|pl| cfg.host_acp(&pl.name).is_some());
+    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).shed_only(acp_host);
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f);
@@ -865,7 +915,7 @@ pub fn spawn(
     let local = local.to_string_lossy().into_owned();
     let reopen = on.exists(&p.worktree);
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
-    let bt = cfg.shed_for(fleet).map(|b| {
+    let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
         herdr::Shed(crate::shed::Shed { wire, ..b })
     });
@@ -878,8 +928,11 @@ pub fn spawn(
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
     let n = round(&read(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
+    if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
+        remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
+    }
     let acp = match &acp_id {
-        Some(id) => acp_cmd(ctx, r, &p, id, on.machine.is_some())?,
+        Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
         None => vec![],
     };
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
@@ -1225,7 +1278,7 @@ pub fn spawn(
         copy_included(&f.local_path(), &p.worktree)?;
     }
     h.prepare(ctx, &on, &p)?;
-    if on.machine.is_some() {
+    if on.machine.is_some() && p.lane_key.is_none() {
         // #592: its host keeps no fleet.toml, so this lane's profile is synced there by name.
         let exe = home(vec![ctx.exe.clone()]).remove(0);
         ok(
@@ -1233,6 +1286,14 @@ pub fn spawn(
             &exe,
             &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
         )?;
+    }
+    if let (Some(k), Some(pl)) = (&p.lane_key, &placed) {
+        // #637: its proxy key recorded (the account it signs with stays here), the proxy and the host's tunnel up.
+        // #683: the account's `[accounts]` value names its token's secret, read only by the proxy here.
+        let acct = p.account.as_ref().and_then(|a| cfg.accounts.names.get(&a.0));
+        let acct = acct.map_or("", String::as_str);
+        crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), (&pl.name, acct))?;
+        crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
     let _secrets = deliver(&on, cfg, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
