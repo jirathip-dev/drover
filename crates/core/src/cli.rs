@@ -337,6 +337,15 @@ enum Cmd {
         #[arg(long, default_value = ".herdsman/rules.md")]
         rules: std::path::PathBuf,
     },
+    /// CI (#734): the layers, bans and size limits in --config; exit 1 on a violation
+    #[command(hide = true)]
+    ArchCheck {
+        #[arg(long, default_value = ".herdsman/arch.toml")]
+        config: PathBuf,
+        /// Write today's size offenders to the baseline file instead
+        #[arg(long)]
+        write_baseline: bool,
+    },
     /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
     #[command(hide = true)]
     LessonCheck {
@@ -392,9 +401,6 @@ enum Cmd {
         /// Only load the config (the pre-install gate, #539): exit 1 if this binary can't, warnings are fine
         #[arg(long)]
         config_only: bool,
-        /// Only read each account token from the store, timed out on a dialog (the install gates' secret check, #631)
-        #[arg(long, conflicts_with = "config_only")]
-        tokens: bool,
     },
     /// Read-only: is GitHub branch protection on for main, staging and the integration branch of each fleet repo? Exit 1 unless all are
     Protection,
@@ -679,6 +685,12 @@ enum QueueCmd {
         /// A bug fix: impl's first commit is a failing test, rev proves it fails on base and passes at head
         #[arg(long)]
         repro: bool,
+        /// A speed-up: impl's first commit records a baseline, rev's PASS gives before/after (`NO_BASELINE`)
+        #[arg(long, conflicts_with = "refactor")]
+        perf: bool,
+        /// Behaviour unchanged: tests only moved or renamed, checked on rev's PASS (`TESTS_CHANGED`)
+        #[arg(long)]
+        refactor: bool,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -851,8 +863,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +6 for #712's `unpark` and `park --why`/`--by`).
-pub const HELP_AGENT_MAX: usize = 350;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`).
+pub const HELP_AGENT_MAX: usize = 352;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1031,9 +1043,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             };
             crate::db::migrate(&state, out)?;
             crate::roots::migrate(ctx, r, out)?; // #630
+            crate::secret::retired(&state, out)?; // #707
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::ArchCheck { config, write_baseline } => return crate::arch::check(&config, write_baseline, out),
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -1239,9 +1253,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             ..
         } => (SERVE.get().context("no serve")?.1)(ctx, r, &dir, demo)?,
         Cmd::Serve { addr, read_only, .. } => {
-            if let Ok(cfg) = Config::load(&ctx.config) {
-                crate::secret::probe(r, &cfg)?; // #441: no usable store, no board
-            }
             (SERVE.get().context("no serve")?.0)(ctx, r, &addr, read_only)?;
         }
         Cmd::Push { cmd: PushCmd::Test } => {
@@ -1282,6 +1293,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["repro"] == true {
                     on += "  repro";
                 }
+                if let Some(p) = r["playbook"].as_str() {
+                    on += &format!("  {p}");
+                }
                 if let Some(v) = r["verify"].as_bool() {
                     on += if v { "  verify on" } else { "  verify off" };
                 }
@@ -1301,8 +1315,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 )?;
             }
         }
-        Cmd::Doctor { tokens: true, .. } => return crate::doctor::tokens(ctx, r, out),
-        Cmd::Doctor { json, config_only, .. } => return crate::doctor::doctor(ctx, r, out, json, config_only),
+        Cmd::Doctor { json, config_only } => return crate::doctor::doctor(ctx, r, out, json, config_only),
         Cmd::Setup { host, name, no_load } => {
             let Some((h, n)) = host.zip(name) else {
                 return crate::timer::setup(ctx, r, out, !no_load);
@@ -1479,7 +1492,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         crate::secret::request(ctx, &cfg, &thread, &name, &why)?;
                     }
                     SecretCmd::Ls => crate::secret::ls(ctx, out)?,
-                    SecretCmd::Rm { fleet, name } => crate::secret::rm(ctx, &cfg, r, &fleet, &name)?,
+                    SecretCmd::Rm { fleet, name } => crate::secret::rm(ctx, &cfg, &fleet, &name)?,
                 },
                 Cmd::Card { cmd } => {
                     let line = match cmd {
@@ -1817,6 +1830,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             architect,
                             verify,
                             repro,
+                            perf,
+                            refactor,
                         } => {
                             // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
                             let g =
@@ -1847,6 +1862,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             if repro {
                                 d["repro"] = json!(true);
+                            }
+                            if perf || refactor {
+                                d["playbook"] = json!(if perf { "perf" } else { "refactor" });
                             }
                             d
                         }

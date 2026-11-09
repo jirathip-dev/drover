@@ -261,7 +261,7 @@ pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
-/// The key is read from `env_file` (else the store's `all` secret `key_env`, else the environment), never from fleet.toml.
+/// The key is read from `env_file` (#707: 0600, refused if looser; else the environment), never from fleet.toml.
 #[derive(Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
@@ -293,6 +293,8 @@ pub struct Serve {
     pub hooks_addr: Option<String>,
     /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
+    /// #707: the 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
+    pub webhook_secret_file: Option<String>,
 }
 
 impl Serve {
@@ -420,6 +422,9 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
+    /// #754: the repo's own line-cap script `herdsman cap` reads `N / cap M` lines from; unset = the first `premerge`
+    /// check naming a cap, else the built-in Rust count.
+    pub cap_script: Option<String>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
     /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
@@ -591,6 +596,9 @@ pub struct Limits {
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
     pub webhook_poll_minutes: u64,
+    /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
+    pub keychain_readers: usize,
+    pub reap_keychain_readers: bool,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -665,6 +673,8 @@ impl Default for Limits {
             fallback_rest_minutes: 60,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
+            keychain_readers: 3,
+            reap_keychain_readers: false,
         }
     }
 }
@@ -710,6 +720,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "orphan-issue",
     "config-warning",
     "keychain-locked",
+    "keychain-jammed",
     "self-update-failed",
     "clean-failed",
     "runners-low",

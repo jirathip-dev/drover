@@ -30,7 +30,8 @@ fn rc(verb: &str) -> String {
     format!("sh -c IFS= read -r K; export FAKE_CLOUD_KEY=\"$K\"; unset K; fakecloud {verb} cloud1")
 }
 
-/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); the key in the store.
+/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); #707: the key in
+/// `<config>/secrets/FAKE_CLOUD_KEY`, 0600.
 fn setup(name: &str) -> herdsman::Ctx {
     let dir = tmpdir(name);
     std::fs::create_dir_all(&dir).unwrap();
@@ -41,6 +42,7 @@ budget_usd_month = 10\nmax_hours_day = 20\ntags = [\"docker\"]\n";
     let c = ctx(&dir, &cfg);
     std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
+    secret_file(&c, "FAKE_CLOUD_KEY", KEY, 0o600);
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
     let cache = json!({
@@ -63,8 +65,7 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
 /// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
-        .reply("herdr --machine cloud1 agent list", NO_AGENTS)
+    f.reply("herdr --machine cloud1 agent list", NO_AGENTS)
         .reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
         .reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
@@ -499,9 +500,6 @@ impl Runner for Stdin {
         self.1.borrow_mut().push(input.into());
         self.0.run(prog, args)
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
 }
 
 #[test]
@@ -528,6 +526,33 @@ fn the_provider_key_never_reaches_argv_or_the_log() {
     assert!(!log.contains(KEY) && log.contains("cloud-up"), "{log}");
 }
 
+#[test]
+fn a_recipe_without_key_env_runs_its_command_with_no_key() {
+    let (c, cfg) = running("cloud-nokey");
+    let recipe = c.config.with_file_name("recipes/fake.toml");
+    std::fs::write(&recipe, RECIPE.replace("key_env = \"FAKE_CLOUD_KEY\"\n", "")).unwrap();
+    std::fs::remove_file(c.config.with_file_name("secrets/FAKE_CLOUD_KEY")).unwrap();
+    let r = Stdin(lane_fake().reply("sh -c fakecloud stop cloud1", ""), Shared::default());
+    herdsman::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap();
+    assert!(r.0.called("sh -c fakecloud stop cloud1"), "{:?}", r.0.calls.borrow());
+    assert!(
+        r.1.borrow().iter().all(String::is_empty),
+        "no key on stdin: {:?}",
+        r.1.borrow()
+    );
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "cloud-stop"));
+}
+
+#[test]
+fn a_cloud_key_file_others_can_read_is_refused() {
+    let (c, cfg) = running("cloud-0644");
+    secret_file(&c, "FAKE_CLOUD_KEY", KEY, 0o644);
+    let r = Stdin(lane_fake(), Shared::default());
+    let e = herdsman::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap_err();
+    assert!(format!("{e:#}").contains("REFUSED SECRET_FILE_OPEN"), "{e:#}");
+    assert!(!r.0.called("sh -c"), "nothing ran: {:?}", r.0.calls.borrow());
+}
+
 /// The start of the ssh line a bootstrap step's shell `cmd` runs as on cloud1.
 fn step(cmd: &str) -> String {
     let s = format!("{}{cmd}", herdsman::cloud::SH).replace('\'', "'\\''");
@@ -543,7 +568,6 @@ fn boot_fake(gh_in: bool) -> Fake {
         herdsman::VERSION
     );
     let f = Fake::default()
-        .stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
         .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
         .reply("herdr machine list --json", r#"[{"id": "c1", "label": "cloud1"}]"#)
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
@@ -695,9 +719,6 @@ impl Runner for Remote<'_> {
             stdout: String::from_utf8_lossy(&o.stdout).into(),
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
     }
 }
 

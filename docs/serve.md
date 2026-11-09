@@ -347,8 +347,8 @@ tailscale funnel --bg --https=10000 --set-path /hooks/github http://127.0.0.1:77
 
 In the repo's GitHub settings add a webhook: payload URL `https://<mac>.<tailnet>.ts.net:10000/hooks/github`,
 content type `application/json`, the secret, and the events *Pull requests*, *Check suites*, *Check runs*,
-*Statuses* and *Pushes*. The secret is `GITHUB_WEBHOOK_SECRET` in the OS store (`herdsman secret request <thread>
-GITHUB_WEBHOOK_SECRET --why …`; a fleet's own, else `all`'s); without it the endpoint answers 503 and doctor shows
+*Statuses* and *Pushes*. The secret is the 0600 file `[serve] webhook_secret_file` names (#707; one for every fleet, refused
+`SECRET_FILE_OPEN` if others can read it); without it the endpoint answers 503 and doctor shows
 `! webhook — no secret`.
 
 Each delivery's `X-Hub-Signature-256` (HMAC-SHA256 of the raw body) is checked in constant time; a missing or bad one

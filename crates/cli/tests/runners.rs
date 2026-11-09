@@ -43,6 +43,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(&tmpdir(name), &cfg);
     std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
+    secret_file(&c, "FAKE_KEY", KEY, 0o600); // #707: the `[ci_runners]` API key's 0600 file
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     c
 }
@@ -73,7 +74,6 @@ fn fleet(bb_on: usize, aa_busy: bool) -> String {
 
 fn fake(list: &str) -> Fake {
     Fake::default()
-        .stored("herdsman/all/FAKE_KEY", KEY)
         .reply(LIST, list)
         .reply(
             "gh api -X POST repos/o/app/actions/runners/registration-token",

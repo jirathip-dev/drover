@@ -64,6 +64,8 @@ jobs:
         run: just html-lint
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
+      - name: "arch-check (#734: layers, banned calls and size baselines in .herdsman/arch.toml)"
+        run: ./target/release/herdsman arch-check
       - name: "lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)"
         run: ./target/release/herdsman lesson-check
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
@@ -132,6 +134,8 @@ jobs:
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
       - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
         run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
+      - name: the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+        run: cargo test --locked --test verify_browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:

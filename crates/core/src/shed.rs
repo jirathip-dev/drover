@@ -303,12 +303,6 @@ impl Runner for With<'_> {
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         self.0.detach(exe, args, log)
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.0.set_secret(svc, value)
-    }
     fn shed(&self) -> Option<Shed> {
         Some(self.1.clone())
     }
