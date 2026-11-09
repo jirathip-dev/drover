@@ -282,7 +282,11 @@ overflow_after_minutes = 10  # the default
 Each step checks first and is skipped when already done, then is read back after its install, so it is safe to run
 again. In order:
 
-1. **herdr** at this host's version (`herdr machine add <machine>` from here), then git, gh, Claude Code and Rust with
+0. #641: before any step, the host's `machine` label must name at most one herdr machine profile
+   (`herdr machine list`); several are refused `HOST_AMBIGUOUS`, listed, and nothing runs. A setup pane (a login,
+   from bootstrap or the board) needs exactly one, else `HOST_UNKNOWN`; it never opens on this host instead.
+1. **herdr** at this host's version (`herdr machine add <machine>` from here; a recreated box's old profile under
+   that label is removed first, logged `host-machine-replaced`), then git, gh, Claude Code and Rust with
    a C linker (apt and the official install scripts). Other toolchains a fleet needs go in your own snapshot.
 2. **herdsman** at this host's exact sha: `cargo install --git <herdsman repo> --rev <sha>` into the same root as
    here (e.g. `~/.local`).
