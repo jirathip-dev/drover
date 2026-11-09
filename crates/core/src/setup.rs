@@ -42,6 +42,9 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
         return refused("NO_SUCH_HOST", format!("no [hosts.{host}]"));
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
+    if let Some(m) = on.machine {
+        crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
+    }
     let ws = "workspace create --cwd /tmp --label herdsman-setup --no-focus";
     let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;
     let pane = ws["result"]["root_pane"]["pane_id"].as_str().context("no pane")?;

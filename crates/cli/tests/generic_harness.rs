@@ -14,7 +14,7 @@ const MENU: &str = "⏺ Bash(cargo test)\nWhich database should the meter use?\n
 
 #[test]
 fn the_generic_harness_has_every_fallback() {
-    let h = harness::get("codex");
+    let h = harness::get("gemini");
     assert!(h.env().is_empty() && h.health_check().is_none() && h.process_names().is_empty());
     assert_eq!(h.credential(), harness::Credential::None);
     assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage_meter().is_none());
@@ -31,7 +31,7 @@ fn the_generic_harness_has_every_fallback() {
     assert_eq!(h.transcript(std::path::Path::new("/"), "/wt"), None);
     assert!(h.now_line("$ cargo test") && !h.now_line("────────────────────"));
     assert_eq!(
-        herdsman::lanes::activity("codex", MENU),
+        herdsman::lanes::activity("gemini", MENU),
         "2. Postgres",
         "the last non-chrome line"
     );
@@ -43,15 +43,15 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     let c = ctx(&d, CONFIG);
     let wt = d.join("wt").to_string_lossy().into_owned();
     std::fs::create_dir_all(&wt).unwrap();
-    let sp = json!({"role": "impl", "agent": LANE, "harness": "codex", "pane": "w1:p2", "worktree": wt});
+    let sp = json!({"role": "impl", "agent": LANE, "harness": "gemini", "pane": "w1:p2", "worktree": wt});
     append(&c.state, &Event::new(T - 60, "sendmeter", Some(12), "spawn", sp)).unwrap();
     let mut list: serde_json::Value = serde_json::from_str(&agents(&[(LANE, "blocked", &wt, "w1:p2")])).unwrap();
-    list["result"]["agents"][0]["agent"] = json!("codex");
+    list["result"]["agents"][0]["agent"] = json!("gemini");
     let r = Fake::default()
         .reply("herdr agent list", &list.to_string())
         .reply("herdr workspace list", "{}")
         .reply("herdr pane read", MENU)
-        .reply("lsof", &format!("p201\nccodex\nfcwd\nn{wt}\n"))
+        .reply("lsof", &format!("p201\ncgemini\nfcwd\nn{wt}\n"))
         .reply("ps -axo pid=,rss=", "  201 1048576\n");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "", T);
@@ -64,7 +64,7 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     let chat: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
     assert_eq!(
         (&chat["harness"], &chat["said"]),
-        (&json!("codex"), &json!(null)),
+        (&json!("gemini"), &json!(null)),
         "{chat}"
     );
     assert!(
@@ -85,11 +85,11 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     );
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(res.contains("no menu on") && !r.called("herdr pane send-keys"), "{res}");
-    // Memory: the codex lane's pane tree in a row of its own, none under Claude.
+    // Memory: the gemini lane's pane tree in a row of its own, none under Claude.
     let page = host_tab(&s, ADDR, T);
     assert!(!page.contains("<span class=k>claude</span>"), "{page}");
     assert!(
-        page.contains("<span class=k>codex</span>")
+        page.contains("<span class=k>gemini</span>")
             && page.contains("<b>1.0 GB</b> <span class=mt>(1 lanes: working 0 / done 0)</span>"),
         "{page}"
     );

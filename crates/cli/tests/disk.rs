@@ -436,3 +436,82 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     assert!(res.contains("removed%201%20orphan"), "{res}");
     assert!(!old.exists() && !host_tab(&s, ADDR, NOW).contains("remove orphans"));
 }
+
+/// Real git; a `ssh <host> -- <line>` runs `<line>` here (the Air shares this disk); `date` and herdr are scripted.
+struct TwoHosts(Fake);
+
+impl herdsman::runner::Runner for TwoHosts {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        let line = args.last().map_or("", String::as_str);
+        match prog {
+            "git" => herdsman::runner::Real.run(prog, args),
+            "ssh" if line.starts_with("'date' ") => self.0.run("date", &[]),
+            "ssh" => herdsman::runner::Real.run("sh", &["-c".into(), line.into()]),
+            _ => self.0.run(prog, args),
+        }
+    }
+}
+
+/// #716: lane `impl-48` left dirty work on this host and on the Air; one `clean --yes` saves each to its own wip/
+/// branch (no push rejected), removes both worktrees though a skipped build file stays, and the next clean is silent.
+#[test]
+fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
+    let d = tmpdir("disk-wip-716");
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
+    let wt = |dir: &str, host: Option<&str>| {
+        let p = c.worktrees.join(dir).join("issue-48");
+        git(&local, &["worktree", "add", "-q", "--detach", p.to_str().unwrap()]);
+        std::fs::write(p.join("notes.txt"), format!("{dir}\n")).unwrap();
+        build(&p, "target", 10); // skipped by the save, left in the folder
+        let mut e = json!({"role": "impl", "agent": "impl-48", "worktree": p, "pane": "w48:p1", "workspace": "w48"});
+        if let Some(h) = host {
+            e["host"] = json!(h);
+            e["machine"] = json!(h);
+        }
+        ev(&c, 10, 48, "spawn", e);
+        p
+    };
+    let (mini, air) = (wt("mini", None), wt("air", Some("air")));
+    ev(
+        &c,
+        50,
+        48,
+        "merged",
+        json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+    );
+    let r = || {
+        TwoHosts(
+            Fake::default()
+                .reply("herdr agent list", NO_AGENTS)
+                .reply("herdr --machine air agent list", NO_AGENTS)
+                .reply("date", "20261102-072000\n"),
+        )
+    };
+    let (code, out) = run(&c, &r(), &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    let saved: Vec<String> = (events(&c, "wip-saved").iter())
+        .map(|e| e.str("branch").unwrap().to_string())
+        .collect();
+    assert_eq!(saved.len(), 2, "{out}");
+    assert_ne!(saved[0], saved[1], "{out}");
+    let remote = git(&local, &["ls-remote", "origin", "refs/heads/wip/*"]);
+    assert_eq!(remote.lines().count(), 2, "{remote}");
+    for w in &saved {
+        assert!(w.starts_with("wip/impl-48-"), "{w}");
+        let n = saved.iter().filter(|o| o.starts_with(w.as_str())).count();
+        assert_eq!(
+            n, 1,
+            "no name is a retry of another's (`<name>-<tag>` after a rejected push): {saved:?}"
+        );
+    }
+    assert!(!mini.exists() && !air.exists(), "both removed on this tick: {out}");
+    let (code, again) = run(&c, &r(), &["clean", "--yes"]);
+    assert_eq!(code, 0, "{again}");
+    assert!(!again.contains("issue-48"), "{again}");
+}

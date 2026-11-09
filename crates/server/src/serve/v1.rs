@@ -4,7 +4,7 @@
 //! (`herd`, `roles`, `setup/<pane>`; POST `send`, `menu`, `act`, `setup`, `chat-about`, `chat`, `close`) run the old
 //! board's code; every POST takes JSON (or the board's form) and answers `Reply`. #576: the queue rows' marks (`qset`
 //! sets one), an issue's verdicts and the lessons.
-use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
+use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, States, HTML, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
@@ -22,7 +22,8 @@ const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat"
 
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
 /// #633: and a cooee thread's conductor link.
-const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach"];
+/// #725: and the lifeboat's posts.
+const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach", "lifeboat"];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -59,6 +60,19 @@ impl Server<'_> {
                     && (lane.or(setup).is_some() || ["needs", "lanes", "chat"].contains(&x) || paired_op(x)) =>
             {
                 reply("503 Service Unavailable", "BUSY", "board busy, retrying")
+            }
+            // #725: the lifeboat (`crate::lifeboat`), plain HTML; an unpaired device gets the pair hint only.
+            ("GET", Some("lifeboat")) if !paired => ("401 Unauthorized", HTML, crate::lifeboat::hint().into_bytes()),
+            ("GET", Some("lifeboat")) => {
+                let lanes = Config::load(&ctx.config).ok().zip(shared(&ctx.state).ok());
+                let lanes = lanes.map_or_else(Vec::new, |(c, e)| self.lane_list(ctx, &c, &e, &e.states));
+                let msg = f.get("msg").map_or("", String::as_str);
+                ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
+            }
+            ("POST", Some("lifeboat")) if paired => {
+                let (msg, later) = crate::conductor::deferred(|| crate::lifeboat::act(ctx, self.r, &fields(body)));
+                self.later(ctx, later);
+                ("200 OK", HTML, crate::lifeboat::back(&super::enc(&msg)).into_bytes())
             }
             ("GET", Some("state")) => self.state(ctx).map_or_else(
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
@@ -297,11 +311,10 @@ impl Server<'_> {
         Ok(format!("closed #{n}"))
     }
 
-    pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
-        let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
-        let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
-        let waits = self.waits(ctx, &cfg, &events, &all);
+    /// API v1's live lanes from the step's snapshot (#337: no subprocess on a request); `state`'s and the lifeboat's.
+    fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
+        let all = self.lanes(ctx.now, cfg, events, st).unwrap_or_default();
+        let waits = self.waits(ctx, cfg, events, &all);
         let lane = |l: &lanes::Lane| {
             let (title, tone, shown, _) = view(ctx, l, &waits);
             Lane {
@@ -321,6 +334,13 @@ impl Server<'_> {
                 place: l.place.clone(),
             }
         };
+        all.iter().map(lane).collect()
+    }
+
+    pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
+        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
+        let lanes = self.lane_list(ctx, &cfg, &events, &st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
             fleet: f.clone(),
             issue: i.issue,
@@ -382,7 +402,7 @@ impl Server<'_> {
             theme: super::active(ctx),
             fleets: cfg.fleet.iter().map(fleet).collect(),
             queue: queue.map(queued).collect(),
-            lanes: all.iter().map(lane).collect(),
+            lanes,
             asks: crate::events::open_asks(&events).into_iter().map(ask).collect(),
             hosts: crate::hosts::cards(&cfg, r).into_iter().map(host).collect(),
             services: crate::timer::services(ctx, &cfg, r, Some(board(ctx)))
