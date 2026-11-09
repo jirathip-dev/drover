@@ -1,0 +1,7 @@
+Decided: merged origin/staging (#637) into spawn.rs keeping both the #708 unset and #637's lane_key secrets-file condition
+Because: crates/core/src/spawn.rs:152
+Because: crates/core/src/spawn.rs:154
+Rejected: taking staging's side only — it drops #708's unset of an inherited shell token
+Rejected: unsetting after sourcing the secrets file — the token must be gone before the lane's own env is read
+Check: claude_role_dry_run_uses_synced_profile still expects the unset; #637's remote ACP spawn tests still source the key file
+Owner: no behaviour change; this only joins two changes to the same lane start line.
