@@ -155,7 +155,8 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
 ## Monitoring
 
 - `herdsman hosts` prints, per host: on or off, reachable or offline, its tags, load/cpu, memory, disk, and its lanes.
-- `herdsman status` gets a `HOST` column once fleet.toml has `[hosts]`.
+- `herdsman status` gets a `HOST` column once fleet.toml has `[hosts]`; #609: it shows a live lane's `where`
+  (`mini · shed`, docs/serve.md), as `board` and `waiting` do.
 - The Host tab's HOSTS section has one card per host, main first, then A→Z, each with the same rows (#234): load/cpu,
   swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
   values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
@@ -340,7 +341,8 @@ asked there.
   is removed once the shell has read it. Port `<port>` there is an ssh reverse tunnel (`ssh -N -R`, started detached
   by spawn and each survey, its pid in `<state>/tunnel-<host>.pid`) to `herdsman proxy` here, which spawn starts when
   it does not answer. The proxy checks the key, then forwards the call to `upstream` with the role's `[accounts]`
-  token and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
+  token (#683: the account's `[accounts]` value names that token's secret in the store, `herdsman/all/<value>`;
+  only the proxy reads it) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
   argv, and the answer streams back as it comes. The account token never leaves the main host.
 - **Lane keys.** They are kept in `<state>/proxy-keys.json` as sha256 only. A key signs while it is `live`: it is not
   `revoked`, not `expired` (`key_hours`), and not `ended` (its issue merged or closed, its lane closed, dead or

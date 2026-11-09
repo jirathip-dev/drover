@@ -304,14 +304,17 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> its token's secret name (#441: in the store, `herdsman accounts import`), plus the
-/// settings below.
+/// `[accounts]`: the account names (#683: each value is unused, once its token's name in the store; a lane signs in
+/// with `account_env`'s env, else its folder, `Accounts::folder`), plus the settings below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
     /// #539: retired by #441, a warning (`Config::warnings`), never a load error; its tokens still back the store's
     /// missing ones, read-only, until the import and the line's removal.
     pub accounts_env: Option<String>,
+    /// #683 (q846): the command (words; `{provider}` and `{name}` filled in) that prints an account's lane env as a JSON
+    /// object, e.g. `cooee accounts env {provider} {name}`; unset: `Accounts::folder` as the provider's config folder.
+    pub account_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -323,10 +326,20 @@ pub struct Accounts {
     pub names: BTreeMap<String, String>,
 }
 
+impl Accounts {
+    /// #683: account `name`'s own CLI login folder with no `account_env`: its `[accounts.usage]` one, else
+    /// `~/.config/herdsman/accounts/<name>`.
+    pub fn folder(&self, name: &str) -> PathBuf {
+        let d = self.usage.get(name).cloned();
+        expand(&d.unwrap_or_else(|| format!("~/.config/herdsman/accounts/{name}")))
+    }
+}
+
 impl Default for Accounts {
     fn default() -> Self {
         Accounts {
             accounts_env: None,
+            account_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
@@ -715,7 +728,7 @@ impl Config {
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s
     /// `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
+        let run = |_| "retired (#441): drop the line (#683: accounts sign in with their own login)".to_string();
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));

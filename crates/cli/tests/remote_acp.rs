@@ -131,8 +131,10 @@ impl Boat<'_> {
                 let mut all = self.machines.borrow_mut();
                 all.get_mut(m).unwrap().terms.insert(name.clone(), t);
                 let i = w.iter().position(|a| a == "--").unwrap();
+                let cwd = &w[w.iter().position(|a| a == "--cwd").unwrap() + 1];
                 let o = Command::new(&w[i + 1])
                     .args(&w[i + 2..])
+                    .current_dir(cwd)
                     .env_clear()
                     .env("PATH", std::env::var("PATH").unwrap())
                     .output()
@@ -154,6 +156,7 @@ impl Boat<'_> {
                 let dir = self.profiles.join(p);
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(dir.join("settings.json"), s.to_string()).unwrap();
+                std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
             // Its files and its herdsman are real (paths under the test's own dirs).

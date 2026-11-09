@@ -73,7 +73,7 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
 
 /// #633: `POST /api/v1/conductor-attach`: cooee thread `id` becomes `fleet`'s conductor thread (`conductor-attached`);
 /// what its profile needs: the brief, the synced settings, the env, and whether #565's ACP guard holds (`why` not).
-pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
+pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) -> Result<Value> {
     let f = cfg.fleet(fleet)?;
     let (_, role) = defaults(cfg, fleet)?;
     let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
@@ -88,12 +88,20 @@ pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     emit(&ctx.state, cfg, t.clone())?;
     let p = role.profile_or("conductor");
     let acp = harness::get(&role.harness).acp().unwrap_or(&role.harness);
-    let account = crate::access::pick(ctx, cfg, &events, &role).ok().flatten().is_some();
-    let why = crate::spawn::unguarded(ctx, (&p, "conductor", &role.harness), acp, (account, false));
+    // #683: the account's env is the thread's sign-in (its own login); the profile's settings go on top.
+    let acct = crate::access::pick(ctx, cfg, &events, &role).ok().flatten();
+    let acct = acct
+        .map(|a| crate::access::account_env(cfg, r, &role.harness, &a.0))
+        .transpose()?;
+    let acct = acct.unwrap_or_default();
+    let why = crate::spawn::unguarded(ctx, (&p, "conductor", &role.harness), acp, (!acct.is_empty(), false));
     let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/conductor-{id}"), &[]);
     let settings = harness::profiles_root(ctx).join(&p).join("settings.json");
-    let env = json!({"HERDSMAN_LANE": format!("{fleet}:-:conductor"), "HERDSMAN_THREAD": id,
+    let mut env = json!({"HERDSMAN_LANE": format!("{fleet}:-:conductor"), "HERDSMAN_THREAD": id,
         "HERDSMAN_PORT": port.to_string()});
+    for (k, v) in acct {
+        env[k] = json!(v);
+    }
     let message = format!("{id} is {fleet}'s conductor thread");
     Ok(
         json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
@@ -976,6 +984,10 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         lane_key: None,
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
+    // #683: the conductor runs on this host: its account's env is its sign-in.
+    if let Some(a) = p.account.as_mut() {
+        a.1 = crate::access::account_env(cfg, r, &p.harness, &a.0)?;
+    }
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
     let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {

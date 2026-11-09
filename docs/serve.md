@@ -421,6 +421,14 @@ build` after a UI edit.
 - cooee core, where it reads it (the lanes it shows as Workflow chats, cooee#33);
 - the frozen `web/` board (#552), until #553's parity rows pass.
 
+#609: every lane in `state`, `lanes` and `herd` (`/herd.json`), and each `queue` row (its active lane's, empty with
+none), carries `runtime` (`herdr`, `shed` or `shed-acp`, from the lane's spawn: a config change later never moves it),
+`host` (its `[hosts]` name, the main host's for a local lane, `local` with no `[hosts]`; `herd`'s stays null without
+one) and `where`, the one label every surface shows: the host while 2 or more hosts are enabled, then `herdr` or `shed`
+(an ACP session is `shed`) while live lanes span both runtimes, joined with ` · ` (`mini · shed`, `air`, `shed`, or
+empty: no chip). The old board's Queue and Lanes rows show it as a chip; `status`'s HOST column, a `board` row's
+`on …` line and `waiting`'s age show the same string. Each shape is in `crates/cli/tests/golden/api_v1/where.json`.
+
 The rule: a screen that needs data herdsman doesn't send gets the `/api/v1` field here first, with its fixture in
 `crates/cli/tests/api_v1_contract.rs`, then the consumer reads it. Consumers never derive engine state themselves.
 

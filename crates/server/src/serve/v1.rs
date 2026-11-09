@@ -193,7 +193,7 @@ impl Server<'_> {
                 if op == "conductor-detach" {
                     return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
                 }
-                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, fleet, t));
+                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, self.r, fleet, t));
                 match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
                     Ok(a) => out("200 OK", &a),
                     Err(e) => done(Err(e)),
@@ -316,6 +316,9 @@ impl Server<'_> {
                 shown,
                 tone: tone.into(),
                 since: l.since,
+                runtime: l.runtime.clone(),
+                host: l.at(),
+                place: l.place.clone(),
             }
         };
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {

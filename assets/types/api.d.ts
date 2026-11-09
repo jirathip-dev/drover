@@ -10,7 +10,7 @@ export type HerdFleet = { name: string, color: string, lanes: Array<HerdLane>, q
 /**
  * A lane in the Herd; #423: `grow`, its issue's growth stage (a theme's `stages`).
  */
-export type HerdLane = { name: string, act: string, grow: string, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, effort?: string | null, account?: string | null, host?: string | null, state: string, shown: string, tone: string, age: string, coat: string, gone: boolean, };
+export type HerdLane = { name: string, act: string, grow: string, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, effort?: string | null, account?: string | null, host?: string | null, runtime: string, where: string, state: string, shown: string, tone: string, age: string, coat: string, gone: boolean, };
 
 export type HerdQueued = { issue: number, title?: string | null, blocked_by?: number | null, coat: string, };
 
@@ -84,7 +84,7 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, };
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, runtime: string, host: string, where: string, };
 
 /**
  * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -236,7 +236,7 @@ blocked_on: Array<string>, };
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
  */
-export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, shown: string, tone: string, since: number, };
+export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
 
 export type Ask = { id: string, fleet: string, issue?: number | null, question: string, options: Array<string>, recommend?: number | null, ts: number, };
 
@@ -350,7 +350,7 @@ export type DriveAct = { who: string, words: string, code: string, };
  * answer not delivered), the decision taken by default
  * (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
  */
-export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, open?: NeedAsk | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, };
+export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, open?: NeedAsk | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, runtime: string, host: string, where: string, };
 
 /**
  * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
@@ -490,7 +490,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, };
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
 
 export type Event = { 
 /**

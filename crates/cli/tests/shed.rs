@@ -355,7 +355,7 @@ fn a_lane_spawns_on_shed() {
 }
 
 /// #565: the fleet piloting ACP lanes: its own `[fleet.<n>.runtime]` (no global one), a `harness` role signed in with
-/// account C (`account`), whose token is in the store.
+/// account C (`account`), #683: its default login folder (no `account_env`).
 fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
     let acct = if account { "\naccount = \"C\"" } else { "" };
     let cfg = CONFIG.replace(
@@ -363,15 +363,24 @@ fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
         &format!("harness = \"{harness}\"{acct}"),
     );
     format!(
-        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n",
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         sock.display()
     )
+}
+
+/// #683: account C's default config folder, its own `claude /login`.
+fn acct_c() -> String {
+    herdsman::config::home()
+        .join(".config/herdsman/accounts/C")
+        .display()
+        .to_string()
 }
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 
 /// shed's CLI as the fake server sees it: `shed run --acp` makes a running ACP terminal of that name and, as shed's
-/// bridge does, starts the adapter command after `--` at once (in the terminal's env, `$SHED` set): its stdout kept.
+/// bridge does, starts the adapter command after `--` at once (in the terminal's env and `--cwd`, `$SHED` set): its
+/// stdout kept.
 struct Cli<'a>(&'a Fake, Terms, Shared<Vec<String>>);
 
 impl Runner for Cli<'_> {
@@ -382,7 +391,9 @@ impl Runner for Cli<'_> {
                 "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
             self.1.lock().unwrap().insert(name.clone(), t);
             if let Some(i) = args.iter().position(|a| a == "--") {
+                let cwd = &args[args.iter().position(|a| a == "--cwd").unwrap() + 1];
                 let o = std::process::Command::new(&args[i + 1])
+                    .current_dir(cwd)
                     .args(&args[i + 2..])
                     .env_clear()
                     .env("PATH", std::env::var("PATH").unwrap())
@@ -426,7 +437,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let c = acp_ctx("acp-spawn", &acp_config(&b.sock, "claude", true));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
-    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
     let calls = f.calls.borrow();
@@ -456,8 +467,8 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let ev = herdsman::events::read(&c.state).unwrap();
     let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(
-        (sp.str("pane"), sp.data["confirmed"].as_bool()),
-        (Some("sendmeter-impl-12"), Some(true))
+        (sp.str("pane"), sp.data["confirmed"].as_bool(), sp.str("runtime")),
+        (Some("sendmeter-impl-12"), Some(true), Some("shed-acp")) // #609: the lane's runtime, as spawned
     );
     assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
 
@@ -500,25 +511,24 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
     assert_eq!(code, 0, "{out}");
     let dump = cli.2.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
-    let dir = c.config.with_file_name("claude").join("fleet-impl");
-    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&dir.to_str().unwrap()));
-    assert_eq!(
-        env.get("CLAUDE_CODE_OAUTH_TOKEN"),
-        Some(&TOKEN_C),
-        "the account's token, from the secrets file"
-    );
+    // #683: the account's folder is its config folder (its own login); no token reaches the lane.
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
+    assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
+    assert!(!dump.contains(TOKEN_C));
     assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:12:impl"));
     assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"opus"));
     assert!(!env.contains_key("SHED"), "the session reports its state, not the hook");
-    // As Claude Code in that adapter: the user settings' (`$CLAUDE_CONFIG_DIR/settings.json`) `PreToolUse` hook runs in
-    // the adapter's env before each tool, and its deny stops the tool.
-    let s: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+    // As Claude Code in that adapter: the local project settings' (`<worktree>/.claude/settings.local.json`, the
+    // profile's, copied there before the adapter starts) `PreToolUse` hook runs in the adapter's env before each tool,
+    // and its deny stops the tool.
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let local = std::fs::read_to_string(wt.join(".claude/settings.local.json")).unwrap();
+    let s: Value = serde_json::from_str(&local).unwrap();
     assert_eq!(s["permissions"]["defaultMode"], "bypassPermissions");
-    assert!(std::fs::read_to_string(dir.join("CLAUDE.md"))
+    assert!(std::fs::read_to_string(wt.join("CLAUDE.local.md"))
         .unwrap()
         .contains("herdsman"));
     let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
-    let wt = c.worktrees.join("sendmeter/issue-12");
     let tool = |cmd: &str| {
         let mut ch = std::process::Command::new("sh")
             .args(["-c", hook])
@@ -564,7 +574,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     let cases = [
         (
             acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false)),
-            "[accounts] token",
+            "[accounts] account env",
         ),
         (
             acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes", true)),
@@ -1220,11 +1230,12 @@ fn git(dir: &std::path::Path, a: &[&str]) -> String {
 }
 
 /// #662: an ACP lane's runner whose `git` in its worktree (a real repo, the `PathBuf`) is real; the rest is `Cli`'s.
+/// #722: also `git -C` anywhere under that path.
 struct Push<'a>(Cli<'a>, PathBuf);
 
 impl Runner for Push<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]) == self.1 {
+        if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]).starts_with(&self.1) {
             self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             let o = std::process::Command::new("git").args(args).output()?;
             let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
@@ -1242,15 +1253,13 @@ impl Runner for Push<'_> {
     }
 }
 
-const TOKEN_D: &str = concat!("sk", "-ant-oat01-DDDD-secret");
-
-/// #662: the ACP fleet with accounts C then D, and #12's impl lane spawned on C in a real worktree (its `origin` a
+/// #662: the ACP fleet with accounts C then D (#683: folders), and #12's impl lane spawned on C in a real worktree (its `origin` a
 /// bare repo holding `issue-12` at the base commit): (ctx, server, fake, worktree, origin).
 fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let cfg = acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]")
-        + "D = \"CLAUDE_CODE_OAUTH_TOKEN_D\"\n";
+    let cfg =
+        acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]") + "D = \"D\"\n";
     let c = acp_ctx(name, &cfg);
     let (wt, origin) = (c.worktrees.join("sendmeter/issue-12"), c.worktrees.join("origin.git"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -1261,7 +1270,6 @@ fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
     git(&wt, &["commit", "-q", "--allow-empty", "-m", "base"]);
     git(&wt, &["push", "-q", "origin", "issue-12"]);
     let f = acp_fake(&["true"])
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_D", TOKEN_D)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -1501,13 +1509,14 @@ fn an_acp_conductor_runs_under_the_conductor_guard() {
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
     assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
     assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
-    assert_eq!(env.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&TOKEN_C));
-    let dir = c.config.with_file_name("claude").join("lane-conductor");
-    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&dir.to_str().unwrap()));
-    // The profile's `PreToolUse` hook, run in the adapter's env as Claude Code runs it.
-    let s: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
-    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
+    assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
+    // The profile's `PreToolUse` hook, from its session folder's local settings, run in the adapter's env as Claude
+    // Code runs it.
     let cwd = c.state.with_file_name("conductor").join("t1");
+    let local = std::fs::read_to_string(cwd.join(".claude/settings.local.json")).unwrap();
+    let s: Value = serde_json::from_str(&local).unwrap();
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
     let tool = |cmd: &str| {
         let mut ch = std::process::Command::new("sh")
             .args(["-c", hook])
@@ -1550,7 +1559,7 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
-        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] token"),
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] account env"),
         "{out}"
     );
     let calls = f.calls.borrow();
@@ -1565,4 +1574,320 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     assert_eq!(sys.len(), 1, "{msgs:?}");
     assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
     assert!(thread_events(&c, "conductor-start").is_empty());
+}
+
+/// #609: `GET path` on a fresh board over runner `r` (a server per call: its lane cache starts empty).
+fn board_get(c: &herdsman::Ctx, r: Fake, path: &str) -> Value {
+    let r: &'static Fake = Box::leak(Box::new(r));
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let sc = c.clone();
+    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(s, "GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut s, &mut body).unwrap();
+    serde_json::from_str(body.split_once("\r\n\r\n").expect(&body).1).expect(&body)
+}
+
+/// #609: each named lane's `(runtime, host, where)` in `/api/v1/lanes`, `/api/v1/state` and `/herd.json`, which agree.
+fn wheres(c: &herdsman::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, String, String)> {
+    let s = |v: &Value| v.as_str().unwrap_or("?").to_string();
+    let lanes = board_get(c, r(), "/api/v1/lanes");
+    let rows = lanes["sections"].as_array().unwrap_or_else(|| panic!("{lanes}"));
+    let rows = rows.iter().flat_map(|s| {
+        s["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["lanes"].as_array().unwrap())
+    });
+    let got: BTreeMap<_, _> = rows
+        .map(|l| (s(&l["name"]), (s(&l["runtime"]), s(&l["host"]), s(&l["where"]))))
+        .collect();
+    let state = board_get(c, r(), "/api/v1/state");
+    for l in state["lanes"].as_array().unwrap() {
+        assert_eq!(
+            got[&s(&l["name"])],
+            (s(&l["runtime"]), s(&l["host"]), s(&l["where"])),
+            "{state}"
+        );
+    }
+    let herd = board_get(c, r(), "/herd.json");
+    for l in herd["fleets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|f| f["lanes"].as_array().unwrap())
+    {
+        assert_eq!(
+            (s(&l["runtime"]), s(&l["where"])),
+            (got[&s(&l["name"])].0.clone(), got[&s(&l["name"])].2.clone())
+        );
+    }
+    got
+}
+
+/// #609: a herdr lane on another host (`air`) and a shed-acp lane on the main one (`mini`): `/api/v1/lanes` and
+/// `/api/v1/queue` give each its runtime, host and `where`; `where` drops the host while one host is enabled and the
+/// runtime once the last herdr lane is gone (each shape is in tests/golden/api_v1/where.json).
+#[test]
+fn every_lane_says_where_it_runs() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let hosts = |air: bool| format!("\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\nenabled = {air}\n");
+    let c = ctx(
+        &tmpdir("where-lanes"),
+        &(acp_config(&b.sock, "claude", true) + &hosts(true)),
+    );
+    let ev = |n, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(n), "spawn", d)).unwrap()
+    };
+    ev(
+        12,
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12", "host": "mini"}),
+    );
+    ev(
+        9,
+        json!({"role": "rev", "agent": "sendmeter-rev-9", "harness": "claude", "pane": "w9:p1",
+        "worktree": "/w/issue-9", "host": "air", "machine": "air"}),
+    );
+    let air = agents(&[("sendmeter-rev-9", "working", "/w/issue-9", "w9:p1")]);
+    let both = || {
+        Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr --machine air agent list", &air)
+    };
+    let shed_only = || {
+        Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply("herdr --machine air agent list", NO_AGENTS)
+    };
+    let t = |rt: &str, h: &str, w: &str| (rt.to_string(), h.to_string(), w.to_string());
+    let (rev, imp) = ("sendmeter-rev-9", "sendmeter-impl-12");
+    let mut shapes = vec![];
+
+    // Two hosts, both runtimes live: host and runtime.
+    let got = wheres(&c, both);
+    assert_eq!(
+        (&got[rev], &got[imp]),
+        (&t("herdr", "air", "air · herdr"), &t("shed-acp", "mini", "mini · shed"))
+    );
+    shapes.push(json!(got));
+    let q = board_get(&c, both(), "/api/v1/queue");
+    let rows: Vec<_> = q["fleets"][0]["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{q}"))
+        .iter()
+        .map(|r| {
+            (
+                r["issue"].as_u64().unwrap(),
+                t(
+                    r["runtime"].as_str().unwrap(),
+                    r["host"].as_str().unwrap(),
+                    r["where"].as_str().unwrap(),
+                ),
+            )
+        })
+        .collect();
+    assert!(rows.contains(&(9, t("herdr", "air", "air · herdr"))), "{rows:?}");
+    assert!(rows.contains(&(12, t("shed-acp", "mini", "mini · shed"))), "{rows:?}");
+
+    // `air` disabled: one host enabled, so the runtime alone.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(false)).unwrap();
+    let got = wheres(&c, both);
+    assert_eq!((&got[rev].2, &got[imp].2), (&"herdr".to_string(), &"shed".to_string()));
+    shapes.push(json!(got));
+
+    // Both hosts again, the last herdr lane ended: the host alone.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(true)).unwrap();
+    let got = wheres(&c, shed_only);
+    assert_eq!(got[imp], t("shed-acp", "mini", "mini"));
+    shapes.push(json!(got));
+
+    // Neither varies: no label.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(false)).unwrap();
+    let got = wheres(&c, shed_only);
+    assert_eq!(got[imp], t("shed-acp", "mini", ""));
+    shapes.push(json!(got));
+
+    // The CLI shows the same label: status's HOST column, board's row, waiting's line.
+    std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(true)).unwrap();
+    for cmd in ["status", "board", "waiting"] {
+        let (code, out) = run(&c, &both(), &[cmd, "sendmeter"]);
+        assert!(
+            code == 0 && out.contains("mini · shed") && out.contains("air · herdr"),
+            "{cmd}: {out}"
+        );
+    }
+
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/api_v1/where.json");
+    let fresh = serde_json::to_string_pretty(
+        &json!({"route": "GET /api/v1/lanes, state, queue, herd: each lane's [runtime, host, where]",
+        "shapes": shapes}),
+    )
+    .unwrap()
+        + "\n";
+    if std::env::var_os("BLESS").is_some() {
+        std::fs::write(&file, &fresh).unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap_or_default(),
+        fresh,
+        "`BLESS=1` rewrites it"
+    );
+}
+
+/// #609: a lane keeps the runtime it was spawned with (a shed-acp spawn logs `shed-acp`, the test above): the board
+/// still says `shed-acp` once the fleet's runtime config is gone (new lanes start in herdr).
+#[test]
+fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let c = ctx(&tmpdir("acp-keeps-runtime"), &acp_config(&b.sock, "claude", true));
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
+        "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let r = || Fake::default().reply("herdr agent list", NO_AGENTS);
+    assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
+    std::fs::write(
+        &c.config,
+        CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""),
+    )
+    .unwrap();
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    assert!(
+        cfg.shed_for("sendmeter").is_none(),
+        "the fleet's new lanes start in herdr"
+    );
+    let got = wheres(&c, r);
+    assert_eq!(got["sendmeter-impl-12"].0, "shed-acp", "{got:?}");
+}
+
+/// #722: #12's branch checked out in its herdr-era worktree (`old`, clean and pushed) of a real `local` repo whose
+/// origin is a bare repo; with `fix`, its impl and rev lanes logged and the verdict FAIL, so the next impl spawn is a fix
+/// round on shed at the new root (else no lane logged it); herdr lists `live` agents in `old`: (ctx, fake, local, old,
+/// origin).
+fn herdr_era_lane(
+    name: &str,
+    sock: &std::path::Path,
+    fix: bool,
+    live: &[&str],
+) -> (herdsman::Ctx, Fake, PathBuf, PathBuf, PathBuf) {
+    let d = std::fs::canonicalize(tmpdir(name)).unwrap(); // git names worktrees by their real path
+    let (local, old, origin) = (
+        d.join("sendmeter"),
+        d.join("herdr/sendmeter/issue-12"),
+        d.join("origin.git"),
+    );
+    for p in [&local, &origin] {
+        std::fs::create_dir_all(p).unwrap();
+    }
+    git(&origin, &["init", "-q", "--bare"]);
+    git(&local, &["init", "-q", "-b", "staging"]);
+    git(&local, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&local, &["push", "-q", "origin", "staging"]);
+    git(
+        &local,
+        &["worktree", "add", "-q", "-b", "issue-12", old.to_str().unwrap()],
+    );
+    git(&old, &["commit", "-q", "--allow-empty", "-m", "impl"]);
+    git(&old, &["push", "-q", "origin", "issue-12"]);
+    let cfg = shed_config(sock, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w1:p1",
+        "workspace": "w1", "worktree": old, "branch": "issue-12"});
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12", "harness": "claude", "pane": "w2:p1",
+        "workspace": "w2", "worktree": d.join("herdr/sendmeter/rev-12-r1"), "branch": "rev-12-r1"});
+    for (i, (kind, data)) in [
+        ("spawn", sp),
+        ("spawn", rev),
+        ("verdict", json!({"verdict": "FAIL", "sha": "1".repeat(40)})),
+    ]
+    .into_iter()
+    .enumerate()
+    .filter(|_| fix)
+    {
+        let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
+        herdsman::events::append(&c.state, &e).unwrap();
+    }
+    let rows: Vec<_> = (live.iter())
+        .map(|n| (*n, "working", old.to_str().unwrap(), "w1:p2"))
+        .collect();
+    let f = Fake::default()
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("herdr agent list", &agents(&rows))
+        .reply("which shed", "/opt/shed/bin/shed\n");
+    (c, f, local, old, origin)
+}
+
+fn worktrees_of(local: &std::path::Path) -> String {
+    git(local, &["worktree", "list", "--porcelain"])
+}
+
+#[test]
+fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b.sock, true, &[]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    assert_eq!(git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]), "issue-12");
+    assert!(!old.exists(), "the old worktree is gone");
+    assert!(
+        !worktrees_of(&local).contains(old.to_str().unwrap()),
+        "{}",
+        worktrees_of(&local)
+    );
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    assert_eq!(moved[0].str("old"), old.to_str());
+    assert_eq!(moved[0].data["wip"], Value::Null);
+}
+
+#[test]
+fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, origin) = herdr_era_lane("moved-unpushed", &b.sock, false, &[]);
+    git(&old, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
+    let commit = git(&old, &["rev-parse", "HEAD"]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    let w = moved[0].str("wip").expect("saved to wip").to_string();
+    assert!(w.starts_with("wip/sendmeter-impl-12-"), "{w}");
+    git(&origin, &["merge-base", "--is-ancestor", &commit, &w]);
+    assert!(!old.exists(), "the old worktree is gone");
+    let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
+    assert!(brief.contains(&format!("origin/{w}")), "{brief}");
+}
+
+#[test]
+fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-live", &b.sock, false, &["shell"]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("LANE_LIVE") && out.contains(old.to_str().unwrap()),
+        "{out}"
+    );
+    assert!(old.exists() && !c.worktrees.join("sendmeter/issue-12").exists());
+    assert!(logged(&c, "worktree-moved").is_empty());
 }
