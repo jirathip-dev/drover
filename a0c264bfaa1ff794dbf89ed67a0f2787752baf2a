@@ -1,0 +1,6 @@
+Decided: line_cap set to 38028 exactly as the issue states, with a cap-history note
+Because: "`ci/cap.toml`: `line_cap = 38028`."
+Because: q967
+Rejected: re-sizing to a fresh projection — the owner decision fixes the figure
+Check: ci/cap.toml differs only in line_cap; cap-check at head reports cap 38028
+Owner: The code-size limit is now 38,028 lines, room for the whole queue as you decided.
