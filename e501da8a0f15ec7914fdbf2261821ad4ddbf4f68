@@ -1,0 +1,10 @@
+Decided: a transcript with no parsed screen marker (⏺ ⎿ ❯ › • ┊ 💻) is drawn as plain text with its line breaks kept, in both views.
+Because: "a transcript that is not a parsed Claude screen is shown with its line breaks kept"
+Because: assets/serve.js:1246
+Decided: each `[tool] ` entry is a closed one-line row (the existing tool-run block), a multi-line title's later lines (to its `(status)`) behind the tap.
+Because: "Each line starting `[tool] ` is cut to one line, its first, with the rest behind a tap."
+Rejected: keying on the lane's harness or runtime — the owner asked for harness and provider agnostic (q937), and it would add a field to the API.
+Rejected: treating hermes and dsh screens as plain — they are parsed today (┊, ›) and the issue says no other change.
+Check: crates/cli/tests/chat_blocks.rs an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool fails on base (one <p>) and passes at head.
+Check: the ui job's ui-390/sheet-acp.png shows separate lines and one row per tool; the demo's codex scratch pane (no markers) now also keeps its lines.
+Owner: Lane transcripts from shed sessions now show line by line, with each tool call on its own tappable row.
