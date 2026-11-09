@@ -1,0 +1,19 @@
+name: arch-check
+# #734: the reusable step every fleet repo's CI calls: `herdsman arch-check` against its .herdsman/arch.toml.
+on:
+  workflow_call:
+    inputs:
+      config:
+        type: string
+        default: .herdsman/arch.toml
+
+jobs:
+  arch-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: install herdsman
+        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging herdsman
+      - name: arch-check
+        run: herdsman arch-check --config "${{ inputs.config }}"

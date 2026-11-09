@@ -8,7 +8,8 @@ that works; write rules last.
 2. Group it into mistake classes. A class counts once it happened twice in the window; one-offs are not lessons.
 3. Fix each class at the highest level that works, in this order:
    architecture or types (the mistake cannot compile), then a lint or CI check whose error names the fix, then a
-   behaviour test, and only last a "don't X" rule.
+   behaviour test, and only last a "don't X" rule. A layer crossing or a banned call is a `[[layer]]` or `[[ban]]`
+   entry in `.herdsman/arch.toml` (its `reason` names the mistake), which `herdsman arch-check` enforces in CI.
 4. Prove each new check fails on a real past mistake from the digest: apply that mistake, run the check, and put
    the command and its failing output in the PR body. Then show it passes on the fixed tree.
 5. Rules live in `.herdsman/rules.md`: at most 30 lines (CI fails over that), one `- don't X (enforced by: <check>)`

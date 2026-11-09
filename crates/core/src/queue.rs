@@ -27,6 +27,8 @@ pub struct Item {
     pub verify: Option<bool>,
     /// #420: a bug fix that starts with a failing test (`--repro`, `queue set <n> repro on|off`).
     pub repro: bool,
+    /// #734: `perf` or `refactor` (`--perf`, `--refactor`): the playbook its briefs and rev's PASS follow.
+    pub playbook: Option<String>,
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | unblock | set (`needs`).
@@ -76,6 +78,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     design: d["design"] == true,
                     verify: onoff(&d["verify"]),
                     repro: d["repro"] == true,
+                    playbook: d["playbook"].as_str().map(String::from),
                 })
                 .collect();
             for m in &mut moved {
@@ -85,6 +88,7 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     m.check |= old.check;
                     m.design |= old.design;
                     m.repro |= old.repro;
+                    m.playbook = m.playbook.take().or_else(|| old.playbook.clone());
                     m.verify = m.verify.or(old.verify);
                     m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
@@ -222,6 +226,11 @@ pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> bool {
 /// #420: issue `n` is queued `--repro`.
 pub fn repro(events: &[Event], fleet: &str, n: u64) -> bool {
     replay(events, fleet).iter().any(|i| i.issue == n && i.repro)
+}
+
+/// #734: issue `n`'s playbook, `perf` or `refactor`.
+pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
+    replay(events, fleet).into_iter().find(|i| i.issue == n)?.playbook
 }
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
@@ -384,7 +393,7 @@ pub fn skipped(
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro, "playbook": i.playbook});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 

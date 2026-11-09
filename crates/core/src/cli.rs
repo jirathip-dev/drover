@@ -320,6 +320,15 @@ enum Cmd {
         #[arg(long, default_value = ".herdsman/rules.md")]
         rules: std::path::PathBuf,
     },
+    /// CI (#734): the layers, bans and size limits in --config; exit 1 on a violation
+    #[command(hide = true)]
+    ArchCheck {
+        #[arg(long, default_value = ".herdsman/arch.toml")]
+        config: PathBuf,
+        /// Write today's size offenders to the baseline file instead
+        #[arg(long)]
+        write_baseline: bool,
+    },
     /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
     #[command(hide = true)]
     LessonCheck {
@@ -659,6 +668,12 @@ enum QueueCmd {
         /// A bug fix: impl's first commit is a failing test, rev proves it fails on base and passes at head
         #[arg(long)]
         repro: bool,
+        /// A speed-up: impl's first commit records a baseline, rev's PASS gives before/after (`NO_BASELINE`)
+        #[arg(long, conflicts_with = "refactor")]
+        perf: bool,
+        /// Behaviour unchanged: tests only moved or renamed, checked on rev's PASS (`TESTS_CHANGED`)
+        #[arg(long)]
+        refactor: bool,
     },
     /// Move a queued issue
     #[command(group(clap::ArgGroup::new("to").required(true).args(["top", "before", "after"])))]
@@ -1014,6 +1029,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::ArchCheck { config, write_baseline } => return crate::arch::check(&config, write_baseline, out),
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -1258,6 +1274,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 if r["repro"] == true {
                     on += "  repro";
+                }
+                if let Some(p) = r["playbook"].as_str() {
+                    on += &format!("  {p}");
                 }
                 if let Some(v) = r["verify"].as_bool() {
                     on += if v { "  verify on" } else { "  verify off" };
@@ -1783,6 +1802,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             design,
                             verify,
                             repro,
+                            perf,
+                            refactor,
                         } => {
                             // `--serial 12 13`: an issue right after a plain `--serial` (the old flag) is not a group.
                             let g =
@@ -1810,6 +1831,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             }
                             if repro {
                                 d["repro"] = json!(true);
+                            }
+                            if perf || refactor {
+                                d["playbook"] = json!(if perf { "perf" } else { "refactor" });
                             }
                             d
                         }
