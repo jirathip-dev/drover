@@ -37,6 +37,28 @@ pub struct Config {
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
+    /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
+    pub proxy: ProxyCfg,
+}
+
+/// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, and how
+/// long a lane key lives.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ProxyCfg {
+    pub port: u16,
+    pub upstream: String,
+    pub key_hours: u64,
+}
+
+impl Default for ProxyCfg {
+    fn default() -> Self {
+        ProxyCfg {
+            port: 41990,
+            upstream: crate::harness::PROXY_UPSTREAM.into(),
+            key_hours: 12,
+        }
+    }
 }
 
 /// #537: the repo's runner VMs: their recipe (`provider`), spec, slots per VM, label, and the `max_vms` / `usd_day` cap;
@@ -196,6 +218,8 @@ pub struct HostCfg {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
+    /// #637: `herdr` or `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
+    pub runtime: Option<RuntimeKind>,
 }
 
 /// #256: a cloud host is a disposable machine: its lanes may start containers.
@@ -897,10 +921,33 @@ impl Config {
         own.map_or_else(|| self.runtime.shed(), Runtime::shed)
     }
 
-    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's.
+    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's; #637: else shed-acp's
+    /// defaults when a host runs it.
     pub fn shed(&self) -> Option<crate::shed::Shed> {
         let first = || self.fleet.values().find_map(|f| f.runtime.as_ref()?.shed());
-        self.runtime.shed().or_else(first)
+        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
+        self.runtime.shed().or_else(first).or_else(host)
+    }
+
+    /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
+    pub fn host_acp(&self, name: &str) -> Option<crate::shed::Shed> {
+        self.hosts
+            .get(name)
+            .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
+        Runtime {
+            kind: RuntimeKind::ShedAcp,
+            ..Runtime::default()
+        }
+        .shed()
+    }
+
+    /// #637: the runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
+    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
+        match host.and_then(|h| self.hosts.get(h)?.runtime.as_ref()) {
+            Some(RuntimeKind::Herdr) => None,
+            Some(RuntimeKind::ShedAcp) => host.and_then(|h| self.host_acp(h)),
+            _ => self.shed_for(fleet),
+        }
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).
