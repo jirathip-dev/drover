@@ -217,8 +217,8 @@ never edits the account list itself: that change is a `config propose` card.
 
 - `herdsman secret request <thread> <NAME> --why "…"` shows a masked-input card with [save] [dismiss], on paired
   owner devices only (elsewhere the card says so).
-- [save] stores the value in the main host's OS store (#441, docs/providers.md) as `herdsman/<fleet>/<NAME>`
-  (`<fleet>` is the thread's, or `all`), never in argv. Events, the chat and lanes never see it. The thread records
+- [save] writes the value to the main host's 0600 file `<config dir>/secrets/<NAME>` (#707, docs/providers.md), never
+  in argv. Events, the chat and lanes never see it. The thread records
   only `secret <NAME> set ✓ (by owner)`.
 - A cloud host's provider key (docs/hosts.md, e.g. `BOAT_API_KEY`) works saved either way: from the fleet's thread
   (`herdsman/<fleet>/<NAME>`, for a host only that fleet fits) or as `all`.
