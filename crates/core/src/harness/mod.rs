@@ -230,6 +230,9 @@ pub trait Harness: Sync {
 struct Generic;
 impl Harness for Generic {}
 
+/// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
+pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
+
 pub fn get(name: &str) -> &'static dyn Harness {
     match name {
         "claude" => &claude::Claude,

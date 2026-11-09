@@ -157,7 +157,7 @@ impl Harness for Claude {
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         format!(" && mkdir -p .claude && cp {settings} .claude/settings.local.json && cp {role} CLAUDE.local.md")
     }
-    /// #683: `[accounts]` of provider `claude` (`access::CONFIG_ENV`).
+    /// #683: `[accounts]` of provider `claude` (`harness::CONFIG_ENV`).
     fn credential(&self) -> Credential {
         Credential::Account("claude")
     }

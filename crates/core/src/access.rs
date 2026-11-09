@@ -250,9 +250,6 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
-pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
-
 /// #683 (q846): the env account `name` signs a lane of `harness` in with, exactly: `[accounts] account_env`'s JSON
 /// object of env vars (else refused `ACCOUNT_ENV` with its stderr), or with none set its folder (`Accounts::folder`)
 /// as its provider's config folder. Never a token; empty for a harness on no `[accounts]`.
@@ -261,7 +258,10 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
         return Ok(BTreeMap::new());
     };
     let Some(cmd) = &cfg.accounts.account_env else {
-        let var = CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1.to_string());
+        let var = crate::harness::CONFIG_ENV
+            .iter()
+            .find(|p| p.0 == provider)
+            .map(|p| p.1.to_string());
         let var = var.with_context(|| format!("no config folder env for provider {provider}"))?;
         return Ok(BTreeMap::from([(var, cfg.accounts.folder(name).display().to_string())]));
     };
@@ -302,7 +302,7 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     let Credential::Account(provider) = h.credential() else {
         return (false, String::new());
     };
-    let var = CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1);
+    let var = crate::harness::CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1);
     let Some((var, dir)) = var.and_then(|v| Some((v, env.get(v)?))) else {
         let keys: Vec<&String> = env.keys().collect();
         return (true, format!("env {keys:?} from account_env"));
