@@ -795,6 +795,9 @@ pub const V1_PERMISSION: &str = "╭──────────────�
 
 /// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
 /// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
+/// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
+pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
+
 pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
@@ -811,6 +814,7 @@ pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
         .reply("herdr agent list", &list)
         .reply("herdr pane read", V1_PERMISSION)
         .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+        .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
         .reply("gh issue close", "");
     (c, r)
