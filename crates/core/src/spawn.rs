@@ -61,7 +61,7 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
-        for h in harness::NAMES {
+        for h in harness::known() {
             harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
@@ -581,7 +581,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
     let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
-    let env = harness::get(&p.harness).acp_env(p.model.as_deref());
+    let env = harness::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
@@ -944,7 +944,12 @@ pub fn spawn(
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
     let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
-        herdr::Shed(crate::shed::Shed { wire, ..b })
+        // #732: an ACP lane runs its role's own agent over the runtime's.
+        let acp = b
+            .acp
+            .clone()
+            .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
+        herdr::Shed(crate::shed::Shed { wire, acp, ..b })
     });
     // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
     if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {

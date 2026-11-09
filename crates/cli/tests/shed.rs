@@ -1931,3 +1931,156 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
     assert!(code == 3 && out.contains("REFUSED ACP_UNGUARDED"), "{out}");
 }
+
+/// #732: impl on `claude-acp` (account C, Claude's login) and rev on `codex-acp` (account X, Codex's login): each lane
+/// starts its role's agent with its own provider's config folder, and the codex lane's tools pass herdsman's hook.
+#[test]
+fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let cfg = acp_config(&b.sock, "claude", true)
+        .replace(
+            "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+            "[fleet.sendmeter.role.rev]\nagent = \"codex-acp\"\naccount = \"X\"\nmodel = \"gpt-5.5\"\neffort = \"high\"",
+        )
+        .replace("C = \"C\"\n", "C = \"C\"\nX = \"X\"\n");
+    let c = acp_ctx("acp-codex", &cfg);
+    let agents = json!([{"id": "claude-acp", "cmd": ["env"]}, {"id": "codex-acp", "cmd": ["env"]}]);
+    let head = "a".repeat(40);
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "mergeable": "MERGEABLE", "statusCheckRollup": []});
+    let f = spawn_fake()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+        .reply("gh pr view", &pr.to_string());
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = |kind: &str, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), kind, d)).unwrap();
+    };
+    ev("pushed", json!({"sha": head}));
+    ev("turn-end", json!({"state": "done", "agent": "sendmeter-impl-12"}));
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let calls = f.calls.borrow();
+    let runs: Vec<_> = calls.iter().filter(|c| c.starts_with("shed run")).collect();
+    assert!(
+        runs[0].contains("--acp claude-acp ") && runs[0].contains("--label role=impl "),
+        "{runs:?}"
+    );
+    assert!(
+        runs[1].contains("--acp codex-acp ") && runs[1].contains("--label role=rev "),
+        "{runs:?}"
+    );
+    assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
+    let dumps = cli.2.borrow();
+    let env = |i: usize| -> BTreeMap<String, String> {
+        let kv = dumps[i].lines().filter_map(|l| l.split_once('='));
+        kv.map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    };
+    let (imp, rev) = (env(0), env(1));
+    let acct = |n: &str| acct_c().replace("accounts/C", &format!("accounts/{n}"));
+    // Each provider signs in from its own folder: Claude's login for impl, Codex's for rev; no token either way.
+    assert_eq!(imp.get("CLAUDE_CONFIG_DIR"), Some(&acct("C")));
+    assert!(!imp.contains_key("CODEX_HOME"), "{imp:?}");
+    assert_eq!(rev.get("CODEX_HOME"), Some(&acct("X")), "{rev:?}");
+    assert!(!rev.contains_key("CLAUDE_CONFIG_DIR"), "{rev:?}");
+    assert_eq!(rev.get("HERDSMAN_LANE").map(String::as_str), Some("sendmeter:12:rev"));
+    // The role's model and effort, and herdsman's hook on every tool call, in Codex's session config.
+    let codex: Value = serde_json::from_str(&rev["CODEX_CONFIG"]).unwrap();
+    assert_eq!(
+        (&codex["model"], &codex["model_reasoning_effort"]),
+        (&json!("gpt-5.5"), &json!("high"))
+    );
+    let wt = PathBuf::from(&rev["PWD"]);
+    assert!(std::fs::read_to_string(wt.join("AGENTS.override.md"))
+        .unwrap()
+        .contains("herdsman"));
+    let hook = codex["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(hook.ends_with("hook --role rev"), "{hook}");
+    let tool = |call: Value| {
+        let mut ch = std::process::Command::new("sh")
+            .args(["-c", hook])
+            .env_clear()
+            .envs(rev.iter())
+            .env("FLEET_CONFIG", &c.config)
+            .env("FLEET_STATE", &c.state)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        ch.stdin.take().unwrap().write_all(call.to_string().as_bytes()).unwrap();
+        String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let call = |tool: &str, cmd: &str| {
+        json!({"hook_event_name": "PreToolUse", "turn_id": "t1", "model": "gpt-5.5", "cwd": wt,
+            "tool_name": tool, "tool_input": {"command": cmd}})
+    };
+    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-a\n+b\n*** End Patch";
+    for (t, cmd, why) in [
+        ("Bash", "gh pr merge 3", "merge"),
+        ("Bash", "git push origin staging", "staging"),
+        ("apply_patch", patch, "reviewers are read-only"),
+    ] {
+        let o = tool(call(t, cmd));
+        let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{cmd}: {o}"));
+        let d = &v["hookSpecificOutput"];
+        assert_eq!(d["permissionDecision"], "deny", "{cmd}: {o}");
+        assert!(
+            d["permissionDecisionReason"].as_str().unwrap().contains(why),
+            "{cmd}: {o}"
+        );
+    }
+    assert_eq!(tool(call("Bash", "cargo test")), "", "an ordinary command runs");
+}
+
+/// #732 (q911): a fleet whose rev runs on its impl's provider does not load, unless `rev_same_provider = true` says why.
+#[test]
+fn a_rev_on_the_impls_provider_refuses_to_load() {
+    let sock = std::path::Path::new("/nonexistent/shed.sock");
+    let base = acp_config(sock, "claude", false);
+    let rev = |agent: &str| {
+        base.replace(
+            "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+            &format!("[fleet.sendmeter.role.rev]\nagent = \"{agent}\""),
+        )
+    };
+    let load = |t: &str| herdsman::config::Config::parse(t).map_err(|e| format!("{e:#}"));
+    // Named on rev, inherited by impl from the fleet's runtime (claude-acp): both anthropic.
+    let err = load(&rev("claude-acp")).unwrap_err();
+    assert!(
+        err.contains("REVIEW_SAME_PROVIDER") && err.contains("anthropic"),
+        "{err}"
+    );
+    // Named on impl only: rev's is the runtime's.
+    let imp = base.replace(
+        "harness = \"claude\"\nprofile = \"fleet-impl\"",
+        "agent = \"claude-acp\"\nprofile = \"fleet-impl\"",
+    );
+    let imp = imp.replace(
+        "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
+        "[fleet.sendmeter.role.rev]\nharness = \"claude\"",
+    );
+    assert!(load(&imp).unwrap_err().contains("REVIEW_SAME_PROVIDER"));
+    let opt = |line: &str| {
+        rev("claude-acp").replace(
+            "integration = \"staging\"   # never main",
+            &format!("integration = \"staging\"\n{line}"),
+        )
+    };
+    assert!(
+        load(&opt("rev_same_provider = true"))
+            .unwrap_err()
+            .contains("REVIEW_SAME_PROVIDER"),
+        "no reason given"
+    );
+    assert!(load(&opt("rev_same_provider = true # one provider for now (q911)")).is_ok());
+    // Another provider loads; an agent no adapter guards does not; neither naming one keeps today's configs loading.
+    let ok = load(&rev("codex-acp")).unwrap();
+    assert_eq!(ok.fleet["sendmeter"].role["rev"].harness, "codex");
+    assert!(load(&rev("gemini-acp"))
+        .unwrap_err()
+        .contains("no harness adapter guards it"));
+    assert!(load(&base.replace("harness = \"hermes\"", "harness = \"claude\"")).is_ok());
+}
