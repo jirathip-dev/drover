@@ -1,0 +1,9 @@
+Decided: dropped the Always Allow contradiction and added the login-Keychain and Linux-unverified notes
+Because: q858
+Decided: appended the new sections as §7-§9 instead of renumbering, since §5 and §6 already exist
+Because: scripts/install-gate.sh:35
+Decided: bounded commands use perl alarm; timeout is described as missing only on older macOS
+Because: "Name the safe, always-bounded commands to use"
+Rejected: saying timeout is absent on macOS — /usr/bin/timeout exists on macOS 27.2
+Check: commands not run on the host (sudo or state-changing) are marked unverified
+Owner: The docs now cover a hung Keychain service on a headless Mac and how to keep its Claude login usable.
