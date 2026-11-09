@@ -261,7 +261,7 @@ pub struct Providers {
     pub deepseek: Option<Provider>,
 }
 
-/// The key is read from `env_file` (else the store's `all` secret `key_env`, else the environment), never from fleet.toml.
+/// The key is read from `env_file` (#707: 0600, refused if looser; else the environment), never from fleet.toml.
 #[derive(Debug, Deserialize)]
 pub struct Provider {
     pub key_env: String,
@@ -293,6 +293,8 @@ pub struct Serve {
     pub hooks_addr: Option<String>,
     /// #172: the Herd's theme, `<config dir>/themes/<name>/` or built-in (default `farm`).
     pub theme: Option<String>,
+    /// #707: the 0600 file holding `GITHUB_WEBHOOK_SECRET` (unset: webhooks off).
+    pub webhook_secret_file: Option<String>,
 }
 
 impl Serve {

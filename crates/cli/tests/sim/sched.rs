@@ -410,10 +410,4 @@ impl Runner for SimRunner {
         let name = a.first().copied().unwrap_or("proc").to_string();
         Ok(self.sim.spawn(&mut w, &name, &a))
     }
-    fn secret(&self, _svc: &str) -> anyhow::Result<Option<String>> {
-        Ok(None)
-    }
-    fn set_secret(&self, _svc: &str, _value: Option<&str>) -> anyhow::Result<()> {
-        Ok(())
-    }
 }

@@ -26,8 +26,6 @@ fn fake(c: &herdsman::Ctx, n: u64) -> Fake {
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
     Fake::default()
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", "a")
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_B", "b")
         .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
