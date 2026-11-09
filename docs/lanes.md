@@ -1,7 +1,22 @@
 # Lanes, hooks and notifiers
 
 A lane is one agent working one issue in its own worktree and herdr pane: `impl`, `rev`
-or the owner-only `design`. No lane runs the fleet: `herdsman drive` does ([Drive](#drive)). Agents get their usage doc from `herdsman help --agent`.
+or the owner-only `design` and `architect`. No lane runs the fleet: `herdsman drive` does ([Drive](#drive)). Agents get their usage doc from `herdsman help --agent`.
+
+## Design and architect (#412, #730)
+
+Two roles run before impl, started by the owner, a conductor thread or drive, on the main host only. Neither writes
+product code; the owner approves, revises (a note in the next brief) or rejects their pushed work, and impl starts
+only after approve.
+
+- `design` (UI, `queue add N --design`): HTML mockups on the repo's own design system in `docs/design/<slug>/`, a
+  1440 and a 390 PNG of each page and a README mapping each PNG to the decision it shows; at most 3 pages unless
+  the issue asks for variants.
+- `architect` (`[fleet.<n>.role.architect]`, `queue add N --architect`, `queue set N architect on|off`): in
+  `docs/architecture/<slug>/` an ADR (question, options, decision, consequences), the data shapes as types or a
+  schema, the module boundaries (which module may call which), a statechart where state matters and the callers'
+  usage sketched first. With both marks the architect runs first, then the design, then impl. Every later lane's brief
+  links the approved ADR; rev checks the diff against it. A shed lane's role label is `architect`.
 
 ## Typical flow
 
