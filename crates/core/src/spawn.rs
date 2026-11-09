@@ -171,6 +171,10 @@ impl Plan {
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        // #708: a token the pane inherited (a login shell's export) never picks the account of a lane without one.
+        if let (None, Some(v)) = (&self.account, harness::get(&self.harness).token_env()) {
+            c.push(format!("&& unset {v}"));
+        }
         if !self.secrets().is_empty() || self.lane_key.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
@@ -1377,23 +1381,15 @@ pub fn spawn(
             start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
             late = soft(&start) && confirm(r, h, &pane);
         }
-        // #463: a start that failed shows why on its screen; a first-start prompt the harness knows gets its answer.
         let mut screen = String::new();
         if start.code != 0 && !late {
-            screen = tail(r, &pane);
-            if let Some((prompt, keys)) = h.startup_prompt(&screen) {
-                for k in &keys {
-                    herdr::keys(r, &pane, k)?;
-                }
+            let logged = |prompt: &str| {
                 event(
                     "startup-prompt",
                     json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
-                )?;
-                late = confirm(r, h, &pane);
-                if !late {
-                    screen = tail(r, &pane);
-                }
-            }
+                )
+            };
+            (late, screen) = unblock(r, h, &pane, logged)?;
         }
         if start.code != 0 {
             let taken = herdr::failed_with(&start, "agent_name_taken");
@@ -1527,14 +1523,38 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
 
+/// #463: a start that failed shows why on `pane`'s screen; a first-start prompt the harness knows gets its answer
+/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and a conductor's. Whether it came up; the
+/// screen's redacted tail.
+pub(crate) fn unblock(
+    r: &dyn Runner,
+    h: &dyn harness::Harness,
+    pane: &str,
+    logged: impl FnOnce(&str) -> Result<()>,
+) -> Result<(bool, String)> {
+    let screen = tail(r, pane);
+    let Some((prompt, keys)) = h.startup_prompt(&screen) else {
+        return Ok((false, screen));
+    };
+    for k in &keys {
+        herdr::keys(r, pane, k)?;
+    }
+    logged(prompt)?;
+    if confirm(r, h, pane) {
+        return Ok((true, screen));
+    }
+    Ok((false, tail(r, pane)))
+}
+
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
 const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
 
 /// #359: whether the harness came up in `pane`: its process runs there and its startup title or a reported state has
-/// been seen. Reads it 5 s apart, never deciding from one read; any change restarts the window.
+/// been seen. Reads it 5 s apart, never deciding from one read; #718: gives up `CONFIRM_SECS` after it starts, however
+/// often the pane's title changes (a busy Claude's spinner never ends).
 fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
-    let (mut left, mut seen, mut titled, names) = (herdr::CONFIRM_SECS, String::new(), false, h.process_names());
+    let (mut left, mut titled, names) = (herdr::CONFIRM_SECS, false, h.process_names());
     loop {
         let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
         let agent = v["agent"].as_str().unwrap_or("");
@@ -1544,12 +1564,10 @@ fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
         if titled && !agent.is_empty() && (names.is_empty() || names.contains(&agent)) {
             return true;
         }
-        let now = format!("{agent}\n{title}");
-        left = if now == seen { left } else { herdr::CONFIRM_SECS };
         if left < 5 {
             return false;
         }
-        (left, seen) = (left - 5, now);
+        left -= 5;
         r.sleep(5);
     }
 }
