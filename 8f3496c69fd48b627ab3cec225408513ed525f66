@@ -1,0 +1,9 @@
+Decided: one helper, spawn::unblock, reads the screen, answers a known first-start prompt, logs it and confirms the harness; spawn and conductor::start both call it
+Because: "Share one implementation between the two paths rather than copying it."
+Decided: conductor::start calls it only on agent_not_ready, before the workspace is closed; an answered start is not marked adopted
+Because: crates/core/src/conductor.rs:1055
+Decided: an unanswerable prompt's redacted tail goes into the start error, which the board's not-delivered line already prints
+Because: "include the pane's redacted tail in the thread's `✗ not delivered` line"
+Rejected: answering on every failed conductor start — timeout/name-taken paths already adopt or retry, and the issue names agent_not_ready
+Check: the known-prompt test asserts one agent start only (the old code passed by luck on #623's automatic retry)
+Owner: a conductor on an account that never trusted its folder now answers Claude's trust question itself and gets your message
