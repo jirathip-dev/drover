@@ -1891,3 +1891,25 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     assert!(old.exists() && !c.worktrees.join("sendmeter/issue-12").exists());
     assert!(logged(&c, "worktree-moved").is_empty());
 }
+
+/// #737: profiles synced through a symlink to the binary guard a spawn through the real path, and the reverse.
+#[test]
+fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let real = std::fs::canonicalize(env!("CARGO_BIN_EXE_herdsman")).unwrap();
+    for (name, sync_via_link) in [("acp-link-sync", true), ("acp-real-sync", false)] {
+        let dir = tmpdir(name);
+        let link = dir.join("bin/herdsman");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let (sync, spawn) = if sync_via_link { (&link, &real) } else { (&real, &link) };
+        let mut c = ctx(&dir, &acp_config(&b.sock, "claude", true));
+        c.exe = sync.display().to_string();
+        assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+        c.exe = spawn.display().to_string();
+        let f = acp_fake(&["env"]);
+        let cli = Cli(&f, b.terms.clone(), Shared::default());
+        let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
+        assert!(code == 0 && !out.contains("ACP_UNGUARDED"), "{name}: {code} {out}");
+    }
+}
