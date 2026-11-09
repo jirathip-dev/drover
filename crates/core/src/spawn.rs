@@ -141,6 +141,10 @@ impl Plan {
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        // #708: a token the pane inherited (a login shell's export) never picks the account of a lane without one.
+        if let (None, harness::Credential::Token(v)) = (&self.account, harness::get(&self.harness).credential()) {
+            c.push(format!("&& unset {v}"));
+        }
         if !self.secrets().is_empty() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));

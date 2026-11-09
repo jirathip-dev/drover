@@ -1160,6 +1160,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → herdsman doctor")?;
             }
+            if let Some(l) = crate::update::paused_line(r, &events) {
+                writeln!(out, "{l}")?;
+            }
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
