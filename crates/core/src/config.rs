@@ -698,6 +698,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "state-write-failed",
     "wip-blocked",
     "spawn-held",
+    "spawn-failing",
     "host-busy",
     "cap-near",
     "orphan-issue",
