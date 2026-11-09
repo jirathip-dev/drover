@@ -1175,6 +1175,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → herdsman doctor")?;
             }
+            if let Some(l) = crate::update::paused_line(r, &events) {
+                writeln!(out, "{l}")?;
+            }
             write!(out, "{}", boards.join("\n"))?;
         }
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
@@ -1299,7 +1302,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::harness::NAMES {
+            for h in crate::harness::known() {
                 crate::harness::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
@@ -1543,12 +1546,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let (who, what) = match &s.lane {
                             Some(l) => ("none", format!("waiting on {l} (working){note}")),
                             // #604: its last start refused (a kick's too) says so.
-                            None => match crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now) {
+                            None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
+                                .map(|w| (String::new(), w))
+                                .or_else(|| crate::queue::skipped(&events, &st, Some(f), &s.fleet, s.issue, ctx.now))
+                            {
                                 Some((_, why)) => ("drive", format!("next in the queue, held back: {why}{note}")),
                                 None => ("drive", format!("next in the queue: drive starts it{note}")),
                             },
                         };
                         // #558: why drive hasn't started it yet, never `?`.
+                        let slot = crate::drive::slot_wait(ctx, &events, &s.fleet, s.issue);
                         let why = match crate::drive::last_pass(ctx, &s.fleet) {
                             _ if s.lane.is_some() => None,
                             _ if f.paused => Some(format!("paused: herdsman resume {}", s.fleet)),
@@ -1556,6 +1563,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 "drive hasn't passed this fleet yet: herdsman drive {}",
                                 s.fleet
                             )),
+                            // #724: passes run and only a spawn slot is wanting: not a stuck tick.
+                            Some(t) if ctx.now.saturating_sub(t) > 600 && slot.is_some() => slot,
                             Some(t) => {
                                 let late = ctx.now.saturating_sub(t);
                                 let stuck = if late > 600 {

@@ -57,11 +57,11 @@ UI PRs: confirm the `ui` job is green and open its `ui-390` screenshots. Any vis
 
 ## Tool guard, accounts, MCP
 
-Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
-`gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and Hermes
+Lanes skip permission prompts; the lane's hook blocks `gh pr merge`, `gh issue|pr comment`, `gh pr review`,
+`gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and agent
 profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. Design and architect lanes are owner-only: started by the owner or a conductor thread (`herdsman spawn … design|architect`), never by a lane; never in verdict or merge.
 The hook also refuses `deny_commands` (default: containers: docker, colima, orb, podman, `supabase start`… → `REFUSED NO_CONTAINERS`) and, for every lane, `pkill`, `killall` and `pgrep … | xargs kill` (`REFUSED NO_BROAD_KILL`); a call it can't judge (input not JSON, fleet.toml not loading, an unknown fleet) `REFUSED HOOK_FAILED_CLOSED`.
-Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` signs the lane in with the first uncapped one's env (`[accounts] account_env`'s JSON, else its folder as `CLAUDE_CONFIG_DIR`; never a token);
+Accounts (`herdsman accounts`): a role's `account`/`accounts` signs the lane in with the first uncapped one's env (`[accounts] account_env`'s JSON for its agent's provider, else its folder as that agent's config folder; never a token);
 an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. Secrets (`secret:<NAME>` env) live only in the main host's OS store as `herdsman/<fleet>/<NAME>`; spawn writes a lane's to a 0600 file beside its worktree (over ssh stdin to a remote host), the pane's shell sources it, spawn deletes it. MCP: only the role's `mcp` (default none).
 
 ## Events

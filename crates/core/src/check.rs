@@ -145,6 +145,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let d = json!({"key": since, "reason": why});
         fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
     }
+    // #724: a spawn failing the same way 3 times in a row alerts once per distinct error.
+    let ids: std::collections::BTreeSet<_> = events
+        .iter()
+        .filter(|e| e.kind == "spawn-error")
+        .filter_map(|e| Some((e.fleet.clone(), e.issue?)))
+        .collect();
+    for (fleet, n) in ids {
+        let f = crate::drive::failures(&events, &fleet, n);
+        if let Some((_, error)) = crate::drive::same_run(&f).filter(|r| r.0 >= 3) {
+            let d = json!({"key": error, "error": error});
+            fire(ctx, cfg, out, &events, (&fleet, Some(n)), "spawn-failing", d)?;
+        }
+    }
     // #604: every start a pass logged refused by one host gate (code and host) for 30 min alerts once per episode (its
     // first such pass is the key); a start that ran, or another refusal, ends it. A kick still pending says nothing.
     let mut busy: Option<(u64, u64, Gate)> = None;

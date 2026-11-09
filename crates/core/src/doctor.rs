@@ -219,11 +219,23 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let bad = if tailscale.is_err() { '!' } else { '✗' }; // not installed is a warning
     let maps = tailscale.is_ok_and(|o| o.code == 0 && o.stdout.contains(addr));
     row(rows, maps, bad, &line);
-    match serve_plist(ctx) {
+    // #708: the configured job, never another plist that mentions `herdsman serve`.
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+    let plist = ctx.home.join(format!("Library/LaunchAgents/{label}.plist"));
+    match plist.is_file() {
         _ if !cfg!(target_os = "macos") => {}
-        None => rows.push("✗ launchd — no plist runs herdsman serve → see docs/setup.md".into()),
-        Some(plist) => {
-            let label = plist.file_stem().unwrap_or_default().to_string_lossy();
+        false => {
+            let found = serve_plists(ctx);
+            let names: Vec<_> = found.iter().filter_map(|p| p.file_name()?.to_str()).collect();
+            let found = names
+                .first()
+                .map_or(String::new(), |_| format!(" (found {})", names.join(", ")));
+            let what = format!("{} missing{found}", plist.display());
+            rows.push(format!(
+                "✗ launchd — no plist runs herdsman serve: {what} → see docs/setup.md"
+            ));
+        }
+        true => {
             let uid = std::fs::metadata(&ctx.home).map_or(0, |meta| meta.uid());
             let target = format!("gui/{uid}/{label}");
             let fix = format!("launchctl bootstrap gui/$(id -u) {}", plist.display());
@@ -231,6 +243,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             row(rows, ok(r, "launchctl", &["print", &target]).is_ok(), '✗', &line);
         }
     }
+    rows.extend(crate::update::paused_line(
+        r,
+        &crate::events::read(&ctx.state).unwrap_or_default(),
+    ));
+    rows.extend(login_token(r, None));
     let paired = crate::devices::load(ctx).len();
     let line = format!("phone — {paired} paired → open the page, then herdsman serve approve <code>");
     row(rows, paired > 0, '!', &line);
@@ -287,6 +304,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}herdsman {v}");
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
+        rows.extend(login_token(&on, Some(name)));
         // #592: lanes there read only their rules file; the owner removes an old copy (#647: bootstrap, one it wrote).
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
@@ -295,12 +313,53 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
 }
 
+/// #708: the startup files a clean login shell reads; `login_token` names only these.
+const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
+
+/// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports the accounts harness's token var overrides
+/// each lane's account: the warning names the startup files that mention it, never the value or any other line.
+fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
+    let var = crate::harness::accounts()?.token_env()?;
+    let probe = format!(
+        "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{{var}:+set}}\"' </dev/null 2>/dev/null); \
+         case \"$t\" in *token:set*) echo token:set; cd \"$HOME\" && \
+         grep -l {var} {} 2>/dev/null | sed 's/^/file:/';; esac",
+        STARTUP.join(" ")
+    );
+    let out = ok(r, "sh", &["-c", &probe]).ok()?;
+    out.lines().any(|l| l == "token:set").then_some(())?;
+    let files: Vec<String> = out
+        .lines()
+        .filter_map(|l| l.strip_prefix("file:"))
+        .filter(|f| STARTUP.contains(f))
+        .map(|f| format!("~/{f}"))
+        .collect();
+    let files = if files.is_empty() {
+        "your shell startup files".into()
+    } else {
+        files.join(", ")
+    };
+    let on = host.map_or(String::new(), |h| format!(" on host {h}"));
+    Some(format!(
+        "! a login shell{on} exports {var} (it overrides each lane's account) → remove it from {files}"
+    ))
+}
+
 /// The launchd job: a plist under ~/Library/LaunchAgents that runs `herdsman serve`.
 pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
+    serve_plists(ctx).into_iter().next()
+}
+
+/// #708: every such plist, by name.
+fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     let agents = std::fs::read_dir(ctx.home.join("Library/LaunchAgents"));
     let serves = |text: String| text.contains("herdsman") && text.contains("<string>serve</string>");
-    let mut plists = agents.into_iter().flatten().flatten().map(|entry| entry.path());
-    plists.find(|plist| std::fs::read_to_string(plist).is_ok_and(serves))
+    let plists = agents.into_iter().flatten().flatten().map(|entry| entry.path());
+    let mut found: Vec<_> = plists
+        .filter(|plist| std::fs::read_to_string(plist).is_ok_and(serves))
+        .collect();
+    found.sort();
+    found
 }
 
 /// #600: shed, and each ACP adapter's command (`shed agents --json`), on the PATH the timer's jobs run with.

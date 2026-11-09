@@ -2,6 +2,7 @@
 //! one file plus its `NAMES` entry; core never names one, and any other name gets the generic fallbacks (#316).
 mod claude;
 mod claude_meter;
+mod codex;
 mod dsh;
 mod hermes;
 
@@ -23,6 +24,31 @@ pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
 pub const NAMES: [&str; 3] = ["claude", "hermes", "dsh"];
+
+/// #732: harnesses a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
+pub const ACP_ONLY: [&str; 1] = ["codex"];
+
+/// #732: every harness name, `NAMES` then `ACP_ONLY`.
+pub fn known() -> impl Iterator<Item = &'static str> {
+    NAMES.into_iter().chain(ACP_ONLY)
+}
+
+/// #732: each known ACP agent's model provider; a fleet's `rev` runs on another provider than its `impl`.
+pub const PROVIDERS: &[(&str, &str)] = &[
+    ("claude-acp", "anthropic"),
+    ("codex-acp", "openai"),
+    ("gemini-acp", "google"),
+];
+
+/// #732: ACP agent `id`'s model provider, if known.
+pub fn provider(id: &str) -> Option<&'static str> {
+    PROVIDERS.iter().find(|p| p.0 == id).map(|p| p.1)
+}
+
+/// #732: the harness whose adapter ACP agent `id` is (the one that guards it).
+pub fn of_agent(id: &str) -> Option<&'static str> {
+    known().find(|h| get(h).acp() == Some(id))
+}
 
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
@@ -70,9 +96,9 @@ pub fn all() -> impl Iterator<Item = (&'static str, &'static dyn Harness)> {
     NAMES.into_iter().map(|n| (n, get(n)))
 }
 
-/// The hook dialects of every harness that has one, in `NAMES` order.
+/// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
-    all().filter_map(|h| h.1.hook_dialect())
+    known().filter_map(|h| get(h).hook_dialect())
 }
 
 /// (used %, reset epoch) of a usage window, either part unread.
@@ -146,8 +172,8 @@ pub trait Harness: Sync {
     fn acp(&self) -> Option<&'static str> {
         None
     }
-    /// #565: the env its ACP adapter reads its model from (#683: its config folder is the account's, `Plan::lane_cmd`).
-    fn acp_env(&self, _model: Option<&str>) -> Vec<(&'static str, String)> {
+    /// #565: the env its ACP adapter reads its model (#732: and effort) from (#683: its config folder is the account's, `Plan::lane_cmd`).
+    fn acp_env(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
     /// #683: whether config folder `dir` holds its CLI's own login, read from its files (never a Keychain or a CLI
@@ -163,6 +189,10 @@ pub trait Harness: Sync {
     /// How its lanes sign in (generic: unknown).
     fn credential(&self) -> Credential {
         Credential::None
+    }
+    /// #708: the env var a token in the shell overrides its CLI's login with (generic: none).
+    fn token_env(&self) -> Option<&'static str> {
+        None
     }
     /// The interactive login a person runs for it (setup panes, login hints).
     fn login(&self) -> Option<&'static str> {
@@ -241,6 +271,7 @@ pub fn get(name: &str) -> &'static dyn Harness {
         "claude" => &claude::Claude,
         "hermes" => &hermes::Hermes,
         "dsh" => &dsh::Dsh,
+        "codex" => &codex::Codex,
         _ => &Generic,
     }
 }
