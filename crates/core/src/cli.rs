@@ -1293,7 +1293,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::harness::NAMES {
+            for h in crate::harness::known() {
                 crate::harness::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
