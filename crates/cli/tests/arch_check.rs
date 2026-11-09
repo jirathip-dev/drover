@@ -170,3 +170,146 @@ fn no_config_has_nothing_to_check() {
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.trim()), (0, "no .herdsman/arch.toml: nothing to check"));
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let o = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+fn committed(name: &str, arch: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+    let d = tmpdir(name);
+    for (p, text) in [(".herdsman/arch.toml", arch)].iter().chain(files) {
+        let p = d.join(p);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    git(&d, &["init", "-q"]);
+    git(&d, &["add", "-A"]);
+    git(&d, &["commit", "-qm", "base"]);
+    d
+}
+
+const OLD: &str = "// an old comment\nfn old() {}\n";
+
+#[test]
+fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_item() {
+    let d = committed(
+        "arch-comments",
+        "[comments]\npolicy = \"off\"\n",
+        &[("src/lib.rs", OLD), ("web/a.ts", "export const a = 1;\n")],
+    );
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let added = [
+        "// SAFETY: the pointer is valid",
+        "unsafe { f() }",
+        "/// One line.",
+        "pub fn a() {}",
+        "/// First.",
+        "/// Second.",
+        "pub fn b() {}",
+        "fn c() {",
+        "    // new",
+        "}",
+        "/* block",
+        "  still */",
+    ];
+    let lib = format!("{OLD}{}\n", added.join("\n"));
+    std::fs::write(d.join("src/lib.rs"), lib).unwrap();
+    std::fs::write(d.join("web/a.ts"), "/** Shown. */\nexport const a = 1;\n// not ok\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    let flagged: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.split(": a new comment").nth(1).and(l.split(": a").next()))
+        .collect();
+    assert_eq!(
+        flagged,
+        [
+            "src/lib.rs:7",
+            "src/lib.rs:8",
+            "src/lib.rs:11",
+            "src/lib.rs:13",
+            "src/lib.rs:14",
+            "web/a.ts:3"
+        ],
+        "{out}"
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(
+        (code, out.contains("0 violations")),
+        (0, true),
+        "no --base, nothing judged: {out}"
+    );
+}
+
+const DOCS: &str = "[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\"]\ncli = true\n";
+
+#[test]
+fn a_doc_naming_a_missing_path_line_link_or_flag_fails() {
+    let readme = "See `src/lib.rs:2`, `src/lib.rs`, [doc](docs/a.md) and `herdsman spawn --dry-run <f>`.\n";
+    let doc = "`../src/lib.rs` and `herdsman queue <fleet> add --top 3`\n```\n`src/gone.rs`\n```\n";
+    let d = committed(
+        "arch-docs",
+        DOCS,
+        &[
+            ("src/lib.rs", "fn a() {}\nfn b() {}\n"),
+            ("README.md", readme),
+            ("docs/a.md", doc),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let stale = "`src/gone.rs`, `src/lib.rs:3`, [x](docs/none.md), `herdsman spawn --gone`, `herdsman nope`\n";
+    std::fs::write(d.join("docs/b.md"), stale).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    for want in [
+        "docs/b.md:1: `src/gone.rs`: no such path",
+        "docs/b.md:1: `src/lib.rs:3`: src/lib.rs has fewer than 3 lines",
+        "docs/b.md:1: link `docs/none.md` does not exist",
+        "docs/b.md:1: `herdsman spawn --gone`: `spawn` has no `--gone`",
+        "docs/b.md:1: `herdsman nope`: no herdsman command `nope`",
+        "5 violations",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+}
+
+#[test]
+fn a_changed_flag_needs_a_doc_naming_it_or_no_doc_in_the_pr_body() {
+    let cli = "struct Args {\n    old_flag: bool,\n}\n";
+    let d = committed(
+        "arch-doc-touch",
+        DOCS,
+        &[("src/cli.rs", cli), ("docs/a.md", "`--old-flag`\n")],
+    );
+    std::fs::write(d.join("src/cli.rs"), "struct Args {\n    new_flag: bool,\n}\n").unwrap();
+    std::fs::write(d.join("body.md"), "Closes #1\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/cli.rs:2: `new_flag` added, but no changed doc line names it"),
+        "{out}"
+    );
+    assert!(out.contains("src/cli.rs:2: `old_flag` removed"), "{out}");
+    std::fs::write(d.join("body.md"), "no doc: internal only\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("body.md"), "Closes #1\n").unwrap();
+    std::fs::write(d.join("docs/a.md"), "`--new-flag`\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
