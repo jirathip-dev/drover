@@ -115,8 +115,9 @@ pub struct Plan {
     pub kick: String,
     /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
     pub lane: String,
-    /// `[accounts]` lanes: the account name and its token's secret name (`all`'s, in the store).
-    pub account: Option<(String, String)>,
+    /// `[accounts]` lanes: the account name and (#683) the env it signs in with (`access::account_env`); that env is
+    /// empty on a remote host (its lanes sign in through the main host's token proxy, #637).
+    pub account: Option<access::Account>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
     /// The only MCP servers the lane gets, and the lane-local file a harness reads them from.
@@ -140,6 +141,9 @@ impl Plan {
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
+        // #683: the account's env, its own CLI login; the lane's profile goes on top (`--settings`, ACP's settings).
+        let acct = self.account.iter().flat_map(|a| &a.1);
+        c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
         if !self.secrets().is_empty() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
@@ -148,23 +152,14 @@ impl Plan {
         c
     }
 
-    /// #441: (env var, fleet, secret name) of each `secret:<NAME>` env and of the account's token.
+    /// #441: (env var, fleet, secret name) of each `secret:<NAME>` env (#683: never an account token).
     fn secrets(&self) -> Vec<(String, &str, String)> {
         let fleet = self.lane.split(':').next().unwrap_or_default();
         let env = self
             .env
             .iter()
             .filter_map(|(k, x)| Some((k.clone(), fleet, x.strip_prefix("secret:")?.into())));
-        let token = match harness::get(&self.harness).credential() {
-            harness::Credential::Token(v) => Some(v),
-            _ => None,
-        };
-        let acct = self
-            .account
-            .iter()
-            .zip(token)
-            .map(|(a, v)| (v.to_string(), "all", a.1.clone()));
-        env.chain(acct).collect()
+        env.collect()
     }
 
     /// The file `deliver` writes beside the worktree, on the lane's host.
@@ -201,8 +196,7 @@ pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Resu
     let mut text = String::new();
     for (var, fleet, name) in p.secrets() {
         let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
-        let why =
-            || format!("{var}: secret {name} is not in the store (`herdsman accounts import` or a secret request)");
+        let why = || format!("{var}: secret {name} is not in the store (`herdsman secret request`)");
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
     let file = (!text.is_empty()).then(|| p.secrets_file());
@@ -518,14 +512,15 @@ pub fn unguarded(
     } else if !hooks.any(|h| h["command"] == guard.as_str()) {
         format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
     } else if !account {
-        "an ACP lane signs in with its role's [accounts] token (its config folder is its profile)".into()
+        "an ACP lane signs in with its role's [accounts] account env".into()
     } else {
         String::new()
     }
 }
 
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
-/// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
+/// file, with its account's env as its sign-in (#683), its profile's settings and role as the
+/// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
     let dir = harness::profiles_root(ctx).join(&p.profile);
@@ -533,7 +528,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
         ctx,
         (&p.profile, p.family, &p.harness),
         id,
-        (p.account.is_some(), remote),
+        (p.account.as_ref().is_some_and(|a| !a.1.is_empty()), remote),
     );
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
@@ -546,10 +541,13 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     let mut words = p.lane_cmd("")[3..].to_vec();
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let env = harness::get(&p.harness).acp_env(&dir, p.model.as_deref());
+    let env = harness::get(&p.harness).acp_env(p.model.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
-    let line = words.join(" ") + " && unset SHED BERTH && exec \"$@\"";
+    let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
+    let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
+    let profile = harness::get(&p.harness).acp_profile(&set, &role);
+    let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }
 
@@ -854,6 +852,11 @@ pub fn spawn(
             p.env
                 .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
         }
+    }
+    // #683: a lane on this host signs in with its account's env (a failing `account_env` refuses the spawn); a remote
+    // one gets none, its host signs in through the main host's token proxy (#637).
+    if let Some(a) = p.account.as_mut().filter(|_| on.machine.is_none()) {
+        a.1 = access::account_env(cfg, base, &p.harness, &a.0)?;
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);

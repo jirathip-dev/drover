@@ -490,7 +490,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, };
+export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
 
 export type Event = { 
 /**

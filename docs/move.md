@@ -18,7 +18,7 @@ A move is copy, regenerate, then `herdsman doctor` until every line is ✓. Path
 | Config | `~/.config/herdsman/fleet.toml` | fleets, roles, notifiers, `[serve]` |
 | State database (#344) | `~/.local/state/herdsman/state.db` (copy it with herdsman stopped, or `sqlite3 state.db .backup`) | the event log (queue, lanes, verdicts, asks), paired phones (hashes only), push subscriptions |
 | VAPID key | `~/.local/state/herdsman/webpush/vapid.key` | keep it and paired phones keep getting push |
-| Secrets (#441) | the main host's OS store, `herdsman/<fleet>/<NAME>` | not a file: on the new host run `herdsman accounts import` and re-save other secrets by request |
+| Secrets (#441) | the main host's OS store, `herdsman/<fleet>/<NAME>` | not a file: on the new host re-save secrets by request; accounts sign in with their own login (#683) |
 
 Copy the secret files with their mode (`scp -p` or `rsync -a`), never through chat or a repo, then
 `chmod 600` `vapid.key`, `subs.json` and `devices.json` on the new host.
