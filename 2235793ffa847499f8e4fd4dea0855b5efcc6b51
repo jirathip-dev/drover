@@ -1,0 +1,15 @@
+Decided: limit() returns a Duration for every call (60 s default, security/codesign 10 s, longer ones in a table) matched on the program's file name
+Because: "`limit()` returns `Some` for every call: a default (60 s)"
+Decided: hosts::On sends a remote call to run_for with the limit of the command it carries, so ssh never falls into the 60 s default
+Because: crates/core/src/hosts.rs:175
+Decided: hosts bootstrap's install steps (cargo install, rustup, apt) get 30 min by run_for; its checks keep 60 s
+Because: crates/core/src/cloud.rs:437
+Decided: premerge checks (`sh -c "cd wt && cargo test"`) get 30 min through run_for, not a table entry for all of sh
+Because: crates/core/src/gate.rs:644
+Decided: after #707 the wedged test keeps the 10 s bound on all four commands; its keyring fake and codesign row went with the store
+Because: crates/cli/tests/wedged.rs:13
+Rejected: an ssh arm in limit() that parses the quoted line after `--` — On already has the unquoted command
+Rejected: a sh entry in the table — every short script would then wait 30 min
+Check: runner_limits' a_remote_call_keeps_the_limit_of_the_command_it_carries: remote git fetch 600 s, cargo 1800 s, sh 60 s
+Check: cargo test --test wedged fails on fb52f6c9d (all four still running after 10 s) and passes at head in under a second
+Owner: When a tool like the Keychain stops answering, herdsman now gives up on it after a set time instead of hanging; remote installs and fetches keep their longer limits.
