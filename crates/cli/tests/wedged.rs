@@ -1,7 +1,8 @@
 //! #713: the 11-08 outage as a test. The login Keychain stops answering: `security` and `codesign` never return.
 //! `doctor`, `serve` (startup through its first page render), `tick` and `check` each still finish within 10 s of
-//! wall-clock time, and serve still serves the board. #707 retired the store and the signing step, so today none of
-//! them calls either tool; the test keeps any that comes back bounded.
+//! wall-clock time, and serve still serves the board. #707 retired the store and the signing step, so `lsof`, which
+//! all four still call (doctor's port probe, the host's cwd scan) and which hangs the same way on a stuck mount,
+//! stands in for the next tool that stops answering.
 mod common;
 use common::*;
 use herdsman::runner::{Out, Runner};
@@ -9,8 +10,8 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::time::Duration;
 
-/// The tools that hang with the Keychain.
-const WEDGED: [&str; 2] = ["security", "codesign"];
+/// The tools that hang with the Keychain, and `lsof`, the one of the next kind that all four commands call.
+const WEDGED: [&str; 3] = ["security", "codesign", "lsof"];
 
 fn hang() -> ! {
     loop {
