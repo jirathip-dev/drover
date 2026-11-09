@@ -1,0 +1,6 @@
+Decided: merge staging 244d861 (q889 cap raise, #683 account folders); a remote ACP lane passes the guard with its lane key and no account env
+Because: q889 raised the cap; #683 gives remote lanes no account env, so crates/core/src/spawn.rs:541 accepts a lane key instead
+Because: the proxy still signs with the store secret named by the account's [accounts] value, crates/core/src/spawn.rs:1293
+Rejected: reading the token from the account's CLAUDE_CONFIG_DIR — on macOS it is a Keychain item, which #683 forbids reading
+Check: cargo test --locked --test remote_acp (5 pass); full cargo test exit 0 at 672cb1c
+Owner: Remote lanes keep signing in only through the Mini's proxy after the new account-folder sign-in; staging merged
