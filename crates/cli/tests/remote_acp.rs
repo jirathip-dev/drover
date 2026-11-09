@@ -518,9 +518,14 @@ fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
 
 /// One model call to the proxy at `port` with lane key `key`: the status line and body.
 fn call(port: u16, key: &str) -> (String, String) {
+    call_at(port, key, "/v1/messages?beta=true")
+}
+
+/// The same call to request path `path`.
+fn call_at(port: u16, key: &str, path: &str) -> (String, String) {
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     let body = r#"{"model":"opus","messages":[]}"#;
-    write!(s, "POST /v1/messages?beta=true HTTP/1.1\r\nhost: x\r\nauthorization: Bearer {key}\r\nanthropic-beta: claude-code-20250219\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len()).unwrap();
+    write!(s, "POST {path} HTTP/1.1\r\nhost: x\r\nauthorization: Bearer {key}\r\nanthropic-beta: claude-code-20250219\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len()).unwrap();
     let mut text = String::new();
     s.read_to_string(&mut text).unwrap();
     let (head, body) = text.split_once("\r\n\r\n").unwrap();
@@ -584,6 +589,21 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             !h.contains(&live) && up[0].ends_with(r#"{"model":"opus","messages":[]}"#),
             "{h}"
         );
+        // A live key with a path that would move curl's host off `upstream` (`@host/`, no leading `/`, ...): refused.
+        for p in [
+            "@127.0.0.1:9/v1",
+            "/v1@127.0.0.1:9",
+            "\\@127.0.0.1:9/",
+            "/v1#@x",
+            "v1/messages",
+        ] {
+            let (status, body) = call_at(pport, &live, p);
+            assert!(
+                status.contains("400") && body.contains("bad request path"),
+                "{p}: {status} {body}"
+            );
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1, "a hostile path never reaches upstream");
         // Revoked by the owner, unknown, and (past `key_hours`) expired: refused here, nothing goes upstream.
         assert_eq!(run(&c, f, &["hosts", "keys", "revoke", &gone_id]).0, 0);
         let (code, list) = run(&c, f, &["hosts", "keys"]);

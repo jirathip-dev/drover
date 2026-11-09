@@ -224,6 +224,10 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         w.next().unwrap_or("GET").to_string(),
         w.next().unwrap_or("/").to_string(),
     );
+    // The path is appended to `upstream`: only an origin-form path, so it can never move the host (`@evil/`).
+    if !path.starts_with('/') || path.chars().any(|ch| "@\\#\"".contains(ch) || ch.is_control()) {
+        return reply(&mut c, 400, "bad request path");
+    }
     let mut heads: Vec<(String, String)> = vec![];
     loop {
         let mut h = String::new();
@@ -283,7 +287,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         format!("request = \"{}\"\ndump-header = \"-\"\n", q(&method))
     };
     let res = r
-        .stream("curl", &argv(&["-sS", "-N", "--http1.1", "-K", "-"]), &conf)
+        .stream("curl", &argv(&["-sS", "-N", "-g", "--http1.1", "-K", "-"]), &conf)
         .and_then(|up| relay(&mut BufReader::new(up), &mut c));
     let _ = std::fs::remove_file(&tmp);
     if res.is_err() {
