@@ -106,7 +106,21 @@ pub fn spawns_line(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) ->
         .filter(|m| m.starts_with("spawn-"))
         .count();
     let day = |e: &&Event| e.kind == "stale-marker" && ctx.now < e.ts + 86400;
-    let gone: Vec<&str> = events.iter().filter(day).filter_map(|e| e.str("file")).collect();
+    // #708: each name once, with its count, the first 5 then `+N more`.
+    let mut seen: Vec<(&str, usize)> = vec![];
+    for f in events.iter().filter(day).filter_map(|e| e.str("file")) {
+        match seen.iter_mut().find(|s| s.0 == f) {
+            Some(s) => s.1 += 1,
+            None => seen.push((f, 1)),
+        }
+    }
+    let more = seen.len().saturating_sub(5);
+    let mut gone: Vec<String> = seen
+        .iter()
+        .take(5)
+        .map(|(f, n)| if *n > 1 { format!("{f} ×{n}") } else { f.to_string() })
+        .collect();
+    gone.extend((more > 0).then(|| format!("+{more} more")));
     let gone = (!gone.is_empty()).then(|| format!(" · stale removed (24 h): {}", gone.join(", ")));
     format!(
         "spawns starting {n}/{}{}",
