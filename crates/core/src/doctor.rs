@@ -207,6 +207,19 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = "hermes hooks — profiles sync --check → herdsman profiles sync";
         row(rows, synced, '✗', line);
     }
+    // #737: a profile's hook names another binary: lanes from this one are refused ACP_UNGUARDED.
+    let stray = crate::spawn::stray_hooks(ctx, cfg);
+    let what = if stray.is_empty() {
+        "run this binary".into()
+    } else {
+        stray.join("; ")
+    };
+    row(
+        rows,
+        stray.is_empty(),
+        '✗',
+        &format!("profile hooks — {what} → herdsman profiles sync"),
+    );
     let hosts = cfg.serve.allowed_hosts.join(", ");
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);

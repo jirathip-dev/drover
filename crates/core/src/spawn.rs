@@ -79,7 +79,11 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
 
 /// `profiles sync --check`: each Hermes profile's `hooks list` (run as in a lane) shows its hook `✓ allowed`.
 pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
-    let mut good = true;
+    let stray = stray_hooks(ctx, cfg);
+    let mut good = stray.is_empty();
+    for s in stray {
+        writeln!(out, "✗ {s} → herdsman profiles sync")?;
+    }
     for (name, f, role, _, profile) in profiles(cfg) {
         if !ctx.hermes.join(&profile).join("config.yaml").exists() {
             continue;
@@ -96,6 +100,26 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
         good &= allowed;
     }
     Ok(good)
+}
+
+/// #737: each synced profile's herdsman hook whose program is not the running binary: `<profile> hook runs <exe>`.
+pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
+    let mut stray = vec![];
+    for (_, _, _, _, profile) in profiles(cfg) {
+        let path = harness::profiles_root(ctx).join(&profile).join("settings.json");
+        let settings: Value = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+        for h in pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten()) {
+            let cmd = h["command"].as_str().unwrap_or_default();
+            if let Some(exe) = harness::hook_program(cmd).filter(|_| !harness::runs_this(ctx, cmd)) {
+                stray.push(format!("{profile} hook runs {exe}, not {}", ctx.exe));
+            }
+        }
+    }
+    stray
 }
 
 pub struct Plan {
@@ -511,11 +535,10 @@ pub fn unguarded(
         .unwrap_or_default();
     let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
-    let guard = hook_command(ctx, family);
     // #637: a remote host's profile is proven there (`hosts::acp_guard`), before this.
     if harness::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
-    } else if !remote && !hooks.any(|h| h["command"] == guard.as_str()) {
+    } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| harness::guards(ctx, c, family))) {
         format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
     } else if !account {
         "an ACP lane signs in with its role's [accounts] account env".into()

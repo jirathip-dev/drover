@@ -1913,3 +1913,21 @@ fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
         assert!(code == 0 && !out.contains("ACP_UNGUARDED"), "{name}: {code} {out}");
     }
 }
+
+/// #737: a hook naming another binary still refuses the spawn.
+#[test]
+fn a_hook_naming_another_binary_refuses_acp_unguarded() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let dir = tmpdir("acp-other-bin");
+    let other = dir.join("other/herdsman");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    std::fs::write(&other, "").unwrap();
+    let mut c = ctx(&dir, &acp_config(&b.sock, "claude", true));
+    c.exe = other.display().to_string();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    let f = acp_fake(&["env"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
+    assert!(code == 3 && out.contains("REFUSED ACP_UNGUARDED"), "{out}");
+}
