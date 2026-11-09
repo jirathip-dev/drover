@@ -49,7 +49,7 @@ Another repo's CI runs it with the reusable workflow:
 ```yaml
 jobs:
   arch-check:
-    uses: jirathip-dev/herdsman/.github/workflows/arch-check.yml@staging
+    uses: <owner>/herdsman/.github/workflows/arch-check.yml@staging
 ```
 
 ## Playbooks: `--perf` and `--refactor`
