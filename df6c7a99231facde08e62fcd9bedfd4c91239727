@@ -1,0 +1,10 @@
+Decided: fix round 1 merges origin/staging twice (#730's architect role, then #761's cap raise) instead of rebasing
+Because: q966
+Because: ci/cap.toml:6
+Rejected: rebasing onto staging — the branch is pushed and lanes never rewrite history or force-push
+Decided: help --agent budget is staging's 344 plus this PR's +2 for --perf/--refactor
+Because: crates/core/src/cli.rs:853
+Decided: queue ls JSON keeps both staging's architect field and this PR's playbook field
+Because: crates/core/src/queue.rs:412
+Check: cap-check passes under the raised cap and the arch_check, playbooks and spawn tests pass at the merge head
+Owner: No new behaviour this round; it only takes in the latest staging, including the cap raise this change was waiting for.
