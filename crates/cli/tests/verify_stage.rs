@@ -141,6 +141,10 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
         brief.contains("# ROLE: VERIFIER") && brief.contains("verdict.md"),
         "{brief}"
     );
+    // #731: the browser evidence helper sits beside it, the repo's own script.
+    let vb = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.verify-browser.mjs")).unwrap();
+    let ours = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/verify-browser.mjs");
+    assert_eq!(vb, std::fs::read_to_string(ours).unwrap());
 }
 
 #[test]
