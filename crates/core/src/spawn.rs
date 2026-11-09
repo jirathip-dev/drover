@@ -701,12 +701,9 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
-    "why.md", // #677: herdsman attaches it as a note; never committed
-    VERIFY_BROWSER,
+    "why.md",              // #677: herdsman attaches it as a note; never committed
+    ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
-
-/// #731: `scripts/verify-browser.mjs`, written into each verify lane's worktree.
-pub const VERIFY_BROWSER: &str = ".verify-browser.mjs";
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
@@ -1308,11 +1305,8 @@ pub fn spawn(
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     if p.role == "verify" {
-        // #731: the browser evidence helper, for any repo's recipe (`node .verify-browser.mjs`).
-        on.write(
-            &p.worktree.join(VERIFY_BROWSER),
-            include_str!("../../../scripts/verify-browser.mjs"),
-        )?;
+        let vb = include_str!("../../../scripts/verify-browser.mjs");
+        on.write(&p.worktree.join(".verify-browser.mjs"), vb)?;
     }
     if on.machine.is_none() {
         copy_included(&f.local_path(), &p.worktree)?;

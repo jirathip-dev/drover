@@ -68,9 +68,8 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     Ok(false)
 }
 
-/// The evidence files verify's verdict.md (at `file`) lists, as `{name, path}`: its PNGs (#731: and its console and
-/// network `.log`s, a11y and trace `.json`, `.txt`). #547: only a relative word with no `..` that is a regular file
-/// inside the verify lane's folder `lane` (none: no shots).
+/// The PNGs (#731: and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`:
+/// #547: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
 pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     let dir = file.parent().unwrap_or(Path::new(""));
     let words = body.split(|c: char| c.is_whitespace() || "`()[]<>\"'".contains(c));
