@@ -591,8 +591,7 @@ pub struct Limits {
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
     pub webhook_poll_minutes: u64,
-    /// #710: more than this many Keychain readers waiting over 60 s alerts `keychain-jammed`; with
-    /// `reap_keychain_readers`, `check` kills them and a stale `SecurityAgent`.
+    /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
 }

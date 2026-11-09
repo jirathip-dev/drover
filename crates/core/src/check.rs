@@ -425,13 +425,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         .rev()
         .find(|e| matches!(e.kind.as_str(), "keychain-jammed" | "keychain-clear"));
     if jam.0.len() > cfg.limits.keychain_readers {
-        let key = events
-            .iter()
-            .rev()
-            .find(|e| e.kind == "keychain-clear")
-            .map_or(0, |e| e.seq);
+        let key = events.iter().rev().find(|e| e.kind == "keychain-clear");
         let why = format!("Keychain readers {}", host::jam_line(&jam));
-        let d = json!({"key": key, "reason": why});
+        let d = json!({"key": key.map_or(0, |e| e.seq), "reason": why});
         fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-jammed", d)?;
         // Optional: kill the readers, then the stale SecurityAgent (macOS restarts it); securityd never matches.
         if cfg.limits.reap_keychain_readers {
@@ -441,12 +437,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             if let Some(a) = &agent {
                 let _ = r.run("kill", std::slice::from_ref(a));
             }
-            let d = json!({"pids": pids, "agent": agent});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, "herdsman", None, "keychain-reap", d),
-            )?;
+            let e = Event::new(
+                ctx.now,
+                "herdsman",
+                None,
+                "keychain-reap",
+                json!({"pids": pids, "agent": agent}),
+            );
+            emit(&ctx.state, cfg, e)?;
         }
     } else if last.is_some_and(|e| e.kind == "keychain-jammed") {
         let e = Event::new(ctx.now, "herdsman", None, "keychain-clear", json!({}));
