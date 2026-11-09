@@ -132,6 +132,8 @@ jobs:
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
       - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
         run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
+      - name: the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+        run: cargo test --locked --test verify_browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
