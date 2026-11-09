@@ -208,7 +208,7 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
 
 This replaces raising `review_rounds` in fleet.toml, merging and restoring it by hand.
 
-Paused fleets are skipped (no pass, no `last pass`); one fleet's error doesn't skip the others. drive never answers asks (a lane's question stays a needs-you card),
+Paused fleets are skipped (no pass, no `last pass`), but their live lanes still get delivery: the fast step drains their outbox and retypes undelivered answers (#714); one fleet's error doesn't skip the others. drive never answers asks (a lane's question stays a needs-you card),
 never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY`, `CAP`,
 `SERIAL_BUSY`) is printed and logged once per item an hour (cron stays quiet), and the step is retried
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host

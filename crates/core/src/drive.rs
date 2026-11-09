@@ -602,14 +602,17 @@ pub fn drive(
             writeln!(out, "budget: {e:#}")?;
         }
     }
-    let mine = |(n, f): &(&String, &crate::config::Fleet)| !f.paused && only.is_none_or(|o| o == n.as_str());
-    let fleets: Vec<&str> = cfg.fleet.iter().filter(mine).map(|(n, _)| n.as_str()).collect();
+    // #714: a paused fleet's live lanes still get their outbox drained and their answers; only its pass is held.
+    let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
+        .filter(|n| only.is_none_or(|o| o == *n))
+        .collect();
+    let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
     // #325: an answer that never reached its lane is typed again each fast step, until it lands or the lane is gone.
     let events = fast
         .then(|| crate::events::read(&ctx.state).ok())
         .flatten()
         .unwrap_or_default();
-    for u in fleets.iter().flat_map(|f| crate::undelivered(&events, f)) {
+    for u in live.iter().flat_map(|f| crate::undelivered(&events, f)) {
         if let Err(e) = crate::deliver(ctx, cfg, r, u, u.str("text").unwrap_or_default(), false) {
             writeln!(out, "redeliver: {e:#}")?;
         }
@@ -626,8 +629,8 @@ pub fn drive(
     };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     let log = || crate::db::last_seq(&ctx.state);
-    let mut seen = if fleets.is_empty() {
-        crate::snapshot::Snap::read(ctx, r) // every fleet paused: nothing to look at
+    let mut seen = if fleets.is_empty() && (!fast || live.is_empty()) {
+        crate::snapshot::Snap::read(ctx, r) // every fleet paused, no drain: nothing to look at
     } else {
         crate::snapshot::take(ctx, cfg, r)
     };
@@ -647,7 +650,7 @@ pub fn drive(
     let grew = log();
     // #389: remote lanes' commands that found no route here, as the look read them.
     if fast {
-        crate::outbox::drain(ctx, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
+        crate::outbox::drain(ctx, (r, &seen), out, &live).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
     }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
