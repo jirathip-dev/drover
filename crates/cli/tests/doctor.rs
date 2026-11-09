@@ -433,3 +433,104 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains('!'), "{out}");
 }
+
+/// #708: the launchd row follows `[serve] launchd_label` (default `dev.herdsman.serve`), never another plist that
+/// mentions `herdsman serve`; a missing one lists what it found.
+#[test]
+fn launchd_row_follows_the_configured_label() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let (c, _) = setup("doc-launchd", "claude");
+    let agents = c.home.join("Library/LaunchAgents");
+    for old in ["com.a.herdsman.plist", "local.herdsman.plist", "zz.herdsman.old.plist"] {
+        write(&agents.join(old), PLIST, 0o644);
+    }
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = line(&out, "launchd");
+    assert!(l.starts_with('✓') && l.ends_with("/dev.herdsman.serve loaded"), "{l}");
+
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let mine = text.replace("[serve]\n", "[serve]\nlaunchd_label = \"dev.mine.serve\"\n");
+    std::fs::write(&c.config, mine).unwrap();
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "launchd");
+    assert!(l.starts_with('✗') && l.contains("dev.mine.serve.plist missing"), "{l}");
+    assert!(l.contains("found") && l.contains("dev.herdsman.serve.plist"), "{l}");
+    write(&agents.join("dev.mine.serve.plist"), PLIST, 0o644);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "launchd").ends_with("/dev.mine.serve loaded"), "{out}");
+}
+
+/// #708: the stale spawn markers removed in 24 h are listed once each, with a count, capped at `+N more`.
+#[test]
+fn spawns_row_dedupes_stale_names() {
+    let (c, _) = setup("doc-spawns", "claude");
+    let mut names: Vec<String> = (1..=8).map(|n| format!("spawn-demo-{n}.pending")).collect();
+    names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
+    for (i, f) in names.iter().enumerate() {
+        let ev = herdsman::events::Event::new(
+            c.now - 600 + i as u64,
+            "demo",
+            Some(1),
+            "stale-marker",
+            serde_json::json!({ "file": f }),
+        );
+        herdsman::events::append(&c.state, &ev).unwrap();
+    }
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = out.lines().find(|l| l.contains("spawns starting")).unwrap();
+    assert!(l.starts_with("! spawns starting 0/"), "{l}");
+    assert_eq!(l.matches("spawn-demo-1.pending").count(), 1, "{l}");
+    assert!(l.contains("spawn-demo-1.pending ×300"), "{l}");
+    assert!(l.contains("+3 more"), "{l}");
+    assert!(l.len() < 300, "{} chars: {l}", l.len());
+}
+
+/// #708: `self-update --pause` shows in doctor and on the board until `--resume`.
+#[test]
+fn a_paused_self_update_shows_in_doctor_and_the_board() {
+    let (c, _) = setup("doc-paused", "claude");
+    let r = good();
+    assert_eq!(run(&c, &r, &["self-update", "--pause"]).0, 0);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let row = out
+        .lines()
+        .find(|l| l.contains(" self-update — "))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(row.starts_with("! self-update — paused since "), "{row}");
+    assert!(row.ends_with(" → herdsman self-update --resume"), "{row}");
+    let (_, board) = run(&c, &r, &["board"]);
+    assert!(board.lines().any(|l| l == row), "{board}");
+
+    assert_eq!(run(&c, &r, &["self-update", "--resume"]).0, 0);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(!out.contains("self-update"), "{out}");
+    let (_, board) = run(&c, &r, &["board"]);
+    assert!(!board.contains("self-update"), "{board}");
+}
+
+/// #708: a clean login shell that exports `CLAUDE_CODE_OAUTH_TOKEN` warns with the file to fix; neither the value nor
+/// anything else the shell printed is shown.
+#[test]
+fn a_login_shell_exporting_the_token_warns() {
+    let (c, _) = setup("doc-login", "claude");
+    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides each lane's account) → remove it from";
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert!(!out.contains("login shell"), "{out}");
+    let shell = format!("Welcome {TOKEN}\ntoken:set\nfile:.zshrc\nfile:{TOKEN}\n");
+    let r = good().reply("sh -c t=$(env -i HOME=", &shell);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = out
+        .lines()
+        .find(|l| l.starts_with(warn))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert_eq!(l, format!("{warn} ~/.zshrc"), "{out}");
+    assert!(!out.contains("FAKEtoken") && !out.contains("Welcome"), "{out}");
+}
