@@ -1,0 +1,11 @@
+Decided: hook commands name ctx.exe canonicalized, and spawn accepts a hook whose program resolves to the running binary
+Because: "`unguarded` accepts a hook whose program resolves to the same file as the running binary (symlink or real path)"
+Because: crates/core/src/harness/mod.rs:274
+Because: crates/core/src/spawn.rs:541
+Decided: profiles sync --check and a new doctor row "profile hooks" name each profile hook that runs another binary
+Because: crates/core/src/spawn.rs:106
+Rejected: canonicalizing ctx.exe once in Ctx::from_env — tests set ctx.exe directly, so the regression would bypass it
+Rejected: comparing only canonical strings — a hook synced before this fix still names the symlink path and must guard
+Check: a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path fails at commit 1 and passes at head
+Check: a_hook_naming_another_binary_refuses_acp_unguarded and doctor's a_hook_naming_another_binary_is_named pass
+Owner: New lanes no longer get refused depending on whether profiles were synced through the ~/.local/bin link or the real binary.
