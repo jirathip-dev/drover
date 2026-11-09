@@ -30,44 +30,53 @@
       {
         "fleet": "sendmeter",
         "harness": "claude",
+        "host": "local",
         "issue": 12,
         "model": null,
         "name": "sendmeter-impl-12",
         "role": "impl",
+        "runtime": "herdr",
         "shown": "working",
         "since": 999900,
         "state": "working",
         "title": null,
-        "tone": "g"
+        "tone": "g",
+        "where": ""
       },
       {
         "fleet": "sendmeter",
         "harness": "claude",
+        "host": "local",
         "issue": 9,
         "model": null,
         "name": "sendmeter-rev-9-r1",
         "role": "rev",
+        "runtime": "herdr",
         "shown": "blocked",
         "since": 999900,
         "state": "blocked",
         "title": null,
-        "tone": "r"
+        "tone": "r",
+        "where": ""
       },
       {
         "fleet": "sendmeter",
         "harness": "hermes",
+        "host": "local",
         "issue": null,
         "model": "opus",
         "name": "Let's talk about #30 · t1",
         "role": "conductor",
+        "runtime": "herdr",
         "shown": "asleep",
         "since": 1000000,
         "state": "asleep",
         "title": null,
-        "tone": "m"
+        "tone": "m",
+        "where": ""
       }
     ],
-    "mtime": "1793969430121521119",
+    "mtime": "1794098378090929508",
     "now": 1000000,
     "queue": [],
     "seq": 8,

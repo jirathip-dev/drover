@@ -267,6 +267,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
     },
+    /// Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)
+    #[command(hide = true)]
+    Proxy,
     /// Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort
     Serve {
         #[command(subcommand)]
@@ -752,6 +755,17 @@ enum HostsCmd {
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
     #[command(hide = true)]
     Snapshot { name: String },
+    /// The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once
+    Keys {
+        #[command(subcommand)]
+        cmd: Option<KeysCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeysCmd {
+    /// Owner only: this key stops signing at once; logs `proxy-key-revoked`
+    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -817,8 +831,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`).
-pub const HELP_AGENT_MAX: usize = 339;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`).
+pub const HELP_AGENT_MAX: usize = 342;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1060,14 +1074,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         false,
                     )
                 });
-                // #157: a HOST column once fleet.toml has `[hosts]`.
-                let hosts = Config::load(&ctx.config).is_ok_and(|c| !c.hosts.is_empty());
+                // #157: a HOST column once fleet.toml has `[hosts]`; #609: or a lane's `where` says more.
+                let cfg = Config::load(&ctx.config).ok();
+                let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+                let hosts = cfg.is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
-                let c = |h: &str| format!(" {h:<10}").repeat(usize::from(hosts));
+                let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
                 let head = c("HOST");
                 let host = |s: &crate::events::IssueState| {
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
-                    c(e.map_or("-", |e| e.str("host").unwrap_or("local")))
+                    let place = s.active_lane().and_then(|l| at.get(l.1)).filter(|p| !p.is_empty());
+                    c(place.map_or_else(|| e.map_or("-", |e| e.str("host").unwrap_or("local")), |p| p))
                 };
                 let root = |s: &crate::events::IssueState| {
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
@@ -1147,10 +1164,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let events = read(&ctx.state)?;
             let all = fleet.map_or_else(|| queue::fleets(&events), |f| vec![f]);
             let cfg = Config::load(&ctx.config).ok();
-            let boards: Vec<_> = all
-                .iter()
-                .map(|f| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
-                .collect();
+            let look = crate::snapshot::Snap::read(ctx, r);
+            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+            let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
+            let boards: Vec<_> = all.iter().map(board).collect();
             // #539: each retired config key, its own line above the boards.
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → herdsman doctor")?;
@@ -1473,7 +1490,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
                     Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
+                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
+                    Some(HostsCmd::Keys {
+                        cmd: Some(KeysCmd::Revoke { id }),
+                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
+                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -1492,6 +1514,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
+                    let at = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
                     let mut rows: Vec<_> = all
                         .into_iter()
@@ -1561,9 +1584,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     }
                     for w in rows.iter().filter(|_| !json) {
+                        // #609: the lane's `where` beside its age: `(3m · mini · shed)`.
+                        let place = at
+                            .get(&w.lane)
+                            .filter(|p| !p.is_empty())
+                            .map_or(String::new(), |p| format!(" · {p}"));
                         writeln!(
                             out,
-                            "{} #{} {}: {} ({}){}",
+                            "{} #{} {}: {} ({}{place}){}",
                             w.fleet,
                             w.issue,
                             w.who,
@@ -2076,4 +2104,14 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         coauthor_warn(ctx, r, ".", sha);
     }
     Ok(0)
+}
+
+/// #609: each lane's `where` (`lanes::Lane::place`) by agent, as runner `r` sees the lanes.
+fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+    let (st, list) = (
+        crate::events::fold(events),
+        crate::herdr::list(r, "agent").unwrap_or_default(),
+    );
+    let ls = crate::snapshot::lanes(cfg, r, ctx, (events, &st), &list);
+    ls.into_iter().map(|l| (l.name, l.place)).collect()
 }
