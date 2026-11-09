@@ -593,6 +593,9 @@ pub struct Limits {
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
     pub webhook_poll_minutes: u64,
+    /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
+    pub keychain_readers: usize,
+    pub reap_keychain_readers: bool,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -667,6 +670,8 @@ impl Default for Limits {
             fallback_rest_minutes: 60,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
+            keychain_readers: 3,
+            reap_keychain_readers: false,
         }
     }
 }
@@ -712,6 +717,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "orphan-issue",
     "config-warning",
     "keychain-locked",
+    "keychain-jammed",
     "self-update-failed",
     "clean-failed",
     "runners-low",
