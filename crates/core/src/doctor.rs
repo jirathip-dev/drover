@@ -329,13 +329,16 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
 /// #708: the startup files a clean login shell reads; `login_token` names only these.
 const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
 
-/// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports `CLAUDE_CODE_OAUTH_TOKEN` overrides each
-/// lane's account: the warning names the startup files that mention it, never the value or any other line.
+/// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports the accounts harness's token var overrides
+/// each lane's account: the warning names the startup files that mention it, never the value or any other line.
 fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
+    let crate::harness::Credential::Token(var) = crate::harness::accounts()?.credential() else {
+        return None;
+    };
     let probe = format!(
-        "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{CLAUDE_CODE_OAUTH_TOKEN:+set}}\"' </dev/null 2>/dev/null); \
+        "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{{var}:+set}}\"' </dev/null 2>/dev/null); \
          case \"$t\" in *token:set*) echo token:set; cd \"$HOME\" && \
-         grep -l CLAUDE_CODE_OAUTH_TOKEN {} 2>/dev/null | sed 's/^/file:/';; esac",
+         grep -l {var} {} 2>/dev/null | sed 's/^/file:/';; esac",
         STARTUP.join(" ")
     );
     let out = ok(r, "sh", &["-c", &probe]).ok()?;
@@ -353,7 +356,7 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     };
     let on = host.map_or(String::new(), |h| format!(" on host {h}"));
     Some(format!(
-        "! a login shell{on} exports CLAUDE_CODE_OAUTH_TOKEN (it overrides each lane's account) → remove it from {files}"
+        "! a login shell{on} exports {var} (it overrides each lane's account) → remove it from {files}"
     ))
 }
 
