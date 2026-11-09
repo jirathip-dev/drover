@@ -2,4 +2,5 @@
 pub use herdsman_core::*;
 pub mod api;
 pub mod hooks;
+pub mod lifeboat;
 pub mod serve;
