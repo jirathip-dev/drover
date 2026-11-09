@@ -1637,15 +1637,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::clean_all(
-                        ctx,
-                        &cfg,
-                        r,
-                        out,
-                        fleet.as_deref(),
-                        (None, lane.as_deref(), false, true),
-                        yes,
-                    )?;
+                    let what = (None, lane.as_deref(), false, true); // #678: disabled hosts that answer too
+                    check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;

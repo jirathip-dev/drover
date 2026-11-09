@@ -1194,9 +1194,10 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
             let res = scratch(&on, &b, &[]).and_then(|v| {
                 let held = |n: &String| agents.iter().any(|a| a["name"] == n.as_str());
                 let gone: Vec<String> = v.into_iter().map(|n| n.0).filter(|n| !held(n)).collect();
-                match () {
-                    () if dry || gone.is_empty() => Ok(gone.into_iter().map(|n| (n, 0)).collect()),
-                    () => scratch(&on, &b, &gone),
+                if dry || gone.is_empty() {
+                    Ok(gone.into_iter().map(|n| (n, 0)).collect())
+                } else {
+                    scratch(&on, &b, &gone)
                 }
             });
             let gone = match res {
@@ -1208,16 +1209,12 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
             };
             for (n, bytes) in gone {
                 let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
+                let line = match dry {
+                    true => format!("would remove scratch {name}:{p}"),
+                    false => format!("scratch: {name}: removed {p} {:.2} GB (no live lane there)", gb(bytes)),
+                };
                 freed += bytes;
-                if dry {
-                    writeln!(out, "would remove scratch {name}:{p}")?;
-                } else {
-                    writeln!(
-                        out,
-                        "scratch: {name}: removed {p} {:.2} GB (no live lane there)",
-                        gb(bytes)
-                    )?;
-                }
+                writeln!(out, "{line}")?;
             }
         }
     }
