@@ -387,6 +387,18 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),
         "{png}"
     );
+    // #720: asked with a cooee plugin's token, the same PNG as the `data:` URL its frame shows; a missing one stays 404.
+    let plugin = |p: &str| {
+        let r = format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\nAuthorization: Bearer 0123456789abcdef0123\r\n\r\n");
+        String::from_utf8_lossy(&s.respond(&r, c.now)).into_owned()
+    };
+    let url = plugin("/shot/sendmeter/12/0");
+    assert!(
+        url.starts_with("HTTP/1.1 200") && url.contains("Content-Type: text/plain"),
+        "{url}"
+    );
+    assert!(url.ends_with("\r\n\r\ndata:image/png;base64,iVBORyBuYXJyb3c="), "{url}");
+    assert!(plugin("/shot/sendmeter/12/5").starts_with("HTTP/1.1 404 "));
 }
 
 /// #547: only a verify verdict lists screenshots, and only real files inside its lane folder; #499's CI FAIL body

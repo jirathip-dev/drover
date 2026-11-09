@@ -69,6 +69,14 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     th!("terminal/icon-192.png", PNG),
     th!("terminal/icon-512.png", PNG),
 ];
+/// #720: drover's cooee tabs (web/plugin, its dist committed like the board's): cooee's `[[plugins]]` entry for one
+/// names this server's URL and `module = "/plugin/<tab>.js"` (docs/serve.md).
+const PLUGIN: [(&str, &str); 4] = [
+    ("queue", include_str!("../web/plugin/dist/queue.js")),
+    ("lanes", include_str!("../web/plugin/dist/lanes.js")),
+    ("asks", include_str!("../web/plugin/dist/asks.js")),
+    ("fleets", include_str!("../web/plugin/dist/fleets.js")),
+];
 /// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
 macro_rules! sc {
     ($($n:literal),*) => { [$(($n, include_bytes!(concat!("../assets/schemes/", $n, ".json")).as_slice())),*] };
@@ -372,6 +380,19 @@ fn header<'h>(head: &'h str, name: &str) -> Option<&'h str> {
             .filter(|(k, _)| k.trim().eq_ignore_ascii_case(name))
             .map(|(_, v)| v.trim())
     })
+}
+
+/// #720: a cooee plugin's `Authorization: Bearer <token>`, whose token is a paired device's (docs/serve.md).
+fn bearer(head: &str) -> Option<&str> {
+    header(head, "authorization")?.strip_prefix("Bearer ")
+}
+
+/// The request's device credential: its `Cookie`, else #720 a plugin's bearer token as the `hd=` cookie it stands for.
+fn cookie(head: &str) -> String {
+    header(head, "cookie").map_or_else(
+        || bearer(head).map(|t| format!("hd={t}")).unwrap_or_default(),
+        String::from,
+    )
 }
 
 /// #199: the asking client's address. Behind `tailscale serve` every peer is loopback: then the forwarded address (the
@@ -725,7 +746,7 @@ impl<'a> Server<'a> {
             ..self.ctx.clone()
         };
         // #501: a database error is no unpaired stream: the reply below says 503 and the page reconnects.
-        let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
+        let dev = live.then(|| devices::check(&ctx, &cookie(&req)));
         if let Some(dev) = dev.filter(|d| !busy(d)) {
             s.set_write_timeout(Some(Duration::from_secs(10)))?;
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
@@ -1050,6 +1071,13 @@ impl<'a> Server<'a> {
                     None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
             }
+            ("GET", p) if p.starts_with("/plugin/") => {
+                let tab = p[8..].strip_suffix(".js");
+                PLUGIN.iter().find(|(t, _)| Some(*t) == tab).map_or(
+                    ("404 Not Found", "text/plain", text("no such tab\n")),
+                    |(_, js)| ("200 OK", "text/javascript", text(js)),
+                )
+            }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
                 let a = ASSETS.iter().find(|a| p == format!("/a/{VER:08x}/{}", a.0)).inspect(|_| cache = "public, max-age=31536000, immutable");
@@ -1104,6 +1132,15 @@ impl<'a> Server<'a> {
             ("POST", _) => ("404 Not Found", "text/plain", text("not found\n")),
             _ => ("405 Method Not Allowed", "text/plain", text("GET or POST only\n")),
         };
+        // #720: cooee's plugin frame shows `data:` images only and `cooee.fetch` passes text: a design PNG or screenshot
+        // asked for with a plugin's token comes back as its `data:` URL.
+        let img = path.starts_with("/design/") || path.starts_with("/shot/");
+        let (ctype, body) = if img && ctype == PNG && bearer(head).is_some() {
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &body);
+            ("text/plain", format!("data:image/png;base64,{b64}").into_bytes())
+        } else {
+            (ctype, body)
+        };
         // #501: the page's sign that this browser is paired after all (serve.js `repaired`).
         if a.get().is_some_and(Result::is_ok) {
             extra += "X-Paired: 1\r\n";
@@ -1155,7 +1192,7 @@ impl<'a> Server<'a> {
     /// The paired device whose token the request's `Cookie` carries, else why not (`devices::check`), read once into `a`.
     #[allow(clippy::unused_self)] // a method so every route reads `self.auth(..)` alike
     fn auth<'c>(&self, ctx: &Ctx, head: &str, a: &'c OnceCell<Auth>) -> &'c Auth {
-        a.get_or_init(|| devices::check(ctx, header(head, "cookie").unwrap_or_default()))
+        a.get_or_init(|| devices::check(ctx, &cookie(head)))
     }
 
     /// The reply box (or a blocked menu's option, a sheet action, a report): a paired device (cookie) prompts one agent, at most 10 sends a minute.

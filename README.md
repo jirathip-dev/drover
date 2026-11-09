@@ -16,13 +16,13 @@ only through it, and it refuses anything that breaks a rule.
 - **The pipeline is configurable.** The default is impl → rev → gates → merge; yours is validated as a
   full loop when the config loads and drawn on the board.
 - **A phone board.** `herdsman serve` is a PWA: queue, lanes, host, events, and web push for what needs you.
-  Frozen for features (#552): bug fixes only; new UI goes to cooee and cooee-drover, over `/api/v1` (see below).
+  Frozen for features (#552): bug fixes only; new UI goes to cooee and the drover tabs (`web/plugin/`), over `/api/v1` (see below).
 
 ## How it fits
 
 ```
-cooee  →  cooee-drover  →  herdsman /api/v1
-(app)     (tabs)           (engine)
+cooee  →  herdsman /plugin/<tab>.js  →  herdsman /api/v1
+(app)     (drover tabs)                 (engine)
 ```
 
 Calls go one way, left to right; nothing on the right depends on what is to its left.
@@ -30,12 +30,14 @@ Calls go one way, left to right; nothing on the right depends on what is to its 
 - **herdsman** (this repo) is the engine: queue, drive, lanes, reviews, gates, merge. It is to be renamed
   drover (#456).
 - **cooee** is the app: chats, and shed sessions, which include the lanes as Workflow chats (cooee#33).
-- **cooee-drover** is cooee's Queue, Asks and Fleets tabs. They read and act through herdsman's `/api/v1` and
-  reimplement nothing.
+- **The drover tabs** (cooee's Queue, Asks, Fleets and Lanes) live in this repo, in `web/plugin/` (#720, moved from
+  cooee-drover). herdsman serves them as cooee plugins from the same server as `/api/v1`, so the tabs and the API
+  ship in one build; they read and act only through `/api/v1` and reimplement nothing
+  ([docs/serve.md](docs/serve.md#drovers-cooee-tabs-720)).
 - The old board (`herdsman serve`) is frozen (#552) and retires once #553's parity rows pass on the owner's phone.
 
 A new Queue-tab feature's data comes from herdsman's `/api/v1`, so herdsman changes first: it adds the field to
-`/api/v1` (with its fixture in `crates/cli/tests/api_v1_contract.rs`), then cooee-drover's tab reads it. A
+`/api/v1` (with its fixture in `crates/cli/tests/api_v1_contract.rs`), then the drover tab in `web/plugin/` reads it. A
 consumer never derives engine state itself ([docs/serve.md](docs/serve.md#json-api-v1-265)).
 
 ## Quick start

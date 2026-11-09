@@ -4,7 +4,7 @@
 `last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
 
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
-UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to the cooee-drover repo; both read `/api/v1`, which
+UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to the drover tabs in `web/plugin/` (#720); both read `/api/v1`, which
 stays open (README, "How it fits"). CI's
 `board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
@@ -361,7 +361,7 @@ missed.
 
 ## JSON API v1 (#265)
 
-`herdsman serve` answers JSON under `/api/v1/`, the frozen TypeScript board's (`web/`) every read, and cooee-drover's and cooee core's (below). Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
+`herdsman serve` answers JSON under `/api/v1/`, the frozen TypeScript board's (`web/`) every read, and the drover tabs' and cooee core's (below). Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
 transcript, a setup screen, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host, bqueue, cond, and
 #555's send, menu, act, setup, chat-about, chat, close) refuse an unpaired one.
 
@@ -404,9 +404,9 @@ never caches `api/`. A breaking change is `/api/v2/`.
 The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
 `assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
 `crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`. #555: the contract with
-cooee core and cooee-drover is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
+cooee core and the drover tabs is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
 `crates/cli/tests/golden/api_v1/` (the route, its Rust type, the type's schema generated from its default, and a recorded
-response; cooee-drover's module tests copy them). A response whose shape (keys, each value's JSON type) or a type whose schema
+response; the drover tabs' tests in `web/plugin/test/` read their own recorded `web/plugin/fixtures/`). A response whose shape (keys, each value's JSON type) or a type whose schema
 changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
@@ -415,9 +415,42 @@ dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is c
 (`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
 build` after a UI edit.
 
+### Drover's cooee tabs (#720)
+
+The drover tabs are cooee plugins (cooee's `docs/plugins.md`) whose backend is `herdsman serve` itself; they came from
+the cooee-drover repo (imported at its `db41383`). `web/plugin/` holds their TypeScript (`src/`), tests on recorded
+`/api/v1` answers (`test/`, `fixtures/`; `node web/plugin/scripts/record-fixtures.mjs <herdsman URL>` records them
+again) and the committed build (`dist/`), which the binary embeds and serves at `/plugin/<tab>.js` for `queue`, `asks`,
+`fleets` and `lanes`. In `web/plugin/`: `npm run check`, `npm run lint`, `npm test`, `npm run build`; CI's `plugin` job
+runs them and fails on a stale `dist/` or a module over its 24 KiB budget, and the `ui` job shoots each tab at 390 px
+(`ui-390/plugin-<tab>.png`, `web/plugin/scripts/shots.sh`). The TypeScript counts toward the soft web budget, not
+`line_cap`.
+
+One `[[plugins]]` entry per tab in cooee's `config.toml`:
+
+```toml
+[[plugins]]
+name = "drover-queue"              # likewise drover-asks, drover-fleets, drover-lanes
+label = "Queue"
+url = "http://127.0.0.1:7777"      # herdsman serve's --addr (or a [serve].allowed_hosts name)
+module = "/plugin/queue.js"
+token = "<a paired device's token>"
+```
+
+cooee calls with `Authorization: Bearer <token>` and never forwards a cookie, so herdsman takes a bearer token as the
+`hd=` cookie it stands for: a paired device's token makes the tabs that device (its answers, drives and other paired
+ops); any other token reads as unpaired. The owner pairs one for cooee the way any browser pairs (`POST /pair/request`
+gives the `hd=` token and a code to approve, then `POST /pair/claim`). Asked with a bearer token, `/design/…` and
+`/shot/…` answer the PNG as `data:image/png;base64,…` text, since the plugin frame shows `data:` images only; `/live`
+takes the token the same way. The tabs and `/api/v1` ship in one build, so neither checks the other's version.
+
+cooee-drover's own binary is gone: its token-per-tab proxy is this server (the modules hold no secret, and the token
+check is the paired-device check), and its `answer-undelivered` push poller is dropped, since herdsman's own notifiers
+already send that event (`[[notify]]`, web push).
+
 ### Who consumes this
 
-- cooee-drover's tabs (Queue, Asks, Fleets), its whole engine view: it reads and acts only through `/api/v1`;
+- the drover tabs (Queue, Asks, Fleets, Lanes; `web/plugin/`), their whole engine view: it reads and acts only through `/api/v1`;
 - cooee core, where it reads it (the lanes it shows as Workflow chats, cooee#33);
 - the frozen `web/` board (#552), until #553's parity rows pass.
 

@@ -149,7 +149,8 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 }
 
 /// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
-/// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
+/// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines (#720: and
+/// `web/plugin/src`'s) are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let (cap, warn) = limits(&std::fs::read_to_string(config)?)
         .ok_or_else(|| anyhow::anyhow!("no [fleet.<name>] line_cap in {}", config.display()))?;
@@ -159,7 +160,7 @@ pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> R
     writeln!(
         out,
         "web lines (TypeScript, soft budget, not capped): {}",
-        lines(Path::new("web/src"), "ts")
+        lines(Path::new("web/src"), "ts") + lines(Path::new("web/plugin/src"), "ts")
     )?;
     let left = cap - i64::try_from(n)?;
     if (0..warn).contains(&left) {

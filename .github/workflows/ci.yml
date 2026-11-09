@@ -97,6 +97,34 @@ jobs:
         run: |
           echo "web/src TypeScript lines: $(cat src/*.ts | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
 
+  # #720: drover's cooee tabs (web/plugin, from cooee-drover): strict tsc, Biome, the tests on the recorded /api/v1
+  # fixtures, the committed dist (embedded in the binary at /plugin/<tab>.js) and each module's size budget.
+  plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: install (pinned, package-lock.json)
+        run: npm ci --no-audit --no-fund
+      - name: typecheck (tsc --strict)
+        run: npm run check
+      - name: biome check (lint and format)
+        run: npm run lint
+      - name: tests (fixtures/ from herdsman /api/v1)
+        run: npm test
+      - name: build, and the committed dist is that build
+        run: |
+          npm run build
+          git diff --exit-code -- dist || { echo "::error::web/plugin/dist is stale: run \`npm run build\` in web/plugin/ and commit"; exit 1; }
+          test -z "$(git status --porcelain -- dist)" || { echo "::error::web/plugin/dist has uncommitted files"; exit 1; }
+      - name: bundle-size budget per module
+        run: scripts/bundle-size.sh
+
   # #63 gate 2 (docs/ui.md): headless Chrome (preinstalled on ubuntu-latest) audits the demo at 390 px.
   ui:
     runs-on: ubuntu-latest
@@ -128,6 +156,8 @@ jobs:
         run: |
           if [ -s ui-390/hangs.txt ]; then { echo "### Chrome hangs (#566)"; sed 's/^/- /' ui-390/hangs.txt; } >> "$GITHUB_STEP_SUMMARY"; fi
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
+      - name: "drover's cooee tabs at 390 px (#720: ui-390/plugin-<tab>.png, the committed modules on the fixtures)"
+        run: web/plugin/scripts/shots.sh ui-390
       - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
         run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
       - uses: actions/upload-artifact@v4
