@@ -1,0 +1,5 @@
+Decided: fix the evidence check by merging origin/staging, re-running every gate at the new head 9cdf08b, and making the PR body name that sha. No code changes.
+Because: AC 1 "`cargo build --release`, `clippy -D warnings` and `cargo test` exit 0", proven at the new head; the CI-only FAIL was the evidence sha.
+Rejected: an empty commit just to re-trigger CI (the staging merge already gives a real head); `herdsman done --no-change` (staging had moved, so the branch needed the merge).
+Check: build/clippy/fmt/test exit 0 at 9cdf08b; cap-check exit 0, 35036/35500; `herdsman pr herdsman 683` shows ci green (7 checks).
+Owner: none. Live AC 3 (second install, no Keychain prompt) still needs the owner's install on the Mini.
