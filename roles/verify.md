@@ -40,6 +40,6 @@ podman, `supabase start`, …); the lane hook refuses them, and so must the reci
   the command and its output, or the screenshot path beside the design PNG it differs from.
 - List every screenshot by its path relative to your worktree (`shots/home-1440.png`), one per
   line, and beside them each console and network log, a11y report, trace and diff image
-  (`shots/home-console.log`, `shots/home-1440-diff.png`); the board shows the PNGs inline and links
-  the rest.
+  (`shots/home-console.log`, `shots/home-1440-diff.png`); the board shows the PNGs inline and
+  `/api/v1/issue/<fleet>/<n>` lists every one.
 - On PASS, name what you could not drive.

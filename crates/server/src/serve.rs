@@ -1045,10 +1045,8 @@ impl<'a> Server<'a> {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                // #731: a listed log or report is plain text.
-                let kind = |n: &str| if n.to_ascii_lowercase().ends_with(".png") { PNG } else { "text/plain; charset=utf-8" };
-                match at.and_then(|(n, p)| Some((kind(&n), std::fs::read(p).ok()?))) {
-                    Some((k, b)) => ("200 OK", k, b),
+                match at.and_then(|(_, p)| std::fs::read(p).ok()) {
+                    Some(b) => ("200 OK", PNG, b),
                     None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
             }

@@ -34,8 +34,8 @@ function issue(d: NeedsTab, s: NeedIssue): string {
   const v = s.pass != null ? `PASS at ${s.pass.slice(0, 7)}${s.stale ? ' (not the head)' : ''} · ${line} · ${s.mergeable}` : `FAIL: ${esc(s.fail)} · ${line}`;
   const merge = s.merge ? `<button name=op value=override data-confirm="Merge #${n} past the round limit?">merge anyway</button>` : '';
   const f = d.rw && d.paired ? `${form(d)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>` : '';
-  // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them; #731: its logs and reports as links.
-  const shots = s.shots.map((x, i) => /\.png$/i.test(x) ? `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>` : `<p class=m><a href="shot/${enc(s.fleet)}/${n}/${i}">${esc(x)}</a></p>`).join('');
+  // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them.
+  const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
   return `<div class=ask data-n=${n}><p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</div>`;
 }
 

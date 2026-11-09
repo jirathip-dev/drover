@@ -324,12 +324,12 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
     assert!(r.starts_with("HTTP/1.1 200") && r.ends_with("PNG wide"), "{r}");
-    // #731: a listed console log is served as plain text.
+    // #731: a listed console log is listed and served too.
     let r =
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/2 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
     assert!(
-        r.contains("text/plain; charset=utf-8") && r.ends_with("console error: boom\n"),
+        r.starts_with("HTTP/1.1 200") && r.ends_with("console error: boom\n"),
         "{r}"
     );
 }
