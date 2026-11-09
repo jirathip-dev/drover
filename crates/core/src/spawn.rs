@@ -1354,23 +1354,15 @@ pub fn spawn(
             start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
             late = soft(&start) && confirm(r, h, &pane);
         }
-        // #463: a start that failed shows why on its screen; a first-start prompt the harness knows gets its answer.
         let mut screen = String::new();
         if start.code != 0 && !late {
-            screen = tail(r, &pane);
-            if let Some((prompt, keys)) = h.startup_prompt(&screen) {
-                for k in &keys {
-                    herdr::keys(r, &pane, k)?;
-                }
+            let logged = |prompt: &str| {
                 event(
                     "startup-prompt",
                     json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
-                )?;
-                late = confirm(r, h, &pane);
-                if !late {
-                    screen = tail(r, &pane);
-                }
-            }
+                )
+            };
+            (late, screen) = unblock(r, h, &pane, logged)?;
         }
         if start.code != 0 {
             let taken = herdr::failed_with(&start, "agent_name_taken");
@@ -1502,6 +1494,29 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
     let s = herdr::read(r, pane).unwrap_or_default();
     let lines: Vec<_> = s.trim_end().lines().map(crate::lanes::redact).collect();
     lines[lines.len().saturating_sub(40)..].join("\n")
+}
+
+/// #463: a start that failed shows why on `pane`'s screen; a first-start prompt the harness knows gets its answer
+/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and a conductor's. Whether it came up; the
+/// screen's redacted tail.
+pub(crate) fn unblock(
+    r: &dyn Runner,
+    h: &dyn harness::Harness,
+    pane: &str,
+    logged: impl FnOnce(&str) -> Result<()>,
+) -> Result<(bool, String)> {
+    let screen = tail(r, pane);
+    let Some((prompt, keys)) = h.startup_prompt(&screen) else {
+        return Ok((false, screen));
+    };
+    for k in &keys {
+        herdr::keys(r, pane, k)?;
+    }
+    logged(prompt)?;
+    if confirm(r, h, pane) {
+        return Ok((true, screen));
+    }
+    Ok((false, tail(r, pane)))
 }
 
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
