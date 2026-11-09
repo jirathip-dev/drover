@@ -1,0 +1,8 @@
+Decided: add only the two AC3 tests; no production change, since run cards already render in the chat tab
+Because: crates/server/src/serve/chat.rs:240
+Because: web/src/chat.ts:122
+Because: "A server test seeds a thread with a message, a run card, then a message and asserts all three render in order"
+Rejected: a failing commit 1 at this base — the bug is gone since #669, so no test can fail here; shown failing on a887fa0c8 instead
+Rejected: changing chat.rs or chat.ts — nothing at this base breaks any acceptance criterion
+Check: the tests fail on a887fa0c8 (before #669), matching the live repro: the replies render, the card does not
+Owner: the phone chat already shows run cards; the bug report most likely came from a board running a build from before #669
