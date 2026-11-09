@@ -1,0 +1,95 @@
+{
+  "baseRefName": "staging",
+  "body": "Closes #709\n\n## For humans\nIf fleet.toml is broken, the board still loads with its last good data and shows a red line on every tab saying what is wrong and on which line.\nYou get one alert per new config error, and a \"config ok\" note once the file is fixed. No restart is needed.\nA new health address tells a phone or script whether the config is ok or broken; no answer means the process is down.\n\n## What changed\n- `Config::load`: a load error is the one line `config invalid: <error> (fleet.toml:<line>)` (the toml span, or the first line holding the value a check quotes). tick, drive, check, the banner and health all show it.\n- `Config::loaded` / `Config::kept`: each good load keeps its text as `fleet.good.toml` beside the state log; serve's reads (every `Config::load` in crates/server) fall back to it.\n- Board: `needs.config` (API v1, additive) → a red `.cfgbad` line in the needs strip above every tab; serve's 15 s re-render pushes it, so it appears and clears without a restart.\n- `check` (and `tick`, which runs it) alert `config-invalid` once per distinct error, through the last good config's notifiers (added to the webpush kinds), and log `config-ok` once it loads again.\n- `GET /api/v1/health` → `{ok, config: \"ok\"|\"invalid\", error}`; documented in docs/serve.md.\n- Scope item 1 (degraded serve on a locked store) dropped per amendment q857.\n\n## Repro\nCommit 1 (80330b6cb) is only `crates/cli/tests/config_invalid.rs`; `cargo test -p herdsman --test config_invalid` fails there (`/api/v1/health` → 403, no route) and passes at head. Two later edits to that test: `cargo fmt`, and the expected role in the message is `conductor` (the validator reports the inherited role first, as in the issue's own example `fleet.berth.role.conductor: account 'C'…`), not `impl` as I first guessed.\n\n## Other test changes\n- `board_errors.rs`: expected the old `TOML parse error` wording; now `config invalid: … (fleet.toml:1)`, the format this issue specifies.\n- `golden/api_v1/needs.json`: re-blessed for the new `config` field only (the bless also rewrote seven unrelated fixtures' volatile values; reverted).\n- `.gitignore`: `/demo/fleet.good.toml`, the copy the demo-export test (whose state log is the committed `demo/`) now leaves.\n\n## Size\nsrc/ net +94 (budget: none stated): one message builder, the last-good fallback, the alert, the health route; the serve call-site swap is net 0 (trimmed from +98). Cap raised to 38028 on staging (q967, PR #761; q968 decided no further trim).\n\n## Merges\nstaging merged four times (the latest brings #707, no conflict; an earlier one conflicted in crates/server/src/serve/v1.rs: staging's `lane_list` refactor kept, its reads switched to the last-good fallback; staging's new lifeboat page reads it too).\n\n## Fix round 2\n- `ui_tokens`: the banner used a raw `#fff`; it is now a red border and red text on the scheme's `--r` token, like `.pend`/`.ask b`.\n- `board-freeze`: the board files are the banner the issue's AC2 asks for; the gate needs a `board-fix` line in the issue. Asked as q973 (amend #709 with a `board-fix` line; the issue is itself a fix of #559). It stays red until that amendment lands.\n- `usage::secret_in_config_is_refused` (found locally by the full run): the one-line message had turned a `SECRET_IN_CONFIG` refusal into a plain error (exit 1). A refusal now keeps its code with the one line as its text (`REFUSED SECRET_IN_CONFIG: config invalid: … (fleet.toml)`), exit 3 as before.\n- `ui`: the one outlier, `loading~kitchen` `[↻] busy moved`, is a known flake in the loading audit. The same line also failed staging's run 42642603752 and #710's run 42650085142; this diff changes nothing in that view when the config loads.\n\n## Evidence (at 4293df9853576f9ad3eacf5c8bb1385df4cb381a)\n- `cargo build --release` → 0\n- `cargo clippy --all-targets -- -D warnings` → 0\n- `cargo test -p herdsman --test ui_tokens --test config_invalid --test board_errors --test api_v1_contract` → 0\n- web `npm run build` → 0 (dist rebuilt for the CSS change)\n- `herdsman cap-check --config ci/cap.toml` → 0 (36595 / 38028)\n- `env -u HERDSMAN_LANE cargo test -p herdsman --test usage --test config_invalid --test board_errors` → 0\n- `cargo test` (with the lane's `HERDSMAN_LANE` set) → 101, only at `self_update::pause_and_resume_are_logged_and_pause_stops_the_job`: it records `by` from that variable (`herdsman:709:impl` ≠ `owner`); `env -u HERDSMAN_LANE cargo test -p herdsman --test self_update` → 0\n- `env -u HERDSMAN_LANE cargo test --no-fail-fast` → 101: 157 suites ok, 1 failing: `outbox` (`herdr agent list failed` under the parallel load; it passed in the run before this commit). `env -u HERDSMAN_LANE cargo test -p herdsman --test outbox` → 0 three times in a row\n\nNot verified: AC3 live (locking the host Keychain) is moot under amendment q857; the banner was not checked on a live board.\n",
+  "headRefName": "issue-709",
+  "headRefOid": "4293df9853576f9ad3eacf5c8bb1385df4cb381a",
+  "labels": [],
+  "mergeStateStatus": "UNSTABLE",
+  "mergeable": "MERGEABLE",
+  "number": 764,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T21:56:11Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998936/job/129466306555",
+      "name": "board-freeze",
+      "startedAt": "2026-11-09T21:55:08Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T22:17:23Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42710348143/job/129477906951",
+      "name": "board-freeze",
+      "startedAt": "2026-11-09T22:16:21Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T21:56:32Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998527/job/129466306451",
+      "name": "evidence",
+      "startedAt": "2026-11-09T21:55:08Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T22:08:27Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998656/job/129466308031",
+      "name": "rust",
+      "startedAt": "2026-11-09T21:55:09Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T22:17:53Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42710348038/job/129477906508",
+      "name": "evidence",
+      "startedAt": "2026-11-09T22:16:21Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T21:55:20Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998656/job/129466307355",
+      "name": "web",
+      "startedAt": "2026-11-09T21:55:09Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T22:03:30Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998656/job/129466308060",
+      "name": "ui",
+      "startedAt": "2026-11-09T21:55:08Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T21:58:19Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998656/job/129466307840",
+      "name": "ui-webkit",
+      "startedAt": "2026-11-09T21:55:10Z",
+      "status": "COMPLETED"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-09T22:03:30Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/jirathip-dev/herdsman/actions/runs/42706998656/job/129470819099",
+      "name": "ui-flaky",
+      "startedAt": "2026-11-09T22:03:30Z",
+      "status": "COMPLETED"
+    }
+  ],
+  "title": "serve/check: an invalid fleet.toml is a visible state, not an empty board (#709)"
+}
