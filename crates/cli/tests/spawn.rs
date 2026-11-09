@@ -46,7 +46,9 @@ fn claude_role_dry_run_uses_synced_profile() {
             &port12(),
             // #248: no updater, telemetry or other background traffic in a Claude lane.
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-            "DISABLE_AUTOUPDATER=1"
+            "DISABLE_AUTOUPDATER=1",
+            // #708: no account, so a token the pane inherited from a login shell never picks one.
+            "&& unset CLAUDE_CODE_OAUTH_TOKEN"
         ]
     );
     let start = words(&p["commands"][3]);

@@ -457,6 +457,31 @@ fn start_timeout_without_harness_closes_pane_and_retries_once() {
     );
 }
 
+/// #718: a pane whose title changes on every read (a busy spinner) but never confirms still gives up at 120 s: a
+/// title change never extends confirm's window.
+#[test]
+fn a_title_that_changes_every_read_never_extends_the_confirm_window() {
+    let d = tmpdir("timeout-spinner");
+    let c = ctx(&d, CONFIG);
+    let mut r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once(
+            "herdr pane split w9:p1",
+            0,
+            r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+        );
+    for i in 0..200 {
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": null, "terminal_title": format!("⠋ {i}")}}});
+        r = r.once("herdr pane get w9:p", 0, &pane.to_string());
+    }
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out}");
+    assert_eq!(r.count("herdr agent start"), 2, "retried once");
+    assert_eq!(r.count("sleep 5"), 2 * 24, "each confirm gives up at 120 s");
+    assert!(r.called("herdr pane close w9:p1") && r.called("herdr pane close w9:p2"));
+}
+
 /// #359: the retried start succeeds: the lane runs on the fresh pane.
 #[test]
 fn a_never_confirming_pane_is_replaced_by_one_more_start() {
