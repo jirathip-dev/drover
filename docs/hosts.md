@@ -250,10 +250,11 @@ overflow_after_minutes = 10  # the default
   refuses an empty one, and herdsman runs no `stop` or `destroy` when `id` prints nothing. Sizes
   are `small|default|large|xlarge`; an old `size = "medium"` is run as `default` and `herdsman doctor` shows a `!`
   row for it. doctor also checks each `boat` subcommand the recipe uses against `boat --help` (✗ with the recipe line).
-- **The provider key** is read on the main host from the environment, else from the store's `herdsman/<fleet>/<key_env>`
-  (#635: when only that fleet fits the host, e.g. saved by a secret card in that fleet's thread), else
-  `herdsman/all/<key_env>`. `herdsman doctor` names the one it found (`✓ cloud boat1 key — herdsman/app/BOAT_API_KEY`). Each
-  command gets it on stdin and exports it. It never appears in argv, fleet.toml or the event log.
+- **The provider key** (#707) is optional: the `boat` CLI owns its own login, so a recipe command runs with no key.
+  With `key_env` set, the key is read on the main host from the environment, else the 0600 file
+  `<config dir>/secrets/<key_env>`, and each command gets it on stdin and exports it (the `[ci_runners]` API calls use
+  it as `$BOAT_API_KEY`). `herdsman doctor` names the one it found (`✓ cloud boat1 key — env`), or warns `!` with none.
+  It never appears in argv, fleet.toml or the event log.
 - **Start on demand.** Placement uses a cloud host, stopped or running, in two cases only: every local host has been
   refused (busy, low memory or disk) for `overflow_after_minutes`, or the lane needs a tag only the cloud host has (#256:
   local Macs first, even when the cloud host is idle). The `spawn` event's `why` says which (`overflow: every local host
@@ -345,8 +346,8 @@ asked there.
   is removed once the shell has read it. Port `<port>` there is an ssh reverse tunnel (`ssh -N -R`, started detached
   by spawn and each survey, its pid in `<state>/tunnel-<host>.pid`) to `herdsman proxy` here, which spawn starts when
   it does not answer. The proxy checks the key, then forwards the call to `upstream` with the role's `[accounts]`
-  token (#683: the account's `[accounts]` value names that token's secret in the store, `herdsman/all/<value>`;
-  only the proxy reads it) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
+  token (#707: the account's hand-placed `[accounts]` `token-file:<path>`, 0600, [accounts](accounts.md); only the
+  proxy reads it) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
   argv, and the answer streams back as it comes. The account token never leaves the main host.
 - **Lane keys.** They are kept in `<state>/proxy-keys.json` as sha256 only. A key signs while it is `live`: it is not
   `revoked`, not `expired` (`key_hours`), and not `ended` (its issue merged or closed, its lane closed, dead or

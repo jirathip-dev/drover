@@ -204,9 +204,6 @@ impl Runner for Boat<'_> {
         self.f.run_in(prog, args, input)
     }
     fn sleep(&self, _: u64) {}
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.f.secret(svc)
-    }
 }
 
 /// sendmeter on Claude (account C), herdr runtime; `hosts`: each a `shed-acp` remote host; mini (this one) off.
@@ -237,7 +234,6 @@ fn setup(name: &str, hosts: &[&str]) -> (herdsman::Ctx, PathBuf) {
 /// A remote lane's spawn: the issue, its worktree's git there, the proxy started and the tunnel's ssh detached.
 fn spawn_fake() -> Fake {
     Fake::default()
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C", TOKEN_C)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply("@boat1 git", "")
         .reply("@boat2 git", "")
@@ -544,16 +540,16 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
     std::fs::write(&c.config, toml).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    // #707: account C's hand-placed 0600 token file is what the proxy signs with.
+    let tf = c.config.with_file_name("tokens/C");
+    std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
+    std::fs::write(&tf, TOKEN_C).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let acct = format!("token-file:{}", tf.display());
     let mint = |agent: &str| {
         let k = herdsman::proxy::new_key().unwrap();
-        let id = herdsman::proxy::mint(
-            &c,
-            &cfg,
-            &k,
-            ("sendmeter", 12, agent),
-            ("boat1", "CLAUDE_CODE_OAUTH_TOKEN_C"),
-        )
-        .unwrap();
+        let id = herdsman::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, agent), ("boat1", acct.as_str())).unwrap();
         (k, id)
     };
     let ((live, _), (gone, gone_id), (late, _)) = (
@@ -561,7 +557,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         mint("sendmeter-rev-12"),
         mint("sendmeter-fix-12"),
     );
-    let f = Fake::default().stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C", TOKEN_C);
+    let f = Fake::default();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let pport = l.local_addr().unwrap().port();
     // The proxy runs until the test binary ends: its state leaked for its thread.
