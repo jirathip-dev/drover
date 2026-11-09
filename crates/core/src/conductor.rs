@@ -982,11 +982,13 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         resting,
         session: Some((session.clone(), resume)),
         lane_key: None,
+        token: None,
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
     // #683: the conductor runs on this host: its account's env is its sign-in.
     if let Some(a) = p.account.as_mut() {
         a.1 = crate::access::account_env(cfg, r, &p.harness, &a.0)?;
+        p.token = crate::access::token_file(cfg, &p.harness, &a.0);
     }
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
@@ -1012,7 +1014,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let text = profile(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = crate::spawn::deliver(&on, cfg, &p)?;
+    let _secrets = crate::spawn::deliver(ctx, &on, cfg, &p)?;
     if let Some((b, cmd)) = acp {
         let labels = [
             ("fleet", fleet),
@@ -1393,7 +1395,7 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
     );
     // #640: an account's banner caps only when its usage reading agrees; a cap is never a sign-out.
     let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
-    let seen = limit.map(|u| crate::access::confirm(ctx, cfg, r, account, u));
+    let seen = limit.map(|u| crate::access::confirm(ctx, account, u));
     let (seen, limit) = seen.map_or((None, None), |s| (Some(s.0), s.1));
     let out = seen.map_or(h.signed_out(&screen), |k| k == "account-signed-out");
     let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);

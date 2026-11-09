@@ -53,25 +53,50 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
 }
 
-/// #631 `doctor --tokens`, the install gate: each `[accounts]` account signed in (#683: its own folder's login, never
-/// a Keychain read); exit 1 on any ✗ (each with its fix).
-pub fn tokens(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
-    let mut rows = vec![];
-    match Config::load(&ctx.config) {
-        Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
-        Ok(cfg) => account_rows(&cfg, r, &mut rows),
+/// #707 (q855): one row for where accounts sign in from (no Keychain read, no per-account rows); a `token-file:`
+/// account's file warns when loose, missing or older than `TOKEN_DAYS`.
+fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
+    if cfg.accounts.names.is_empty() {
+        return;
     }
-    writeln!(out, "{}", rows.join("\n"))?;
-    Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
+    let src = cfg.accounts.account_env.as_ref().map_or_else(
+        || "each account's own folder (`/login` in it, docs/accounts.md)".into(),
+        |c| format!("the account_env helper `{c}`"),
+    );
+    rows.push(format!("✓ accounts — sign in from {src}"));
+    let on = |n: &&&str| {
+        matches!(
+            crate::harness::get(n).credential(),
+            crate::harness::Credential::Account(_)
+        )
+    };
+    let hn = crate::harness::NAMES.iter().find(on).copied().unwrap_or_default();
+    for name in cfg.accounts.names.keys() {
+        let Some((_, f)) = crate::access::token_file(cfg, hn, name) else {
+            continue;
+        };
+        let at = std::fs::metadata(&f).and_then(|m| m.modified());
+        let days = at
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map_or(0, |a| a.as_secs() / 86_400);
+        let (ok, line) = match crate::secret::file(&f) {
+            Err(e) => (false, format!("{e:#}")),
+            Ok(None) => (false, format!("{} missing → place it, mode 600", f.display())),
+            Ok(Some(_)) => (
+                days < TOKEN_DAYS,
+                format!(
+                    "{} is {days} days old → renew it before it expires (a year)",
+                    f.display()
+                ),
+            ),
+        };
+        row(rows, ok, '!', &format!("account {name} token file — {line}"));
+    }
 }
 
-/// #683: each account's sign-in (`access::sign_in`: its env, its folder's own login; no Keychain read, no CLI call).
-fn account_rows(cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
-    for name in cfg.accounts.names.keys() {
-        let (ok, line) = crate::access::sign_in(cfg, r, name);
-        row(rows, ok, '✗', &format!("account {name} — {line}"));
-    }
-}
+/// #707: a hand-placed account token file older than this many days warns (they last about a year).
+const TOKEN_DAYS: u64 = 300;
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, rows);
@@ -160,36 +185,22 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    account_rows(cfg, r, rows);
+    account_rows(cfg, rows);
     // #626: GitHub webhooks need their secret; the refused deliveries are only counted.
     let n = crate::webhook::rejected(ctx);
     let bad = match n {
         0 => String::new(),
         n => format!(" · {n} refused (bad signature)"),
     };
-    let on = !crate::webhook::secrets(cfg, r).is_empty();
-    let fix = "herdsman secret request <thread> GITHUB_WEBHOOK_SECRET --why 'GitHub webhooks' (docs/serve.md)";
-    let line = format!("webhook — {}{bad} → {fix}", if on { "secret set" } else { "no secret" });
-    row(rows, on, '!', &line);
-    // #556: signed by the one local identity, the keychain's "Always Allow" outlasts a reinstall.
-    if cfg!(target_os = "macos") {
-        let req = [
-            "-v",
-            "-R",
-            "=certificate leaf[subject.CN] = \"herdsman-local\"",
-            &ctx.exe,
-        ];
-        let signed = ok(r, "codesign", &req).is_ok();
-        // #568: the identity is there but signing never took: codesign waits on the key's dialog.
-        let has = !signed && ok(r, "security", &["find-certificate", "-c", "herdsman-local"]).is_ok();
-        let fix = if has {
-            format!("security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db (asks the login password), then sh scripts/signing-identity.sh sign {}", ctx.exe)
-        } else {
-            "sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall".into()
-        };
-        let line = format!("signature — {} signed by \"herdsman-local\" → {fix}", ctx.exe);
-        row(rows, signed, '✗', &line);
-    }
+    let fix = "put the secret in a file, chmod 600, and name it in [serve] webhook_secret_file (docs/serve.md)";
+    let (on, why) = match crate::webhook::secrets(cfg) {
+        Ok(k) => (
+            !k.is_empty(),
+            if k.is_empty() { "no secret" } else { "secret set" }.to_string(),
+        ),
+        Err(e) => (false, format!("{e:#}")),
+    };
+    row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
     // #710: the readers `check` counts for `keychain-jammed`.
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
@@ -211,6 +222,19 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = "hermes hooks — profiles sync --check → herdsman profiles sync";
         row(rows, synced, '✗', line);
     }
+    // #737: a profile's hook names another binary: lanes from this one are refused ACP_UNGUARDED.
+    let stray = crate::spawn::stray_hooks(ctx, cfg);
+    let what = if stray.is_empty() {
+        "run this binary".into()
+    } else {
+        stray.join("; ")
+    };
+    row(
+        rows,
+        stray.is_empty(),
+        '✗',
+        &format!("profile hooks — {what} → herdsman profiles sync"),
+    );
     let hosts = cfg.serve.allowed_hosts.join(", ");
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);

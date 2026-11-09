@@ -131,10 +131,10 @@ C = "C"
 # [accounts.usage]
 # A = "~/.config/herdsman/accounts/A"
 
-# The DeepSeek balance row; the key is read from an env file or the store, never from here.
+# The DeepSeek balance row; the key is read from a 0600 env file or the environment, never from here.
 # [providers.deepseek]
 # key_env = "DEEPSEEK_API_KEY"
-# env_file = "~/.config/deepseek.env"   # default: the store's herdsman/all/DEEPSEEK_API_KEY
+# env_file = "~/.config/deepseek.env"   # mode 0600; default: herdsman's environment
 # warn_below = 5
 
 [limits]

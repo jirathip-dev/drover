@@ -19,7 +19,6 @@ pub use claude::{
     remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, OAUTH_BETA,
     PROXY_UPSTREAM,
 };
-pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
@@ -104,10 +103,8 @@ pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
 /// (used %, reset epoch) of a usage window, either part unread.
 pub type Part = (Option<f64>, Option<u64>);
 
-/// A harness's usage meter for an `[accounts]` login (#258).
+/// A harness's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
 pub trait UsageMeter: Sync {
-    /// Read the 5-hour and 7-day windows of the login in `dir` (`[accounts.usage]`).
-    fn poll(&self, r: &dyn Runner, dir: &Path, now: u64) -> crate::usage::Poll;
     /// The (5-hour, 7-day) parts of its status-line JSON (`herdsman statusline`).
     fn status(&self, v: &Value) -> (Part, Part);
 }
@@ -283,7 +280,27 @@ pub fn default_acp() -> Option<&'static str> {
 
 /// The herdsman hook's command line, as Claude settings and Hermes config/allowlist name it.
 pub fn hook_command(ctx: &Ctx, role: &str) -> String {
-    format!("'{}' hook --role {role}", ctx.exe)
+    format!("'{}' hook --role {role}", real(&ctx.exe))
+}
+
+/// #737: `path` with its symlinks resolved (unresolvable: as given), so `~/.local/bin/herdsman` and the binary agree.
+fn real(path: &str) -> String {
+    std::fs::canonicalize(path).map_or(path.into(), |p| p.to_string_lossy().into())
+}
+
+/// #737: the program of a herdsman hook command (`'<exe>' hook --role <r>`), any role; None for another hook.
+pub fn hook_program(cmd: &str) -> Option<&str> {
+    cmd.strip_prefix('\'')?.split_once("' hook --role ").map(|(exe, _)| exe)
+}
+
+/// #737: herdsman hook command `cmd` runs the running binary, through a symlink or not.
+pub fn runs_this(ctx: &Ctx, cmd: &str) -> bool {
+    hook_program(cmd).is_some_and(|exe| real(exe) == real(&ctx.exe))
+}
+
+/// #737: hook command `cmd` is this binary's hook for `role`.
+pub fn guards(ctx: &Ctx, cmd: &str, role: &str) -> bool {
+    runs_this(ctx, cmd) && cmd.ends_with(&format!("' hook --role {role}"))
 }
 
 /// Try numbers `0..n`, sleeping `secs` before every try but the first.

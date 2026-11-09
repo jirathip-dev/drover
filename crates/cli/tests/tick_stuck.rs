@@ -101,9 +101,6 @@ impl Runner for Hang {
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> anyhow::Result<u32> {
         self.f.detach(exe, args, log)
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.f.secret(svc)
-    }
 }
 
 #[test]

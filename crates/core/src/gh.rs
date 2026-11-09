@@ -171,7 +171,7 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
             .as_object()
             .is_some_and(|m| m.values().all(|v| v["mergeable"] != "UNKNOWN"));
         let age = now.saturating_sub(at);
-        let on = || crate::secret::lookup(r, fleet, crate::webhook::SECRET).is_ok_and(|s| s.is_some());
+        let on = || Config::load(&ctx.config).is_ok_and(|c| crate::webhook::secrets(&c).is_ok_and(|s| !s.is_empty()));
         let hooked = || settled && age < CATCHUP.get() && on();
         let same = FORCE.get() && (hooked() || unchanged(r, f, &mut etags) && settled && age < PROBE_MAX);
         let c = if same {

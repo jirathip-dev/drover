@@ -258,7 +258,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let h = crate::harness::get(harness.unwrap_or_default());
                 // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
                 let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
-                    Some(u) => Some((crate::access::confirm(ctx, cfg, r, account, u), "")),
+                    Some(u) => Some((crate::access::confirm(ctx, account, u), "")),
                     None if h.signed_out(&screen) => {
                         let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
                         let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
@@ -396,27 +396,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let d = json!({"key": name, "reason": why});
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
-    }
-    // #548: a keychain read that timed out on a dialog (a thread's row, a lane's spawn refusal) alerts once per
-    // episode; a start or spawn on an account since ends it.
-    let mut locked: Option<&Event> = None;
-    for e in &events {
-        if matches!(e.kind.as_str(), "conductor-start" | "spawn") && e.data.get("account").is_some_and(|a| !a.is_null())
-        {
-            locked = None;
-        } else if locked.is_none()
-            && e.kind != "keychain-locked"
-            && e.data
-                .values()
-                .any(|v| v.as_str().is_some_and(|t| t.contains("KEYCHAIN_LOCKED")))
-        {
-            locked = Some(e);
-        }
-    }
-    if let Some(e) = locked {
-        let why = "the Keychain is waiting on a dialog: accounts and secrets can't be read → run `herdsman doctor` for the fix";
-        let d = json!({"key": e.ts, "reason": why});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-locked", d)?;
     }
     // #710: Keychain readers piling up behind a dialog nobody sees: once per episode (a clear pass ends it).
     let jam = host::keychain_jam(r);
