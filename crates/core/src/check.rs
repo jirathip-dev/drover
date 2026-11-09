@@ -1768,6 +1768,11 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
 }
 
+/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
+pub fn unsaved(on: &On, wt: &Path) -> bool {
+    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
+}
+
 /// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
 fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<String>> {
     match snapshot(on, wt, w, msg) {
