@@ -1,0 +1,12 @@
+Decided: the lifeboat is a new crates/server/src/lifeboat.rs routed from serve/v1.rs at /api/v1/lifeboat; no frozen file touched
+Because: "reached from `/api/v1/lifeboat` or another path that needs no edit to the frozen board files"
+Because: q945
+Decided: actions call crate::answer, crate::pause and a new card::settle_via, each logging via: lifeboat
+Because: crates/core/src/card.rs:112
+Rejected: changing card::settle's signature — serve/chat.rs (frozen) calls it
+Decided: lanes come from the step's snapshot list (lane_list, shared with state); the page never calls self.state, which runs date and host reads
+Because: crates/server/src/serve/v1.rs:66
+Decided: html-lint skips lifeboat.rs, the one place server-rendered HTML is the spec
+Because: "plain server-rendered HTML with a few lines of CSS"
+Check: cargo test --test lifeboat passes; the ui job's lifeboat/page view has 0 outliers and lifeboat-page.png in ui-390
+Owner: When cooee is down, open /api/v1/lifeboat on a paired phone to pause/resume fleets, answer asks and approve or deny run cards.
