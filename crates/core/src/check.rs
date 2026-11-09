@@ -648,13 +648,26 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
     if seen.is_empty() {
         return Ok(());
     }
-    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false, false), true)
+    clean(ctx, cfg, r, out, Some(fleet), (Some(issue), None, false), true)
 }
 
 /// Remove worktree + pane of lanes whose issue is merged (or closed on GitHub). Dry run unless `yes`.
-/// `--lane` (one agent's worktree) refuses `UNSAFE_CLEAN` with the reason when it cannot go. #678: `all` (an explicit
-/// run) also sweeps each disabled host that answers its one bounded probe: its worktrees and dead lanes' scratch.
+/// `--lane` (one agent's worktree) refuses `UNSAFE_CLEAN` with the reason when it cannot go.
 pub fn clean(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    fleet: Option<&str>,
+    (issue, lane, sched): (Option<u64>, Option<&str>, bool),
+    yes: bool,
+) -> Result<()> {
+    sweep(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
+}
+
+/// `clean`; #678: `all` (an explicit `herdsman clean`) also sweeps each disabled host that answers its one bounded
+/// probe: its worktrees and dead lanes' scratch.
+pub fn sweep(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -915,7 +928,7 @@ const IDLE: &str = "idle-merged";
 /// then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed`
 /// once (until a run passes); a clean no-op is silent.
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean(ctx, cfg, r, out, None, (None, None, true, false), true).and_then(|()| {
+    let res = clean(ctx, cfg, r, out, None, (None, None, true), true).and_then(|()| {
         let list = herdr::list(r, "workspace")?;
         let all = list["result"]["workspaces"].as_array().cloned().unwrap_or_default();
         for w in all {
