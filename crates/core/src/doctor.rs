@@ -53,6 +53,26 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
 }
 
+/// #631 `doctor --tokens`, the install gate: each `[accounts]` account signed in (#683: its own folder's login, never
+/// a Keychain read); exit 1 on any ✗ (each with its fix).
+pub fn tokens(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
+    let mut rows = vec![];
+    match Config::load(&ctx.config) {
+        Err(e) => rows.push(format!("✗ config — {e:#} → edit {}", ctx.config.display())),
+        Ok(cfg) => account_rows(&cfg, r, &mut rows),
+    }
+    writeln!(out, "{}", rows.join("\n"))?;
+    Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
+}
+
+/// #683: each account's sign-in (`access::sign_in`: its env, its folder's own login; no Keychain read, no CLI call).
+fn account_rows(cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
+    for name in cfg.accounts.names.keys() {
+        let (ok, line) = crate::access::sign_in(cfg, r, name);
+        row(rows, ok, '✗', &format!("account {name} — {line}"));
+    }
+}
+
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, rows);
     if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
@@ -140,27 +160,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    for (name, var) in &cfg.accounts.names {
-        let svc = crate::secret::service("all", var);
-        let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
-        let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
-        let got = r.secret(&svc);
-        // #548: an item the Keychain guards with a dialog gets its one-time fix.
-        if got.as_ref().is_err_and(|e| {
-            e.downcast_ref::<crate::gate::Refusal>()
-                .is_some_and(|f| f.code == "KEYCHAIN_LOCKED")
-        }) {
-            let fix = crate::runner::keychain_fix(&svc);
-            row(
-                rows,
-                false,
-                '✗',
-                &format!("account {name} — {svc} prompts for Keychain access → approve herdsman in the Keychain dialog: {fix}"),
-            );
-            continue;
-        }
-        row(rows, got.is_ok_and(|v| v.is_some()), bad, &line);
-    }
+    account_rows(cfg, r, rows);
     // #626: GitHub webhooks need their secret; the refused deliveries are only counted.
     let n = crate::webhook::rejected(ctx);
     let bad = match n {
@@ -254,6 +254,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
         row(rows, state == "loaded", '✗', &line);
     }
+    // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.
+    for name in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()).map(|h| h.0) {
+        if let Err(e) = crate::cloud::doctor(ctx, cfg, r, name, rows) {
+            rows.push(format!("✗ cloud {name} — {e:#}"));
+        }
+    }
+    crate::cloud::includes(ctx, rows);
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }

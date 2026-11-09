@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #677: drive's one prompt on a `done` whose why note was refused.
+pub const WHY_NUDGE: &str = "your why note was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
 const STALE_LOCK_SECS: u64 = 3600;
 
@@ -226,9 +228,16 @@ pub fn kicked(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, k: K
         flag();
         return Ok(());
     };
+    let start = crate::now();
     for _ in 0..30 {
+        // #680: each pass decides at its own time: under the kick's start time a reviewer it spawned looked already
+        // told of its refusal and was superseded again every pass (#370's 25 supersedes in one logged second).
+        let ctx = &Ctx {
+            now: ctx.now + crate::now().saturating_sub(start),
+            ..ctx.clone()
+        };
         // #333: a running kick's lease stays unexpired.
-        let expires_at = crate::now().max(ctx.now) + ttl;
+        let expires_at = ctx.now + ttl;
         crate::db::renew(
             &ctx.state,
             &k.1,
@@ -718,7 +727,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
                 continue;
             }
         }
-        let why = format!("blocked by {}", queue::hashes(on));
+        let why = format!("blocked by {on}");
         writeln!(out, "{} #{} repaired: back to queued ({why})", s.fleet, s.issue)?;
         let d = json!({"state": "queued", "reason": why});
         emit(
@@ -745,11 +754,42 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         }
         let from = mine[..at].iter().rposition(|(_, e)| reset.contains(&e.kind.as_str()));
         let round = &mine[from.map_or(0, |i| i + 1)..at];
+        // #679: a `LANE_ENDS` whose lane exited right after an idle trim killed its agent gets one respawn in the
+        // same worktree (its work is there): back to the state before the park.
+        let exited = |e: &Event| e.kind == "lane-state" && e.str("state") == Some("gone");
+        let trimmed = round
+            .windows(2)
+            .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
+        let again = mine
+            .iter()
+            .any(|(_, e)| e.kind == "repaired" && e.data["trimmed"] == true);
+        if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
+            let Some(was) = fold(&events[..mine[at].0])
+                .remove(&(s.fleet.clone(), s.issue))
+                .map(|b| b.state)
+            else {
+                continue;
+            };
+            writeln!(
+                out,
+                "{} #{} repaired: back to {was} (its lane ended after an idle trim)",
+                s.fleet, s.issue
+            )?;
+            let why = "the lane ended after an idle trim killed its agent: one respawn in its worktree";
+            let d = json!({"code": "LANE_ENDS", "state": was, "reason": why, "trimmed": true});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
+            )?;
+            continue;
+        }
         let adopted = |e: &Event| crate::events::design(e) && e.data.get("adopted") == Some(&json!(true));
         let Some(first) = round.iter().position(|(_, e)| e.kind == "respawn") else {
             continue;
         };
-        let gone = (round.iter()).all(|(_, e)| e.kind != "respawn" || e.str("why") == Some("lane gone"));
+        let gone = (round.iter())
+            .all(|(_, e)| e.kind != "respawn" || e.str("why").is_some_and(|w| w.starts_with("lane gone")));
         if mine[at].1.str("code") != Some("LANE_ENDS") || !gone || !round[..first].iter().any(|(_, e)| adopted(e)) {
             continue;
         }
@@ -771,6 +811,43 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         )?;
     }
     Ok(())
+}
+
+/// #662: push gone lane `lane`'s local commits (never its dirty files) to its issue branch, on its own host; a push
+/// that moved the branch is logged `lane-pushed`, a failed one says why.
+fn save(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    f: &crate::config::Fleet,
+    (events, n, lane): (&[Event], u64, &str),
+    why: &str,
+) -> Result<()> {
+    let sp = crate::events::last_spawn(events, lane);
+    let (Some(wt), Some(branch)) = (sp.and_then(|e| e.str("worktree")), sp.and_then(|e| e.str("branch"))) else {
+        return Ok(());
+    };
+    if [f.integration.as_str(), "main", "master"].contains(&branch) {
+        return Ok(());
+    }
+    let on = crate::hosts::On::of(r, sp);
+    let to = format!("HEAD:refs/heads/{branch}");
+    let o = on.run("git", &crate::runner::argv(&["-C", wt, "push", "origin", &to]))?;
+    let fleet = sp.map_or("", |e| e.fleet.as_str());
+    if o.code != 0 {
+        return Ok(writeln!(
+            out,
+            "{fleet} #{n} push of {lane}'s commits failed: {}",
+            o.stderr.trim()
+        )?);
+    }
+    if o.stderr.contains("up-to-date") {
+        return Ok(());
+    }
+    writeln!(out, "{fleet} #{n} pushed {lane}'s local commits to {branch} ({why})")?;
+    let d = json!({"agent": lane, "branch": branch, "why": why});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
 fn pass(
@@ -854,12 +931,13 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     external(ctx, cfg, r, out, fleet)?;
+    ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
             writeln!(out, "{fleet} land: {e:#}")?;
         }
     }
-    if !fast && handoff(ctx, cfg, out, fleet, &events, &waits)? {
+    if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
         waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
@@ -1018,6 +1096,11 @@ fn pass(
             if w.what.starts_with("reviewer exited") {
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
+            }
+            // #662: a lane that exited on an account limit or adapter crash has its local commits pushed first.
+            let cause = crate::shed::exit_cause(&events, &w.lane).filter(|c| crate::shed::RESUMABLE.contains(c));
+            if let Some(why) = cause.filter(|_| args[0] == "spawn") {
+                save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
@@ -1370,6 +1453,7 @@ fn update_lane(
 fn handoff(
     ctx: &Ctx,
     cfg: &Config,
+    r: &dyn Runner,
     out: &mut dyn Write,
     fleet: &str,
     ev: &[Event],
@@ -1405,6 +1489,23 @@ fn handoff(
         }
         if handed {
             continue;
+        }
+        // #677: a `done` whose why note was refused is told once (WHY_NUDGE); its next `done` (or 10 min) goes to review.
+        if let Some(why) = turn.and_then(|t| t.str("note").map(|w| (t.ts, w))) {
+            let sp = crate::events::last_spawn(ev, &w.lane).map_or(0, |e| e.ts);
+            let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
+            match ev.iter().rfind(told) {
+                None => {
+                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix why.md, then `herdsman turn done`.", why.1);
+                    let sent = tell(r, ev, &w.lane, &text);
+                    writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
+                    let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
+                    append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "why-nudged", d))?;
+                    continue;
+                }
+                Some(p) if why.0 <= p.ts && ctx.now < p.ts + 600 => continue,
+                Some(_) => {}
+            }
         }
         writeln!(out, "{fleet} #{} pushed: {head:.7} via pr", s.issue)?;
         let d = json!({"sha": head, "via": "pr"});
@@ -1488,6 +1589,39 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         (d["pr"], d["by"]) = (json!(num), json!("external"));
         writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
+    }
+    Ok(())
+}
+
+/// #667: each open blocker of the fleet's queue in another fleet or repo, read on GitHub at most once per 5 min
+/// (`gh issue view`, cached): one read closed logs `blocker-closed`, and the queue drops it.
+fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
+        .into_iter()
+        .flat_map(|i| i.ext)
+        .collect();
+    for b in refs {
+        let Some((repo, n)) = b.rsplit_once('#') else { continue };
+        let repo = match cfg.fleet.get(repo) {
+            Some(f) => &f.repo,
+            None => repo,
+        };
+        let p = gh::cache_path(ctx, "blocker", &b.replace(['/', '#'], "-"), 0);
+        let ts = crate::usage::load::<Value>(&p).and_then(|c| c["ts"].as_u64());
+        if ts.is_some_and(|t| ctx.now < t + 300) {
+            continue;
+        }
+        let v = crate::runner::json(r, "gh", &["issue", "view", n, "-R", repo, "--json", "state"]);
+        gh::store(&p, &json!({"ts": ctx.now}))?;
+        if v.is_ok_and(|v| v["state"] == "CLOSED") {
+            writeln!(out, "{fleet}: blocker {b} closed")?;
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, fleet, None, "blocker-closed", json!({"ref": b})),
+            )?;
+        }
     }
     Ok(())
 }

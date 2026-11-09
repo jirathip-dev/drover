@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub use claude::{remove_tmp, root as profiles_root};
+pub use claude::{remove_tmp, root as profiles_root, CAP_PATTERN};
 pub use claude_meter::{keychain_service, parse_usage};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
@@ -32,12 +32,12 @@ pub fn efforts(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// How a harness's lanes sign in: unknown, an `[accounts]` token (`access::pick`) exported as this env var, or the
-/// harness's own login on the host.
+/// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from
+/// `access::account_env`), or the harness's own login on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credential {
     None,
-    Token(&'static str),
+    Account(&'static str),
     Own,
 }
 
@@ -83,12 +83,12 @@ pub trait UsageMeter: Sync {
     fn status(&self, v: &Value) -> (Part, Part);
 }
 
-/// The harness `[accounts]` tokens are for: the first that runs on one.
+/// The harness `[accounts]` are for: the first that runs on one.
 pub fn accounts() -> Option<&'static dyn Harness> {
     NAMES
         .iter()
         .map(|n| get(n))
-        .find(|h| matches!(h.credential(), Credential::Token(_)))
+        .find(|h| matches!(h.credential(), Credential::Account(_)))
 }
 
 pub trait Harness: Sync {
@@ -143,9 +143,19 @@ pub trait Harness: Sync {
     fn acp(&self) -> Option<&'static str> {
         None
     }
-    /// #565: the env its ACP adapter reads its config folder (`profile`) and model from.
-    fn acp_env(&self, _profile: &Path, _model: Option<&str>) -> Vec<(&'static str, String)> {
+    /// #565: the env its ACP adapter reads its model from (#683: its config folder is the account's, `Plan::lane_cmd`).
+    fn acp_env(&self, _model: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
+    }
+    /// #683: whether config folder `dir` holds its CLI's own login, read from its files (never a Keychain or a CLI
+    /// call; generic: unknown, false).
+    fn signed_in(&self, _dir: &Path) -> bool {
+        false
+    }
+    /// #565: the shell words that put a lane's profile (`settings.json`, `role.md`, both quoted) where its ACP
+    /// adapter reads them in the worktree (generic: none).
+    fn acp_profile(&self, _settings: &str, _role: &str) -> String {
+        String::new()
     }
     /// How its lanes sign in (generic: unknown).
     fn credential(&self) -> Credential {
@@ -219,6 +229,9 @@ pub trait Harness: Sync {
 
 struct Generic;
 impl Harness for Generic {}
+
+/// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
+pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
 
 pub fn get(name: &str) -> &'static dyn Harness {
     match name {

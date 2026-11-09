@@ -24,7 +24,7 @@ profile = "fleet-rev"
 review_rounds = 3
 stall_minutes = 30
 max_parallel_spawns = 0   # spawns in the pass; tests/drive_kicks.rs runs them as kicks (#318)
-build_root = ""           # #438: no shared CARGO_TARGET_DIR (and no trim of the real one) unless a test sets it
+build_root = ""           # #630: retired (builds go under the worktree root); a stale key is ignored
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
 "#;
 
@@ -66,6 +66,8 @@ pub struct Fake {
     pub no_store: bool,
     /// Each `run_in`'s command line and its stdin.
     pub inputs: Shared<Vec<(String, String)>>,
+    /// #664: `closing()`: the panes a `herdr … pane close` closed, left out of every later `agent list`.
+    pub closed: Option<Shared<Vec<String>>>,
 }
 
 impl Fake {
@@ -102,6 +104,11 @@ impl Fake {
         ));
         self
     }
+    /// #664: a closed pane leaves herdr's agent list, as on a real host.
+    pub fn closing(mut self) -> Self {
+        self.closed = Some(Shared::default());
+        self
+    }
     /// #441: `svc` holds `value` in the fake store.
     pub fn stored(self, svc: &str, value: &str) -> Self {
         self.store.borrow_mut().insert(svc.into(), value.into());
@@ -123,6 +130,52 @@ pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let mut o = self.answer(prog, args)?;
+        let Some(closed) = &self.closed else {
+            return Ok(o);
+        };
+        match args {
+            [.., a, b, p] if prog == "herdr" && a == "pane" && b == "close" && o.code == 0 => {
+                closed.borrow_mut().push(p.clone())
+            }
+            [.., a, b] if prog == "herdr" && a == "agent" && b == "list" => {
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
+                    if let Some(l) = v["result"]["agents"].as_array_mut() {
+                        l.retain(|a| !closed.borrow().iter().any(|p| a["pane_id"] == p.as_str()));
+                        o.stdout = v.to_string();
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(o)
+    }
+    fn sleep(&self, secs: u64) {
+        self.calls.borrow_mut().push(format!("sleep {secs}"));
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        self.inputs.borrow_mut().push((line, input.into()));
+        self.run(prog, args)
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        anyhow::ensure!(!self.no_store, "no secret store (fake)");
+        Ok(self.store.borrow().get(svc).cloned())
+    }
+    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.no_store, "no secret store (fake)");
+        let mut m = self.store.borrow_mut();
+        let _ = match value {
+            Some(v) => m.insert(svc.into(), v.into()),
+            None => m.remove(svc),
+        };
+        Ok(())
+    }
+}
+
+impl Fake {
+    /// The scripted answer to one command line.
+    fn answer(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.calls.borrow_mut().push(line.clone());
         // #337: a batched ssh script answers each of its reads as the one call it stands for (also logged).
@@ -170,27 +223,6 @@ impl Runner for Fake {
             stdout: String::new(),
             stderr: format!("unscripted: {line}"),
         })
-    }
-    fn sleep(&self, secs: u64) {
-        self.calls.borrow_mut().push(format!("sleep {secs}"));
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        self.inputs.borrow_mut().push((line, input.into()));
-        self.run(prog, args)
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        Ok(self.store.borrow().get(svc).cloned())
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        let mut m = self.store.borrow_mut();
-        let _ = match value {
-            Some(v) => m.insert(svc.into(), v.into()),
-            None => m.remove(svc),
-        };
-        Ok(())
     }
 }
 
@@ -734,7 +766,10 @@ impl Runner for Shell<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         if let Some(i) = args.iter().position(|a| a == "export").filter(|_| prog == "herdr") {
             let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
-            let o = std::process::Command::new("sh").arg("-c").arg(line).output()?;
+            // #683: the pane's shell starts with neither credential var of the test's own env.
+            let mut sh = std::process::Command::new("sh");
+            sh.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
+            let o = sh.arg("-c").arg(line).output()?;
             self.2.borrow_mut().push(String::from_utf8_lossy(&o.stdout).into());
         }
         self.0.run(prog, args)

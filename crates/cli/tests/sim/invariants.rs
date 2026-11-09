@@ -1,0 +1,274 @@
+//! The invariants (design §2), checked against the model's ground truth (panes, PRs, true time) and the events as
+//! the yield hook saw each one appended: never against herdsman's own view. I1, I3, I4, I7, I9 and I10 hold after
+//! every step; I2 at each supersede; I5 at quiet points; I6 per full drive pass; I8 when a process exits.
+use crate::sched::World;
+use herdsman::events::Event;
+use std::collections::BTreeMap;
+
+/// Test-only break switches (AC 3): each makes the model break one invariant on purpose.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Sabotage {
+    /// I1: a second pane comes up for a live lane.
+    DoubleLane,
+    /// I4: the head's CI turns red just before a merge lands.
+    RedMerge,
+    /// #688's planted bug, deep where random seeds rarely go: I1, a second pane, only at a lane's fourth start.
+    Planted,
+}
+
+/// I7: an event may be this far behind the true time it is appended at (owner, q836).
+pub const LAG: u64 = 60;
+/// I6: a queued, unblocked issue with room gets a lane within this many full drive passes (owner, q838).
+pub const PASSES: usize = 3;
+/// I9: spawns of one lane name allowed within a sim hour without a new head, verdict, owner event or injected death.
+pub const CHURN: usize = 3;
+
+fn agent(e: &Event) -> Option<&str> {
+    e.str("agent")
+}
+
+/// (issue, role) of a lane name `<fleet>-<role>-<n>[-r<k>]`: a rev lane counts once, whatever its round.
+pub fn lane_key(name: &str) -> Option<(u64, String)> {
+    let mut w = name.split('-').skip(1);
+    let role = w.next()?.to_string();
+    Some((w.next()?.parse().ok()?, role))
+}
+
+/// Each append, as it happens: I2, I3, I7, I9, I10.
+pub fn on_append(w: &mut World, me: usize) {
+    let i = w.wrote.len() - 1;
+    let (at, ev) = (w.wrote[i].at, w.wrote[i].ev.clone());
+    let who = w.procs[me].name.clone();
+    // I7: no event stamped ahead of true time, or more than LAG behind it.
+    if ev.ts > at || at - ev.ts > LAG {
+        let lag = at as i64 - ev.ts as i64;
+        return w.fail(format!(
+            "I7 clock: {who} wrote {} #{} ts=t+{} at true t+{} (lag {lag} s > {LAG} s)",
+            ev.kind,
+            ev.issue.unwrap_or(0),
+            ev.ts - crate::scenario::T0,
+            at - crate::scenario::T0
+        ));
+    }
+    let n = ev.issue.unwrap_or(0);
+    let before = &w.wrote[..i];
+    match ev.kind.as_str() {
+        "supersede" => {
+            let a = agent(&ev).unwrap_or_default();
+            // I2: one supersede per lane per pass (a pass: one process at one `Ctx.now`).
+            let again = before
+                .iter()
+                .any(|x| x.proc == me && x.ev.kind == "supersede" && agent(&x.ev) == Some(a) && x.ev.ts == ev.ts);
+            // I2: never by a pass that started before the lane it supersedes spawned.
+            let spawned = before
+                .iter()
+                .rfind(|x| x.ev.kind == "spawn" && agent(&x.ev) == Some(a))
+                .map(|x| x.at);
+            if again {
+                return w.fail(format!(
+                    "I2 supersede-once: {a} superseded twice by {who}'s pass at ts=t+{}",
+                    ev.ts - crate::scenario::T0
+                ));
+            }
+            if let Some(s) = spawned.filter(|s| ev.ts < *s) {
+                let t0 = crate::scenario::T0;
+                return w.fail(format!(
+                    "I2 supersede-after-spawn: {who} (pass at t+{}) superseded {a}, spawned at true t+{}",
+                    ev.ts - t0,
+                    s - t0
+                ));
+            }
+        }
+        "done" => {
+            // I3: no action_id is acted on twice.
+            let id = ev.str("action_id").unwrap_or_default();
+            if before
+                .iter()
+                .any(|x| x.ev.kind == "done" && x.ev.str("action_id") == Some(id))
+            {
+                return w.fail(format!("I3 action-once: {id} done twice (again by {who})"));
+            }
+        }
+        "spawn" => {
+            // I9: churn bound.
+            let a = agent(&ev).unwrap_or_default();
+            let reason = |x: &Event| {
+                x.issue == ev.issue
+                    && (matches!(
+                        x.kind.as_str(),
+                        "pushed" | "verdict" | "queue" | "decision" | "round-extended"
+                    ) || x.kind == "lane-dead" && agent(x) == Some(a))
+            };
+            let from = before.iter().rposition(|x| reason(&x.ev)).map_or(0, |p| p + 1);
+            let k = (before[from..].iter())
+                .filter(|x| x.ev.kind == "spawn" && agent(&x.ev) == Some(a) && x.at + 3600 > at)
+                .count();
+            if k + 1 > CHURN && !w.model.died.contains(&a.to_string()) {
+                return w.fail(format!(
+                    "I9 churn: {a} spawned {} times within an hour, nothing new in between",
+                    k + 1
+                ));
+            }
+        }
+        _ => {}
+    }
+    // I10: nothing acts on a merged issue.
+    let acts = ["spawn", "spawn-started", "supersede", "respawn"];
+    if n != 0
+        && acts.contains(&ev.kind.as_str())
+        && before.iter().any(|x| x.ev.kind == "merged" && x.ev.issue == Some(n))
+    {
+        w.fail(format!("I10 merged: {who} logged {} on merged #{n}", ev.kind));
+    }
+}
+
+/// I4, as the model's `gh pr merge` is accepted: the base is integration, the latest verdict at the exact head is
+/// PASS, and the head's CI is green.
+pub fn on_merge(w: &mut World, issue: u64, head: &str, base: &str) {
+    if w.model.sabotage == Some(Sabotage::RedMerge) {
+        w.model.ci.insert(head.into(), Some(false));
+    }
+    let v = (w.wrote.iter().rev())
+        .find(|x| x.ev.kind == "verdict" && x.ev.issue == Some(issue) && x.ev.str("sha") == Some(head))
+        .and_then(|x| x.ev.str("verdict").map(String::from));
+    let green = w.model.ci.get(head).copied().flatten() == Some(true);
+    if base != "staging" || v.as_deref() != Some("PASS") || !green {
+        w.fail(format!(
+            "I4 merge: #{issue} merged into {base} at {head:.7}: verdict {v:?}, CI green {green}"
+        ));
+    }
+}
+
+/// After every step: I1, I5 (at quiet points), I6, and the merged event's verdict sha (I4).
+pub fn after_step(w: &mut World) {
+    if w.failure.is_some() {
+        return;
+    }
+    // I1: at most one live lane per (fleet, issue, role).
+    let mut by: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
+    for p in w.model.live().filter(|p| !matches!(p.status.as_str(), "dead" | "done")) {
+        if let Some(k) = p.agent.as_deref().and_then(lane_key) {
+            by.entry(k)
+                .or_default()
+                .push(format!("{} on {}", p.agent.clone().unwrap_or_default(), p.id));
+        }
+    }
+    if let Some((k, v)) = by.iter().find(|(_, v)| v.len() > 1) {
+        return w.fail(format!(
+            "I1 one-lane: #{} {} has {} live lanes: {v:?}",
+            k.0,
+            k.1,
+            v.len()
+        ));
+    }
+    // I4: each merged event names the head that was merged.
+    for x in w.wrote.iter().filter(|x| x.ev.kind == "merged") {
+        let n = x.ev.issue.unwrap_or(0);
+        let merged = w.model.merges.iter().rfind(|m| m.issue == n).map(|m| m.head.clone());
+        if merged.as_deref() != x.ev.str("verdict_sha") {
+            let why = format!(
+                "I4 merged-sha: #{n} merged event names {:?}, the model merged {merged:?}",
+                x.ev.str("verdict_sha")
+            );
+            return w.fail(why);
+        }
+    }
+    // I5, at a quiet point (no process between a pane's agent start and its spawn event): every live pane is a logged lane.
+    if w.procs.iter().all(|p| !p.live() || p.starting.is_none()) {
+        let orphan = w.model.live().find(|p| {
+            let a = p.agent.as_deref();
+            !(w.wrote.iter()).any(|x| x.ev.kind == "spawn" && agent(&x.ev) == a && x.ev.str("pane") == Some(&p.id))
+        });
+        if let Some(p) = orphan {
+            let why = format!("I5 orphan: pane {} runs {:?}, no spawn logged it", p.id, p.agent);
+            return w.fail(why);
+        }
+    }
+    if !w.procs.iter().any(|p| p.killed) {
+        if let Some(x) = w.wrote.iter().find(|x| x.ev.kind == "spawn-adopted") {
+            let why = format!("I5 adopt: {:?} adopted with no process crashed", agent(&x.ev));
+            return w.fail(why);
+        }
+    }
+    liveness(w);
+}
+
+/// I6: a queued issue, unblocked, on a fleet with room, gets a lane within `PASSES` full drive passes. A pass that
+/// refused it (the #513 last-slot rule's SPAWN_PENDING, a cap), met a busy host or full disk, or spent its start on
+/// another issue does not count.
+fn liveness(w: &mut World) {
+    let mut queued: BTreeMap<u64, usize> = BTreeMap::new();
+    for (i, x) in w.wrote.iter().enumerate() {
+        let e = &x.ev;
+        match e.kind.as_str() {
+            "queue" => {
+                for n in e.data.get("issues").and_then(|v| v.as_array()).into_iter().flatten() {
+                    let n = n.as_u64().unwrap_or(0);
+                    match e.str("op") {
+                        Some("add") => drop(queued.entry(n).or_insert(i)),
+                        _ => drop(queued.remove(&n)),
+                    }
+                }
+            }
+            "spawn" | "spawn-started" => {
+                queued.remove(&e.issue.unwrap_or(0));
+            }
+            _ => {}
+        }
+    }
+    for (n, from) in queued {
+        let full: Vec<String> = (w.wrote[from..].iter())
+            .filter(|x| x.ev.kind == "drive-pass" && x.ev.data.get("by").and_then(|b| b.as_str()) == Some("auto"))
+            .filter(|x| x.ev.data.get("kick").is_none_or(serde_json::Value::is_null))
+            .filter(|x| {
+                let acts = x.ev.data.get("actions").and_then(|a| a.as_array());
+                let room = |a: &serde_json::Value| {
+                    ["HOST_BUSY", "DISK_LOW", "MEM_LOW"].contains(&a["code"].as_str().unwrap_or(""))
+                };
+                let start = |a: &serde_json::Value| a["step"] == "start" && a["code"].is_null();
+                !x.busy
+                    && !acts
+                        .into_iter()
+                        .flatten()
+                        .any(|a| a["issue"] == n && !a["code"].is_null() || room(a) || start(a))
+            })
+            .map(|x| {
+                format!(
+                    "t+{} {}",
+                    x.ev.ts - crate::scenario::T0,
+                    x.ev.data.get("actions").map(ToString::to_string).unwrap_or_default()
+                )
+            })
+            .collect();
+        if full.len() >= PASSES {
+            return w.fail(format!(
+                "I6 liveness: #{n} queued, no lane after {} full drive passes: {full:?}",
+                full.len()
+            ));
+        }
+    }
+}
+
+/// I8, as process `me` exits: it holds no lease (each guard released it; markers it handed on carry another pid). A
+/// `.again` flag is a message to the busy kick, not a hold.
+pub fn on_exit(w: &mut World, me: usize, pid: u32) {
+    let state = crate::scenario::ctx(&w.root, 0).state;
+    let held: Vec<String> = (herdsman::db::leases(&state, "").into_iter())
+        .filter(|l| l.pid == pid && l.expires_at > w.now && !l.key.ends_with(".again"))
+        .map(|l| l.key)
+        .collect();
+    if !held.is_empty() {
+        let who = w.procs[me].name.clone();
+        w.fail(format!("I8 lease: {who} exited holding {held:?}"));
+    }
+}
+
+/// `Sabotage::DoubleLane`: a copy of the pane whose agent just started comes up beside it.
+pub fn double(w: &mut World, pane: &str) {
+    if let Some(p) = w.model.panes.iter().find(|p| p.id == pane).cloned() {
+        w.model.panes.push(crate::model::Pane {
+            id: format!("{}x", p.id),
+            ..p
+        });
+    }
+}

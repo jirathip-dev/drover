@@ -1,10 +1,12 @@
 //! #386: the `[chat]` tab (docs/design/conductor-chat/): per repo its conductor threads, and each thread as #138's chat
 //! blocks with choice rows, images and files; the owner's writes (`POST /thread`) and the files (`GET /thread/<t>/<name>`).
 use super::ago;
-use crate::api::{Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, ThreadPage, ThreadRow, ThreadView};
+use crate::api::{
+    Answered, ChatRepo, ChatTab, Chip, FileRef, Link, Msg, QueuedMsg, RunCard, ThreadPage, ThreadRow, ThreadView,
+};
 use crate::conductor::{self, of};
 use crate::config::Config;
-use crate::events::{closed, Event};
+use crate::events::{ask_event, closed, Event};
 use crate::runner::Runner;
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -41,13 +43,10 @@ fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
 /// answer the last, under `CHANGE` old).
 fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
-    let is = |d: &&Event| d.kind == "decision" && d.fleet == e.fleet && d.str("id") == Some(id);
-    let d = events.iter().rfind(is)?;
+    let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
     (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
-    events
-        .iter()
-        .find(|a| a.kind == "needs-decision" && a.fleet == e.fleet && a.str("id") == Some(id))
+    ask_event(events, "needs-decision", &e.fleet, id)
 }
 
 /// #407: a queued message's id, and its files.
@@ -87,7 +86,7 @@ fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
 
 /// `[chat·N]`: the threads where a choice waits for the owner.
 pub fn choosing(events: &[Event]) -> usize {
-    let ids = events.iter().filter(|e| e.kind == "thread-new");
+    let ids = conductor::threads(events).into_iter();
     ids.filter(|t| open_ask(events, t.str("thread").unwrap_or_default()).is_some())
         .count()
 }
@@ -102,8 +101,7 @@ fn link(e: &Event) -> Option<Link> {
 
 /// An ask as its thread shows it: decided, the answer; else open (no `closed` event) for the choice rows.
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
-    let is = |e: &&Event| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id");
-    let answer = events.iter().rfind(is).map(|d| {
+    let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
         let opts = a.data["options"].as_array().into_iter().flatten();
         Answered {
@@ -121,6 +119,36 @@ fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
         ask: Some(super::v1::ask(a)),
         answer,
         ..m
+    }
+}
+
+/// #669: run card `e` and how it stands: open (15 min), then approved (running until its `run-done`), denied or expired.
+fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
+    let s = |e: &Event, k: &str| e.str(k).unwrap_or_default().to_string();
+    let id = s(e, "id");
+    let set = crate::card::settled(events, &id);
+    let done = events.iter().find(|d| d.kind == "run-done" && d.str("id") == Some(&id));
+    let exp = e.ts + crate::card::TTL;
+    let state = match set {
+        Some(x) if x.data["approved"] != true => "denied",
+        Some(_) if done.is_none() => "running",
+        Some(_) => "approved",
+        None if ctx.now > exp => "expired",
+        None => "open",
+    };
+    RunCard {
+        id,
+        cmd: s(e, "cmd"),
+        why: s(e, "why"),
+        blast: s(e, "blast"),
+        host: s(e, "host"),
+        dir: s(e, "dir"),
+        sha: s(e, "sha"),
+        exp,
+        state: state.into(),
+        by: set.and_then(|x| x.str("by")).map(Into::into),
+        code: done.and_then(|d| d.data["code"].as_i64()),
+        tail: done.map(|d| s(d, "tail")).unwrap_or_default(),
     }
 }
 
@@ -203,6 +231,15 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 Msg {
                     from: s("name"),
                     ..m("secret", s("why"))
+                }
+            }
+            ("run-card", _) => {
+                let run = run_card(ctx, events, e);
+                Msg {
+                    from: s("id"),
+                    open: run.state == "open",
+                    run: Some(run),
+                    ..m("run", s("cmd"))
                 }
             }
             ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
@@ -360,7 +397,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             return tab;
         }
     };
-    let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
+    let threads = conductor::threads(events);
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
     for (repo, k) in repos {
         let (mut rows, mut arch) = (vec![], vec![]);
@@ -389,19 +426,17 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
 impl super::Server<'_> {
     /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads. #620: the fold is kept by the log's
     /// last seq, fleet.toml's mtime, the agents, `rw` and the minute; a request in between reuses it, the log unread.
+    /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
+    /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        let key = json!([
-            crate::db::last_seq(&ctx.state),
-            super::mtime(ctx),
-            agents,
-            rw,
-            ctx.now / 60
-        ]);
-        let mut c = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seen: Vec<_> = agents.iter().map(|a| [&a["name"], &a["agent_status"]]).collect();
+        let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
+        let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
             let (cfg, events) = match (Config::load(&ctx.config), crate::events::shared(&ctx.state)) {
@@ -549,6 +584,11 @@ pub fn post(
             crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
             Ok(format!("answered {}", g("id")))
         }
+        // #669: a run card's [approve] (with the sha prefix the owner saw) / [deny].
+        "card" => {
+            let approve = g("act") == "approve";
+            crate::card::settle(ctx, &cfg, r, g("id"), approve, approve.then(|| g("sha")))
+        }
         "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
         "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),
         "read" => {
@@ -580,7 +620,7 @@ pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
         return vec![];
     };
     let mut out = vec![];
-    for t in events.iter().filter(|e| e.kind == "thread-new") {
+    for t in conductor::threads(&events) {
         let id = t.str("thread").unwrap_or_default();
         for e in queued(&events, id)
             .values()

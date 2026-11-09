@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#680 · Deterministic simulation of herdsman's concurrent passes: design</title>
+<style>
+  :root { --ink:#1d2330; --mute:#5b6475; --line:#d9dde5; --bg:#fbfbfc; --card:#fff; --acc:#2856c7; --bad:#b4232c; --ok:#1f7a45; --warn:#9a5b00; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 32px 28px 56px; }
+  h1 { font-size: 26px; line-height:1.25; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 34px 0 10px; padding-top: 6px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 18px 0 6px; }
+  p, li { max-width: 78ch; }
+  .sub { color: var(--mute); margin: 0 0 18px; }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+  code { background:#eef1f6; padding: 1px 4px; border-radius: 4px; }
+  pre { background:#0f1420; color:#dfe6f3; padding: 12px 14px; border-radius: 8px; overflow-x:auto; line-height:1.45; }
+  pre .c { color:#8a96ad; } pre .r { color:#ff8f8f; } pre .g { color:#8fe3a8; } pre .y { color:#f2cf7a; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding: 14px 16px; }
+  .card h3 { margin-top: 0; }
+  table { width:100%; border-collapse: collapse; background: var(--card); border:1px solid var(--line); border-radius: 10px; overflow:hidden; }
+  th, td { text-align:left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { background:#f1f3f7; font-size: 13px; }
+  td { font-size: 14px; }
+  tr:last-child td { border-bottom: 0; }
+  .tag { display:inline-block; font-size:11.5px; font-weight:600; padding: 1px 7px; border-radius: 99px; border:1px solid currentColor; white-space:nowrap; }
+  .new { color: var(--acc); } .from { color: var(--mute); } .bad { color: var(--bad); } .ok { color: var(--ok); } .warn { color: var(--warn); }
+  .lede { font-size: 16px; }
+  .kv { display:grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+  .kv b { white-space: nowrap; }
+  .tl { position:relative; margin: 6px 0 0; padding-left: 18px; border-left: 2px solid var(--line); }
+  .tl div { margin: 0 0 6px; }
+  .tl .mono { color: var(--mute); }
+  .q li { margin-bottom: 8px; }
+  .scroll { overflow-x: auto; }
+  @media (max-width: 600px) {
+    main { padding: 20px 14px 40px; }
+    h1 { font-size: 21px; }
+    th, td { padding: 6px 7px; font-size: 13px; }
+    .kv { grid-template-columns: 1fr; }
+    pre { font-size: 11.5px; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>#680 · A deterministic simulation of drive, fast, check, merge and kick</h1>
+<p class="sub">Design for the owner to approve. Branch <code>issue-680</code> · 2026-11-08 · design lane <code>herdsman-design-680</code></p>
+
+<p class="lede">The real pass code runs as a set of "processes" (one OS thread each). A seeded scheduler lets only one of them run at a time. Every call a pass makes to herdr, gh, git, <code>ps</code> or <code>kill</code> already goes through <code>Runner</code>. That call is the yield point: an in-process model answers it, the fake clock moves on, and the seed picks which process runs next. Invariants are checked after every step. Production code gains two small seams, a clock and a yield hook, about <b>30 src/ lines</b>. The fix for the incident adds about <b>25 more</b>.</p>
+
+<h2>1 · The first seed: <code>herdsman-rev-370-r5</code>, 26 supersedes in "one second"</h2>
+<p>From <code>state.db</code>, issue <code>herdsman#370</code>: every supersede, spawn and kick between seq 21420 and 22260 carries the <b>same</b> <code>ts</code>, 1793805085 (2026-11-04 22:11:25). That is 26 <code>supersede</code>, 28 <code>spawn</code> and 30 <code>kick</code> events. The lane's own later <code>lane-closed</code> key says it actually spawned at 1793805278, about 3 minutes later. So it was not one second. It was one <b>frozen clock</b> across a run of minutes.</p>
+<div class="grid">
+  <div class="card">
+    <h3>What the log shows</h3>
+    <div class="tl">
+      <div><span class="mono">21420</span> <code>pushed</code> 5bca43e → a <code>kick why=push</code> starts (<code>Ctx.now</code> = 22:11:25)</div>
+      <div><span class="mono">21437</span> rev spawn refused <code>HOST_BUSY</code>; the kick loops (<code>.again</code>)</div>
+      <div><span class="mono">21610</span> <code>rev-370-r5</code> spawned and adopted; the kick reports "reviewed #370"</div>
+      <div><span class="mono">21645…22256</span> 25× <code>supersede rev-370-r5</code> "live agent(s) … unfinished rev lane", each followed by a new pane <code>wXA…wYM</code>, each kick "nothing due"</div>
+      <div><span class="mono">22261</span> 23:14:51: <code>stall</code>, the lane was done 63 min ago; its FAIL verdict was only recorded at 23:16</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Mechanism to confirm in the sim</h3>
+    <p><code>drive::kicked</code> runs up to 30 drive passes under one <code>Ctx</code>, and <code>ctx.now</code> is set once at process (or service job) start. Each pass that sees the rev lane's verdict file but no <code>verdict</code> event re-spawns review with <code>--supersede</code>. That spawn's push or prompt re-flags <code>kick-…​.again</code>. All the time-based guards (#666 "superseded once", the stall threshold, <code>spawn_pending_max_secs</code>) compare against a clock that never moves. So nothing stops it until the 30 iterations run out.</p>
+    <p class="warn"><b>This is a hypothesis, read from the log.</b> Seed <code>1</code> must reproduce it on current staging before any fix lands (AC 2).</p>
+  </div>
+</div>
+<h3>Seed 1, a fixed scenario (not random)</h3>
+<pre><span class="c"># crates/cli/tests/sim/seeds.rs: the scenario is written out by hand, and the seed orders the interleavings</span>
+fleet herdsman · issue 370 at fix(4) · impl lane live · host load at 2.50 (HOST_BUSY) for the first spawn
+t+0     impl pushes 5bca43e          → kick why=push (detached, Ctx.now frozen)
+t+5     rev spawn refused HOST_BUSY  → .again
+t+190   rev-370-r5 spawned, confirmed
+t+200   rev-370-r5 writes verdict.md FAIL, agent_status=done (the `herdsman verdict` call is delayed)
+...     drive (300 s), fast (60 s), check, overlapping kicks
+
+<span class="r">FAIL seed=1 step=412  I2 supersede-once: herdsman-rev-370-r5 superseded 2× by pass kick#3 (started t+0, lane spawned t+190)</span>
+<span class="r">                      I7 clock: event supersede ts=t+0 written at true t+214 (lag 214 s &gt; 60 s)</span>
+replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
+
+<h2>2 · Invariants: the final list</h2>
+<p>All of them are checked after every step, unless a row says "at quiet points". A quiet point is a moment when no pass is inside a spawn, between its pane create and its <code>spawn</code> event. The checker reads the model's ground truth (panes, PRs, true time) and the real <code>state.db</code> event log. It never reads herdsman's own view.</p>
+<div class="scroll">
+<table>
+<tr><th>#</th><th>Invariant</th><th>Checked against</th><th></th></tr>
+<tr><td>I1</td><td>At most one live lane per (fleet, issue, role). "Live" means a model pane whose agent is not dead. A rev lane counts once, whatever its round.</td><td>model panes</td><td><span class="tag from">issue 1</span></td></tr>
+<tr><td>I2</td><td>At most one <code>supersede</code> per lane spawn per pass. A lane is never superseded by a pass whose <b>true</b> start came before the lane's true spawn.</td><td><code>supersede</code> events, tagged with the pass that wrote them</td><td><span class="tag from">issue 2</span></td></tr>
+<tr><td>I3</td><td>No <code>action_id</code> (#509) is acted on twice: no two <code>driven</code> or kick-processed records carry the same id.</td><td>events + the <code>processed</code> table</td><td><span class="tag from">issue 3</span></td></tr>
+<tr><td>I4</td><td>The model's <code>gh pr merge</code> is accepted only if the base is the fleet's integration branch (never main/master), the latest verdict at the PR's exact head is PASS, and every check at that head is green. Each <code>merged</code> event's <code>verdict_sha</code> equals the head that was merged.</td><td>model PR at call time</td><td><span class="tag from">issue 4</span></td></tr>
+<tr><td>I5</td><td>At quiet points, every live model pane maps to one logged, unclosed lane, and every such lane has a live pane. No orphans, nothing for adopt to repair (<code>spawn-adopted</code> stays 0 when no pane was dropped on purpose).</td><td>model panes ↔ events</td><td><span class="tag from">issue 5</span></td></tr>
+<tr><td>I6</td><td>Liveness: a queued, unblocked issue with free capacity and an online host gets a lane within <b>3</b> full drive passes.</td><td>queue fold + model</td><td><span class="tag from">issue 6</span></td></tr>
+<tr><td>I7</td><td>Clock: every event's <code>ts</code> is at most 60 s behind the true time at which it was appended, and never ahead of it.</td><td>yield hook on append</td><td><span class="tag new">new</span></td></tr>
+<tr><td>I8</td><td>Leases: at most one live holder per key (<code>drive.lock</code>, <code>kick-*.lock</code>, <code>spawn-*.pending</code>). A lease whose holder is dead goes within one <code>markers</code> sweep.</td><td><code>leases</code> table + model process table</td><td><span class="tag new">new</span></td></tr>
+<tr><td>I9</td><td>Churn bound: at most 3 spawns of one lane name within a sim hour unless a new head, verdict, owner event or a death the scenario injected came in between. This catches any repeat loop, whatever its cause.</td><td>events + scenario log</td><td><span class="tag new">new</span></td></tr>
+<tr><td>I10</td><td>Nothing acts on a merged issue: no spawn, kick-driven step or prompt after its <code>merged</code> event (the <code>MERGED</code> rule).</td><td>events + model calls</td><td><span class="tag new">new</span></td></tr>
+</table>
+</div>
+<p>Test-only break switch (AC 3): <code>SimOpts { sabotage: Some(Sabotage::DoubleLane) }</code> makes the model start a second pane for a live lane at a random step. The test expects I1 to fail, and the failure to print the seed and the trace. There is one sabotage per invariant (I4: the model merges with a red check). It lives in test code only.</p>
+
+<h2>3 · Scheduler and the production seams</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Processes as baton-passing threads</h3>
+    <ul>
+      <li>Each pass is one OS thread running the real entry: <code>herdsman_core::main_with(["herdsman","drive",…], &amp;ctx, &amp;sim, …)</code>, and likewise <code>drive --fast</code>, <code>check</code>, <code>merge</code>, <code>kick --now</code> and the owner and conductor verbs. Thread-locals (<code>IN_ACT</code>, <code>KICK</code>, <code>SLOT</code>, <code>ROOM</code>, the db connection cache) are per thread, which matches per-process state.</li>
+      <li>One baton, a <code>Mutex</code> plus <code>Condvar</code>. A thread runs only while it holds the baton. At each yield point it hands the baton back, and the scheduler picks the next runnable process with a SplitMix64 PRNG seeded from <code>HERDSMAN_SIM_SEED</code>, written in about 15 lines of test code (no <code>rand</code>).</li>
+      <li>Discrete-event clock: each modelled call costs virtual seconds (herdr <code>agent start</code> 3 s, gh 1 s, git 0.5 s). <code>r.sleep(n)</code> parks the process until <code>now + n</code>. When nothing is runnable, the clock jumps to the next wake-up or scenario event.</li>
+      <li>Timers start passes as launchd does: drive every 300 s, fast every 60 s, check every 300 s, each with seeded jitter, so passes of the same kind overlap. <code>Runner::detach</code> on <code>kick --now</code> starts a new process with a model pid.</li>
+      <li>A panic in a process is a failure, with the seed and the trace.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Seams added to production <span class="tag new">≈30 lines</span></h3>
+    <div class="kv">
+      <b>Clock</b><span><code>crate::now()</code> reads a thread-local override first, which the sim sets. The two direct uses (<code>drive.rs:231</code>, <code>:663</code>) and the service's <code>herdsman_core::now()</code> already go through it. <code>Ctx.now</code> stays the per-process start time, the real behaviour the sim must expose. ~8 lines.</span>
+      <b>Yield hook</b><span><code>crate::sim::point(&amp;Point)</code>: a thread-local <code>Option&lt;&amp;dyn Fn&gt;</code>, a no-op unless set. Called in <code>db::append</code> (with the event), <code>db::take</code>, <code>db::release</code> and <code>db::claim</code>, so read-modify-write races on <code>state.db</code> interleave too, not only those between external calls. ~15 lines.</span>
+      <b>Runner</b><span>Nothing new: the sim's <code>Runner</code> is the yield point for herdr, gh, git, <code>ps</code>, <code>kill</code> and <code>detach</code>. <code>local()</code> is false, so <code>herdr::STREAMED</code> stays unused.</span>
+      <b>Determinism</b><span>Any <code>HashMap</code> iteration that reaches a Runner call or an event becomes a <code>BTreeMap</code>. The determinism test finds these. Budget ~5 lines.</span>
+    </div>
+    <p>The real <code>state.db</code> (rusqlite) runs in a temp dir per seed, along with real worktree folders and <code>verdict.md</code> files there. No network and no child process: every <code>Command</code> goes through the sim <code>Runner</code>.</p>
+  </div>
+</div>
+
+<h2>4 · The fakes' surface</h2>
+<p>A single stateful <code>Model</code> (test code, <code>crates/cli/tests/sim/model.rs</code>) answers the argv that herdsman builds. Each argv is parsed by its leading words. An argv the model does not know fails the run with "unmodelled call", so new production calls cannot silently get a canned answer.</p>
+<div class="scroll">
+<table>
+<tr><th>Tool</th><th>Calls modelled</th><th>State and behaviour</th></tr>
+<tr><td>herdr / shed</td><td><code>agent list|start|prompt|rename</code>, <code>workspace create|close|rename</code>, <code>pane list|get|read|send-text|send-keys|close</code>, <code>worktree open|remove</code>, <code>working blocked</code>, and the ssh-batched form for remote hosts</td><td>Panes with id, agent name, <code>agent_status</code> (working, idle, done, dead), screen text and the true spawn time. Agents follow scenario scripts: confirm the prompt, push, write <code>verdict.md</code>, run <code>herdsman turn</code>, ask, die, or get capped (a limit banner on screen). shed is the same model behind <code>shed::call</code>.</td></tr>
+<tr><td>gh</td><td><code>pr view|create|edit|merge</code>, <code>run list|view|rerun</code>, <code>issue view|list|close|reopen|comment</code>, <code>api graphql</code>, <code>api -i</code></td><td>PRs with base, head sha, mergeable and checks per sha (pending, then green or red). <code>pr merge</code> enforces I4 when called and moves the integration head. Rate-limit and 5xx answers are injected by the scenario.</td></tr>
+<tr><td>git</td><td><code>fetch</code>, <code>rev-parse</code>, <code>rev-list</code>, <code>log</code>, <code>diff</code>, <code>status</code>, <code>push</code>, <code>reset</code>, <code>merge-base</code>, <code>merge-tree</code>, <code>merge</code>, <code>worktree</code>, <code>write-tree</code>, <code>show</code>, <code>revert</code></td><td>Branch heads as opaque shas per remote and worktree, dirty and unpushed flags per worktree, and a conflict flag per file pair. No real objects.</td></tr>
+<tr><td>process</td><td><code>ps -o etime=</code>, <code>kill -0</code>, <code>detach</code>, <code>sh -c nohup</code></td><td>A pid table: a kick process's pid is live until its thread ends, or until the scenario kills it (crash mid-pass). Pids are reused on purpose, to cover #333.</td></tr>
+<tr><td>host</td><td><code>sysctl</code>/<code>vm_stat</code>/<code>df</code> reads behind <code>hosts::gate</code>, ssh reachability</td><td>Load, free memory and disk per host over time. Gives <code>HOST_BUSY</code>, <code>DISK_LOW</code> and <code>HOST_OFFLINE</code> windows.</td></tr>
+</table>
+</div>
+<p>Out of scope for v1: the HTTP service process and the board. Their in-process jobs call the same <code>main_with</code> with a fresh <code>Ctx</code>, so the sim covers them as one more process kind (<code>service-job</code>). Webpush and notify are swallowed.</p>
+
+<h2>5 · The scenario generator</h2>
+<div class="grid">
+  <div class="card">
+    <h3>From the seed</h3>
+    <ul>
+      <li>1–2 fleets, 2–6 issues, 1–2 hosts. <code>review_rounds</code>, <code>max_parallel_spawns</code> and serial groups are drawn from small ranges.</li>
+      <li>Queue verbs over time: <code>add</code> (some <code>--serial</code>, <code>--design</code>, <code>--repro</code>), <code>block</code>, <code>unblock</code> and <code>mv</code>, issued as owner processes.</li>
+      <li>Per lane, a script drawn from: finish clean · push and then <code>turn done</code> · write the verdict late · die mid-turn · never confirm the prompt · get capped · hang (stall).</li>
+      <li>Per head: CI goes pending → green or red after 1–15 sim minutes. Verdicts are PASS or FAIL, with or without proof.</li>
+      <li>Host events: going offline and back, load spikes, low disk. Integration moves when other PRs merge, which makes update rounds.</li>
+      <li>Crashes: a running pass is killed at a random yield point, so its leases and half-done spawn are left behind.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Run, trace and replay</h3>
+    <ul>
+      <li>One run is 6 sim hours or 4,000 steps, whichever comes first, then a 30 sim-minute settle with no new faults for the liveness check (I6).</li>
+      <li>The trace is one line per step: <code>step · t · process · call or event · model reply (short)</code>. It is kept in a ring buffer, and the last 200 lines plus every scenario event are printed on failure.</li>
+      <li><code>HERDSMAN_SIM_SEED=&lt;n&gt; cargo test -p herdsman --test sim</code> replays one seed. <code>HERDSMAN_SIM_TRACE=full</code> prints all of it.</li>
+      <li>Determinism test: seed 7 is run twice in one process, and the two traces must be byte-equal.</li>
+      <li>Fixed set: <code>crates/cli/tests/sim/seeds.rs</code> lists seed 1 (the #370 incident), seeds 2–24 and every later regression seed, with a one-line note each. The target is under 60 s on CI.</li>
+      <li><code>just sim [N=500]</code> runs N random seeds and prints any failing seed. A nightly CI job runs <code>just sim 2000</code>. A failing seed goes into the fixed set with its fix.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>6 · Files and line estimate</h2>
+<div class="scroll">
+<table>
+<tr><th>Where</th><th>What</th><th>Lines</th></tr>
+<tr><td><code>crates/core/src/lib.rs</code>, <code>sim.rs</code> (new, tiny), <code>db.rs</code></td><td>clock override, yield hook, 4 hook calls</td><td><b>src +25…35</b></td></tr>
+<tr><td><code>crates/core/src/drive.rs</code>, <code>spawn.rs</code></td><td>the fix for seed 1, expected to be a fresh <code>Ctx.now</code> per kick iteration plus a supersede guard on the pass's start against the lane's spawn. The final shape comes from what the sim shows.</td><td><b>src +15…30</b></td></tr>
+<tr><td>Any HashMap → BTreeMap the determinism test finds</td><td></td><td>src ±5</td></tr>
+<tr><td><code>crates/cli/tests/sim/{main,sched,model,scenario,invariants,seeds}.rs</code></td><td>scheduler, model, generator, checker, seeds</td><td>tests ~1,400 (not capped)</td></tr>
+<tr><td><code>justfile</code>, <code>.github/workflows/</code></td><td><code>sim</code> recipe and the nightly job; the PR job runs the fixed set as part of <code>cargo test</code></td><td>~20</td></tr>
+</table>
+</div>
+<p>Total: <b>src/ net +45…70</b>. The current src/ total is about 32.6k lines against <code>line_cap</code> 35,500, so it fits without a raise. No new dependency.</p>
+
+<h2>7 · Open questions for the owner</h2>
+<ol class="q">
+  <li><b>Fix scope.</b> AC 2 asks for the fix that makes seed 1 pass. If the sim shows more than one cause (for example the frozen clock <i>and</i> the verdict-file / no-verdict-event gap), should both be fixed in this PR, or the second filed as its own issue with its seed parked as <code>#[ignore]</code>? <i>Recommendation: fix what seed 1 needs here and file the rest.</i></li>
+  <li><b>I7's 60 s tolerance.</b> A long pass legitimately writes events stamped with its start time. Is 60 s the right bound, or should events take the true time and <code>Ctx.now</code> stay only the pass's decision time? The second changes what <code>ts</code> means and touches more code. <i>Recommendation: 60 s, and the fix refreshes <code>now</code> per kick iteration.</i></li>
+  <li><b>Nightly job.</b> It is a new scheduled GitHub Actions workflow (CI minutes, about 10 min a night). Is that OK, or should it be <code>just sim</code> by hand only?</li>
+  <li><b>The I6 bound of 3 passes.</b> Is that the right number, with <code>max_parallel_spawns</code> and the #513 last-slot rule in play? A larger N weakens the check. A smaller one may flag the slot rule's intended waits.</li>
+</ol>
+</main>
+</body>
+</html>

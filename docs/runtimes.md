@@ -104,18 +104,18 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 `drover.round`. No token is ever in a label, an event, the brief or the adapter's command line.
 
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
-lane's exports (`HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env`, `HERDSMAN_ACCOUNT`). That shell sources the
-0600 secrets file `deliver` wrote, so the role's account token reaches the adapter as `CLAUDE_CODE_OAUTH_TOKEN`, the
-same way a pane gets it. It also sets `CLAUDE_CONFIG_DIR` to the lane's synced Claude profile
-(`~/.config/herdsman/claude/<profile>`) and the role's model as `ANTHROPIC_MODEL`, and unsets `$SHED`. The
-claude-acp adapter runs Claude Code with its user, project and local settings, so the profile's `settings.json`
-applies:
+lane's exports (`HERDSMAN_LANE`, `HERDSMAN_PORT`, the fleet's `env`, `HERDSMAN_ACCOUNT`, and #683 the role's
+account env, `account_env`'s or its folder as `CLAUDE_CONFIG_DIR`, so the adapter signs in with that login and gets no
+token). It
+sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/herdsman/claude/<profile>`)
+into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
+runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:
 
 - its `PreToolUse` hook is `herdsman hook`, the same guard as in a pane, so protected pushes, `gh pr merge`,
   comments, containers, `pkill`/`killall`, protected paths and the reviewer's read-only rule are all refused;
 - its `permissions.defaultMode = "bypassPermissions"` is what the pane's `--dangerously-skip-permissions` does, so
   tools do not wait on `shed approve` (the hook still runs first);
-- its `CLAUDE.md` is the role's prompt and the usage doc (the pane's `--append-system-prompt-file`).
+- its `role.md`, as `CLAUDE.local.md`, is the role's prompt and the usage doc (the pane's `--append-system-prompt-file`).
 
 The lane's state is the session's own: the bridge reports `working`, `blocked` and `done` from the ACP turn, and the
 hook does not report it, since `$SHED` is unset. drive logs these as `lane-state` events, and nothing is read off a

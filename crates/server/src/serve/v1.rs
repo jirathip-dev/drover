@@ -6,8 +6,11 @@
 //! sets one), an issue's verdicts and the lessons.
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
-use crate::api::{Ask, ChatDefaults, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun};
-use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
+use crate::api::{
+    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
+};
+use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
+use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
 use crate::events::plain;
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -18,7 +21,8 @@ use serde_json::Value;
 const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
-const V1_PAIRED: &[&str] = &["qset", "lesson"];
+/// #633: and a cooee thread's conductor link.
+const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach"];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -60,7 +64,7 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
-            ("GET", Some("host")) => out("200 OK", &self.host_tab(ctx)),
+            ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
                 let (fleet, n) = x[6..].split_once('/').unwrap_or_default();
@@ -92,13 +96,39 @@ impl Server<'_> {
             }
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
-            ("GET", Some("lanes")) => out("200 OK", &self.lanes_tab(ctx, paired)),
-            ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
+            ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
+            ("GET", Some("chat")) => {
+                let (mut c, ev) = (
+                    self.chat_tab(ctx, paired && self.addr.is_some()),
+                    shared(&ctx.state).unwrap_or_default(),
+                );
+                c["threads"]
+                    .as_array_mut()
+                    .into_iter()
+                    .flatten()
+                    .for_each(|t| handoffs(&ev, &mut t["page"]));
+                out("200 OK", &c)
+            }
+            // #681: a repo's conductor threads, newest-active first (cooee's side threads).
+            ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
+                let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
+                match Config::load(&ctx.config) {
+                    Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
+                        let ev = shared(&ctx.state).unwrap_or_default();
+                        out("200 OK", &repo(&ev, fleet))
+                    }
+                    _ => reply("404 Not Found", "NOT_FOUND", "no such repo"),
+                }
+            }
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such thread"),
-                    |p| out("200 OK", &p),
+                    |p| {
+                        let mut p = serde_json::json!(p);
+                        handoffs(&ev, &mut p);
+                        out("200 OK", &p)
+                    },
                 )
             }
             ("GET", Some("herd")) => self.herd(ctx, None).map_or_else(
@@ -156,6 +186,19 @@ impl Server<'_> {
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
+            ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
+                let f = fields(body);
+                let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
+                let cfg = Config::load(&ctx.config);
+                if op == "conductor-detach" {
+                    return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
+                }
+                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, self.r, fleet, t));
+                match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
+                    Ok(a) => out("200 OK", &a),
+                    Err(e) => done(Err(e)),
+                }
+            }
             ("POST", Some("lesson")) => {
                 let by = auth.as_ref().map(|d| d.label.as_str()).unwrap_or_default();
                 done(self.lesson(ctx, &fields(body), by))
@@ -176,7 +219,10 @@ impl Server<'_> {
             .as_ref()
             .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
         else {
-            return self.write(ctx, &f);
+            // #715: an answer's conductor wake is delivered after the reply.
+            let (res, later) = crate::conductor::deferred(|| self.write(ctx, &f));
+            self.later(ctx, later);
+            return res;
         };
         if !lock(&self.running).insert(fleet.clone()) {
             return refused("DRIVE_RUNNING", format!("{fleet} has a {op} running"));
@@ -280,6 +326,17 @@ impl Server<'_> {
                 .get(&(f.clone(), i.issue))
                 .map_or("queued".into(), |s| s.state.clone()),
             blocked_by: i.blocked_by,
+            // #667: another fleet's `fleet#N` reads as its repo's `owner/repo#N`.
+            blocked_on: i
+                .ext
+                .iter()
+                .map(|b| match b.split_once('#') {
+                    Some((x, n)) if !x.contains('/') => {
+                        cfg.fleet.get(x).map_or(b.clone(), |x| format!("{}#{n}", x.repo))
+                    }
+                    _ => b.clone(),
+                })
+                .collect(),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
@@ -391,7 +448,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         });
         Verdict {
             role: e.str("stage").unwrap_or("rev").into(),
-            round: e.data["round"].as_u64().unwrap_or_default(),
+            round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
             sha: e.str("sha").unwrap_or_default().into(),
             verdict: e.str("verdict").unwrap_or_default().into(),
             ts: e.ts,
@@ -406,10 +463,16 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         .filter(|e| e.is("verdict", fleet, n))
         .map(verdict)
         .collect();
+    let why = ev.iter().rfind(|e| e.is("why", fleet, n)).map(|e| WhyNote {
+        sha: e.str("sha").unwrap_or_default().into(),
+        round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
+        owner: e.str("owner").unwrap_or_default().into(),
+    });
     IssueView {
         fleet: fleet.into(),
         issue: n,
         verdicts,
+        why,
     }
 }
 
@@ -573,4 +636,220 @@ pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
         })
         .collect();
     Events { seq, refresh, list }
+}
+
+/// #630: each host card's workspace roots (`hosts.json`), a `root` row each: path, state and free space.
+fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+    let seen = crate::hosts::cached(ctx);
+    for c in &mut tab.hosts {
+        for r in seen.get(&c.name).map_or(&[][..], |s| &s.roots[..]) {
+            let t = ["g", "a", "m"][usize::from(r.state != "active") + usize::from(r.state == "gone")];
+            let free = r.free_gb.map(|g| format!("{g:.0} GB free"));
+            c.rows.push(crate::api::Cell {
+                k: "root".into(),
+                t: t.into(),
+                text: r.path.clone(),
+                notes: [Some(r.state.clone()), free].into_iter().flatten().collect(),
+                ..crate::api::Cell::default()
+            });
+        }
+    }
+    tab
+}
+
+impl Server<'_> {
+    /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
+    fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
+        let events = shared(&ctx.state).unwrap_or_default();
+        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
+        let r = self.cached(ctx.now, 30);
+        let rows = tab
+            .sections
+            .iter_mut()
+            .flat_map(|s| &mut s.repos)
+            .flat_map(|g| &mut g.lanes);
+        for row in rows {
+            let Some(l) = all.iter().find(|l| l.name == row.name) else {
+                continue;
+            };
+            let u = l.unsaved(&r);
+            let more = [
+                l.root.as_ref().map(|r| format!("root {r}")),
+                crate::spawn::unsaved_text(u),
+            ];
+            for m in more.into_iter().flatten() {
+                row.facts = [&row.facts[..], &m]
+                    .into_iter()
+                    .filter(|p| !p.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+            }
+            let (root, dirty, unpushed) = (l.root.clone(), u.map(|u| u.0), u.map(|u| u.1));
+            let name = row.name.clone();
+            tab.unsaved.push(crate::api::LaneUnsaved {
+                name,
+                root,
+                dirty,
+                unpushed,
+            });
+        }
+        tab
+    }
+}
+
+/// #681: a thread page's (JSON) handoffs as agent→agent items: a `handoff` row (straight to a thread) and a repo
+/// handoff's card (`ask`) in the sender's thread folded, the `msg` it delivered in the receiver's as the message form.
+fn handoffs(events: &[Event], page: &mut Value) {
+    let (id, sent) = (
+        page["id"].as_str().unwrap_or_default().to_string(),
+        crate::conductor::forwarded(events),
+    );
+    let msgs = page["msgs"].as_array_mut().map(std::mem::take).unwrap_or_default();
+    let want: std::collections::BTreeSet<_> = msgs.iter().filter_map(|m| m["seq"].as_u64()).collect();
+    let at: BTreeMap<_, _> = events
+        .iter()
+        .filter(|e| want.contains(&e.seq))
+        .map(|e| (e.seq, e))
+        .collect();
+    let got = |e: &Event| {
+        let to = |h: &&Event| h.kind == "thread-handoff" && h.str("to") == Some(&id) && h.str("from") == e.str("from");
+        events.iter().filter(|h| h.seq < e.seq).rfind(to).map(|h| {
+            let is = |c: &&Event| c.kind == "needs-decision" && c.fleet == h.fleet && c.str("id") == h.str("ask");
+            let mut h = handoff(events, events.iter().find(is).unwrap_or(h), false);
+            h.state = (if sent.contains(&e.seq) {
+                "forwarded"
+            } else {
+                "delivered"
+            })
+            .into();
+            h
+        })
+    };
+    let msgs = msgs.into_iter().map(|mut m| {
+        let e = m["seq"].as_u64().and_then(|s| at.get(&s).copied());
+        let h = e.and_then(|e| match (m["kind"].as_str().unwrap_or_default(), e.kind.as_str()) {
+            ("handoff", "thread-handoff") if e.str("ask").is_none() => Some(handoff(events, e, true)),
+            ("ask", "needs-decision") if e.data.get("handoff").is_some() => Some(handoff(events, e, true)),
+            ("msg", "thread-msg") => got(e),
+            _ => None,
+        });
+        if let Some(h) = h {
+            m["handoff"] = serde_json::json!(h);
+        }
+        m
+    });
+    page["msgs"] = Value::Array(msgs.collect());
+}
+
+/// #681: handoff `o` (a repo handoff's card, or a `thread-handoff` straight to a thread) as one agent→agent item.
+/// A card is delivered once its `thread-handoff` is logged, failed while its last `ask-failed` follows its last tap's
+/// `decision` (or it closed undelivered), else pending with its rows.
+fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
+    let card = o.kind == "needs-decision";
+    let (h, from, id) = (
+        o.data.get("handoff").unwrap_or(&Value::Null),
+        o.str("thread").unwrap_or_default(),
+        o.str("id").unwrap_or_default(),
+    );
+    let s = |k: &str| (if card { h.get(k) } else { o.data.get(k) }).and_then(Value::as_str);
+    let s = |k: &str| s(k).unwrap_or_default().to_string();
+    let mine = |e: &&Event| e.fleet == o.fleet && e.str("id") == Some(id);
+    let sent = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
+    let (to, fail) = if card {
+        let end = |e: &&Event| matches!(e.kind.as_str(), "decision" | "ask-failed") && mine(e);
+        let fail = events.iter().rfind(end).filter(|e| e.kind == "ask-failed");
+        let to = events.iter().rfind(sent).and_then(|e| e.str("to"));
+        let closed = crate::events::closed(events, o).filter(|_| to.is_none() && fail.is_none());
+        (to, fail.and_then(|e| e.str("reason")).or(closed))
+    } else {
+        (o.str("to"), None)
+    };
+    let state = match (to, fail) {
+        (_, Some(_)) => "failed",
+        (Some(_), None) => "delivered",
+        (None, None) => "pending",
+    };
+    let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
+    let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);
+    let choices = rows.filter(|_| state == "pending").map(|((t, to), n)| HandoffChoice {
+        n,
+        text: t.as_str().unwrap_or_default().into(),
+        thread: to.as_str().unwrap_or_default().into(),
+        op: "answer".into(),
+        fleet: o.fleet.clone(),
+        id: id.into(),
+    });
+    let text = s("text");
+    Handoff {
+        kind: "handoff".into(),
+        id: o.seq,
+        from: HandoffFrom {
+            agent: "conductor".into(),
+            thread: from.into(),
+            repo: o.fleet.clone(),
+        },
+        to: to.map_or_else(
+            || serde_json::json!({"repo": s("repo"), "pending": true}),
+            |t| serde_json::json!(t),
+        ),
+        title: s("title"),
+        summary: text.lines().next().unwrap_or_default().into(),
+        text,
+        state: state.into(),
+        error: fail.map(Into::into),
+        folded,
+        choices: choices.collect(),
+    }
+}
+
+/// #681: API v1 `repo/<fleet>/threads`: the repo's conductor threads newest-active first (the chat tab's order: by
+/// the last message not the system's), the first not archived its ongoing one.
+fn repo(events: &[Event], fleet: &str) -> RepoThreads {
+    use crate::conductor::{archived, of, title, unread};
+    let ts = events.iter().filter(|t| t.kind == "thread-new" && t.fleet == fleet);
+    let mut rows: Vec<_> = ts
+        .map(|t| {
+            let id = t.str("thread").unwrap_or_default();
+            let msg = |e: &&Event| matches!(e.kind.as_str(), "thread-msg" | "needs-decision");
+            let last = of(events, id).filter(msg).rfind(|e| e.str("from") != Some("system"));
+            let line = last.map_or(String::new(), |e| {
+                let who = if e.str("from") == Some("owner") {
+                    "you"
+                } else {
+                    "conductor"
+                };
+                format!("{who}: {}", e.str("text").or(e.str("question")).unwrap_or_default())
+            });
+            let ts = last.map_or(t.ts, |e| e.ts);
+            (
+                id,
+                LastLine {
+                    line: line.lines().next().unwrap_or_default().into(),
+                    ts,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1.ts));
+    let mut ongoing = true;
+    let threads = rows.into_iter().map(|(id, last)| {
+        let archived = archived(events, id);
+        let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+        let newest = ongoing && !archived;
+        ongoing &= !newest;
+        RepoThread {
+            id: id.into(),
+            title: title(events, id).into(),
+            last,
+            unread: unread(events, id),
+            awake: lane.is_some_and(|l| l.kind != "conductor-sleep"),
+            archived,
+            newest,
+        }
+    });
+    RepoThreads {
+        repo: fleet.into(),
+        threads: threads.collect(),
+    }
 }

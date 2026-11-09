@@ -70,6 +70,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
         }
     }
+    crate::roots::watch(ctx, cfg, r, out)?; // #630
     crate::setup::reap(ctx, r, &events)?;
     // #537: CI runners below `slots × VMs` alert once per drop, `runners-ok` once on the way back.
     match crate::runners::tick(ctx, cfg, r, &events) {
@@ -178,7 +179,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let mut capped = None;
+        let (mut capped, mut cause) = (None, None);
         if let (Some(agents), Some((role, lane))) = (&agents, s.active_lane()) {
             // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
             let spawned = last_spawn(&events, lane);
@@ -208,10 +209,13 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let mine = |e: &Event, sp| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
             let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e, sp)));
             if status.is_none() && !closed {
+                // #662: an ACP lane's exit cause, as shed's events told it.
+                cause = crate::shed::exit_cause(&events, lane);
+                let why = cause.map_or(String::new(), |c| format!(": {c}"));
                 hits.push((
                     "lane-dead",
                     key.clone(),
-                    format!("{role} lane {lane} is gone ({})", s.state),
+                    format!("{role} lane {lane} is gone ({}){why}", s.state),
                 ));
             }
             // A lane on a named account that shows its harness's usage-limit banner caps that account.
@@ -260,16 +264,27 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 }
             }
             // #223: a lane done/idle past `idle_reap_minutes` keeps its agent but not what the agent started.
-            let trim =
-                wt.filter(|_| matches!(status, Some("done" | "idle")) && idle > cfg.limits.idle_reap_minutes * 60);
-            let trimmed = trim.map(|wt| host::reap(r, Path::new(wt), true));
+            // #679: a shed lane's agent (its terminal's pid) and its tree stay too; no pid known: nothing goes. A lane
+            // whose last turn is `working` keeps all: a background job it started on purpose.
+            let shed = agent.is_some_and(|a| a["runtime"] == "shed");
+            let spare = agent.and_then(|a| a["pid"].as_u64()).map(|p| p.to_string());
+            let working = crate::waiting::turn(&events, s).is_some_and(|t| t.str("state") == Some("working"));
+            let trim = wt.filter(|_| {
+                matches!(status, Some("done" | "idle"))
+                    && idle > cfg.limits.idle_reap_minutes * 60
+                    && !working
+                    && (!shed || spare.is_some())
+            });
+            let trimmed = trim.map(|wt| host::reap(r, Path::new(wt), true, spare.as_deref()));
             if let Some((killed, mb)) = trimmed.filter(|t| !t.0.is_empty()) {
                 let d = json!({"agent": lane, "killed": killed, "freed_mb": mb});
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
             // #425: a held lane waits by design. #666: an unheld one alerts once until it changes (drive acts on it).
-            if idle > stall && status != Some("working") && !parked && held_on(&events, s).is_empty() {
+            // #679: a live shed lane whose last turn is `working` is idle between turns, never stalled.
+            let between = shed && working;
+            if idle > stall && status != Some("working") && !between && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
@@ -308,6 +323,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let mut d = json!({"key": key, "reason": reason});
             if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
                 c.iter().for_each(|(k, v)| d[k] = v.clone());
+            }
+            if let Some(c) = cause.filter(|_| kind == "lane-dead") {
+                d["cause"] = json!(c);
             }
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), kind, d)?;
         }
@@ -640,6 +658,7 @@ pub fn clean(
     let mut closed = BTreeMap::new();
     // #605: when each merged lane's agent was first seen not working.
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
+    let mut fresh = std::collections::BTreeSet::new();
     // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
     let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
         .flat_map(|(name, f)| {
@@ -717,16 +736,41 @@ pub fn clean(
             writeln!(out, "keep {shown}: {why}")?;
             continue;
         }
+        // #664: a gitfile naming a folder its host lacks is another host's checkout: reported, never touched.
+        let gitdir = on.read(&Path::new(wt).join(".git"));
+        let gitdir = gitdir
+            .as_deref()
+            .and_then(|g| g.strip_prefix("gitdir: "))
+            .map(str::trim);
+        if let Some(gd) = gitdir.filter(|g| g.starts_with('/') && !on.exists(Path::new(g))) {
+            let there = away.unwrap_or("this host");
+            let why = format!("its gitfile points at {gd}, not on {there}; fix: on {there}, check it holds nothing you need, then `rm -rf '{wt}'`");
+            if lane.is_some() {
+                return unsafe_lane(&format!("orphan (wrong host): {why}"));
+            }
+            writeln!(out, "orphan (wrong host) {shown}: {why}")?;
+            continue;
+        }
         // #605: the lane's own pane, not `working` for `idle_merged_minutes`, closes through `kill`'s path first; a
         // refused wip snapshot keeps it, reported once and never retried. Any other agent there is left alone.
         let agent = e.str("agent").unwrap_or_default();
-        let here = host::live_in(&agents, agent, Path::new(wt));
-        let own = |a: &&Value| a["name"] == agent && a["host"].as_str() == away && a["agent_status"] != "working";
+        // #664: only the spawn's own host's agents: a lane of the same name on another host is not this one.
+        let there: Vec<Value> = (agents.iter())
+            .filter(|a| a["host"].as_str() == away)
+            .cloned()
+            .collect();
+        let here = host::live_in(&there, agent, Path::new(wt));
+        // #664: an unnamed pane there is the shell its harness left.
+        let mine = |a: &Value| a["name"] == agent || a["name"].is_null();
+        let own = |a: &&Value| mine(a) && a["agent_status"] != "working";
         let key = format!("merged-idle:{agent}:{}", e.ts);
         let refused = events
             .iter()
             .any(|x| x.kind == "lane-kept-dirty" && x.str("key") == Some(&key));
         let since = (!here.is_empty() && here.iter().all(own)).then(|| *idle.entry(agent.into()).or_insert(ctx.now));
+        if since.is_some() {
+            fresh.insert(agent.to_string());
+        }
         let left = since.map(|t| (t + cfg.limits.idle_merged_minutes * 60).saturating_sub(ctx.now));
         let mut live = !here.is_empty();
         let mut why_live = match left {
@@ -737,12 +781,20 @@ pub fn clean(
             writeln!(out, "would close {agent}'s idle pane {pane} (work to wip/ first)")?;
             live = false;
         } else if left == Some(0) && !refused {
-            match kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
+            // #664: a lane the log has killed whose pane its host still shows only closes; a failed close is tried
+            // again next run, only a refused wip save is kept for good.
+            let shut = match spawned(&events, agent, e.str("host")) {
+                Ok(_) => kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")),
+                Err(_) => close_gone(&on, agent, wt, pane),
+            };
+            match shut {
                 Ok(()) => live = false,
                 Err(err) => {
                     why_live = format!("pane kept: {err:#}");
-                    let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
-                    fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                    if err.downcast_ref::<crate::gate::Refusal>().is_some() {
+                        let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
+                        fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                    }
                 }
             }
         }
@@ -812,9 +864,7 @@ pub fn clean(
     }
     if yes {
         idle.retain(|n, _| {
-            agents
-                .iter()
-                .any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
+            fresh.contains(n) || (agents.iter()).any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
         });
         crate::db::put(&ctx.state, IDLE, ctx.now, &idle)?;
     }
@@ -876,7 +926,7 @@ pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -
 
 /// #186: TERM, then KILL, the processes inside `wt`; logs `lane-reaped` when any were signalled.
 pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Option<u64>), wt: &str) -> Result<usize> {
-    let names = host::reap(r, Path::new(wt), false).0;
+    let names = host::reap(r, Path::new(wt), false, None).0;
     if !names.is_empty() {
         let d = json!({"worktree": wt, "killed": names.len(), "names": names});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "lane-reaped", d))?;
@@ -960,9 +1010,8 @@ fn save(
     wt: &str,
 ) -> Result<Option<String>> {
     let agent = e.str("agent").unwrap_or_default();
-    let w = wip_branch(ctx, r, agent);
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let sha = match snapshot(r, wt, &w, "wip: auto-saved by herdsman") {
+    let (w, sha) = match snapshot(r, wt, &wip_branch(ctx, r, agent), "wip: auto-saved by herdsman") {
         Err(Snap::Secret(hit)) => {
             let why = format!("unsaved work has a secret ({hit})");
             let d = json!({"key": wt, "agent": agent, "reason": format!("{wt}: {why}; kept")});
@@ -970,7 +1019,7 @@ fn save(
             return Ok(Some(why));
         }
         Err(Snap::Failed(err) | Snap::Push(err)) => return Ok(Some(format!("wip save failed: {err:#}"))),
-        Ok(_) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
+        Ok((w, _)) => (w, git(&["rev-parse", "HEAD"])?.trim().to_string()),
     };
     let remote = git(&["ls-remote", "origin", &format!("refs/heads/{w}")])?;
     if remote.split_whitespace().next() != Some(sha.as_str()) {
@@ -985,9 +1034,9 @@ fn save(
 /// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the
 /// Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let mut total = du(&ctx.worktrees);
+    let mut total = du(&ctx.worktrees).saturating_sub(du(&ctx.worktrees.join(crate::roots::BUILD)));
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
-    let builds = !cfg.limits.build_root.is_empty() && crate::config::expand(&cfg.limits.build_root).is_dir();
+    let builds = builds(ctx, cfg).iter().any(|b| b.is_dir());
     let live = if over(total) || builds {
         live_lanes(ctx, cfg, r)?
     } else {
@@ -1034,7 +1083,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;
-    trim_builds(cfg, cfg.limits.build_budget_gb, &live, out, false)?;
+    trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, out, false)?;
     Ok(std::fs::write(
         ctx.state.with_file_name("worktrees.du"),
         format!("{total} {}", ctx.now),
@@ -1051,7 +1100,7 @@ pub fn trim_hosts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) 
             continue;
         }
         let on = On::quick(r, Some(m));
-        if let Err(e) = trim_on(&on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
+        if let Err(e) = trim_on(ctx, &on, cfg, cfg.limits.build_budget_gb, &Live::new(), out) {
             writeln!(out, "builds: {name}: {e:#}")?;
             continue;
         }
@@ -1078,11 +1127,18 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     Ok(names.chain(spawned).map(String::from).collect())
 }
 
-/// #536/#651: a lane's scratch (`<build_root>/.scratch/<agent>`) on `on`'s host stays while its agent is working,
+/// #536/#651: a lane's scratch (`<root>/.build/.scratch/<agent>`) on `on`'s host stays while its agent is working,
 /// it is an open issue's latest lane of its role, or an agent no spawn names yet holds it; else it goes (`lane ended`).
 /// Under `min_free_gb` every non-working lane's goes (`disk low`). Largest first; a building one stays.
 fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> Result<()> {
-    let names = scratch(on, cfg, &[])?;
+    for b in build_dirs(ctx, cfg, on) {
+        sweep_in(ctx, cfg, on, host, &b, out)?;
+    }
+    Ok(())
+}
+
+fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn Write) -> Result<()> {
+    let names = scratch(on, b, &[])?;
     if names.is_empty() {
         return Ok(());
     }
@@ -1106,10 +1162,10 @@ fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> R
     let removed = if gone.is_empty() {
         vec![]
     } else {
-        scratch(on, cfg, &gone)?
+        scratch(on, b, &gone)?
     };
     for (n, bytes) in &removed {
-        let p = format!("{}/{}/{n}", cfg.limits.build_root, crate::spawn::SCRATCH);
+        let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
         writeln!(out, "scratch: {host}: removed {p} {:.2} GB ({})", gb(*bytes), why[n])?;
     }
     if on.machine.is_some() {
@@ -1123,14 +1179,11 @@ fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> R
     Ok(())
 }
 
-/// #651: on `on`'s host, `<build_root>/.scratch`'s folders (`rm` empty), or `rm`'s removed, largest first, with their
-/// bytes; a building one stays. A remote one runs `SCRATCH` there (no `lsof`: no building check).
-fn scratch(on: &On, cfg: &Config, rm: &[String]) -> Result<Vec<(String, u64)>> {
-    if cfg.limits.build_root.is_empty() {
-        return Ok(vec![]);
-    }
+/// #651: on `on`'s host, build folder `b`'s `.scratch` folders (`rm` empty), or `rm`'s removed, largest first, with
+/// their bytes; a building one stays. A remote one runs `SCRATCH` there (no `lsof`: no building check).
+fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
     if on.machine.is_some() {
-        let args = crate::runner::argv(&["-c", SCRATCH, "sh", &cfg.limits.build_root]);
+        let args = crate::runner::argv(&["-c", SCRATCH, "sh", b]);
         let args = [args, rm.to_vec()].concat();
         let o = on.run("sh", &args)?;
         anyhow::ensure!(o.code == 0, "sweep failed ({}): {}", o.code, o.stderr.trim());
@@ -1140,7 +1193,7 @@ fn scratch(on: &On, cfg: &Config, rm: &[String]) -> Result<Vec<(String, u64)>> {
         };
         return Ok(o.stdout.lines().filter_map(row).collect());
     }
-    let root = crate::config::expand(&cfg.limits.build_root).join(crate::spawn::SCRATCH);
+    let root = crate::config::expand(b).join(crate::spawn::SCRATCH);
     let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
     let all = ls
         .filter(|e| e.path().is_dir())
@@ -1178,7 +1231,7 @@ fn building(d: &Path, depth: u8) -> bool {
 }
 
 /// #536: the newest mtime of `d` and its entries.
-fn mtime(d: &Path) -> u64 {
+pub fn mtime(d: &Path) -> u64 {
     let m = |p: &Path| {
         p.metadata()
             .map_or(0, |m| std::os::unix::fs::MetadataExt::mtime(&m).unsigned_abs())
@@ -1187,24 +1240,46 @@ fn mtime(d: &Path) -> u64 {
     ls.map(|e| m(&e.path())).fold(m(d), u64::max)
 }
 
-/// #438: over `budget` GB, the shared build folder's profiles (`<build_root>/<repo>/<profile>`) whose
+/// #630: this host's build folders, `<root>/.build` of each of its roots.
+fn builds(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
+    let name = cfg
+        .hosts
+        .iter()
+        .find(|h| h.1.machine.is_none())
+        .map_or("", |h| h.0.as_str());
+    let roots = crate::roots::listed(cfg, name, None, &ctx.worktrees);
+    roots.into_iter().map(|r| r.join(crate::roots::BUILD)).collect()
+}
+
+/// `trim_root` on each of this host's build folders. Bytes freed.
+pub fn trim_builds(ctx: &Ctx, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    builds(ctx, cfg)
+        .iter()
+        .map(|b| trim_root(b, budget, live, out, dry))
+        .sum()
+}
+
+/// #438: over `budget` GB, the lane build folders' profiles (`<root>/.build/<agent>/<profile>`, #630) whose
 /// `.cargo-lock` no cargo holds go, until it is under; a building one stays. #536: lane scratch dirs count and go
 /// too, oldest first; #634: never a `live` lane's. Bytes freed.
-pub fn trim_builds(cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
-    let root = crate::config::expand(&cfg.limits.build_root);
-    if cfg.limits.build_root.is_empty() || !root.is_dir() {
+fn trim_root(root: &Path, budget: f64, live: &Live, out: &mut dyn Write, dry: bool) -> Result<u64> {
+    if !root.is_dir() {
         return Ok(0);
     }
-    let (mut total, mut freed) = (du(&root), 0);
+    let (mut total, mut freed) = (du(root), 0);
     let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
-    let profiles = ls(&root)
+    let profiles = ls(root)
         .flat_map(|r| ls(&r))
         .filter(|p| p.join(".cargo-lock").is_file())
         .map(|p| (p, 0));
     let scratch = ls(&root.join(crate::spawn::SCRATCH))
         .filter(|p| p.is_dir())
         .map(|p| (p, 3));
-    let lane = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
+    // #630: a profile's lane is its build folder's (`<root>/.build/<agent>/<profile>`).
+    let lane = |p: &Path, d: u8| {
+        let p = if d > 0 { Some(p) } else { p.parent() };
+        p.and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned())
+    };
     let mut dirs: Vec<_> = profiles.chain(scratch).map(|(p, n)| (mtime(&p), p, n)).collect();
     dirs.sort();
     for (_, dir, depth) in dirs {
@@ -1216,7 +1291,7 @@ pub fn trim_builds(cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write, 
             writeln!(out, "keep {}: cargo is building", dir.display())?;
             continue;
         }
-        if depth > 0 && lane(&dir).is_some_and(|n| live.contains(&n)) {
+        if lane(&dir, depth).is_some_and(|n| live.contains(&n)) {
             writeln!(out, "keep {}: a live lane", dir.display())?;
             continue;
         }
@@ -1282,16 +1357,28 @@ for d in */*/; do
 done
 echo "freed $f""#;
 
-/// The shared build folder on `on`'s host trimmed to `budget` GB; bytes freed.
-pub fn trim_on(on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
-    if on.machine.is_none() || cfg.limits.build_root.is_empty() {
-        return trim_builds(cfg, budget, live, out, false);
+/// #630: the build folders on `on`'s host, `<root>/.build` of each of its roots.
+fn build_dirs(ctx: &Ctx, cfg: &Config, on: &On) -> Vec<String> {
+    let Some(h) = (cfg.hosts.values()).find(|h| h.machine.as_deref() == on.machine && on.machine.is_some()) else {
+        return builds(ctx, cfg).iter().map(|b| b.display().to_string()).collect();
+    };
+    let roots = Some(h.roots()).filter(|v| !v.is_empty());
+    let roots = roots.unwrap_or_else(|| vec![crate::roots::DEFAULT.into()]);
+    roots.iter().map(|r| format!("{r}/{}", crate::roots::BUILD)).collect()
+}
+
+/// The shared build folders on `on`'s host trimmed to `budget` GB each; bytes freed.
+pub fn trim_on(ctx: &Ctx, on: &On, cfg: &Config, budget: f64, live: &Live, out: &mut dyn Write) -> Result<u64> {
+    if on.machine.is_none() {
+        return trim_builds(ctx, cfg, budget, live, out, false);
     }
+    let dirs = build_dirs(ctx, cfg, on);
+    dirs.iter().map(|b| trim_remote(on, b, budget, out)).sum()
+}
+
+fn trim_remote(on: &On, root: &str, budget: f64, out: &mut dyn Write) -> Result<u64> {
     let kb = format!("{:.0}", budget * 1_048_576.0);
-    let o = on.run(
-        "sh",
-        &crate::runner::argv(&["-c", TRIM, "sh", &cfg.limits.build_root, &kb]),
-    )?;
+    let o = on.run("sh", &crate::runner::argv(&["-c", TRIM, "sh", root, &kb]))?;
     anyhow::ensure!(o.code == 0, "trim failed ({}): {}", o.code, o.stderr.trim());
     let s = o.stdout;
     let (log, last) = s.trim_end().rsplit_once('\n').unwrap_or(("", s.trim()));
@@ -1330,7 +1417,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
             writeln!(o, "skip {}: {why}", wt.display())?;
         }
     }
-    total += trim_builds(cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
+    total += trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, o, !yes)?;
     let done = if yes { "freed" } else { "reclaimable" };
     writeln!(o, "{:.2} GB {done} {NOTE}", gb(total))?;
     if yes {
@@ -1377,7 +1464,12 @@ pub fn orphan_dirs(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
     let ours: Vec<&str> = cfg.fleet.values().map(crate::config::Fleet::repo_name).collect();
     let all = std::fs::read_dir(&ctx.worktrees).into_iter().flatten().flatten();
     all.map(|d| d.path())
-        .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| ours.iter().any(|o| n == *o)))
+        .filter(|p| {
+            p.is_dir()
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.as_encoded_bytes()[0] == b'.' || ours.iter().any(|o| n == *o))
+        })
         .collect()
 }
 
@@ -1401,7 +1493,7 @@ pub fn remote_orphans(cfg: &Config, r: &dyn Runner, out: &mut dyn Write, remove:
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && h.1.machine.is_some()) {
         let (on, root) = (
             On::new(r, h.machine.as_deref()),
-            h.root.as_deref().unwrap_or("~/.herdr/worktrees"),
+            h.root.as_deref().unwrap_or(crate::roots::DEFAULT),
         );
         let list = ok(&on, "sh", &["-c", DIRS, "sh", root.trim_start_matches("~/")]);
         let list = list.or_else(|e| writeln!(out, "cannot list orphans on {name}: {e:#}").map(|()| String::new()))?;
@@ -1644,12 +1736,21 @@ fn kill_as(
     if !yes {
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
-    if let Some(w) = &wip {
-        let skip = save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
-        let _ = skip.is_empty()
-            || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
-    }
-    herdr::close(&on, e.str("pane").unwrap_or_default())?;
+    let wip = match wip {
+        Some(w) => {
+            let (w, skip) = save_on(&on, agent, wt.unwrap_or_default(), &w, "wip: kill snapshot")?;
+            let _ = skip.is_empty()
+                || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
+            Some(w)
+        }
+        None => None,
+    };
+    close_gone(
+        &on,
+        agent,
+        e.str("worktree").unwrap_or("\0"),
+        e.str("pane").unwrap_or_default(),
+    )?;
     drop_log(ctx, Some(agent));
     let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip, "why": why});
     // #605: a merged lane's idle pane closed by `clean` is `lane-closed`.
@@ -1707,8 +1808,38 @@ fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     Ok((dirty, ahead.trim().parse().unwrap_or(0)))
 }
 
-/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
-fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<String>> {
+/// #676: does worktree `wt` on its host hold dirty files or unpushed commits (unreadable: no)?
+pub fn unsaved(on: &On, wt: &Path) -> bool {
+    on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
+}
+
+/// #664: close `pane` on the lane's host, then any pane herdr there still shows for `agent` or inside `wt` (a stale id
+/// in the log, a shell its harness left); fails, naming it, unless the host confirms none is left.
+fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
+    herdr::close(on, pane)?;
+    for again in [true, false] {
+        let left: Vec<String> = (host::live_in(&herdr::agents(on)?, agent, Path::new(wt)).iter())
+            .filter(|a| a["name"] == agent || a["name"].is_null())
+            .filter_map(|a| a["pane_id"].as_str().map(String::from))
+            .collect();
+        if left.is_empty() {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            again,
+            "{agent}'s pane {} is still open on its host after close",
+            left.join(", ")
+        );
+        for p in &left {
+            herdr::close(on, p)?;
+        }
+    }
+    Ok(())
+}
+
+/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing
+/// closed. The branch it went to (#664: another name when `w` was taken) and the files skipped.
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String, Vec<String>)> {
     match snapshot(on, wt, w, msg) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
@@ -1722,7 +1853,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<Str
             "SNAPSHOT_FAILED",
             format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
         ),
-        Ok(skip) => Ok(skip),
+        Ok(ws) => Ok(ws),
     }
 }
 
@@ -1732,19 +1863,28 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
         return Ok(None);
     }
     let w = wip_branch(ctx, on.r, agent);
-    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|_| Some(w))
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|(w, _)| Some(w))
 }
 
-/// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
-fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
-    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M");
+/// `wip/<agent>-<YYYYmmdd-HHMMSS>-<tag>` (the epoch when `date` is unreadable); #664: never another save's name.
+pub(crate) fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
+    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
-    format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() })
+    let w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    format!("{w}-{}", tag(&w))
 }
 
-/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first).
-pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<()> {
-    snapshot(r, wt, w, msg).map(drop).map_err(|e| match e {
+/// #664: 4 hex digits hashed from `seed` (fixed keys, so a replay names the same branch).
+fn tag(seed: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    seed.hash(&mut h);
+    format!("{:04x}", h.finish() & 0xffff)
+}
+
+/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
+pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> {
+    snapshot(r, wt, w, msg).map(|(w, _)| w).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
         Snap::Failed(e) | Snap::Push(e) => e,
     })
@@ -1804,8 +1944,9 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
 
 /// Stage all but `OWN_FILES`, `SHOT_DIRS`, `NO_WIP` and files over `CAPS`, scan the staged and unpushed diff for a
 /// secret (#96, the first as `file:line: masked`), commit any staged change with `msg` (the skipped files listed) and
-/// push HEAD to `w`; the skipped files.
-fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<Vec<String>, Snap> {
+/// push HEAD to `w`; #664: a push rejected because `w` exists goes once more to `w-<tag>`, never forced. The branch
+/// pushed and the skipped files.
+fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(String, Vec<String>), Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
     let undo = |e: anyhow::Error| {
@@ -1883,6 +2024,11 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
         git(&[id, &["commit", "-q", "--no-verify", "-m", &msg]].concat()).map_err(undo)?;
     }
-    git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
-    Ok(skip)
+    let push = |w: String| git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map(|_| w);
+    match push(w.to_string()) {
+        Err(e) if format!("{e:#}").contains("[rejected]") => push(format!("{w}-{}", tag(w))),
+        p => p,
+    }
+    .map(|w| (w, skip))
+    .map_err(Snap::Push)
 }

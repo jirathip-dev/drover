@@ -172,13 +172,16 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-/// #157: one host: its herdr machine label (unset = this host), hand tags, worktree root, and whether new lanes go there.
+/// #157: one host: its herdr machine label (unset = this host), hand tags, workspace root, and whether new lanes go there.
+/// #630: or `roots`, in order: a new lane goes to the first mounted, writable one with room.
 #[derive(Debug, Deserialize)]
 pub struct HostCfg {
     pub machine: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub root: Option<String>,
+    #[serde(default)]
+    pub roots: Vec<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
     /// #254: a cloud host's recipe (`boat`, or `<config>/recipes/<name>.toml`), size, limits and idle stop (20 min).
@@ -199,6 +202,12 @@ pub struct HostCfg {
 pub const CLOUD_ALLOW: [&str; 3] = ["docker", "docker compose", "supabase start"];
 
 impl HostCfg {
+    /// #630: its workspace roots in order, as written (none set: empty).
+    pub fn roots(&self) -> Vec<String> {
+        let mut v = self.roots.clone();
+        v.extend(self.root.clone().filter(|_| v.is_empty()));
+        v
+    }
     pub fn allow(&self) -> Vec<String> {
         let def = || {
             CLOUD_ALLOW
@@ -271,14 +280,17 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: account name -> its token's secret name (#441: in the store, `herdsman accounts import`), plus the
-/// settings below.
+/// `[accounts]`: the account names (#683: each value is unused, once its token's name in the store; a lane signs in
+/// with `account_env`'s env, else its folder, `Accounts::folder`), plus the settings below.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Accounts {
     /// #539: retired by #441, a warning (`Config::warnings`), never a load error; its tokens still back the store's
     /// missing ones, read-only, until the import and the line's removal.
     pub accounts_env: Option<String>,
+    /// #683 (q846): the command (words; `{provider}` and `{name}` filled in) that prints an account's lane env as a JSON
+    /// object, e.g. `cooee accounts env {provider} {name}`; unset: `Accounts::folder` as the provider's config folder.
+    pub account_env: Option<String>,
     /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
     pub cap_pattern: Option<String>,
     pub cap_reset_minutes: u64,
@@ -290,10 +302,20 @@ pub struct Accounts {
     pub names: BTreeMap<String, String>,
 }
 
+impl Accounts {
+    /// #683: account `name`'s own CLI login folder with no `account_env`: its `[accounts.usage]` one, else
+    /// `~/.config/herdsman/accounts/<name>`.
+    pub fn folder(&self, name: &str) -> PathBuf {
+        let d = self.usage.get(name).cloned();
+        expand(&d.unwrap_or_else(|| format!("~/.config/herdsman/accounts/{name}")))
+    }
+}
+
 impl Default for Accounts {
     fn default() -> Self {
         Accounts {
             accounts_env: None,
+            account_env: None,
             cap_pattern: None,
             cap_reset_minutes: 300,
             usage: BTreeMap::new(),
@@ -496,9 +518,8 @@ pub struct Limits {
     pub min_free_gb: f64,
     /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
-    /// #438: lanes share `CARGO_TARGET_DIR=<build_root>/<repo>` on their host (empty: off; a fleet's own wins); over
-    /// `build_budget_gb` drive trims its unlocked profiles.
-    pub build_root: String,
+    /// #630: each lane's Cargo target, `<root>/.build/<agent>`, on its host (a fleet's own wins); over
+    /// `build_budget_gb` drive trims their unlocked profiles.
     pub build_budget_gb: f64,
     /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,
@@ -576,7 +597,6 @@ impl Default for Limits {
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
-            build_root: "~/.cache/herdsman/target".into(),
             build_budget_gb: 20.0,
             sweep_remote: true,
             stray_roots: vec!["/tmp".into(), "$TMPDIR".into()],
@@ -684,7 +704,7 @@ impl Config {
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s
     /// `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let run = |f| format!("retired (#441): run `herdsman accounts import {f}`, then drop the line");
+        let run = |_| "retired (#441): drop the line (#683: accounts sign in with their own login)".to_string();
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));

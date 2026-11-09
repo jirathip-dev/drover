@@ -2,13 +2,15 @@
   "response": {
     "fleet": "sendmeter",
     "issue": 12,
-    "verdicts": []
+    "verdicts": [],
+    "why": null
   },
   "route": "GET /api/v1/issue/<fleet>/<n>",
   "schema": {
     "fleet": "string",
     "issue": "number",
-    "verdicts": []
+    "verdicts": [],
+    "why": "null"
   },
   "type": "IssueView"
 }

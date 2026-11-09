@@ -70,6 +70,10 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
+- Never edit `ci/cap.toml` (the hook refuses it): one conductor-filed issue raises it for the whole queue.
+  Your cap ask carries `herdsman cap <fleet>`'s queue-wide view, with its two options: raise to the
+  projected total plus margin in one conductor-filed issue (recommended), or trim. A `DECISION` to wait
+  for that issue: `herdsman queue <fleet> block --on N <issue>` and end the turn.
 - Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
   the cap after another merge is a fix round: trim, or ask under the same rule.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
@@ -99,6 +103,7 @@ This is a fix round; a fresh review follows at your pushed head.
 2. Resolve the conflicts preserving both sides' intent.
 3. Run the repo's gates (build, lint, tests) and push.
 4. Report the resolved files.
+5. A merge-only round's `why.md` may be short: one `Decided:`, `Because:` and `Owner:` (`Rejected: none` allowed).
 
 ## Output contract
 
@@ -108,3 +113,8 @@ This is a fix round; a fresh review follows at your pushed head.
 - A second build or checkout (base, staging, head) goes under `$HERDSMAN_SCRATCH_TARGET` only (builds with
   `CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target`, checkouts in `$HERDSMAN_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
+- #677: before `herdsman turn done`, write `why.md` in the worktree root (never commit it: herdsman puts it on your
+  pushed head as a git note and copies it into the PR body). At most 15 `Key: text` lines, `Owner:` once and last:
+  `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
+  `Check: what the reviewer should verify`, `Owner: one plain line`. Every `Because:` cites a verbatim spec quote
+  (12+ chars), an answered ask or a `file:line` at your head; no secrets. A bad note is refused `WHY_INVALID`.

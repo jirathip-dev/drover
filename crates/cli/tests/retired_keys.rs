@@ -36,8 +36,7 @@ fn a_fleet_toml_from_before_each_retired_key_change_loads() {
     }
     let c = ctx(&tmpdir("upgrade-441"), RETIRED);
     let (_, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
-    let warn = "! config — [accounts].accounts_env is retired (#441): run `herdsman accounts import \
-                ~/.config/claude-accounts/tokens.env`, then drop the line";
+    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
 
@@ -126,6 +125,24 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     );
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
 
+    // #631, #683: the signed build finds the account signed out (no login in its folder): DEST stays.
+    let o = gate(RETIRED, "");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(1), "{out}");
+    assert!(
+        out.contains("can't read the secrets; kept ") && out.contains("✗ account main — "),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    assert!(!dest.with_file_name("herdsman.new").exists());
+
+    // Signed in (#683: Claude Code's own login in the account's default folder): the build goes in.
+    std::fs::create_dir_all(d.join(".config/herdsman/accounts/main")).unwrap();
+    std::fs::write(
+        d.join(".config/herdsman/accounts/main/.claude.json"),
+        r#"{"oauthAccount": {}}"#,
+    )
+    .unwrap();
     let o = gate(RETIRED, "");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
@@ -135,5 +152,6 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
         d.display(),
         dest.display()
     );
-    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);
+    // The token-refused build was signed too (the check runs on the signed binary), then the green one.
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed.repeat(2));
 }

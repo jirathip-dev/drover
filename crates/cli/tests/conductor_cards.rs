@@ -178,7 +178,7 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
 
     let banner = "You've hit your limit · resets 6:40pm";
     let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
-    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
+    let sh = Shell(&r, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
     let (code, out) = run(
         &herdsman::Ctx {
             now: T + 60,
@@ -205,7 +205,9 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
         start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
         "{start}"
     );
-    assert_eq!(*sh.2.borrow(), ["b"], "on B: {calls:?}");
+    // #683: B's own login folder, no token.
+    let b = herdsman::config::home().join(".config/herdsman/accounts/B");
+    assert_eq!(*sh.2.borrow(), [format!("{}|", b.display())], "on B: {calls:?}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(
@@ -330,4 +332,110 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     );
     // `secret ls` lists names only.
     assert_eq!(run(&c, &Fake::default(), &["secret", "ls"]).1, "sendmeter API_KEY\n");
+}
+
+/// #669: a run card shows in its thread as its own row (never in a commands fold): the command, why, blast and folder,
+/// [approve]/[deny] for a paired device and its expiry; the tap runs it and the row shows the outcome; denied or
+/// expired, it says so.
+#[test]
+fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() {
+    let c = setup("cards-run", "", "");
+    let card = |cmd: &str| {
+        let args = [
+            "card",
+            "post",
+            "t1",
+            "--cmd",
+            cmd,
+            "--why",
+            "owner asked",
+            "--blast",
+            "read-only",
+            "--dir",
+            "/srv/app",
+        ];
+        run(&herdsman::Ctx { now: T, ..c.clone() }, &Fake::default(), &args).1
+    };
+    let cmd = |n: &str| {
+        let d = json!({"thread": "t1", "cmd": format!("herdsman brief sendmeter {n}")});
+        herdsman::events::append(&c.state, &Event::new(T, "sendmeter", None, "thread-cmd", d)).unwrap();
+    };
+    cmd("1");
+    assert_eq!(card("git log -1 main"), "r1\n");
+    cmd("2");
+    assert_eq!(card("git status"), "r2\n");
+    assert_eq!(card("uptime"), "r3\n");
+    let sha = kinds(&c, "run-card")[0].str("sha").unwrap().to_string();
+    let r = herdr(&live()).reply("sh -c", "commit 1a2b\n");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+
+    // API v1 `thread/<t>` for the paired device: the card, its sha, open for [approve]/[deny].
+    let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "thread/t1")).unwrap();
+    let msgs = j["msgs"].as_array().unwrap();
+    let r1 = msgs.iter().find(|m| m["kind"] == "run" && m["run"]["id"] == "r1");
+    let r1 = r1.unwrap_or_else(|| panic!("no run card r1 in {j}"));
+    assert_eq!(
+        (
+            &r1["run"]["sha"],
+            &r1["run"]["cmd"],
+            &r1["run"]["dir"],
+            r1["open"].clone()
+        ),
+        (&json!(sha), &json!("git log -1 main"), &json!("/srv/app"), json!(true))
+    );
+
+    // The board: its own row with the command, why, blast, folder, both buttons and the countdown; no fold holds it.
+    let page = chat(&s, &cookie, T + 60);
+    let row = format!("<form class=chr data-id=\"r1\" data-sha=\"{}\"><button name=act value=approve>approve</button><button name=act value=deny>deny</button></form>", &sha[..12]);
+    for want in [
+        row.as_str(),
+        "<pre class=rc>git log -1 main</pre>",
+        "why: owner asked",
+        "touches: read-only",
+        "runs on: main host, /srv/app",
+        "expires in 14m",
+    ] {
+        assert!(page.contains(want), "{want} not in {page}");
+    }
+    let folds: Vec<&str> = page
+        .split("<details")
+        .filter(|d| d.contains("class=\"blk fold\""))
+        .collect();
+    assert!(folds.iter().all(|f| !f.contains("run card")), "{page}");
+
+    // [approve] runs it; the row shows who, the exit code and the output, no buttons. [deny] says nothing ran.
+    let res = req(
+        &s,
+        "/thread",
+        &format!("op=card&id=r1&act=approve&sha={}", &sha[..12]),
+        &cookie,
+        T + 120,
+    );
+    assert!(
+        res.starts_with("HTTP/1.1 200") && body(&res).contains("run r1 approved by owner"),
+        "{res}"
+    );
+    assert!(r.called("sh -c"));
+    let res = req(&s, "/thread", "op=card&id=r2&act=deny", &cookie, T + 130);
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    let page = chat(&s, &cookie, T + 140);
+    for want in [
+        "✓ approved by owner · exit 0",
+        "commit 1a2b",
+        "✗ denied by owner · nothing ran",
+    ] {
+        assert!(page.contains(want), "{want} not in {page}");
+    }
+    assert!(
+        !page.contains("data-id=\"r1\"") && !page.contains("data-id=\"r2\""),
+        "{page}"
+    );
+    assert!(page.contains("data-id=\"r3\""), "{page}");
+    // Past 15 min an unsettled card is expired: no buttons.
+    let page = chat(&s, &cookie, T + 901);
+    assert!(
+        page.contains("expired · nothing ran") && !page.contains("data-id=\"r3\""),
+        "{page}"
+    );
 }

@@ -1,6 +1,6 @@
 //! #548: a keychain read that waits on a macOS access dialog never blocks: `KEYCHAIN_LOCKED` within 5 s (a system
 //! row in the thread, one `check` alert); a second message behind a stuck delivery is `not delivered`, not a hang;
-//! `doctor` prints a prompting item's one-time fix.
+//! #683: `doctor`'s account rows never read the Keychain.
 mod common;
 use common::*;
 use herdsman::runner::{Out, Runner};
@@ -9,7 +9,7 @@ use std::any::Any;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
-const SVC_A: &str = "herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A";
+const SVC_A: &str = "herdsman/sendmeter/API_KEY";
 
 /// A keychain item behind a dialog nobody clicks: every call blocks for good.
 struct Dialog;
@@ -67,11 +67,11 @@ impl Runner for Hung<'_> {
     }
 }
 
-/// CONFIG with a Claude conductor on `[accounts]` A, and thread t1.
+/// CONFIG with a Claude conductor whose fleet env holds a `secret:` (#683: no account token any more), and thread t1.
 fn setup(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"A\"\n\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n"
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n\n[fleet.sendmeter.env]\nAPI_KEY = \"secret:API_KEY\"\n"
     );
     let c = ctx(&d, &cfg);
     let profile = c.config.with_file_name("claude").join("fleet-conductor");
@@ -127,7 +127,7 @@ fn a_hung_keychain_is_keychain_locked_in_5_s_with_a_system_row_and_one_alert() {
     );
     assert!(log.contains(&row), "{log}");
     assert_eq!(sleeps(&r), 5, "5 s on the clock, then refused: {:?}", r.calls.borrow());
-    assert!(!r.called("herdr agent start"), "no conductor without its token");
+    assert!(!r.called("herdr agent start"), "no conductor without its secret");
     let alerts = || log_kinds(&c).iter().filter(|k| *k == "keychain-locked").count();
     run(&c, &r, &["check"]);
     run(&c, &r, &["check"]);
@@ -153,7 +153,7 @@ fn a_second_message_behind_a_stuck_delivery_is_not_delivered_in_240_s() {
 }
 
 #[test]
-fn doctor_prints_a_prompting_items_fix() {
+fn doctor_reads_no_account_from_the_keychain() {
     let d = tmpdir("keychain-doctor");
     let c = ctx(
         &d,
@@ -161,10 +161,11 @@ fn doctor_prints_a_prompting_items_fix() {
     );
     let r = Fake::default();
     let out = run(&c, &Hung(&r), &["doctor"]).1;
-    let want = format!(
-        "✗ account A — {SVC_A} prompts for Keychain access → approve herdsman in the Keychain dialog: Always Allow for {SVC_A}, once (it lasts while herdsman is signed by \"herdsman-local\")"
-    );
-    assert!(out.lines().any(|l| l == want), "{out}");
+    let row = out
+        .lines()
+        .find(|l| l.contains("account A — "))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(row.contains("signed in (") && !row.contains("Keychain"), "{row}");
 }
 
 fn log_kinds(c: &herdsman::Ctx) -> Vec<String> {
