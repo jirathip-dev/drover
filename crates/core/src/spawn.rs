@@ -553,6 +553,14 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }
 
+/// #722: the linked worktree of `local`'s repo where `branch` is checked out, if any.
+fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
+    let list = ok(r, "git", &["-C", local, "worktree", "list", "--porcelain"]).ok()?;
+    let want = format!("branch refs/heads/{branch}");
+    let held = list.split("\n\n").skip(1).find(|b| b.lines().any(|l| l == want))?;
+    held.lines().next()?.strip_prefix("worktree ").map(String::from)
+}
+
 /// #298: `git worktree add` for a shed lane: its branch checked out if it exists (`have`), else made at the base.
 fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     let wt = p.worktree.to_string_lossy();
@@ -1086,20 +1094,53 @@ pub fn spawn(
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }
-        let created = match bt {
-            None => herdr::json(r, &create_argv(&local, &p, reopen))?,
-            Some(_) if reopen => Value::Null,
-            Some(_) => {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
-                Value::Null
+        let make = || -> Result<Value> {
+            Ok(match bt {
+                None => herdr::json(r, &create_argv(&local, &p, reopen))?,
+                Some(_) if reopen => Value::Null,
+                Some(_) => {
+                    let have = r
+                        .run(
+                            "git",
+                            &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
+                        )?
+                        .code
+                        == 0;
+                    ok(r, "git", &worktree_add(&local, &p, have))?;
+                    Value::Null
+                }
+            })
+        };
+        // #722: it failed with the branch still checked out in another worktree (a herdr-era root): that worktree's
+        // work is saved to `wip/`, it is removed and the lane's made again; a live agent there refuses.
+        let created = match make() {
+            Err(e) if !reopen => {
+                let Some(held) = checked_out(r, &local, &p.branch) else {
+                    return Err(e);
+                };
+                let live = host::agents(r)?;
+                let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
+                    .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
+                    .collect();
+                if !names.is_empty() {
+                    let why = format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch);
+                    return refused("LANE_LIVE", why);
+                }
+                let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
+                if on.exists(Path::new(&held)) {
+                    wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                    // Its work is on `wip/` or pushed: only lane scratch can stop a plain remove.
+                    if git(&["remove", &held]).is_err() {
+                        git(&["remove", "--force", &held])?;
+                    }
+                } else {
+                    git(&["prune"])?;
+                }
+                let d = json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip});
+                event("worktree-moved", d)?;
+                make()?
             }
+            c => c?,
         };
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.

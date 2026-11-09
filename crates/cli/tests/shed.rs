@@ -426,7 +426,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let c = acp_ctx("acp-spawn", &acp_config(&b.sock, "claude", true));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
-    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
     let calls = f.calls.borrow();
@@ -1220,11 +1220,12 @@ fn git(dir: &std::path::Path, a: &[&str]) -> String {
 }
 
 /// #662: an ACP lane's runner whose `git` in its worktree (a real repo, the `PathBuf`) is real; the rest is `Cli`'s.
+/// #722: also `git -C` anywhere under that path.
 struct Push<'a>(Cli<'a>, PathBuf);
 
 impl Runner for Push<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]) == self.1 {
+        if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]).starts_with(&self.1) {
             self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             let o = std::process::Command::new("git").args(args).output()?;
             let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
@@ -1565,4 +1566,131 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     assert_eq!(sys.len(), 1, "{msgs:?}");
     assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
     assert!(thread_events(&c, "conductor-start").is_empty());
+}
+
+/// #722: #12's branch checked out in its herdr-era worktree (`old`, clean and pushed) of a real `local` repo whose
+/// origin is a bare repo; with `fix`, its impl and rev lanes logged and the verdict FAIL, so the next impl spawn is a fix
+/// round on shed at the new root (else no lane logged it); herdr lists `live` agents in `old`: (ctx, fake, local, old,
+/// origin).
+fn herdr_era_lane(
+    name: &str,
+    sock: &std::path::Path,
+    fix: bool,
+    live: &[&str],
+) -> (herdsman::Ctx, Fake, PathBuf, PathBuf, PathBuf) {
+    let d = std::fs::canonicalize(tmpdir(name)).unwrap(); // git names worktrees by their real path
+    let (local, old, origin) = (
+        d.join("sendmeter"),
+        d.join("herdr/sendmeter/issue-12"),
+        d.join("origin.git"),
+    );
+    for p in [&local, &origin] {
+        std::fs::create_dir_all(p).unwrap();
+    }
+    git(&origin, &["init", "-q", "--bare"]);
+    git(&local, &["init", "-q", "-b", "staging"]);
+    git(&local, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&local, &["push", "-q", "origin", "staging"]);
+    git(
+        &local,
+        &["worktree", "add", "-q", "-b", "issue-12", old.to_str().unwrap()],
+    );
+    git(&old, &["commit", "-q", "--allow-empty", "-m", "impl"]);
+    git(&old, &["push", "-q", "origin", "issue-12"]);
+    let cfg = shed_config(sock, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w1:p1",
+        "workspace": "w1", "worktree": old, "branch": "issue-12"});
+    let rev = json!({"role": "rev", "agent": "sendmeter-rev-12", "harness": "claude", "pane": "w2:p1",
+        "workspace": "w2", "worktree": d.join("herdr/sendmeter/rev-12-r1"), "branch": "rev-12-r1"});
+    for (i, (kind, data)) in [
+        ("spawn", sp),
+        ("spawn", rev),
+        ("verdict", json!({"verdict": "FAIL", "sha": "1".repeat(40)})),
+    ]
+    .into_iter()
+    .enumerate()
+    .filter(|_| fix)
+    {
+        let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
+        herdsman::events::append(&c.state, &e).unwrap();
+    }
+    let rows: Vec<_> = (live.iter())
+        .map(|n| (*n, "working", old.to_str().unwrap(), "w1:p2"))
+        .collect();
+    let f = Fake::default()
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("herdr agent list", &agents(&rows))
+        .reply("which shed", "/opt/shed/bin/shed\n");
+    (c, f, local, old, origin)
+}
+
+fn worktrees_of(local: &std::path::Path) -> String {
+    git(local, &["worktree", "list", "--porcelain"])
+}
+
+#[test]
+fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b.sock, true, &[]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    assert_eq!(git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]), "issue-12");
+    assert!(!old.exists(), "the old worktree is gone");
+    assert!(
+        !worktrees_of(&local).contains(old.to_str().unwrap()),
+        "{}",
+        worktrees_of(&local)
+    );
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    assert_eq!(moved[0].str("old"), old.to_str());
+    assert_eq!(moved[0].data["wip"], Value::Null);
+}
+
+#[test]
+fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, origin) = herdr_era_lane("moved-unpushed", &b.sock, false, &[]);
+    git(&old, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
+    let commit = git(&old, &["rev-parse", "HEAD"]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let moved = logged(&c, "worktree-moved");
+    assert_eq!(moved.len(), 1, "{out}");
+    let w = moved[0].str("wip").expect("saved to wip").to_string();
+    assert!(w.starts_with("wip/sendmeter-impl-12-"), "{w}");
+    git(&origin, &["merge-base", "--is-ancestor", &commit, &w]);
+    assert!(!old.exists(), "the old worktree is gone");
+    let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
+    assert!(brief.contains(&format!("origin/{w}")), "{brief}");
+}
+
+#[test]
+fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-live", &b.sock, false, &["shell"]);
+    let cli = Push(
+        Cli(&f, b.terms.clone(), Shared::default()),
+        local.parent().unwrap().into(),
+    );
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("LANE_LIVE") && out.contains(old.to_str().unwrap()),
+        "{out}"
+    );
+    assert!(old.exists() && !c.worktrees.join("sendmeter/issue-12").exists());
+    assert!(logged(&c, "worktree-moved").is_empty());
 }
