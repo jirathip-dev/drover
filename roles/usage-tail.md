@@ -35,7 +35,7 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 - STALE: serve: fleet.toml changed since the page was rendered; reload and retry
 - NO_SUCH_AGENT / IS_LANE / SECRET_IN_WIP / SNAPSHOT_FAILED / UNSAFE_CLEAN: stop/kill: no such live lane; close: a logged lane (use stop/kill/clean); kill: a secret-looking value in the wip diff, or the wip snapshot failed (index restored, nothing pushed, pane stays); clean --lane: not merged/closed, dirty, unpushed or live
 - DESIGN_MAIN_ONLY: spawn: a design lane runs on the main host only; `--host` or a role `host` pin named another
-- MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`). ACP_UNGUARDED: spawn: an ACP lane (`shed-acp`) herdsman's hook would not guard (an adapter that runs no hook, no synced hook, no account token, another host) does not start. SHED_MISSING: spawn: a shed runtime's `shed` is not on the spawning PATH (drive's is the timer's); nothing is made
+- MCP_FORBIDDEN: spawn/profiles sync: a role's `mcp` names a server matching `mcp_deny` (default `*prod*`). ACP_UNGUARDED: spawn: an ACP lane (`shed-acp`) herdsman's hook would not guard (an adapter that runs no hook, no synced hook, no account env, another host) does not start. SHED_MISSING: spawn: a shed runtime's `shed` is not on the spawning PATH (drive's is the timer's); nothing is made. ACCOUNT_ENV: spawn: `[accounts] account_env` failed or printed no JSON object of env vars (its stderr in the refusal)
 
 ## Lessons
 
@@ -60,8 +60,8 @@ Lanes skip permission prompts; the Claude/Hermes hook blocks `gh pr merge`, `gh 
 `gh api` comment writes, `git push` to main/master/staging/integration, edits to fleet, fleet-operations and Hermes
 profile config. Reviewers are read-only: no edits but `verdict.md`, no `git commit|push|merge|rebase|reset`. Design lanes are owner-only: started by the owner or a conductor thread (`herdsman spawn … design`), never by a lane; never in verdict or merge.
 The hook also refuses `deny_commands` (default: containers: docker, colima, orb, podman, `supabase start`… → `REFUSED NO_CONTAINERS`) and, for every lane, `pkill`, `killall` and `pgrep … | xargs kill` (`REFUSED NO_BROAD_KILL`); a call it can't judge (input not JSON, fleet.toml not loading, an unknown fleet) `REFUSED HOOK_FAILED_CLOSED`.
-Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` exports the first uncapped one as `CLAUDE_CODE_OAUTH_TOKEN`;
-an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. Secrets (tokens, `secret:<NAME>` env) live only in the main host's OS store as `herdsman/<fleet>/<NAME>`; spawn writes a lane's to a 0600 file beside its worktree (over ssh stdin to a remote host), the pane's shell sources it, spawn deletes it. `herdsman accounts import [tokens.env]` (owner only) copies the old file's tokens in, checked by sha256. MCP: only the role's `mcp` (default none).
+Accounts (`herdsman accounts`): a Claude role's `account`/`accounts` signs the lane in with the first uncapped one's env (`[accounts] account_env`'s JSON, else its folder as `CLAUDE_CONFIG_DIR`; never a token);
+an `account-capped` one is skipped until the banner's reset time (else `cap_reset_minutes`, a day if weekly) or `herdsman accounts reset <name>`. Secrets (`secret:<NAME>` env) live only in the main host's OS store as `herdsman/<fleet>/<NAME>`; spawn writes a lane's to a 0600 file beside its worktree (over ssh stdin to a remote host), the pane's shell sources it, spawn deletes it. MCP: only the role's `mcp` (default none).
 
 ## Events
 

@@ -24,6 +24,9 @@ profile = "fleet-impl"
 [accounts]
 main = "TOKEN_MAIN"
 
+[accounts.usage]
+main = "{accounts}/main"
+
 [serve]
 allowed_hosts = ["mac.tail.ts.net"]
 
@@ -32,6 +35,7 @@ type = "webpush"
 sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
+        accounts = d.join("accounts").display(),
     )
 }
 
@@ -47,6 +51,8 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
+    // #683: account main's own login folder, signed in.
+    write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
     write(
         &c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist"),
         PLIST,
@@ -130,7 +136,7 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     assert!(
-        line(&out, "account main").contains("herdsman/all/TOKEN_MAIN in the store"),
+        line(&out, "account main").contains("signed in (") && !out.contains("TOKEN_MAIN"),
         "{out}"
     );
     let writes = [
@@ -213,12 +219,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ mkdir -p",
         ),
         (
-            |_, _, r| {
-                r.store.borrow_mut().clear();
+            |_, d, r| {
+                std::fs::remove_file(d.join("accounts/main/.claude.json")).unwrap();
                 r
             },
             "account main",
-            "herdsman/all/TOKEN_MAIN in the store → herdsman accounts import",
+            "→ cooee Settings › Providers, or CLAUDE_CONFIG_DIR=",
         ),
         (|_, _, r| r.once("which claude", 1, ""), "harness", "→ install claude"),
         (
@@ -397,8 +403,8 @@ fn bad_config_and_hermes_profiles() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) before the import and after
-/// it, until the line is dropped. Before the import the file still serves the token, so the account row warns too.
+/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) until the line is dropped
+/// (#683: the account signs in with its own folder either way).
 #[test]
 fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let (c, d) = setup("doc-retired", "claude");
@@ -408,25 +414,15 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let line_ = format!("accounts_env = \"{}\"\n", env.display());
     let old = text.replace("[accounts]\n", &format!("[accounts]\n{line_}"));
     std::fs::write(&c.config, &old).unwrap();
-    let warn = format!(
-        "! config — [accounts].accounts_env is retired (#441): run `herdsman accounts import {}`, then drop the line",
-        env.display()
-    );
+    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
 
     let r = good();
     r.store.borrow_mut().clear();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == warn), "{out}");
-    assert!(line(&out, "account main").starts_with('!'), "{out}");
-    assert!(!out.contains(TOKEN), "{out}");
-
-    let env = env.display().to_string();
-    assert_eq!(run(&c, &r, &["accounts", "import", &env]).0, 0);
-    let (code, out) = run(&c, &r, &["doctor"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.lines().any(|l| l == warn), "imported, the line still warns: {out}");
     assert!(line(&out, "account main").starts_with('✓'), "{out}");
+    assert!(!out.contains(TOKEN), "{out}");
 
     std::fs::write(&c.config, &text).unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);

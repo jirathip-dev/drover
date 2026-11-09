@@ -42,9 +42,12 @@ fn an_attached_cooee_thread_is_the_repos_conductor_until_detached() {
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
         "harness = \"claude\"\naccount = \"C\"",
-    ) + "\n[accounts]\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n";
+    ) + "\n[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\nC = \"C\"\n";
     let c = ctx(&tmpdir("conductor-attach"), &cfg);
-    let r = Fake::default().reply("herdr", "{}").reply("gh", "");
+    let r = Fake::default().reply("herdr", "{}").reply("gh", "").reply(
+        "fake-cooee accounts env claude C",
+        r#"{"CLAUDE_CONFIG_DIR": "/accounts/claude/C"}"#,
+    );
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &ck, ("POST", &format!("/api/v1/{op}")), &v.to_string());
@@ -71,6 +74,9 @@ fn an_attached_cooee_thread_is_the_repos_conductor_until_detached() {
     assert_eq!(a["settings"], settings.to_string_lossy().as_ref());
     assert_eq!(a["env"]["HERDSMAN_LANE"], "sendmeter:-:conductor");
     assert_eq!(a["env"]["HERDSMAN_THREAD"], COOEE);
+    // #683: the account's folder, no token.
+    assert_eq!(a["env"]["CLAUDE_CONFIG_DIR"], "/accounts/claude/C");
+    assert!(a["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none(), "{a}");
     assert!(
         a["env"]["HERDSMAN_PORT"].as_str().unwrap().parse::<u16>().is_ok(),
         "{a}"

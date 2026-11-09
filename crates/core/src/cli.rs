@@ -731,11 +731,6 @@ enum StatsCmd {
 enum AccountsCmd {
     /// Let spawns use a capped account again
     Reset { name: String },
-    /// Owner only: copy each account's token from the old tokens.env into the secret store, checked by hash
-    Import {
-        #[arg(default_value = "~/.config/herdsman/accounts/tokens.env")]
-        file: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1065,14 +1060,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         false,
                     )
                 });
-                // #157: a HOST column once fleet.toml has `[hosts]`.
-                let hosts = Config::load(&ctx.config).is_ok_and(|c| !c.hosts.is_empty());
+                // #157: a HOST column once fleet.toml has `[hosts]`; #609: or a lane's `where` says more.
+                let cfg = Config::load(&ctx.config).ok();
+                let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+                let hosts = cfg.is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
-                let c = |h: &str| format!(" {h:<10}").repeat(usize::from(hosts));
+                let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
                 let head = c("HOST");
                 let host = |s: &crate::events::IssueState| {
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
-                    c(e.map_or("-", |e| e.str("host").unwrap_or("local")))
+                    let place = s.active_lane().and_then(|l| at.get(l.1)).filter(|p| !p.is_empty());
+                    c(place.map_or_else(|| e.map_or("-", |e| e.str("host").unwrap_or("local")), |p| p))
                 };
                 let root = |s: &crate::events::IssueState| {
                     let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue));
@@ -1152,10 +1150,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let events = read(&ctx.state)?;
             let all = fleet.map_or_else(|| queue::fleets(&events), |f| vec![f]);
             let cfg = Config::load(&ctx.config).ok();
-            let boards: Vec<_> = all
-                .iter()
-                .map(|f| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f)))
-                .collect();
+            let look = crate::snapshot::Snap::read(ctx, r);
+            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+            let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
+            let boards: Vec<_> = all.iter().map(board).collect();
             // #539: each retired config key, its own line above the boards.
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
                 writeln!(out, "! {k} is retired → herdsman doctor")?;
@@ -1500,6 +1498,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
+                    let at = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
                     let mut rows: Vec<_> = all
                         .into_iter()
@@ -1569,9 +1568,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
                     }
                     for w in rows.iter().filter(|_| !json) {
+                        // #609: the lane's `where` beside its age: `(3m · mini · shed)`.
+                        let place = at
+                            .get(&w.lane)
+                            .filter(|p| !p.is_empty())
+                            .map_or(String::new(), |p| format!(" · {p}"));
                         writeln!(
                             out,
-                            "{} #{} {}: {} ({}){}",
+                            "{} #{} {}: {} ({}{place}){}",
                             w.fleet,
                             w.issue,
                             w.who,
@@ -1588,9 +1592,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Accounts {
                     cmd: Some(AccountsCmd::Reset { name }),
                 } => access::reset(ctx, &cfg, out, &name)?,
-                Cmd::Accounts {
-                    cmd: Some(AccountsCmd::Import { file }),
-                } => crate::secret::import(ctx, &cfg, r, out, &file)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },
@@ -2087,4 +2088,14 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         coauthor_warn(ctx, r, ".", sha);
     }
     Ok(0)
+}
+
+/// #609: each lane's `where` (`lanes::Lane::place`) by agent, as runner `r` sees the lanes.
+fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+    let (st, list) = (
+        crate::events::fold(events),
+        crate::herdr::list(r, "agent").unwrap_or_default(),
+    );
+    let ls = crate::snapshot::lanes(cfg, r, ctx, (events, &st), &list);
+    ls.into_iter().map(|l| (l.name, l.place)).collect()
 }

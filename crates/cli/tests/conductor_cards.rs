@@ -178,7 +178,7 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
 
     let banner = "You've hit your limit · resets 6:40pm";
     let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
-    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
+    let sh = Shell(&r, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
     let (code, out) = run(
         &herdsman::Ctx {
             now: T + 60,
@@ -205,7 +205,9 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
         start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
         "{start}"
     );
-    assert_eq!(*sh.2.borrow(), ["b"], "on B: {calls:?}");
+    // #683: B's own login folder, no token.
+    let b = herdsman::config::home().join(".config/herdsman/accounts/B");
+    assert_eq!(*sh.2.borrow(), [format!("{}|", b.display())], "on B: {calls:?}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(

@@ -14,34 +14,28 @@ paths and model ids pass.
 
 **The store (#441).** Every secret lives only in the main host's OS store, through the `keyring` crate: the macOS
 Keychain, Linux Secret Service or the Windows Credential Manager, as `herdsman/<fleet>/<NAME>` (`all` for every fleet).
-There is no plain-file fallback: when fleet.toml names a secret (an `[accounts]` entry or a `secret:` env) and the
+There is no plain-file fallback: when fleet.toml names a secret (a `secret:` env) and the
 main host has no usable store, `herdsman serve` refuses `NO_STORE`. Remote hosts
 keep no secrets.
 
-**Lane tokens.** Each `[accounts]` entry names the secret holding that account's token, `herdsman/all/<VAR>`:
+**Lane accounts (#683).** herdsman keeps no Claude token. Each `[accounts]` key names an account; a lane on it signs in
+with `account_env`'s printed env, else the account's own login folder as `CLAUDE_CONFIG_DIR`
+([accounts](accounts.md)):
 
 ```toml
 [accounts]
-A = "CLAUDE_CODE_OAUTH_TOKEN_A"   # the secret's name, never the token
-B = "CLAUDE_CODE_OAUTH_TOKEN_B"
+# account_env = "cooee accounts env {provider} {name}"
+A = "A"   # the value is unused
+B = "B"
 ```
 
-Make a token with `claude setup-token` while logged in to that account. It is long-lived.
 A role picks with `account = "A"` or an ordered `accounts = ["A", "B"]`.
 
-**Delivery.** At spawn herdsman reads the lane's secrets (the first uncapped account's token as
-`CLAUDE_CODE_OAUTH_TOKEN`, and each `secret:<NAME>` env) from the store and writes them to a 0600 file beside the
-worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's shell
-sources the file; spawn deletes it once the harness has started. A token never reaches argv, the pane's scrollback,
-the event log or a file left behind.
-
-**Import from `tokens.env`.** `accounts_env` is retired (#441). A fleet.toml that still sets it loads with a
-warning (#539): `doctor` shows a `!` row, the board shows a `!` line, and `check` sends one `config-warning` alert.
-Until the import, lanes still read from that file the tokens the store doesn't have. Run
-`herdsman accounts import [FILE]` (owner only; default `~/.config/herdsman/accounts/tokens.env`) once: it copies each
-`[accounts]` variable's value into the store, reads it back and checks its sha256, and prints a `✓` row per account.
-It never deletes the file; do that yourself once lanes run on the store. Then drop the `accounts_env` line
-to clear the warning.
+**Delivery.** At spawn herdsman reads the lane's `secret:<NAME>` env from the store and writes it to a 0600 file beside
+the worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's
+shell sources the file; spawn deletes it once the harness has started. A secret never reaches argv, the pane's
+scrollback, the event log or a file left behind. `accounts_env` is retired (#441; a `!` row while set) and
+`accounts import` with it (#683).
 
 **Fallback and caps.** `herdsman check` reads each Claude lane's pane. When it shows the usage-limit
 banner, it logs `account-capped` with `until`, the banner's reset time (`resets 9am`, `resets Nov 4, 8am`,
