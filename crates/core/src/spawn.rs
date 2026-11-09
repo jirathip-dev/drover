@@ -1094,47 +1094,53 @@ pub fn spawn(
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }
-        // #722: its branch still checked out in another worktree (a herdr-era root): saved to `wip/`, then removed.
-        if let Some(held) = checked_out(r, &local, &p.branch).filter(|_| !reopen) {
-            let live = host::agents(r)?;
-            let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
-                .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
-                .collect();
-            if !names.is_empty() {
-                return refused(
-                    "LANE_LIVE",
-                    format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch),
-                );
-            }
-            let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
-            if on.exists(Path::new(&held)) {
-                wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
-                // Its work is on `wip/` or pushed: only lane scratch can stop a plain remove.
-                if git(&["remove", &held]).is_err() {
-                    git(&["remove", "--force", &held])?;
+        let make = || -> Result<Value> {
+            Ok(match bt {
+                None => herdr::json(r, &create_argv(&local, &p, reopen))?,
+                Some(_) if reopen => Value::Null,
+                Some(_) => {
+                    let have = r
+                        .run(
+                            "git",
+                            &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
+                        )?
+                        .code
+                        == 0;
+                    ok(r, "git", &worktree_add(&local, &p, have))?;
+                    Value::Null
                 }
-            } else {
-                git(&["prune"])?;
+            })
+        };
+        // #722: it failed with the branch still checked out in another worktree (a herdr-era root): that worktree's
+        // work is saved to `wip/`, it is removed and the lane's made again; a live agent there refuses.
+        let created = match make() {
+            Err(e) if !reopen => {
+                let Some(held) = checked_out(r, &local, &p.branch) else {
+                    return Err(e);
+                };
+                let live = host::agents(r)?;
+                let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
+                    .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
+                    .collect();
+                if !names.is_empty() {
+                    let why = format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch);
+                    return refused("LANE_LIVE", why);
+                }
+                let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
+                if on.exists(Path::new(&held)) {
+                    wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                    // Its work is on `wip/` or pushed: only lane scratch can stop a plain remove.
+                    if git(&["remove", &held]).is_err() {
+                        git(&["remove", "--force", &held])?;
+                    }
+                } else {
+                    git(&["prune"])?;
+                }
+                let d = json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip});
+                event("worktree-moved", d)?;
+                make()?
             }
-            event(
-                "worktree-moved",
-                json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip}),
-            )?;
-        }
-        let created = match bt {
-            None => herdr::json(r, &create_argv(&local, &p, reopen))?,
-            Some(_) if reopen => Value::Null,
-            Some(_) => {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
-                Value::Null
-            }
+            c => c?,
         };
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
