@@ -1,0 +1,8 @@
+Decided: herdsman cap runs the fleet's cap script (cap_script, else the first premerge check naming a cap) at integration and on each open PR merged into it, and reads every `N / cap M` line
+Because: "It falls back to its built-in Rust count only when there is no script"
+Because: crates/core/src/overlap.rs:239
+Rejected: running every premerge check — a fleet's premerge may hold slow builds or tests; only a cap-naming one counts lines
+Rejected: keeping the PR body's `src/ net` figure under a script — it is a Rust-only count, the very gap this fixes
+Decided: the ask raises only the caps the projection crosses (all of them when none is crossed)
+Check: a script exiting non-zero over its cap is still read; a conflicting PR shows unknown, not a guess
+Owner: the cap view now matches the repo's own gate and shows each cap with its own headroom
