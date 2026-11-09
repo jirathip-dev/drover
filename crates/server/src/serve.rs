@@ -201,7 +201,12 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
         });
         for mut st in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) < 16 {
-                sc.spawn(move || (drop(s.handle(st)), busy.fetch_sub(1, Relaxed)));
+                // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
+                sc.spawn(move || {
+                    drop(s.handle(st));
+                    busy.fetch_sub(1, Relaxed);
+                    s.deliver();
+                });
             } else {
                 busy.fetch_sub(1, Relaxed);
                 drop(st.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n"));
@@ -350,7 +355,7 @@ pub struct Server<'a> {
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
     /// #620: the [chat] tab's fold, by its key (`chat_tab`).
-    chat: Mutex<(serde_json::Value, serde_json::Value)>,
+    chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -783,9 +788,12 @@ impl<'a> Server<'a> {
         }
         drop(clients);
         s.write_all(&self.reply(&req, crate::now()))?;
-        drop(s);
-        self.deliver();
         Ok(())
+    }
+
+    /// #715: deliveries to type in once the reply is out (`deliver`).
+    pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {
+        lock(&self.later).extend(jobs.into_iter().map(|l| (ctx.clone(), l)));
     }
 
     /// #403: type in the lines `POST /thread` logged (`chat::deliver`).
@@ -1164,18 +1172,22 @@ impl<'a> Server<'a> {
             e if busy(e) => return ("503 Service Unavailable", "board busy, retrying".into()),
             Err(_) => return ("401 Unauthorized", "pair this device: tap Pair this phone".into()),
         };
-        let mut sent = lock(&self.sent);
-        let times = sent.entry(dev.hash.clone()).or_default();
-        times.retain(|t| ctx.now < t + 60);
-        if times.len() >= 10 {
-            return ("429 Too Many Requests", "10 sends a minute: wait a moment".into());
+        // #715: the lock covers the check and the record only, never the action below.
+        {
+            let mut sent = lock(&self.sent);
+            let times = sent.entry(dev.hash.clone()).or_default();
+            times.retain(|t| ctx.now < t + 60);
+            if times.len() >= 10 {
+                return ("429 Too Many Requests", "10 sends a minute: wait a moment".into());
+            }
+            times.push(ctx.now);
         }
-        times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
         let res = if path == "/thread" {
             let mut later = vec![];
-            let res = chat::post(ctx, self.r, f, &mut later);
-            lock(&self.later).extend(later.into_iter().map(|l| (ctx.clone(), l)));
+            // #715: an answer's or a card's conductor wake is delivered after the reply too.
+            let (res, more) = crate::conductor::deferred(|| chat::post(ctx, self.r, f, &mut later));
+            self.later(ctx, later.into_iter().chain(more));
             res
         } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));

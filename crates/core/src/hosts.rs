@@ -831,8 +831,8 @@ cargo install --path crates/cli --locked --root '{}' --force && {{ test ! -e '{c
     res.is_ok()
 }
 
-/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's earlier lanes (its
-/// worktree is there, even on a host turned off), else the least-busy enabled host whose tags cover the needs.
+/// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it
+/// is enabled, up and admitting (#676), else the least-busy enabled host whose tags cover the needs.
 pub fn place(
     ctx: &Ctx,
     cfg: &Config,
@@ -873,9 +873,21 @@ pub fn place(
         }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
     }
+    // #676: the issue's last host while it is on and admits the lane, or refuses it but holds this lane's unpushed work.
     if let Some(e) = last {
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
-        return Ok(Some(at(ctx, cfg, f, r, was, pre)));
+        let mut p = at(ctx, cfg, f, r, was, pre);
+        let code = p.refusal.as_ref().map(|x| x.0);
+        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
+        let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
+        let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
+        let unpushed = busy && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
+        if unpushed {
+            p.refusal.as_mut().unwrap().1 += &format!("; stays on {}: its worktree there has unpushed work", was.0);
+        }
+        if cfg.hosts.get(was.0).is_none_or(|h| h.enabled) && (unpushed || !busy && code != Some("HOST_OFFLINE")) {
+            return Ok(Some(p));
+        }
     }
     let needs = needs(f, role, events, (fleet, issue));
     let seen = cached(ctx);

@@ -174,9 +174,16 @@ fn every_route_keeps_its_fixtures_shape() {
         ("host", "/api/v1/host", HostTab),
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
-        ("lanes", "/api/v1/lanes", LanesTab),
+        ("lanes", "/api/v1/lanes", LanesTab)
+    );
+    // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
+    herdsman::conductor::handoff(&c, &cfg, &r, h).unwrap();
+    gets!(
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
+        ("repo/<fleet>/threads", "/api/v1/repo/sendmeter/threads", RepoThreads),
         ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), Chat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),

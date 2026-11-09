@@ -29,6 +29,9 @@ pub const PARKED: &[(u64, &str)] = &[
     ),
 ];
 
+/// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
+pub const PLANS: &[(&str, &str)] = &[];
+
 /// Seeds 2–24: random fleets (`scenario::random`).
 pub const FIXED: &[(u64, &str)] = &[
     (INCIDENT, "#370: repeated supersede under a kick's frozen clock"),
@@ -58,7 +61,7 @@ pub const FIXED: &[(u64, &str)] = &[
 
 /// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the
 /// refusal; each reviewer after it writes the same FAIL 5 s in.
-pub fn incident() -> (Model, String) {
+pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
     let s = m.sha();
@@ -82,7 +85,7 @@ pub fn incident() -> (Model, String) {
     m.scripts.insert("rev".into(), rev);
     let push = Script::Push { secs: 200, green: true };
     m.scripts.insert("impl".into(), vec![push; 6]);
-    (m, config(4, 3))
+    (m, (4, 3))
 }
 
 /// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head,
