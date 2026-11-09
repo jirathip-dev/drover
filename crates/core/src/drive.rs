@@ -1680,15 +1680,15 @@ fn starts<'a>(
             continue;
         };
         let at = (fleet, n.parse().ok(), "start");
-        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it.
-        let design = n.parse().is_ok_and(|n| queue::wants_design(&events, fleet, n));
+        // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it; #730: an
+        // architect-marked one its architect lane first.
+        let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
         let f = &cfg.fleet[fleet];
-        let c = if design {
-            ["spawn", fleet, &n, "design", "--supersede"]
-        } else {
-            ["spawn", fleet, &n, f.flow().start(), ""]
+        let c = match design {
+            Some(role) => ["spawn", fleet, &n, role, "--supersede"],
+            None => ["spawn", fleet, &n, f.flow().start(), ""],
         };
-        let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design)]) {
+        let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design.is_some())]) {
             Ok(c) => c,
             Err(e) => {
                 errs.push((fleet, e));

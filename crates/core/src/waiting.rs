@@ -537,12 +537,20 @@ fn waits(
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
-        "design" => w(
-            "none",
-            "design lane idle without a pushed design (check the pane)",
-            s.last_ts,
-            cmd("spawn", " design --supersede"),
-        ),
+        "design" => {
+            // #730: the stage's lane is the architect's or the designer's.
+            let role = if s.lane.is_some() && s.lanes.get("architect") == s.lane.as_ref() {
+                "architect"
+            } else {
+                "design"
+            };
+            w(
+                "none",
+                &format!("{role} lane idle without a pushed {role} (check the pane)"),
+                s.last_ts,
+                cmd("spawn", &format!(" {role} --supersede")),
+            )
+        }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
 }

@@ -422,3 +422,104 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
     assert!(r.called("herdr agent start sendmeter-design-12"));
     assert_eq!(state(&c, 12), "design");
 }
+
+const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
+
+/// The architect lane's pushed commit touches `docs/architecture/meter/` (put before `fake`).
+fn adr(c: &herdsman::Ctx) -> Fake {
+    let w = wt(c, 12);
+    Fake::default().reply(
+        &format!("git -C {w} diff --name-only {HEAD} {HEAD} -- docs/architecture"),
+        "docs/architecture/meter/adr.md\ndocs/architecture/meter/statechart.md\n",
+    )
+}
+
+fn brief(c: &herdsman::Ctx) -> String {
+    std::fs::read_to_string(Path::new(&wt(c, 12)).join(".brief.md")).unwrap()
+}
+
+#[test]
+fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("architect-flow", ARCHITECT);
+    let q = ["queue", "sendmeter", "add", "12", "--design", "--architect"];
+    assert_eq!(run(&c, &Fake::default(), &q).0, 0);
+    let base = fake(&c, c.now + 60);
+    let r = Both(adr(&c), &base);
+    drive(&c, &r);
+    assert!(
+        base.called("herdr agent start sendmeter-architect-12")
+            && !base.called("herdr agent start sendmeter-design-12")
+    );
+    assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains("docs/architecture/<slug>/"));
+    assert_eq!(state(&c, 12), "design");
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    let ask = &kinds(&c, "needs-decision")[0];
+    assert!(
+        ask.str("question").unwrap().starts_with("Architecture (ADR) for #12"),
+        "{ask:?}"
+    );
+    drive(&c, &r);
+    assert_eq!(
+        (spawned(&c, "design"), spawned(&c, "impl")),
+        (0, 0),
+        "nothing after the architect before approve"
+    );
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
+    let ok = &kinds(&c, "design-approved")[0];
+    assert_eq!(
+        (ok.str("role"), ok.str("adr")),
+        (Some("architect"), Some("docs/architecture/meter"))
+    );
+    drive(&c, &r);
+    assert!(
+        base.called("herdr agent start sendmeter-design-12"),
+        "the design comes next"
+    );
+    assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
+    drive(&c, &r);
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
+    drive(&c, &r);
+    assert!(base.called("herdr agent start sendmeter-impl-12"));
+    assert_eq!(state(&c, 12), "impl");
+    let b = brief(&c);
+    assert!(
+        b.contains("the owner approved the ADR in `docs/architecture/meter/`"),
+        "{b}"
+    );
+}
+
+#[test]
+fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut c = setup("architect-revise", ARCHITECT);
+    assert_eq!(
+        run(
+            &c,
+            &Fake::default(),
+            &["queue", "sendmeter", "add", "12", "--architect"]
+        )
+        .0,
+        0
+    );
+    let base = fake(&c, c.now + 60);
+    let r = Both(adr(&c), &base);
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    let note = "split the store from the sync";
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", note]).0, 0);
+    c.now += 1000;
+    let base = fake(&c, c.now + 60);
+    let r = Both(adr(&c), &base);
+    drive(&c, &r);
+    assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains(note));
+    assert_eq!((state(&c, 12).as_str(), spawned(&c, "architect")), ("design", 2));
+    drive(&c, &r);
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "reject"]).0, 0);
+    assert_eq!(kinds(&c, "design-rejected")[0].str("role"), Some("architect"));
+    assert_eq!(state(&c, 12), "needs-human");
+    drive(&c, &r);
+    assert_eq!((spawned(&c, "architect"), spawned(&c, "impl")), (2, 0));
+}

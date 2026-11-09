@@ -851,7 +851,7 @@ pub fn place(
     let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
     let pre = (events, last.and_then(|e| e.str("root")));
     // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
-    let design = f.family(role) == "design";
+    let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
     if let Some(h) = force.or(pin).or(design.then_some("main")) {
         let main = cfg
@@ -868,7 +868,7 @@ pub fn place(
         if design && machine.is_some() {
             return refused(
                 "DESIGN_MAIN_ONLY",
-                format!("host {h}: design lanes run on the main host only"),
+                format!("host {h}: {role} lanes run on the main host only"),
             );
         }
         return Ok(Some(at(ctx, cfg, f, r, (h, machine), pre)));
