@@ -95,6 +95,24 @@ verify. You are judged on the diff against the acceptance criteria, not on effor
 
 AC: it {works} \ `ok`
 
+## Shared rules (rules/shared.md)
+
+- Subtract before you add: delete dead code, duplicate paths and needless options before writing new ones.
+- Fix root causes, not symptoms: find why it broke and fix it there, once.
+- Keep boundary discipline: validate at the edges (CLI, files, network), trust typed values inside.
+- Model the domain: name types and functions for what they mean, so a wrong state cannot be built.
+- Prove it works with a run: the exact command and its exit code, not a reading of the code.
+- Encode lessons in structure: a type, a check or a test over a comment or a rule line.
+- Fix at the highest level that works: architecture, then types, then lint or CI, then a test, docs last.
+- Test behaviour, not implementation: drive the real entry point and assert what a user sees.
+- Migrate the callers, then delete the old API: never leave two ways to do one thing.
+- Make operations idempotent: running it twice does what running it once did.
+- Never block on the human: decide routine things, say what you decided, ask only for owner calls.
+- Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
+- Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
+- Every rule names its enforcer: a rule nothing checks is retired.
+- Leave the tree green: format, lint and test before you push.
+
 ## Output contract
 
 - Work on branch `issue-12` only. Commit, push it, open a PR to `staging` whose body says `Closes #12`.

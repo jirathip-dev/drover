@@ -429,10 +429,12 @@ fn brief(
     let contract = contract.trim_end().to_string() + "\n" + steps;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    // #733: the shared rules pack, then (#419) the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let shared = include_str!("../rules/shared.md").trim_end();
+    let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
