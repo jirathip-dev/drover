@@ -158,6 +158,40 @@ fn screens_group_into_role_blocks() {
     }
 }
 
+/// #750: an ACP session's transcript (shed's `> prompt`, `[tool] title (status)`, reply) is no parsed screen: its text
+/// keeps its line breaks, each `[tool] ` entry is one collapsed line, a multi-line title's rest behind its tap.
+#[test]
+fn an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool() {
+    let screen =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens/acp.txt")).unwrap();
+    let js = format!(
+        "const ls = {};\nconsole.log(JSON.stringify([blocks(ls, 'claude', false), matters(ls, null, [], 'claude')].map(bs => bs.map(b => [b.k, b.html]))))",
+        serde_json::to_string(&body(&screen)).unwrap()
+    );
+    let Some(out) = node(&js) else { return };
+    let [full, matters]: [Vec<(String, String)>; 2] = serde_json::from_str(&out).unwrap();
+    assert_eq!(full, matters, "both views draw it the same");
+    let kinds: Vec<&str> = full.iter().map(|b| b.0.as_str()).collect();
+    assert_eq!(kinds, ["txt", "run", "run", "run", "run", "txt"]);
+    assert_eq!(
+        full[0].1,
+        "<div class=txt>&#62; # Brief — herdsman-impl-12 (acme/sendmeter#12)\nImplement #12: retry a failed send once.\nRun `cargo test` before you push.</div>"
+    );
+    assert_eq!(
+        full[1].1,
+        "<details class=\"blk run\"><summary><span class=k>tool</span><span class=cmd>Read src/send.rs (completed)</span><i class=cv></i></summary></details>"
+    );
+    let title = &full[3].1;
+    assert!(
+        title.contains("<span class=cmd>`cd /srv/acme/worktrees/sendmeter-impl-12 &#38;&#38; cargo test")
+            && title.contains("tee test.log`</span><i class=cv></i></summary><div class=out><pre>")
+            && title.contains("(completed)</span></pre></div></details>"),
+        "a multi-line title: its first line, the rest behind the tap: {title}"
+    );
+    assert!(full[4].1.contains("git push -u origin issue-12 (failed)"));
+    assert!(full[5].1.contains("500 ms backoff.\nTests pass;"), "{}", full[5].1);
+}
+
 /// A tool run's header is its call; a red `⏺` with `Exit code N` tags `exit N`; over 20 lines the output keeps its
 /// head (success) or its head and tail around `⋯ N lines` (failure); a last run with no output while busy is `running`.
 #[test]

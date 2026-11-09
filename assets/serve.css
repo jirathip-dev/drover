@@ -235,6 +235,8 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 .blk.run>summary .cmd{color:var(--fg)}
 .blk.run[open]>summary{align-items:flex-start;white-space:normal;padding-top:calc((var(--ctl) - 1.5em) / 2)}
 .blk.run[open]>summary .cmd{white-space:pre-wrap;overflow:visible}
+/* #750: a transcript that is not a parsed screen (an ACP session's) keeps its line breaks. */
+.chat .txt{padding:0 var(--s2);font-size:var(--fs);white-space:pre-wrap;overflow-wrap:anywhere}
 /* Prose (you, assistant): 13 px, minimal markdown as escaped text plus spans: bold, inline code, lists, headings. */
 .md{font-size:var(--fs)}
 .md>*{margin:0 0 var(--s2)}.md>:last-child{margin-bottom:0}
