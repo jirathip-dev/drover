@@ -1,0 +1,13 @@
+Decided: an explicit clean or reclaim probes each disabled host once through Pass; a host that answers is cleaned under the enabled-host rules
+Because: "include a disabled host when it is reachable. One probe with the existing hard timeout"
+Because: crates/core/src/check.rs:696
+Decided: on a disabled host a scratch folder stays only while an agent of that name is live on that host
+Because: "A lane that moved to another host (same agent name live elsewhere) does not keep the old host's copy."
+Because: crates/core/src/check.rs:1195
+Decided: clean keeps its signature (all=false); only the CLI calls clean_all, so serve.rs (board-freeze) and the tick are untouched
+Because: "Drive's hourly clean and build trim stay limited to enabled hosts (no tick slowdown)."
+Because: crates/core/src/timer.rs:271
+Rejected: a 4th tuple flag on clean itself — it edits crates/server/src/serve.rs, which board-freeze refuses without a board-fix issue
+Rejected: reusing sweep_in for disabled hosts — it keeps an open issue's latest lane, so a moved lane's old copy would stay
+Check: the three new tests in scratch.rs and tick_stuck.rs fail at 9eaf2e9 and pass at head; serve.rs has no diff vs staging
+Owner: Running clean or reclaim by hand now also frees space on a host that is switched off for new lanes, as long as it answers; the hourly job still leaves it alone.
