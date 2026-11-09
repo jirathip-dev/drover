@@ -1,17 +1,14 @@
-//! #31: herdsman lane-hours, the Anthropic usage meter, the DeepSeek balance, SECRET_IN_CONFIG.
+//! #31: herdsman lane-hours, the usage meter (#707: the status line's rows only), the DeepSeek balance, SECRET_IN_CONFIG.
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
 use herdsman::runner::{Out, Runner};
 use herdsman::serve::Server;
-use herdsman::usage::{epoch, lane_secs, parse_balance, parse_usage};
+use herdsman::usage::{epoch, lane_secs, parse_balance};
 use serde_json::json;
 use std::path::Path;
 
 const DS_KEY: &str = concat!("sk", "-deepseekfixturekey0123456789");
-const ACCESS: &str = concat!("sk", "-ant-oat01-ACCESS-fixture-secret");
-const REFRESH: &str = concat!("sk", "-ant-ort01-REFRESH-fixture-secret");
-const NEW_ACCESS: &str = concat!("sk", "-ant-oat01-NEWACCESS-fixture-secret");
 
 /// `Fake` that also records what each `run_in` sent on stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
@@ -93,8 +90,6 @@ fn balance_and_usage_fixtures_parse() {
     assert!(parse_balance("{}", 0).is_none());
     assert_eq!(epoch("2026-10-31T12:00:00.123+07:00"), Some(1_793_422_800));
     assert_eq!(epoch("2026-10-31T05:00:00Z"), Some(1_793_422_800));
-    let (s, w) = parse_usage(r#"{"five_hour":{"utilization":9.0,"resets_at":"2026-10-31T05:00:00+00:00"},"seven_day":{"utilization":22.0,"resets_at":null}}"#).unwrap();
-    assert_eq!((s, w), (Some((9.0, 1_793_422_800)), None));
 }
 
 #[test]
@@ -132,6 +127,8 @@ fn config(d: &Path) -> String {
         format!("CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\nexport DEEPSEEK_API_KEY=\"{DS_KEY}\"\n"),
     )
     .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap(); // #707: a secret file
     CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"\naccounts = [\"A\", \"B\"]")
         + &format!(
             "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[accounts.usage]\nA = \"{}\"\n\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"{}\"\n",
@@ -140,55 +137,36 @@ fn config(d: &Path) -> String {
         )
 }
 
-fn creds(expires_ms: u64) -> String {
-    json!({"claudeAiOauth": {"accessToken": ACCESS, "refreshToken": REFRESH, "expiresAt": expires_ms, "scopes": ["user:profile"]}}).to_string()
-}
-
-/// `security`'s attribute dump of the login's item (account `owner`).
-const ATTRS: &str = "keychain: \"/Users/owner/Library/Keychains/login.keychain-db\"\nattributes:\n    \"acct\"<blob>=\"owner\"\n    \"svce\"<blob>=\"x\"\n";
-
 fn no_secret(what: &str, text: &str) {
-    for s in [DS_KEY, ACCESS, REFRESH, NEW_ACCESS] {
-        assert!(!text.contains(s), "{what} leaks a secret: {text}");
-    }
+    assert!(!text.contains(DS_KEY), "{what} leaks a secret: {text}");
 }
 
-/// Every secret went to stdin only: never argv, CLI output, the event log, a cache file or the page. Every
-/// Keychain call names the configured login's hashed item, never the default `Claude Code-credentials`.
+/// Every secret went to stdin only: never argv, CLI output, the event log, a cache file or the page; #707: no
+/// Keychain call at all.
 fn assert_no_leaks(c: &herdsman::Ctx, r: &Stdin, outs: &[&str], page: &str) {
     let calls = r.0.calls.borrow().join("\n");
     no_secret("argv", &calls);
-    let svc = herdsman::usage::keychain_service(&c.config.parent().unwrap().parent().unwrap().join("logins/A"));
-    for call in r.0.calls.borrow().iter().filter(|l| l.starts_with("security find")) {
-        assert!(call.ends_with(&format!("-s {svc}")), "{call}");
-    }
-    for script in r.1.borrow().iter().filter(|s| s.contains("generic-password")) {
-        assert!(script.contains(&format!("-s \"{svc}\"")), "{script}");
-    }
+    assert!(!calls.contains("security "), "{calls}");
     for o in outs {
         no_secret("CLI output", o);
     }
     no_secret("event log", &herdsman::events::jsonl(&c.state).unwrap_or_default());
-    for f in std::fs::read_dir(c.state.parent().unwrap().join("usage")).unwrap() {
+    for f in std::fs::read_dir(c.state.parent().unwrap().join("usage"))
+        .into_iter()
+        .flatten()
+    {
         no_secret("cache", &std::fs::read_to_string(f.unwrap().path()).unwrap_or_default());
     }
     no_secret("page", page);
 }
 
-const USAGE: &str = r#"{"five_hour":{"utilization":9.0,"resets_at":"1970-01-12T13:56:40+00:00"},"seven_day":{"utilization":50.0,"resets_at":"1970-01-17T13:46:40+00:00"}}"#;
-
 #[test]
 fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
     let d = tmpdir("usage-show");
     let c = ctx(&d, &config(&d));
+    row(&c, "A", c.now, 9.0, 50.0); // #707: A's status line, the meter's only source
     let r = stdin(
         Fake::default()
-            .reply("security find-generic-password -s", ATTRS)
-            .reply("security find-generic-password -w", &creds(2_000_000_000_000))
-            .reply(
-                "curl -sS -m 15 -D - -K - https://api.anthropic.com/api/oauth/usage",
-                &http(200, "", USAGE),
-            )
             .reply(
                 "curl -sS -m 15 -D - -K - https://api.deepseek.com/user/balance",
                 &http(
@@ -202,14 +180,14 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
     let (code, out) = run(&c, &r, &["accounts"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("session 9% (resets 10m) · week 50% (resets Mon 19) · at this pace: out Mon evening"),
+        out.contains("session 9% (resets 60m) · week 50% (resets Mon 19)"),
         "{out}"
     );
     assert!(out.contains("5h 0.0 · 7d 0.0 herdsman lane-hours"), "{out}");
     assert!(out.contains("deepseek · USD 2.28 · low"), "{out}");
     let sent = r.1.borrow().join("\n");
     assert!(
-        sent.contains(&format!("Bearer {DS_KEY}")) && sent.contains(&format!("Bearer {ACCESS}")),
+        sent.contains(&format!("Bearer {DS_KEY}")) && !r.0.called("curl -sS -m 15 -D - -K - https://api.anthropic.com"),
         "keys go on stdin: {sent}"
     );
 
@@ -243,157 +221,6 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
 }
 
 #[test]
-fn rate_limited_meter_backs_off_past_retry_after() {
-    let d = tmpdir("usage-429");
-    let mut c = ctx(&d, &config(&d));
-    let r = stdin(
-        Fake::default()
-            .reply("security find-generic-password -s", ATTRS)
-            .reply("security find-generic-password -w", &creds(2_000_000_000_000))
-            .reply(
-                "curl -sS -m 15 -D - -K - https://api.anthropic.com",
-                &http(429, "retry-after: 3000\r\n", "{}"),
-            ),
-    );
-    let m = herdsman::usage::meter(&c, &herdsman::config::Config::load(&c.config).unwrap(), &r, "A").unwrap();
-    assert_eq!((m.fails, m.retry_at), (1, c.now + 3000));
-    c.now += 2000;
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    herdsman::usage::meter(&c, &cfg, &r, "A");
-    assert_eq!(r.0.count("curl"), 1, "no poll before retry-after");
-    c.now += 1001;
-    let m = herdsman::usage::meter(&c, &cfg, &r, "A").unwrap();
-    assert_eq!(
-        (r.0.count("curl"), m.fails, m.retry_at),
-        (2, 2, c.now + 3000),
-        "the larger of retry-after and 600 << fails: {m:?}"
-    );
-}
-
-#[test]
-fn expired_login_refreshes_or_falls_back_to_login_needed() {
-    let d = tmpdir("usage-expired");
-    let c = ctx(&d, &config(&d));
-    let r = stdin(
-        Fake::default()
-            .reply("security find-generic-password -s", ATTRS)
-            .reply("security find-generic-password -w", &creds(1000))
-            .reply(
-                "curl -sS -m 15 -D - -K - https://platform.claude.com",
-                &http(400, "", r#"{"error":"invalid_grant"}"#),
-            ),
-    );
-    let (code, out) = run(&c, &r, &["accounts"]);
-    assert_eq!(code, 0, "{out}");
-    let dir = d.join("logins/A");
-    assert!(
-        out.contains(&format!("usage: login needed (claude /login in {})", dir.display()))
-            && out.contains("herdsman lane-hours"),
-        "{out}"
-    );
-    assert!(!r.0.called("security -i"), "a failed refresh writes nothing");
-    let page = host_tab(&Server::new(&c, &r, None), "", c.now);
-    assert!(page.contains("usage: login needed"), "{page}");
-    assert_no_leaks(&c, &r, &[&out], &page);
-}
-
-/// An expired login whose refresh succeeds; `stored` is what the Keychain holds when re-read after the write-back.
-fn refreshed(d: &Path, stored: &str) -> (herdsman::Ctx, Stdin) {
-    let c = ctx(d, &config(d));
-    let rotated = json!({"access_token": NEW_ACCESS, "refresh_token": concat!("sk", "-ant-ort01-NEWREFRESH-fixture"), "expires_in": 3600});
-    let r = stdin(
-        Fake::default()
-            .reply("security find-generic-password -s", ATTRS)
-            .once("security find-generic-password -w", 0, &creds(1000))
-            .reply("security find-generic-password -w", stored)
-            .reply(
-                "curl -sS -m 15 -D - -K - https://platform.claude.com",
-                &http(200, "", &rotated.to_string()),
-            )
-            .reply("security -i", "")
-            .reply(
-                "curl -sS -m 15 -D - -K - https://api.anthropic.com",
-                &http(200, "", USAGE),
-            ),
-    );
-    (c, r)
-}
-
-#[test]
-fn a_refresh_is_written_back_to_the_same_item_and_verified() {
-    let d = tmpdir("usage-refresh");
-    let stored =
-        json!({"claudeAiOauth": {"accessToken": NEW_ACCESS, "refreshToken": "x", "expiresAt": 2_000_000_000_000u64}})
-            .to_string();
-    let (c, r) = refreshed(&d, &stored);
-    let (_, out) = run(&c, &r, &["accounts"]);
-    assert!(out.contains("session 9%"), "{out}");
-    let sent = r.1.borrow().join("\n");
-    assert!(sent.contains(&format!("Bearer {NEW_ACCESS}")), "{sent}");
-    let svc = herdsman::usage::keychain_service(&d.join("logins/A"));
-    assert!(
-        sent.contains(&format!("add-generic-password -U -a \"owner\" -s \"{svc}\" -X ")),
-        "the item's own account: {sent}"
-    );
-    assert!(r
-        .0
-        .called(&format!("security find-generic-password -w -a owner -s {svc}")));
-    assert_eq!(
-        r.0.count("security find-generic-password -w"),
-        2,
-        "re-read after the write-back"
-    );
-    assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "usage-login-lost"));
-    assert_no_leaks(&c, &r, &[&out], "");
-}
-
-#[test]
-fn a_write_back_that_does_not_stick_alerts_usage_login_lost() {
-    let d = tmpdir("usage-lost");
-    // `security -i` exits 0, but the item still holds the old login.
-    let (c, r) = refreshed(&d, &creds(1000));
-    let (code, out) = run(&c, &r, &["accounts"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("usage: login needed"), "{out}");
-    let lost: Vec<Event> = read(&c.state)
-        .unwrap()
-        .into_iter()
-        .filter(|e| e.kind == "usage-login-lost")
-        .collect();
-    assert_eq!(lost.len(), 1);
-    let why = lost[0].str("reason").unwrap();
-    assert!(
-        lost[0].str("account") == Some("A")
-            && why.contains(&format!("claude /login in {}", d.join("logins/A").display())),
-        "{why}"
-    );
-    assert!(
-        !r.0.called("curl -sS -m 15 -D - -K - https://api.anthropic.com"),
-        "the unstored token is not used"
-    );
-    assert_no_leaks(&c, &r, &[&out], "");
-}
-
-#[test]
-fn an_unsafe_keychain_account_is_never_refreshed() {
-    let d = tmpdir("usage-unsafe");
-    let c = ctx(&d, &config(&d));
-    let r = stdin(
-        Fake::default()
-            .reply(
-                "security find-generic-password -s",
-                "    \"acct\"<blob>=\"own\\\"er\"\n",
-            )
-            .reply("security find-generic-password -w", &creds(1000)),
-    );
-    assert!(run(&c, &r, &["accounts"]).1.contains("usage: login needed"));
-    assert!(
-        !r.0.called("curl -sS -m 15 -D - -K - https://platform.claude.com") && !r.0.called("security -i"),
-        "the old login stays usable by Claude Code"
-    );
-}
-
-#[test]
 fn deepseek_hints_when_the_env_file_lacks_the_key() {
     let d = tmpdir("usage-nokey");
     let missing = d.join("nope.env");
@@ -421,19 +248,23 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
 }
 
 #[test]
-fn keychain_service_is_the_hashed_config_dir() {
-    // Our own derivation (from Claude Code 2.1.308, unverified against a live Keychain): this only pins its shape.
-    let s = herdsman::usage::keychain_service(Path::new("/tmp/claude-accounts/A"));
-    let want = &herdsman::devices::sha256(b"/tmp/claude-accounts/A")[..8];
-    assert_eq!(s, format!("Claude Code-credentials-{want}"));
+fn a_deepseek_env_file_others_can_read_is_refused() {
+    let d = tmpdir("usage-0644");
+    let c = ctx(&d, &config(&d));
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(d.join("tokens.env"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    let r = stdin(Fake::default());
+    let (code, out) = run(&c, &r, &["accounts"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("deepseek · REFUSED SECRET_FILE_OPEN: "), "{out}");
+    assert!(!r.0.called("curl"), "{:?}", r.0.calls.borrow());
+    no_secret("CLI output", &out);
 }
 
 #[test]
 fn spawn_prefers_the_lowest_fresh_weekly_usage() {
     let d = tmpdir("usage-pick");
     let c = ctx(&d, &config(&d));
-    let usage = d.join("state/usage");
-    std::fs::create_dir_all(&usage).unwrap();
     let dry = || {
         let (code, out) = run(
             &c,
@@ -443,17 +274,14 @@ fn spawn_prefers_the_lowest_fresh_weekly_usage() {
         assert_eq!(code, 0, "{out}");
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["account"].clone()
     };
-    let meter = |name: &str, ts: u64, week: f64| {
-        std::fs::write(
-            usage.join(format!("{name}.json")),
-            json!({"checked": ts, "ts": ts, "week": [week, c.now + 86400]}).to_string(),
-        )
-        .unwrap();
-    };
-    meter("A", c.now - 60, 80.0);
-    meter("B", c.now - 60, 20.0);
+    // #707: the readings are the accounts' status-line rows.
+    let rows = d.join("state/usage.jsonl");
+    row(&c, "A", c.now - 60, 0.0, 80.0);
+    row(&c, "B", c.now - 60, 0.0, 20.0);
     assert_eq!(dry(), "B");
-    meter("B", c.now - 1900, 20.0);
+    std::fs::remove_file(&rows).unwrap();
+    row(&c, "A", c.now - 60, 0.0, 80.0);
+    row(&c, "B", c.now - 1900, 0.0, 20.0);
     assert_eq!(dry(), "A", "B's reading is over 30 min old: configured order");
 }
 
@@ -506,13 +334,9 @@ fn statusline_appends_a_throttled_row_and_shrugs_off_garbage() {
 }
 
 #[test]
-fn meter_prefers_a_fresh_status_line_row() {
+fn meter_is_the_newest_status_line_row_fresh_or_stale() {
     let d = tmpdir("usage-rows");
     let c = ctx(&d, &config(&d));
-    std::fs::create_dir_all(d.join("state/usage")).unwrap();
-    // A's /login meter, read just now (no poll), says week 50%.
-    let cached = json!({"checked": c.now, "ts": c.now, "week": [50.0, c.now + 86400]});
-    std::fs::write(d.join("state/usage/A.json"), cached.to_string()).unwrap();
     let accounts = || {
         let (code, out) = run(&c, &Fake::default().reply("date -r", "Mon 19\n"), &["accounts"]);
         assert_eq!(code, 0, "{out}");
@@ -530,14 +354,11 @@ fn meter_prefers_a_fresh_status_line_row() {
         out.contains("session 12% (resets 0s, read 60m ago) · week 30%"),
         "{out}"
     );
-    // A's newest row is 700 s old.
+    // #707: A's newest row is 700 s old and there is no poll: it is still the reading, with its age.
     std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
     row(&c, "A", c.now - 700, 41.0, 63.0);
     let out = accounts();
-    assert!(
-        out.contains("week 50%") && !out.contains("week 63%"),
-        "a stale row yields to the meter: {out}"
-    );
+    assert!(out.contains("read 11m ago) · week 63%"), "{out}");
 }
 
 #[test]

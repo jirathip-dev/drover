@@ -49,8 +49,6 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
 /// herdr with `agents` live, ready to start a conductor or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A", "a")
-        .stored("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_B", "b")
         .reply("herdr agent list", agents)
         .reply(
             "herdr workspace create",
@@ -307,14 +305,17 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         "{guest}"
     );
     assert!(req(&s, "/thread", &form, "", T).starts_with("HTTP/1.1 401"));
-    assert!(!f.store.borrow().contains_key("herdsman/sendmeter/API_KEY"));
+    let file = c.config.with_file_name("secrets/API_KEY");
+    assert!(!file.exists());
 
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert!(chat(&s, &cookie, T).contains("<form class=chs data-t=\"t1\" data-name=\"API_KEY\"><input type=password"));
     let res = req(&s, "/thread", &form, &cookie, T + 10);
     assert_eq!(body(&res), "secret API_KEY set ✓ (by owner)\n", "{res}");
-    // #441: the value went to the OS store and nowhere else.
-    assert_eq!(f.store.borrow()["herdsman/sendmeter/API_KEY"], value);
+    // #707: the value went to its 0600 file and nowhere else.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), value);
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let calls = f.calls.borrow().join("\n");
     let log = herdsman::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);

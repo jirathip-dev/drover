@@ -188,7 +188,8 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
                  \n[[fleet.sendmeter.notify]]\ncmd = \"curl https://api.telegram.org/botSEKRIT/send\"\n";
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, text + extra).unwrap();
-    let r = remote_fake().stored("herdsman/sendmeter/API_KEY", "tok-VALUE-123");
+    secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600); // #707: the `secret:` env's 0600 file
+    let r = remote_fake();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let wt = "/home/me/.local/share/herdsman/work/sendmeter/issue-12"; // #630

@@ -80,7 +80,11 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
 
 /// `profiles sync --check`: each Hermes profile's `hooks list` (run as in a lane) shows its hook `✓ allowed`.
 pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
-    let mut good = true;
+    let stray = stray_hooks(ctx, cfg);
+    let mut good = stray.is_empty();
+    for s in stray {
+        writeln!(out, "✗ {s} → herdsman profiles sync")?;
+    }
     for (name, f, role, _, profile) in profiles(cfg) {
         if !ctx.hermes.join(&profile).join("config.yaml").exists() {
             continue;
@@ -97,6 +101,26 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
         good &= allowed;
     }
     Ok(good)
+}
+
+/// #737: each synced profile's herdsman hook whose program is not the running binary: `<profile> hook runs <exe>`.
+pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
+    let mut stray = vec![];
+    for (_, _, _, _, profile) in profiles(cfg) {
+        let path = harness::profiles_root(ctx).join(&profile).join("settings.json");
+        let settings: Value = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+        for h in pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten()) {
+            let cmd = h["command"].as_str().unwrap_or_default();
+            if let Some(exe) = harness::hook_program(cmd).filter(|_| !harness::runs_this(ctx, cmd)) {
+                stray.push(format!("{profile} hook runs {exe}, not {}", ctx.exe));
+            }
+        }
+    }
+    stray
 }
 
 pub struct Plan {
@@ -133,6 +157,8 @@ pub struct Plan {
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
     pub lane_key: Option<String>,
+    /// #707: a local lane's `token-file:` account: the env var and the file `deliver` exports it from.
+    pub token: Option<(String, PathBuf)>,
 }
 
 impl Plan {
@@ -152,7 +178,7 @@ impl Plan {
         if let (None, Some(v)) = (&self.account, harness::get(&self.harness).token_env()) {
             c.push(format!("&& unset {v}"));
         }
-        if !self.secrets().is_empty() || self.lane_key.is_some() {
+        if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
@@ -197,13 +223,27 @@ impl Plan {
     }
 }
 
-/// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
-/// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
+/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`, its `token-file:`) and
+/// written 0600 beside its worktree on its host (over the ssh channel's stdin to a remote one), never in argv, a pane
+/// or the log; the guard removes the file when dropped.
+pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
-    for (var, fleet, name) in p.secrets() {
-        let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
-        let why = || format!("{var}: secret {name} is not in the store (`herdsman secret request`)");
+    let named = p
+        .secrets()
+        .into_iter()
+        .map(|(var, _, n)| (var, crate::secret::path(ctx, &n), n));
+    let token = p
+        .token
+        .iter()
+        .map(|(var, f)| (var.clone(), f.clone(), "token-file".into()));
+    for (var, f, name) in named.chain(token) {
+        let v = crate::secret::file(&f)?.or_else(|| cfg.legacy_secret(&name)); // #539
+        let why = || {
+            format!(
+                "{var}: secret {name} is not in {} (`herdsman secret request`)",
+                f.display()
+            )
+        };
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
     // #637: a remote ACP lane holds no account token, only its proxy key.
@@ -371,6 +411,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         resting,
         session: None,
         lane_key: None,
+        token: None,
     })
 }
 
@@ -532,11 +573,10 @@ pub fn unguarded(
         .unwrap_or_default();
     let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
-    let guard = hook_command(ctx, family);
     // #637: a remote host's profile is proven there (`hosts::acp_guard`), before this.
     if harness::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
-    } else if !remote && !hooks.any(|h| h["command"] == guard.as_str()) {
+    } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| harness::guards(ctx, c, family))) {
         format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
     } else if !account {
         "an ACP lane signs in with its role's [accounts] account env".into()
@@ -928,6 +968,7 @@ pub fn spawn(
     // one gets none, its host signs in through the main host's token proxy (#637).
     if let Some(a) = p.account.as_mut().filter(|_| on.machine.is_none()) {
         a.1 = access::account_env(cfg, base, &p.harness, &a.0)?;
+        p.token = access::token_file(cfg, &p.harness, &a.0);
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
@@ -1333,7 +1374,7 @@ pub fn spawn(
         crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), (&pl.name, acct))?;
         crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
-    let _secrets = deliver(&on, cfg, &p)?;
+    let _secrets = deliver(ctx, &on, cfg, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {

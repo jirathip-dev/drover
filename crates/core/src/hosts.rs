@@ -194,13 +194,6 @@ impl Runner for On<'_> {
     fn local(&self) -> bool {
         self.machine.is_none() && self.r.local()
     }
-    /// #441: the store is the main host's; remote hosts keep none.
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        self.r.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        self.r.set_secret(svc, value)
-    }
 }
 
 /// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared
@@ -321,12 +314,6 @@ impl Runner for Pass<'_> {
     }
     fn local(&self) -> bool {
         self.r.local()
-    }
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        self.r.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        self.r.set_secret(svc, value)
     }
 }
 
