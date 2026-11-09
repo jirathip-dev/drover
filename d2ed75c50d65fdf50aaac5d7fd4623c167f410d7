@@ -1,0 +1,7 @@
+Decided: fix the red evidence check by re-running every gate at the new head and naming that sha in the PR body
+Because: "`cargo build --release`, `clippy -D warnings` and `cargo test` exit 0"
+Decided: merge origin/staging and keep both sides' new tests in crates/cli/tests/shed.rs
+Because: crates/cli/tests/shed.rs:1772
+Rejected: rebasing onto staging — history rewrites and force-pushes are forbidden
+Check: the evidence check passes at d2ed75c50 and shed.rs still holds the #609 tests (board_get, line 1580) and staging's #722 herdr_era_lane tests
+Owner: No feature change this round: the branch is updated to current staging and its test evidence is refreshed.
