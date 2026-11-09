@@ -1,0 +1,14 @@
+Decided: a role's `agent` picks its ACP agent; the harness follows from it, and its provider comes from a small table.
+Because: "fleet.toml picks agent+model per role" (q911)
+Decided: REVIEW_SAME_PROVIDER applies once a fleet's impl or rev names an `agent`; a role without one counts as the runtime's.
+Because: crates/core/src/config.rs:925
+Rejected: applying it to fleets that name no agent — every live fleet runs Claude impl+rev and would stop loading at merge, so even `config apply` could not fix it.
+Decided: a codex adapter with its own login folder, model and effort in its session config, and herdsman's hook run without Codex's trust review.
+Because: q926
+Decided: codex is reached only through `agent`, not offered as a `harness` (no board picker change).
+Because: crates/core/src/harness/mod.rs:49
+Decided: `config apply` runs `profiles sync` before doctor.
+Because: "runs `profiles sync` itself, so an apply never leaves"
+Check: a live codex-acp lane really runs the hook (the conductor's check after merge, per q926).
+Check: crates/cli/tests/shed.rs drives the real hook from the codex lane's own env (deny merge, push, reviewer patch).
+Owner: Review can now run on Codex while code is written on Claude; the conductor proposes that config after merge.
