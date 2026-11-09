@@ -1,0 +1,7 @@
+Decided: bootstrap of a shed-acp host skips the herdr machine label check
+Because: crates/core/src/cloud.rs:381
+Decided: scope 4 has nothing to apply; #637 never adds a shed machine profile
+Because: "Once #637 makes cloud hosts shed-only, the same rule applies to shed machines"
+Rejected: scripting a herdr machine list reply in the remote_acp test — that test asserts no herdr call at all
+Check: remote_acp bootstrap test passes and cloud.rs #641 tests still refuse HOST_AMBIGUOUS
+Owner: Setting up a shed-only cloud box no longer asks herdr about it, so it stops failing.
