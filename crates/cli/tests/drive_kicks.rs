@@ -767,13 +767,18 @@ fn failing_retries_never_starve_another_fleets_start() {
     assert_eq!(beta, 1, "the healthy start spawned");
 }
 
-/// #724: a failing issue backs off (no attempt within 5 min of its last failure, its `waiting` line says why); past
-/// the wait it is retried; an owner's kick retries it at once.
+/// #724: a failing issue backs off once it fails the same way twice (no attempt within 5 min of its last failure,
+/// its `waiting` line says why); past the wait it is retried; an owner's kick retries it at once.
 #[test]
 fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
     let c = fleet("kicks-724-backoff", 6, 1);
     pass(&c, &fake("1.0"));
     let bad = broken(Fake::default());
+    fail_kick(&c, &bad, "sendmeter", 1);
+    // A first failure is retried at once (#333); the same failure again backs off.
+    let r = fake("1.0");
+    pass(&c, &r);
+    assert_eq!(launched(&r, 1), 1, "a first failure retries at once");
     fail_kick(&c, &bad, "sendmeter", 1);
     let at = |s: u64| herdsman::Ctx {
         now: c.now + s,
@@ -830,9 +835,50 @@ fn three_identical_spawn_failures_alert_once() {
     fail_kick(&c, &broken(Fake::default()), "sendmeter", 1);
     let (code, out) = run(&c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("spawn-failing sendmeter#1: "), "{out}");
+    assert!(
+        out.contains("spawn-failing sendmeter#1: ") && out.contains("already used by worktree"),
+        "{out}"
+    );
     assert_eq!(alerts().len(), 1);
     fail_kick(&c, &broken(Fake::default()), "sendmeter", 1);
     assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
     assert_eq!(alerts().len(), 1, "a fourth identical failure");
+}
+
+/// #724: passes run and a queued issue waits only for a spawn slot: `waiting` says so (naming the failing retries),
+/// never `tick stuck?`.
+#[test]
+fn waiting_names_a_slot_wait_not_a_stuck_tick() {
+    let c = fleet("kicks-724-stuck", 6, 1);
+    std::fs::write(
+        c.state.with_file_name("drive-sendmeter.last"),
+        (c.now - 1200).to_string(),
+    )
+    .unwrap();
+    std::fs::write(c.state.with_file_name("drive.at"), (c.now - 60).to_string()).unwrap();
+    fail_kick(
+        &herdsman::Ctx {
+            now: c.now - 100,
+            ..c.clone()
+        },
+        &broken(Fake::default()),
+        "sendmeter",
+        1,
+    );
+    let a = serde_json::json!([{"issue": 1, "step": "start", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
+    let e = herdsman::events::Event::new(
+        c.now - 60,
+        "sendmeter",
+        None,
+        "drive-pass",
+        serde_json::json!({"actions": a}),
+    );
+    herdsman::events::append(&c.state, &e).unwrap();
+    let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("→ waiting for a spawn slot (1 failing retries hold them)"),
+        "{out}"
+    );
+    assert!(!out.contains("tick stuck?"), "{out}");
 }
