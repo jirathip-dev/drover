@@ -726,3 +726,113 @@ fn waiting_names_the_slot_holders() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("slots: alpha 2, beta 1\n"), "{out}");
 }
+
+/// #724: `f` with every spawn failing the same way (#722's branch still checked out in a herdr-era worktree).
+fn broken(f: Fake) -> Fake {
+    let mut f = fake_with("1.0", f);
+    let used = herdsman::runner::Out {
+        code: 1,
+        stderr: "fatal: 'issue-1' is already used by worktree at '/w/.herdr/worktrees/x'".into(),
+        ..Default::default()
+    };
+    for p in ["herdr worktree", "herdr agent start"] {
+        f.replies.insert(0, (p.into(), used.clone()));
+    }
+    f
+}
+
+/// #724: `fleet` #`n`'s launched kick runs on `r` and its spawn fails, as a detached kick would.
+fn fail_kick(c: &herdsman::Ctx, r: &Fake, fleet: &str, n: u64) {
+    let (code, out) = run(c, r, &["kick", fleet, &n.to_string(), "--why", "drive", "--now"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+/// #724: six due reviews whose spawn always fails the same way never starve another fleet's healthy start: it
+/// spawns within two passes (each failing kick runs, fails and frees its slot between passes).
+#[test]
+fn failing_retries_never_starve_another_fleets_start() {
+    let c = fleets("kicks-724-starve", &["sendmeter", "beta"], 6, 1);
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "1"]).0, 0);
+    let due = || (21..=26).fold(Fake::default(), |f, n| review_due(&c, n, f));
+    let mut beta = 0;
+    for _ in 0..2 {
+        let r = fake_with("1.0", due());
+        let (code, out) = run(&c, &r, &["drive"]);
+        assert_eq!(code, 0, "{out}");
+        beta += kicked_fleets(&r).iter().filter(|f| *f == "beta").count();
+        for n in (21..=26).filter(|n| lease_on(&c, &format!("spawn-sendmeter-{n}.pending")).is_some()) {
+            fail_kick(&c, &broken(due()), "sendmeter", n);
+        }
+    }
+    assert_eq!(beta, 1, "the healthy start spawned");
+}
+
+/// #724: a failing issue backs off (no attempt within 5 min of its last failure, its `waiting` line says why); past
+/// the wait it is retried; an owner's kick retries it at once.
+#[test]
+fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
+    let c = fleet("kicks-724-backoff", 6, 1);
+    pass(&c, &fake("1.0"));
+    let bad = broken(Fake::default());
+    fail_kick(&c, &bad, "sendmeter", 1);
+    let at = |s: u64| herdsman::Ctx {
+        now: c.now + s,
+        ..c.clone()
+    };
+    for s in [0, 60, 299] {
+        let r = fake("1.0");
+        pass(&at(s), &r);
+        assert_eq!(launched(&r, 1), 0, "an attempt {s}s after the failure");
+    }
+    let (code, out) = run(&at(120), &fake("1.0"), &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("retrying in 3m: "), "{out}");
+    let r = fake("1.0");
+    pass(&at(301), &r);
+    assert_eq!(launched(&r, 1), 1, "retried past the wait");
+    fail_kick(&at(302), &bad, "sendmeter", 1);
+    // Backing off again; the owner's kick tries the spawn at once.
+    let r = fake("1.0");
+    pass(&at(310), &r);
+    assert_eq!(launched(&r, 1), 0);
+    let r = fake("1.0");
+    let (code, out) = run(&at(311), &r, &["kick", "sendmeter", "1", "--why", "owner", "--now"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.called("herdr agent start"), "{out}");
+}
+
+/// #724: one fleet with six queued starts and another with one: the second gets a slot in the first pass.
+#[test]
+fn a_fleet_with_one_start_gets_a_slot_beside_one_with_six() {
+    let c = fleets("kicks-724-fair", &["alpha", "beta"], 6, 1);
+    let add = ["queue", "alpha", "add", "2", "3", "4", "5", "6"];
+    assert_eq!(run(&c, &Fake::default(), &add).0, 0);
+    let r = fake("1.0");
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let k = kicked_fleets(&r);
+    assert_eq!(k.iter().filter(|f| *f == "beta").count(), 1, "{k:?}");
+}
+
+/// #724: three identical failures alert `spawn-failing` once; a fourth alerts nothing new.
+#[test]
+fn three_identical_spawn_failures_alert_once() {
+    let c = fleet("kicks-724-alert", 6, 1);
+    let alerts = || {
+        let ev = read(&c.state).unwrap();
+        ev.into_iter().filter(|e| e.kind == "spawn-failing").collect::<Vec<_>>()
+    };
+    for i in 0..2 {
+        fail_kick(&c, &broken(Fake::default()), "sendmeter", 1);
+        assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
+        assert!(alerts().is_empty(), "after {} failures", i + 1);
+    }
+    fail_kick(&c, &broken(Fake::default()), "sendmeter", 1);
+    let (code, out) = run(&c, &Fake::default(), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("spawn-failing sendmeter#1: "), "{out}");
+    assert_eq!(alerts().len(), 1);
+    fail_kick(&c, &broken(Fake::default()), "sendmeter", 1);
+    assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
+    assert_eq!(alerts().len(), 1, "a fourth identical failure");
+}
