@@ -1,0 +1,7 @@
+Decided: doctor's login-shell probe takes the token variable name from the accounts harness's Credential::Token
+Because: crates/core/src/harness/claude.rs:157
+Because: crates/core/src/harness/mod.rs:86
+Rejected: allowlisting doctor.rs in the CI grep — the harness-neutral rule (#316) keeps harness names in harness/
+Rejected: a comment-only workaround — the name must reach the shell, so it has to be a runtime value
+Check: the ci.yml harness-neutral grep finds nothing and a_login_shell_exporting_the_token_warns still passes
+Owner: doctor's login-shell token warning is unchanged; only where it gets the variable name moved.
