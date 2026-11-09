@@ -310,3 +310,71 @@ fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     assert_eq!(s.len(), 2);
     assert!(s[1].data.get("adopted").is_none(), "{:?}", s[1].data);
 }
+
+// --- #736: a conductor start blocked by a first-start prompt answers it as spawn does ---
+
+const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent conductor-t1 is blocked during startup and is not ready for prompts"}}"#;
+/// #484: a real failed start's screen: the unnumbered trust menu under the shell's own `❯` prompts.
+const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
+const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
+
+#[test]
+fn a_conductor_start_blocked_by_a_known_first_start_prompt_answers_it_and_delivers() {
+    for (screen, prompt, keys) in [
+        (TRUST_LIVE, "folder-trust", &["Down", "Enter"][..]),
+        (BYPASS, "bypass-permissions", &["2"]),
+    ] {
+        let c = setup(&format!("first-start-{prompt}"));
+        let up = serde_json::json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "claude", "terminal_title": "✳ Claude Code"}}});
+        let r = herdr(NO_AGENTS)
+            .once_err("herdr agent start", 1, NOT_READY)
+            .once("herdr pane read w9:p1", 0, screen)
+            .once("herdr pane get w9:p1", 0, &up.to_string());
+        let log = say(&c, &r, "hello");
+        assert!(!log.contains("not delivered"), "{log}");
+        assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
+        let sent: Vec<String> = r
+            .calls
+            .borrow()
+            .iter()
+            .filter_map(|c| c.strip_prefix("herdr pane send-keys w9:p1 ").map(String::from))
+            .collect();
+        assert_eq!(sent, keys, "{:?}", r.calls.borrow());
+        assert!(!r.called("herdr workspace close"), "{:?}", r.calls.borrow());
+        let ev = herdsman::events::read(&c.state).unwrap();
+        let sp = ev
+            .iter()
+            .find(|e| e.kind == "startup-prompt")
+            .expect("startup-prompt logged");
+        assert_eq!((sp.str("prompt"), sp.str("pane")), (Some(prompt), Some("w9:p1")));
+        let s = &starts(&c)[0];
+        assert_eq!(
+            (s.str("pane"), &s.data["confirmed"]),
+            (Some("w9:p1"), &serde_json::json!(true))
+        );
+        // The first start's line is in its thread file, which the start's kick points it at.
+        let thread = std::fs::read_to_string(c.state.with_file_name("conductor").join("t1/.thread.md")).unwrap();
+        assert!(thread.contains("hello"), "{thread}");
+    }
+}
+
+#[test]
+fn a_conductor_start_blocked_by_an_unknown_prompt_shows_its_redacted_screen() {
+    let c = setup("first-start-unknown");
+    let token = "ghp_0123456789abcdefghijklmnopqrstuv";
+    let screen = format!(" Choose the text style that looks best with your terminal?\n\n ❯ 1. Dark mode\n   2. Light mode\nkey: {token}\n");
+    let r = herdr(NO_AGENTS)
+        .once_err("herdr agent start", 1, NOT_READY)
+        .once_err("herdr agent start", 1, NOT_READY)
+        .reply("herdr pane read w9:p1", &screen);
+    let log = say(&c, &r, "hello");
+    assert_eq!(log.matches("✗ not delivered").count(), 1, "{log}");
+    assert!(
+        log.contains("is blocked during startup") && log.contains("❯ 1. Dark mode"),
+        "{log}"
+    );
+    assert!(!log.contains(token) && log.contains("key: •••"), "redacted: {log}");
+    assert!(!r.called("herdr pane send-keys w9:p1"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
+    assert!(starts(&c).is_empty());
+}
