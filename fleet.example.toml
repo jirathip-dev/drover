@@ -173,6 +173,8 @@ slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once (0: spawn in the pass)
 spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or whose pid is gone) is stale
 # webhook_poll_minutes = 10   # #626: with GitHub webhooks on, the fast step's catch-up PR read runs this often
+# keychain_readers = 3   # #710: more Keychain readers waiting over 60 s alert `keychain-jammed` (troubleshooting §2)
+# reap_keychain_readers = false   # true: `check` kills those readers, then a SecurityAgent up over 10 min
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin
