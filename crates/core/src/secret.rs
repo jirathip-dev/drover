@@ -75,8 +75,10 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
 
 /// Thread `id`'s open request for `name` (no `secret-set` or `secret-dismissed` after it).
 pub fn open<'a>(events: &'a [Event], id: &str, name: &str) -> Option<&'a Event> {
-    let mine = |e: &&Event| e.kind.starts_with("secret-") && e.str("thread") == Some(id) && e.str("name") == Some(name);
-    events.iter().rfind(mine).filter(|e| e.kind == "secret-request")
+    let mine = |e: &&Event| e.kind.starts_with("secret-") && e.str("name") == Some(name);
+    crate::conductor::of(events, id)
+        .rfind(mine)
+        .filter(|e| e.kind == "secret-request")
 }
 
 /// A card's [save] (`value`, from a paired owner device) or [dismiss] (None); the line the thread records.

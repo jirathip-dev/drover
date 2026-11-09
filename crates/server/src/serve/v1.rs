@@ -9,6 +9,7 @@ use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusa
 use crate::api::{
     Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
 };
+use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
 use crate::events::plain;
 use anyhow::{bail, Context};
@@ -96,12 +97,38 @@ impl Server<'_> {
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
             ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
             ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
-            ("GET", Some("chat")) => out("200 OK", &self.chat_tab(ctx, paired && self.addr.is_some())),
+            ("GET", Some("chat")) => {
+                let (mut c, ev) = (
+                    self.chat_tab(ctx, paired && self.addr.is_some()),
+                    shared(&ctx.state).unwrap_or_default(),
+                );
+                c["threads"]
+                    .as_array_mut()
+                    .into_iter()
+                    .flatten()
+                    .for_each(|t| handoffs(&ev, &mut t["page"]));
+                out("200 OK", &c)
+            }
+            // #681: a repo's conductor threads, newest-active first (cooee's side threads).
+            ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
+                let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
+                match Config::load(&ctx.config) {
+                    Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
+                        let ev = shared(&ctx.state).unwrap_or_default();
+                        out("200 OK", &repo(&ev, fleet))
+                    }
+                    _ => reply("404 Not Found", "NOT_FOUND", "no such repo"),
+                }
+            }
             ("GET", Some(t)) if t.starts_with("thread/") => {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such thread"),
-                    |p| out("200 OK", &p),
+                    |p| {
+                        let mut p = serde_json::json!(p);
+                        handoffs(&ev, &mut p);
+                        out("200 OK", &p)
+                    },
                 )
             }
             ("GET", Some("herd")) => self.herd(ctx, None).map_or_else(
@@ -668,5 +695,161 @@ impl Server<'_> {
             });
         }
         tab
+    }
+}
+
+/// #681: a thread page's (JSON) handoffs as agent→agent items: a `handoff` row (straight to a thread) and a repo
+/// handoff's card (`ask`) in the sender's thread folded, the `msg` it delivered in the receiver's as the message form.
+fn handoffs(events: &[Event], page: &mut Value) {
+    let (id, sent) = (
+        page["id"].as_str().unwrap_or_default().to_string(),
+        crate::conductor::forwarded(events),
+    );
+    let msgs = page["msgs"].as_array_mut().map(std::mem::take).unwrap_or_default();
+    let want: std::collections::BTreeSet<_> = msgs.iter().filter_map(|m| m["seq"].as_u64()).collect();
+    let at: BTreeMap<_, _> = events
+        .iter()
+        .filter(|e| want.contains(&e.seq))
+        .map(|e| (e.seq, e))
+        .collect();
+    let got = |e: &Event| {
+        let to = |h: &&Event| h.kind == "thread-handoff" && h.str("to") == Some(&id) && h.str("from") == e.str("from");
+        events.iter().filter(|h| h.seq < e.seq).rfind(to).map(|h| {
+            let is = |c: &&Event| c.kind == "needs-decision" && c.fleet == h.fleet && c.str("id") == h.str("ask");
+            let mut h = handoff(events, events.iter().find(is).unwrap_or(h), false);
+            h.state = (if sent.contains(&e.seq) {
+                "forwarded"
+            } else {
+                "delivered"
+            })
+            .into();
+            h
+        })
+    };
+    let msgs = msgs.into_iter().map(|mut m| {
+        let e = m["seq"].as_u64().and_then(|s| at.get(&s).copied());
+        let h = e.and_then(|e| match (m["kind"].as_str().unwrap_or_default(), e.kind.as_str()) {
+            ("handoff", "thread-handoff") if e.str("ask").is_none() => Some(handoff(events, e, true)),
+            ("ask", "needs-decision") if e.data.get("handoff").is_some() => Some(handoff(events, e, true)),
+            ("msg", "thread-msg") => got(e),
+            _ => None,
+        });
+        if let Some(h) = h {
+            m["handoff"] = serde_json::json!(h);
+        }
+        m
+    });
+    page["msgs"] = Value::Array(msgs.collect());
+}
+
+/// #681: handoff `o` (a repo handoff's card, or a `thread-handoff` straight to a thread) as one agent→agent item.
+/// A card is delivered once its `thread-handoff` is logged, failed while its last `ask-failed` follows its last tap's
+/// `decision` (or it closed undelivered), else pending with its rows.
+fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
+    let card = o.kind == "needs-decision";
+    let (h, from, id) = (
+        o.data.get("handoff").unwrap_or(&Value::Null),
+        o.str("thread").unwrap_or_default(),
+        o.str("id").unwrap_or_default(),
+    );
+    let s = |k: &str| (if card { h.get(k) } else { o.data.get(k) }).and_then(Value::as_str);
+    let s = |k: &str| s(k).unwrap_or_default().to_string();
+    let mine = |e: &&Event| e.fleet == o.fleet && e.str("id") == Some(id);
+    let sent = |e: &&Event| e.kind == "thread-handoff" && e.str("thread") == Some(from) && e.str("ask") == Some(id);
+    let (to, fail) = if card {
+        let end = |e: &&Event| matches!(e.kind.as_str(), "decision" | "ask-failed") && mine(e);
+        let fail = events.iter().rfind(end).filter(|e| e.kind == "ask-failed");
+        let to = events.iter().rfind(sent).and_then(|e| e.str("to"));
+        let closed = crate::events::closed(events, o).filter(|_| to.is_none() && fail.is_none());
+        (to, fail.and_then(|e| e.str("reason")).or(closed))
+    } else {
+        (o.str("to"), None)
+    };
+    let state = match (to, fail) {
+        (_, Some(_)) => "failed",
+        (Some(_), None) => "delivered",
+        (None, None) => "pending",
+    };
+    let opts = o.data.get("options").and_then(Value::as_array).into_iter().flatten();
+    let rows = opts.zip(h["targets"].as_array().into_iter().flatten()).zip(1..);
+    let choices = rows.filter(|_| state == "pending").map(|((t, to), n)| HandoffChoice {
+        n,
+        text: t.as_str().unwrap_or_default().into(),
+        thread: to.as_str().unwrap_or_default().into(),
+        op: "answer".into(),
+        fleet: o.fleet.clone(),
+        id: id.into(),
+    });
+    let text = s("text");
+    Handoff {
+        kind: "handoff".into(),
+        id: o.seq,
+        from: HandoffFrom {
+            agent: "conductor".into(),
+            thread: from.into(),
+            repo: o.fleet.clone(),
+        },
+        to: to.map_or_else(
+            || serde_json::json!({"repo": s("repo"), "pending": true}),
+            |t| serde_json::json!(t),
+        ),
+        title: s("title"),
+        summary: text.lines().next().unwrap_or_default().into(),
+        text,
+        state: state.into(),
+        error: fail.map(Into::into),
+        folded,
+        choices: choices.collect(),
+    }
+}
+
+/// #681: API v1 `repo/<fleet>/threads`: the repo's conductor threads newest-active first (the chat tab's order: by
+/// the last message not the system's), the first not archived its ongoing one.
+fn repo(events: &[Event], fleet: &str) -> RepoThreads {
+    use crate::conductor::{archived, of, title, unread};
+    let ts = events.iter().filter(|t| t.kind == "thread-new" && t.fleet == fleet);
+    let mut rows: Vec<_> = ts
+        .map(|t| {
+            let id = t.str("thread").unwrap_or_default();
+            let msg = |e: &&Event| matches!(e.kind.as_str(), "thread-msg" | "needs-decision");
+            let last = of(events, id).filter(msg).rfind(|e| e.str("from") != Some("system"));
+            let line = last.map_or(String::new(), |e| {
+                let who = if e.str("from") == Some("owner") {
+                    "you"
+                } else {
+                    "conductor"
+                };
+                format!("{who}: {}", e.str("text").or(e.str("question")).unwrap_or_default())
+            });
+            let ts = last.map_or(t.ts, |e| e.ts);
+            (
+                id,
+                LastLine {
+                    line: line.lines().next().unwrap_or_default().into(),
+                    ts,
+                },
+            )
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1.ts));
+    let mut ongoing = true;
+    let threads = rows.into_iter().map(|(id, last)| {
+        let archived = archived(events, id);
+        let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+        let newest = ongoing && !archived;
+        ongoing &= !newest;
+        RepoThread {
+            id: id.into(),
+            title: title(events, id).into(),
+            last,
+            unread: unread(events, id),
+            awake: lane.is_some_and(|l| l.kind != "conductor-sleep"),
+            archived,
+            newest,
+        }
+    });
+    RepoThreads {
+        repo: fleet.into(),
+        threads: threads.collect(),
     }
 }

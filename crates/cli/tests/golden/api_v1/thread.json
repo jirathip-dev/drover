@@ -10,6 +10,7 @@
         "cmds": [],
         "files": [],
         "from": "owner",
+        "handoff": null,
         "host": "",
         "kind": "msg",
         "link": null,
@@ -20,6 +21,62 @@
         "seq": 6,
         "signin": null,
         "text": "Let's talk about #30",
+        "ts": 1000000
+      },
+      {
+        "answer": null,
+        "ask": {
+          "fleet": "sendmeter",
+          "id": "q1",
+          "issue": null,
+          "options": [
+            "new thread: Facets"
+          ],
+          "question": "Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",
+          "recommend": null,
+          "ts": 1000000
+        },
+        "cmds": [],
+        "files": [],
+        "from": "",
+        "handoff": {
+          "choices": [
+            {
+              "fleet": "sendmeter",
+              "id": "q1",
+              "n": 1,
+              "op": "answer",
+              "text": "new thread: Facets",
+              "thread": "new"
+            }
+          ],
+          "error": null,
+          "folded": true,
+          "from": {
+            "agent": "conductor",
+            "repo": "sendmeter",
+            "thread": "t1"
+          },
+          "id": 9,
+          "kind": "handoff",
+          "state": "pending",
+          "summary": "add facets",
+          "text": "add facets\nthen reindex",
+          "title": "Facets",
+          "to": {
+            "pending": true,
+            "repo": "sendmeter"
+          }
+        },
+        "host": "",
+        "kind": "ask",
+        "link": null,
+        "open": true,
+        "retry": false,
+        "routine": false,
+        "seq": 9,
+        "signin": null,
+        "text": "Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",
         "ts": 1000000
       }
     ],

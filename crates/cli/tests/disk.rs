@@ -301,7 +301,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
         GitHerdr(
             Fake::default()
                 .reply("herdr agent list", NO_AGENTS)
-                .reply("date -r", "20261102-0720\n"),
+                .reply("date -r", "20261102-072000\n"),
         )
     };
     let (code, dry) = run(&c, &r(), &["clean"]);
@@ -320,7 +320,9 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
 
     let (code, out) = run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
-    let w = "wip/impl-12-20261102-0720";
+    let ev = &events(&c, "wip-saved")[0];
+    let w = ev.str("branch").unwrap();
+    assert!(w.starts_with("wip/impl-12-20261102-072000-"), "{w}");
     let remote = git(&local, &["ls-remote", "origin", &format!("refs/heads/{w}")]);
     let sha = remote.split_whitespace().next().expect("pushed");
     assert_eq!(git(&origin, &["show", &format!("{sha}:notes.txt")]), "work\n");
@@ -334,11 +336,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
             .all(|f| f != ".brief.md"),
         "scratch not saved"
     );
-    let ev = &events(&c, "wip-saved")[0];
-    assert_eq!(
-        (ev.str("branch"), ev.str("sha"), ev.issue),
-        (Some(w), Some(sha), Some(12))
-    );
+    assert_eq!((ev.str("sha"), ev.issue), (Some(sha), Some(12)));
     assert!(
         out.contains(&format!("saved {} to {w}", saved.display())) && !saved.exists(),
         "{out}"
