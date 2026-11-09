@@ -112,6 +112,18 @@ pub fn self_update(
     Ok(1)
 }
 
+/// #708: `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
+pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
+    let e = events
+        .iter()
+        .rfind(|e| e.kind == "self-update-paused" || e.kind == "self-update-resumed")
+        .filter(|e| e.kind == "self-update-paused")?;
+    let at = crate::usage::date(r, e.ts, "+%b %-d %H:%M");
+    Some(format!(
+        "! self-update — paused since {at} → herdsman self-update --resume"
+    ))
+}
+
 /// Check `sha` out in herdsman's own worktree (`<home>/src`), build it there and copy the binary to `new`.
 fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<()> {
     let (src, target) = (home.join("src"), home.join("target"));
