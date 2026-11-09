@@ -546,8 +546,30 @@ pub fn say(
     (id, text, files): (&str, &str, &[Value]),
     (from, raw): (&str, bool),
 ) -> Result<String> {
-    let (t, line) = post(ctx, cfg, (id, text, files), (from, raw))?;
+    let job = post(ctx, cfg, (id, text, files), (from, raw))?;
+    let Some((t, line)) = LATER.with_borrow_mut(|l| match l {
+        Some(l) => {
+            l.push(job);
+            None
+        }
+        None => Some(job),
+    }) else {
+        return Ok(id.into());
+    };
     deliver(ctx, cfg, r, &t, &line)
+}
+
+thread_local! {
+    /// #715: set inside `deferred`: `say` only logs, leaving its delivery here.
+    static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// #715: `f` with every `say` in it logging only (a board request never waits on a conductor start); the
+/// deliveries it left, for the caller to type in once its reply is out.
+pub fn deferred<T>(f: impl FnOnce() -> T) -> (T, Vec<(Event, String)>) {
+    LATER.set(Some(vec![]));
+    let out = f();
+    (out, LATER.take().unwrap_or_default())
 }
 
 /// #403: `say`'s first half: log the message; the thread and the line `deliver` types.
