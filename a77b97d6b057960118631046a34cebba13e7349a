@@ -1,0 +1,12 @@
+Decided: each failed spawn logs a `spawn-error` (error's first line, PR head); a pass skips a spawn backing off as SPAWN_BACKOFF
+Because: "An issue whose spawn failed with the same error on its last attempt waits before the next one"
+Because: crates/core/src/drive.rs:1981
+Decided: backoff starts at the second identical failure (5 min, doubling, capped 1 h); a first or changed error, a new push or a kick retries at once
+Because: crates/core/src/drive.rs:371
+Because: crates/cli/tests/drive_kicks.rs:136
+Decided: launch() refuses a fleet holding ceil(max/2) slots while another fleet has a startable issue or a slot-held spawn
+Because: crates/core/src/drive.rs:333
+Rejected: backing off from the first failure — breaks #333's retry-next-pass test and the spec's "same error on its last attempt"
+Rejected: counting failures from `driven` events — repeats within an hour are silent there, so counts would be wrong
+Check: failing_retries_never_starve_another_fleets_start fails on 462586015 and passes at head; three identical failures alert once
+Owner: A spawn that keeps failing the same way now waits (5 min up to 1 h) instead of taking a slot every pass, one fleet can't hold more than half the slots while another waits, and a third identical failure alerts you once.
