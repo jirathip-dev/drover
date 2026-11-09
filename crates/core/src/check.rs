@@ -658,6 +658,7 @@ pub fn clean(
     let mut closed = BTreeMap::new();
     // #605: when each merged lane's agent was first seen not working.
     let mut idle: BTreeMap<String, u64> = crate::db::get(&ctx.state, IDLE).map(|v| v.1).unwrap_or_default();
+    let mut fresh = std::collections::BTreeSet::new();
     // #518: a `rev-<n>-r<k>` folder no spawn names, as its fleet's spawn (visited last, so a logged one wins).
     let revs: Vec<Event> = (cfg.fleet.iter().filter(|(n, _)| fleet.is_none_or(|f| f == n.as_str())))
         .flat_map(|(name, f)| {
@@ -735,16 +736,41 @@ pub fn clean(
             writeln!(out, "keep {shown}: {why}")?;
             continue;
         }
+        // #664: a gitfile naming a folder its host lacks is another host's checkout: reported, never touched.
+        let gitdir = on.read(&Path::new(wt).join(".git"));
+        let gitdir = gitdir
+            .as_deref()
+            .and_then(|g| g.strip_prefix("gitdir: "))
+            .map(str::trim);
+        if let Some(gd) = gitdir.filter(|g| g.starts_with('/') && !on.exists(Path::new(g))) {
+            let there = away.unwrap_or("this host");
+            let why = format!("its gitfile points at {gd}, not on {there}; fix: on {there}, check it holds nothing you need, then `rm -rf '{wt}'`");
+            if lane.is_some() {
+                return unsafe_lane(&format!("orphan (wrong host): {why}"));
+            }
+            writeln!(out, "orphan (wrong host) {shown}: {why}")?;
+            continue;
+        }
         // #605: the lane's own pane, not `working` for `idle_merged_minutes`, closes through `kill`'s path first; a
         // refused wip snapshot keeps it, reported once and never retried. Any other agent there is left alone.
         let agent = e.str("agent").unwrap_or_default();
-        let here = host::live_in(&agents, agent, Path::new(wt));
-        let own = |a: &&Value| a["name"] == agent && a["host"].as_str() == away && a["agent_status"] != "working";
+        // #664: only the spawn's own host's agents: a lane of the same name on another host is not this one.
+        let there: Vec<Value> = (agents.iter())
+            .filter(|a| a["host"].as_str() == away)
+            .cloned()
+            .collect();
+        let here = host::live_in(&there, agent, Path::new(wt));
+        // #664: an unnamed pane there is the shell its harness left.
+        let mine = |a: &Value| a["name"] == agent || a["name"].is_null();
+        let own = |a: &&Value| mine(a) && a["agent_status"] != "working";
         let key = format!("merged-idle:{agent}:{}", e.ts);
         let refused = events
             .iter()
             .any(|x| x.kind == "lane-kept-dirty" && x.str("key") == Some(&key));
         let since = (!here.is_empty() && here.iter().all(own)).then(|| *idle.entry(agent.into()).or_insert(ctx.now));
+        if since.is_some() {
+            fresh.insert(agent.to_string());
+        }
         let left = since.map(|t| (t + cfg.limits.idle_merged_minutes * 60).saturating_sub(ctx.now));
         let mut live = !here.is_empty();
         let mut why_live = match left {
@@ -755,12 +781,20 @@ pub fn clean(
             writeln!(out, "would close {agent}'s idle pane {pane} (work to wip/ first)")?;
             live = false;
         } else if left == Some(0) && !refused {
-            match kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")) {
+            // #664: a lane the log has killed whose pane its host still shows only closes; a failed close is tried
+            // again next run, only a refused wip save is kept for good.
+            let shut = match spawned(&events, agent, e.str("host")) {
+                Ok(_) => kill_as(ctx, cfg, r, out, (agent, e.str("host")), true, Some("merged-idle")),
+                Err(_) => close_gone(&on, agent, wt, pane),
+            };
+            match shut {
                 Ok(()) => live = false,
                 Err(err) => {
                     why_live = format!("pane kept: {err:#}");
-                    let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
-                    fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                    if err.downcast_ref::<crate::gate::Refusal>().is_some() {
+                        let d = json!({"key": key, "agent": agent, "why": why_live, "reason": format!("{agent} stays open: {why_live}")});
+                        fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-kept-dirty", d)?;
+                    }
                 }
             }
         }
@@ -830,9 +864,7 @@ pub fn clean(
     }
     if yes {
         idle.retain(|n, _| {
-            agents
-                .iter()
-                .any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
+            fresh.contains(n) || (agents.iter()).any(|a| a["name"] == n.as_str() && a["agent_status"] != "working")
         });
         crate::db::put(&ctx.state, IDLE, ctx.now, &idle)?;
     }
@@ -978,9 +1010,8 @@ fn save(
     wt: &str,
 ) -> Result<Option<String>> {
     let agent = e.str("agent").unwrap_or_default();
-    let w = wip_branch(ctx, r, agent);
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let sha = match snapshot(r, wt, &w, "wip: auto-saved by herdsman") {
+    let (w, sha) = match snapshot(r, wt, &wip_branch(ctx, r, agent), "wip: auto-saved by herdsman") {
         Err(Snap::Secret(hit)) => {
             let why = format!("unsaved work has a secret ({hit})");
             let d = json!({"key": wt, "agent": agent, "reason": format!("{wt}: {why}; kept")});
@@ -988,7 +1019,7 @@ fn save(
             return Ok(Some(why));
         }
         Err(Snap::Failed(err) | Snap::Push(err)) => return Ok(Some(format!("wip save failed: {err:#}"))),
-        Ok(_) => git(&["rev-parse", "HEAD"])?.trim().to_string(),
+        Ok((w, _)) => (w, git(&["rev-parse", "HEAD"])?.trim().to_string()),
     };
     let remote = git(&["ls-remote", "origin", &format!("refs/heads/{w}")])?;
     if remote.split_whitespace().next() != Some(sha.as_str()) {
@@ -1705,12 +1736,21 @@ fn kill_as(
     if !yes {
         return Ok(writeln!(out, "dry run: nothing changed; pass --yes to kill")?);
     }
-    if let Some(w) = &wip {
-        let skip = save_on(&on, agent, wt.unwrap_or_default(), w, "wip: kill snapshot")?;
-        let _ = skip.is_empty()
-            || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
-    }
-    herdr::close(&on, e.str("pane").unwrap_or_default())?;
+    let wip = match wip {
+        Some(w) => {
+            let (w, skip) = save_on(&on, agent, wt.unwrap_or_default(), &w, "wip: kill snapshot")?;
+            let _ = skip.is_empty()
+                || writeln!(out, "skipped (build output or over the size caps): {}", skip.join(", ")).is_ok();
+            Some(w)
+        }
+        None => None,
+    };
+    close_gone(
+        &on,
+        agent,
+        e.str("worktree").unwrap_or("\0"),
+        e.str("pane").unwrap_or_default(),
+    )?;
     drop_log(ctx, Some(agent));
     let d = json!({"agent": agent, "role": role, "pane": e.str("pane"), "host": e.str("host"), "wip": wip, "why": why});
     // #605: a merged lane's idle pane closed by `clean` is `lane-closed`.
@@ -1773,8 +1813,33 @@ pub fn unsaved(on: &On, wt: &Path) -> bool {
     on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
 }
 
-/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing closed.
-fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<String>> {
+/// #664: close `pane` on the lane's host, then any pane herdr there still shows for `agent` or inside `wt` (a stale id
+/// in the log, a shell its harness left); fails, naming it, unless the host confirms none is left.
+fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
+    herdr::close(on, pane)?;
+    for again in [true, false] {
+        let left: Vec<String> = (host::live_in(&herdr::agents(on)?, agent, Path::new(wt)).iter())
+            .filter(|a| a["name"] == agent || a["name"].is_null())
+            .filter_map(|a| a["pane_id"].as_str().map(String::from))
+            .collect();
+        if left.is_empty() {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            again,
+            "{agent}'s pane {} is still open on its host after close",
+            left.join(", ")
+        );
+        for p in &left {
+            herdr::close(on, p)?;
+        }
+    }
+    Ok(())
+}
+
+/// #649: push a lane's work to `w` on its own host (`On`); refused `SNAPSHOT_FAILED` or `SECRET_IN_WIP`, nothing
+/// closed. The branch it went to (#664: another name when `w` was taken) and the files skipped.
+fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<(String, Vec<String>)> {
     match snapshot(on, wt, w, msg) {
         Err(Snap::Failed(e)) => crate::gate::refused(
             "SNAPSHOT_FAILED",
@@ -1788,7 +1853,7 @@ fn save_on(on: &On, agent: &str, wt: &str, w: &str, msg: &str) -> Result<Vec<Str
             "SNAPSHOT_FAILED",
             format!("{agent}: wip push failed ({e:#}); committed in its worktree, nothing pushed, pane kept"),
         ),
-        Ok(skip) => Ok(skip),
+        Ok(ws) => Ok(ws),
     }
 }
 
@@ -1798,19 +1863,28 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
         return Ok(None);
     }
     let w = wip_branch(ctx, on.r, agent);
-    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|_| Some(w))
+    save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|(w, _)| Some(w))
 }
 
-/// `wip/<agent>-<YYYYmmdd-HHMM>` (the epoch when `date` is unreadable).
+/// `wip/<agent>-<YYYYmmdd-HHMMSS>-<tag>` (the epoch when `date` is unreadable); #664: never another save's name.
 pub(crate) fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
-    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M");
+    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
-    format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() })
+    let w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    format!("{w}-{}", tag(&w))
 }
 
-/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first).
-pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<()> {
-    snapshot(r, wt, w, msg).map(drop).map_err(|e| match e {
+/// #664: 4 hex digits hashed from `seed` (fixed keys, so a replay names the same branch).
+fn tag(seed: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    seed.hash(&mut h);
+    format!("{:04x}", h.finish() & 0xffff)
+}
+
+/// #254: push `wt`'s unpushed or dirty work to `w` (`snapshot`, its secret scan first); the branch it went to.
+pub fn save_wip(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> Result<String> {
+    snapshot(r, wt, w, msg).map(|(w, _)| w).map_err(|e| match e {
         Snap::Secret(hit) => anyhow::anyhow!("a secret in the diff ({hit})"),
         Snap::Failed(e) | Snap::Push(e) => e,
     })
@@ -1870,8 +1944,9 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
 
 /// Stage all but `OWN_FILES`, `SHOT_DIRS`, `NO_WIP` and files over `CAPS`, scan the staged and unpushed diff for a
 /// secret (#96, the first as `file:line: masked`), commit any staged change with `msg` (the skipped files listed) and
-/// push HEAD to `w`; the skipped files.
-fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<Vec<String>, Snap> {
+/// push HEAD to `w`; #664: a push rejected because `w` exists goes once more to `w-<tag>`, never forced. The branch
+/// pushed and the skipped files.
+fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result<(String, Vec<String>), Snap> {
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
     // Stage all, then unstage the scratch: an `:(exclude)` of an ignored file fails `git add`.
     let undo = |e: anyhow::Error| {
@@ -1949,6 +2024,11 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         let msg = [msg, &format!("skipped: {}", skip.join(", "))][..=usize::from(!skip.is_empty())].join("\n\n");
         git(&[id, &["commit", "-q", "--no-verify", "-m", &msg]].concat()).map_err(undo)?;
     }
-    git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map_err(Snap::Push)?;
-    Ok(skip)
+    let push = |w: String| git(&["push", "origin", &format!("HEAD:refs/heads/{w}")]).map(|_| w);
+    match push(w.to_string()) {
+        Err(e) if format!("{e:#}").contains("[rejected]") => push(format!("{w}-{}", tag(w))),
+        p => p,
+    }
+    .map(|w| (w, skip))
+    .map_err(Snap::Push)
 }

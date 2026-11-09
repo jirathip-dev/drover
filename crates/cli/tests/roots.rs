@@ -158,7 +158,9 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(out.contains(&format!("safe to unplug {}", r.nvme.display())), "{out}");
     // Saved: the uncommitted file is on `wip/<agent>-<stamp>` at origin, and the worktree is off the drive.
-    let wip = format!("wip/{AGENT}-1000000");
+    let saved = out.lines().find_map(|l| l.strip_prefix("saved "));
+    let wip = saved.and_then(|l| l.rsplit(" to ").next()).unwrap();
+    assert!(wip.starts_with(&format!("wip/{AGENT}-1000000-")), "{out}");
     assert!(git(&r.origin, &["show", &format!("{wip}:wip.txt")]).contains("half done"));
     assert!(
         !old.exists()

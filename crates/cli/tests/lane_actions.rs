@@ -26,7 +26,7 @@ fn git(wt: &str, status: &str, ahead: &str, log: &str) -> Fake {
         .reply(&format!("git -C {wt} rev-list --count"), ahead)
         .reply(&format!("git -C {wt} log -p"), log)
         .reply(&format!("git -C {wt} "), "")
-        .reply("date -r", "20261031-1200\n")
+        .reply("date -r", "20261031-120000\n")
         .reply("herdr pane", "")
 }
 
@@ -40,8 +40,12 @@ fn kill_dry_run_lists_what_is_lost() {
     let r = git(&wt, "?? .brief.md\n M src/a.rs\n?? new.rs\n", "3\n", "");
     let (code, out) = run(&c, &r, &["kill", LANE]);
     assert_eq!(code, 0, "{out}");
-    let want = format!("{LANE} · impl · 3 unpushed commit(s), 2 dirty file(s) → wip/{LANE}-20261031-1200 · pane closes, worktree kept\n");
-    assert!(out.starts_with(&want) && out.contains("dry run"), "{out}");
+    let want = format!("{LANE} · impl · 3 unpushed commit(s), 2 dirty file(s) → wip/{LANE}-20261031-120000-");
+    assert!(
+        out.starts_with(&want) && out.contains(" · pane closes, worktree kept\n"),
+        "{out}"
+    );
+    assert!(out.contains("dry run"), "{out}");
     assert!(
         !r.called("herdr pane close")
             && !r.called(&format!("git -C {wt} push"))
@@ -59,6 +63,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
     let (c, wt) = lane("kill-yes");
     // #646: a commit only when something is staged.
     let r = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
+        .reply("herdr agent list", NO_AGENTS)
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     // #138: the lane's rolling transcript goes with it.
@@ -69,7 +74,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
     assert_eq!(code, 0, "{out}");
     assert!(!log.exists());
     assert!(
-        out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-1200")),
+        out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-120000-")),
         "{out}"
     );
     let at = |p: &str| {
@@ -80,7 +85,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
         at("add -A") < at("reset -q -- .brief.md")
             && at("reset -q -- .brief.md") < at("commit -q --no-verify -m wip: kill snapshot")
     );
-    assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-1200")));
+    assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-")));
     assert!(at("push") < r.index("herdr pane close w1:p2").unwrap());
     // Never main/staging, never force: the one push names the wip ref.
     let pushes: Vec<String> = r
@@ -90,17 +95,11 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .filter(|l| l.contains(" push "))
         .cloned()
         .collect();
-    assert_eq!(
-        pushes,
-        [format!(
-            "git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-1200"
-        )]
-    );
+    let ref_ = format!("git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-");
+    assert!(pushes.len() == 1 && pushes[0].starts_with(&ref_), "{pushes:?}");
     let e = read(&c.state).unwrap().pop().unwrap();
-    assert_eq!(
-        (e.kind.as_str(), e.str("wip"), e.str("role")),
-        ("lane-killed", Some(&*format!("wip/{LANE}-20261031-1200")), Some("impl"))
-    );
+    assert_eq!((e.kind.as_str(), e.str("role")), ("lane-killed", Some("impl")));
+    assert_eq!(e.str("wip"), pushes[0].rsplit("refs/heads/").next());
     // The impl goes back to queued (re-spawnable); a second kill finds no lane.
     let s = fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".into(), 12))
@@ -142,7 +141,7 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
         concat!("gh", "p_abcdefghijklmnopqrstu1234")
     );
     let (c, wt) = lane("kill-lock");
-    let r = git(&wt, "", "1\n", &lock);
+    let r = git(&wt, "", "1\n", &lock).reply("herdr agent list", NO_AGENTS);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let jwt = concat!("ey", "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc");
@@ -161,7 +160,7 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
     .enumerate()
     {
         let (c, wt) = lane(&format!("kill-lock-secret-{i}"));
-        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n"));
+        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n")).reply("herdr agent list", NO_AGENTS);
         let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
         assert!(code == 3 && out.contains("REFUSED SECRET_IN_WIP"), "{bad}: {out}");
         assert!(
@@ -219,8 +218,9 @@ fn repo(wt: &str, fail: &'static str) -> RealGit {
     }
     RealGit(
         Fake::default()
-            .reply("date -r", "20261031-1200\n")
-            .reply("herdr pane", ""),
+            .reply("date -r", "20261031-120000\n")
+            .reply("herdr pane", "")
+            .reply("herdr agent list", NO_AGENTS),
         fail,
     )
 }
@@ -267,15 +267,9 @@ fn kill_snapshots_only_the_real_dirty_file() {
         .contains("0 unpushed commit(s), 1 dirty file(s)"));
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
+    let w = out.rsplit("work pushed to ").next().unwrap().trim();
     let o = std::process::Command::new("git")
-        .args([
-            "-C",
-            &format!("{wt}.git"),
-            "show",
-            "--name-only",
-            "--format=",
-            &format!("wip/{LANE}-20261031-1200"),
-        ])
+        .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format=", w])
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
@@ -652,7 +646,7 @@ fn kill_saves_code_and_names_the_secret_line() {
     let ok = "diff --git a/src/check.rs b/src/check.rs\n+++ b/src/check.rs\n@@ -10,2 +10,3 @@\n \
               fn a() {}\n+fn check_prompts_an_idle_orch_after_5_min_then_alerts_after_15() {}\n";
     let (c, wt) = lane("kill-96-ok");
-    let r = git(&wt, "", "2\n", ok);
+    let r = git(&wt, "", "2\n", ok).reply("herdr agent list", NO_AGENTS);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let bad = format!(
@@ -660,7 +654,7 @@ fn kill_saves_code_and_names_the_secret_line() {
         "aB3".repeat(12)
     );
     let (c, wt) = lane("kill-96-bad");
-    let r = git(&wt, "", "2\n", &bad);
+    let r = git(&wt, "", "2\n", &bad).reply("herdr agent list", NO_AGENTS);
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -730,10 +724,16 @@ fn kill_skips_build_output_and_names_it() {
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("skipped") && out.contains("target-lane/"), "{out}");
+    let b = out
+        .split("work pushed to ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
     let show = |fmt: &str| {
-        let b = format!("wip/{LANE}-20261031-1200");
         let o = std::process::Command::new("git")
-            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, &b])
+            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, b])
             .output()
             .unwrap();
         String::from_utf8(o.stdout).unwrap()
@@ -757,7 +757,14 @@ fn kill_skips_a_file_over_the_size_cap() {
     );
     let o = std::process::Command::new("git")
         .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format="])
-        .arg(format!("wip/{LANE}-20261031-1200"))
+        .arg(
+            out.split("work pushed to ")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap(),
+        )
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
