@@ -1,0 +1,12 @@
+Decided: bootstrap resolves the machine label before any step, start included; several profiles refuse HOST_AMBIGUOUS
+Because: "before any step, `hosts bootstrap` (and every remote host verb) resolves the host's `machine` label"
+Decided: a remote setup pane needs exactly one profile, else HOST_UNKNOWN, never a local pane
+Because: "A command that would run locally for a remote host is an error, not a silent fallback"
+Decided: herdr's machine add first removes the label's old profiles and logs host-machine-replaced
+Because: "replaces its herdr machine profile instead of adding a second one"
+Decided: boat bootstrap test fakes script an empty `herdr machine list` (no profile yet is allowed at bootstrap)
+Because: crates/core/src/cloud.rs:372
+Rejected: skipping the resolver when herdr's list fails — that would let an unknown state open panes anywhere
+Rejected: shed machines (scope 4) — waits on #637, which hasn't landed
+Check: crates/cli/tests/boat.rs fakes only gained a machine-list reply; no assertion changed
+Owner: A host name that matches two saved machines is now refused, and a recreated cloud box replaces its saved machine.
