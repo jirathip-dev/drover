@@ -224,10 +224,13 @@ fn restart(
             let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
             if crate::spawn::changes(&git(&["status", "--porcelain"])?) > 0 || ahead.trim() != "0" {
                 let w = crate::check::wip_branch(ctx, r, agent);
-                if let Err(err) = crate::check::save_wip(&on, wt, &w, "wip: eject snapshot") {
-                    writeln!(out, "kept {wt}: {err:#}")?;
-                    continue;
-                }
+                let w = match crate::check::save_wip(&on, wt, &w, "wip: eject snapshot") {
+                    Ok(w) => w,
+                    Err(err) => {
+                        writeln!(out, "kept {wt}: {err:#}")?;
+                        continue;
+                    }
+                };
                 writeln!(out, "saved {wt} to {w}")?;
                 log(s, "wip-saved", json!({"agent": agent, "branch": w}))?;
             }

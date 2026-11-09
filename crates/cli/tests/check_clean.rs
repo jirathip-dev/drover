@@ -425,7 +425,12 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
     // #164: unknown dirt is never dropped: it is saved to wip/ first (tests/disk.rs), then the worktree goes.
     assert!(!user.exists(), "{done}");
     let wip = std::process::Command::new("git")
-        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-13-1000000:notes.txt"])
+        .args([
+            "-C",
+            origin.to_str().unwrap(),
+            "show",
+            &format!("{}:notes.txt", saved_as(&done, "wip/impl-13-1000000-")),
+        ])
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&wip.stdout), "x");
@@ -511,7 +516,12 @@ fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_t
     assert!(!shots.exists() && !rev.exists() && !dirt.exists(), "{done}");
     assert!(open.exists(), "{done}");
     let wip = std::process::Command::new("git")
-        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-17-1000000:notes.txt"])
+        .args([
+            "-C",
+            origin.to_str().unwrap(),
+            "show",
+            &format!("{}:notes.txt", saved_as(&done, "wip/impl-17-1000000-")),
+        ])
         .output()
         .unwrap();
     assert_eq!(
@@ -767,4 +777,10 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
     assert!(out.contains("held until #11 merges"), "{out}");
     assert_eq!(check(&c, &r), "", "a held lane is no stall");
     assert_eq!(kinds(&c, "stall"), 0);
+}
+
+/// #664: the wip branch `clean` reports saving to, named from `prefix` (seconds plus a random tag).
+fn saved_as(out: &str, prefix: &str) -> String {
+    let at = out.find(prefix).unwrap_or_else(|| panic!("no {prefix} in {out}"));
+    out[at..].split_whitespace().next().unwrap().to_string()
 }
