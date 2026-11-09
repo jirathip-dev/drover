@@ -224,10 +224,6 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         w.next().unwrap_or("GET").to_string(),
         w.next().unwrap_or("/").to_string(),
     );
-    // The path is appended to `upstream`: only an origin-form path, so it can never move the host (`@evil/`).
-    if !path.starts_with('/') || path.chars().any(|ch| "@\\#\"".contains(ch) || ch.is_control()) {
-        return reply(&mut c, 400, "bad request path");
-    }
     let mut heads: Vec<(String, String)> = vec![];
     loop {
         let mut h = String::new();
@@ -241,6 +237,11 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     let get = |k: &str| heads.iter().find(|h| h.0 == k).map(|h| h.1.as_str());
     let mut body = vec![0; get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0)];
     rd.read_exact(&mut body)?;
+    // The path is appended to `upstream`: only an origin-form path, so it can never move the host (`@evil/`).
+    // Checked once the request is fully read: an earlier reply leaves unread data and the client sees a reset.
+    if !path.starts_with('/') || path.chars().any(|ch| "@\\#\"".contains(ch) || ch.is_control()) {
+        return reply(&mut c, 400, "bad request path");
+    }
     let bearer = get("authorization").and_then(|a| a.strip_prefix("Bearer "));
     let token = match authorize(ctx, cfg, r, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
         Ok(t) => t,
