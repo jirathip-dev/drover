@@ -377,7 +377,10 @@ const RUST: &str =
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
-    crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
+    let acp = cfg.host_acp(name).is_some();
+    if !acp {
+        crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
+    }
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
     } else if h.cloud.is_some() {
@@ -388,7 +391,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let mine = crate::config::home().to_string_lossy().into_owned();
     let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
     let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("HERDSMAN_SHA"));
-    let acp = cfg.host_acp(name).is_some();
     let v = if acp {
         String::new()
     } else {
