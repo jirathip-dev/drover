@@ -1,0 +1,5 @@
+Decided: no product change; merged origin/staging (#754, #710, #731, #707) and re-ran the gates at the new head, named in the PR body's evidence.
+Because: crates/cli/tests/chat_blocks.rs:1
+Rejected: re-running CI only — the evidence check needs the PR body to name the head it was tested at.
+Check: the evidence check is green at the head; the PR body names the head sha.
+Owner: The PR's test evidence now names the commit it was run at, so the evidence check passes.
