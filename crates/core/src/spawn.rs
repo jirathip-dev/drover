@@ -631,6 +631,7 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
+    "why.md", // #677: herdsman attaches it as a note; never committed
 ];
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
@@ -1061,6 +1062,15 @@ pub fn spawn(
         }
         event("supersede", d)?;
     }
+    // #676: a lane moved off its last host starts from the pushed branch, plus that host's unsaved work on `wip/`.
+    let moved = (placed.as_ref())
+        .and_then(|pl| last_spawn(&events, &p.agent).filter(|e| e.str("machine") != pl.machine.as_deref()));
+    if let Some((e, owt)) = moved
+        .and_then(|e| Some((e, e.str("worktree")?)))
+        .filter(|_| wip.is_none())
+    {
+        wip = crate::check::save_lane(ctx, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+    }
 
     let mut sha = None;
     let note; // #353: a superseded or fallback lane's summary for its successor, logged on its spawn
@@ -1075,6 +1085,10 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
+        let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
+        if moved.is_some() && p.family != "rev" && pushed() {
+            p.base = format!("origin/{}", p.branch);
+        }
         let created = match bt {
             None => herdr::json(r, &create_argv(&local, &p, reopen))?,
             Some(_) if reopen => Value::Null,
@@ -1133,10 +1147,14 @@ pub fn spawn(
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
+            .chain((p.family != "design").then(|| {
+                let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
+                crate::why::brief(r, f, &events, (fleet, issue), rev, body)
+            }).flatten())
             .chain(note.clone())
             .chain(resume)
             .chain(wip.as_ref().map(|w| {
-                format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
+                format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
             }))
             .map(|t| format!("\n\n{t}"));
         (

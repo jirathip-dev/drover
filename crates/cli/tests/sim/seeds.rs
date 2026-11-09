@@ -29,6 +29,9 @@ pub const PARKED: &[(u64, &str)] = &[
     ),
 ];
 
+/// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
+pub const PLANS: &[(&str, &str)] = &[];
+
 /// Seeds 2–24: random fleets (`scenario::random`).
 pub const FIXED: &[(u64, &str)] = &[
     (INCIDENT, "#370: repeated supersede under a kick's frozen clock"),
@@ -58,7 +61,7 @@ pub const FIXED: &[(u64, &str)] = &[
 
 /// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the
 /// refusal; each reviewer after it writes the same FAIL 5 s in.
-pub fn incident() -> (Model, String) {
+pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
     let s = m.sha();
@@ -82,5 +85,40 @@ pub fn incident() -> (Model, String) {
     m.scripts.insert("rev".into(), rev);
     let push = Script::Push { secs: 200, green: true };
     m.scripts.insert("impl".into(), vec![push; 6]);
+    (m, (4, 3))
+}
+
+/// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head,
+/// every head's CI takes 300 s, the host never busy. The first reviewer writes a FAIL without Proof 300 s in and
+/// ignores the refusal (a wasted spawn, superseded once); every reviewer after it writes PASS 300 s in.
+pub fn known() -> (Model, String) {
+    let mut rng = Rng::new(KNOWN);
+    let mut m = Model::default();
+    let s = m.sha();
+    m.origin.insert("staging".into(), s);
+    m.load = 1;
+    m.ci_secs = Some(300);
+    timers(&mut m, &mut rng, T0 + 1);
+    m.at(T0, Ev::Run(args(&["queue", FLEET, "add", "201", "202"])));
+    let push = Script::Push { secs: 600, green: true };
+    m.scripts.insert("impl".into(), vec![push; 6]);
+    let bad = Script::Review {
+        secs: 300,
+        pass: false,
+        proof: false,
+        heeds: false,
+    };
+    let pass = Script::Review {
+        secs: 300,
+        pass: true,
+        proof: true,
+        heeds: true,
+    };
+    let mut rev = vec![bad];
+    rev.extend(std::iter::repeat_n(pass, 6));
+    m.scripts.insert("rev".into(), rev);
     (m, config(4, 3))
 }
+
+/// The known-answer fleet's seed (its scheduler's choices and timer offsets).
+pub const KNOWN: u64 = 685;

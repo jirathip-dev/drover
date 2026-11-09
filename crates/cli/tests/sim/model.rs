@@ -100,12 +100,28 @@ pub struct Model {
     pub died: Vec<String>,
     /// Test-only break switches (AC 3).
     pub sabotage: Option<crate::invariants::Sabotage>,
+    /// #685: every head's CI takes this long (else 1–15 min, drawn).
+    pub ci_secs: Option<u64>,
+    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
+    /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
+    /// a head or wrote a verdict herdsman takes.
+    pub ci_since: BTreeMap<String, u64>,
+    pub ci_wait: u64,
+    pub idle: u64,
+    pub polled: u64,
+    pub produced: Vec<String>,
 }
 
 impl Model {
     pub fn at(&mut self, t: u64, e: Ev) {
         self.seq += 1;
         self.agenda.insert((t, self.seq), e);
+    }
+    /// A new head's CI starts at `now`; its end is drawn from `rng` unless `ci_secs` fixes it.
+    pub fn ci_start(&mut self, sha: &str, now: u64, rng: &mut crate::sched::Rng) -> u64 {
+        self.ci.insert(sha.into(), None);
+        self.ci_since.insert(sha.into(), now);
+        now + self.ci_secs.unwrap_or_else(|| 60 * rng.range(1, 15))
     }
     pub fn sha(&mut self) -> String {
         self.shas += 1;
@@ -170,7 +186,10 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
             let o = herdr(sim, w, &a);
             if let (["agent", "start", _, _, _, _, pane, ..], 0) = (&a[..], o.code) {
                 w.procs[me].starting = Some((*pane).into());
-                if w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
+                let agent = Some(a[2].to_string());
+                let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
             }
@@ -473,9 +492,9 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             if let Some(p) = m.prs.get_mut(branch) {
                 p.head = head.clone();
             }
-            m.ci.insert(head.clone(), None);
             m.version += 1;
-            let (t, green) = (w.now + 60 * w.rng.range(1, 15), w.rng.chance(90));
+            let t = w.model.ci_start(&head, w.now, &mut w.rng);
+            let green = w.rng.chance(90);
             w.model.at(t, Ev::Ci { sha: head, green });
             ok("")
         }

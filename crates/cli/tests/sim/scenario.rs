@@ -102,6 +102,8 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
             }
             Ev::Lane { pane, step } => lane(sim, w, &pane, step),
             Ev::Ci { sha, green } => {
+                let since = w.model.ci_since.remove(&sha).unwrap_or(w.now);
+                w.model.ci_wait += w.now - since;
                 w.model.ci.insert(sha, Some(green));
                 w.model.version += 1;
             }
@@ -176,9 +178,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                 merged: None,
             });
             pr.head = sha.clone();
-            w.model.ci.insert(sha.clone(), None);
             w.model.version += 1;
-            let ci = now + 60 * w.rng.range(1, 15);
+            let ci = w.model.ci_start(&sha, now, &mut w.rng);
+            w.model.produced.push(id.into());
             w.model.at(ci, Ev::Ci { sha, green });
             stop(sim, w, i, n);
         }
@@ -193,6 +195,9 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
                     "FAIL\n\nReviewed head: {head}\n\n- blocking [correctness] src/lib.rs:10: wrong\n  Proof: spec\n  > AC 1: it works\n  src/lib.rs:10\n"
                 ),
             };
+            if pass || fixed {
+                w.model.produced.push(id.into());
+            }
             let f = Path::new(&cwd).join("verdict.md");
             std::fs::write(&f, body).unwrap();
             let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(now);
@@ -254,8 +259,9 @@ pub fn default_script(rng: &mut Rng, role: &str) -> Script {
 }
 
 /// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from
-/// `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and the fleet.toml text.
-pub fn random(seed: u64) -> (Model, String) {
+/// `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and
+/// `config`'s (max_spawns, rounds).
+pub fn random(seed: u64) -> (Model, (u64, u64)) {
     let mut rng = Rng::new(seed ^ 0x5eed);
     let mut m = Model::default();
     let s = m.sha();
@@ -290,5 +296,5 @@ pub fn random(seed: u64) -> (Model, String) {
         let kind = ["drive", "kick"][rng.below(2) as usize];
         m.at(T0 + rng.below(5 * 3600), Ev::Crash(kind.into()));
     }
-    (m, config(rng.range(2, 5), rng.range(2, 4)))
+    (m, (rng.range(2, 5), rng.range(2, 4)))
 }

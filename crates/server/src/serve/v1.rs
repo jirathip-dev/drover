@@ -9,7 +9,7 @@ use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusa
 use crate::api::{
     Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
 };
-use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict};
+use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
 use crate::events::plain;
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -192,7 +192,10 @@ impl Server<'_> {
             .as_ref()
             .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
         else {
-            return self.write(ctx, &f);
+            // #715: an answer's conductor wake is delivered after the reply.
+            let (res, later) = crate::conductor::deferred(|| self.write(ctx, &f));
+            self.later(ctx, later);
+            return res;
         };
         if !lock(&self.running).insert(fleet.clone()) {
             return refused("DRIVE_RUNNING", format!("{fleet} has a {op} running"));
@@ -418,7 +421,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         });
         Verdict {
             role: e.str("stage").unwrap_or("rev").into(),
-            round: e.data["round"].as_u64().unwrap_or_default(),
+            round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
             sha: e.str("sha").unwrap_or_default().into(),
             verdict: e.str("verdict").unwrap_or_default().into(),
             ts: e.ts,
@@ -433,10 +436,16 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         .filter(|e| e.is("verdict", fleet, n))
         .map(verdict)
         .collect();
+    let why = ev.iter().rfind(|e| e.is("why", fleet, n)).map(|e| WhyNote {
+        sha: e.str("sha").unwrap_or_default().into(),
+        round: e.data.get("round").and_then(Value::as_u64).unwrap_or_default(),
+        owner: e.str("owner").unwrap_or_default().into(),
+    });
     IssueView {
         fleet: fleet.into(),
         issue: n,
         verdicts,
+        why,
     }
 }
 
