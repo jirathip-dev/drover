@@ -49,4 +49,9 @@ and it lasts.
 A message to a thread whose delivery is stuck waits at most 30 s behind it, then shows `not delivered` instead of
 hanging.
 
-Keychain over ssh, a jammed SecurityAgent and a new build's cdhash: see [troubleshooting](troubleshooting.md).
+On macOS, Claude Code's login lives in the login Keychain (the `Claude Code-credentials` item), so a headless Mac
+keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md) §8. On Linux
+it is said to be a plain file in the config folder (`.credentials.json`): unverified.
+
+Keychain over ssh, a jammed SecurityAgent, a new build's cdhash and a wedged securityd: see
+[troubleshooting](troubleshooting.md).

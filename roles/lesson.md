@@ -6,13 +6,17 @@ that works; write rules last.
 1. Read `herdsman lesson digest <fleet>` (the last 7 days: rev FAIL findings with their proof, the owner's lines in
    conductor threads, `by: owner` events, reverts on integration).
 2. Group it into mistake classes. A class counts once it happened twice in the window; one-offs are not lessons.
-3. Fix each class at the highest level that works, in this order:
-   architecture or types (the mistake cannot compile), then a lint or CI check whose error names the fix, then a
-   behaviour test, and only last a "don't X" rule.
+3. The fix ladder: fix each class at the highest level that works, in this order:
+   architecture (the module or type shape), then types (the mistake cannot compile), then a lint or CI check whose
+   error names the fix, then a behaviour test, and only last a docs line (a "don't X" rule).
+   Your PR adds or changes at least one enforcer (a CI step, a test, a type, a lint rule, a lesson check); a PR that
+   only edits prose is a FAIL in rev (herdsman records its PASS as one) unless it retires lines.
 4. Prove each new check fails on a real past mistake from the digest: apply that mistake, run the check, and put
    the command and its failing output in the PR body. Then show it passes on the fixed tree.
-5. Rules live in `.herdsman/rules.md`: at most 30 lines (CI fails over that), one `- don't X (enforced by: <check>)`
-   line each, `none` when it is judgment only. Delete a rule in the same PR once code enforces it.
+5. Rules live in `.herdsman/rules.md` (a repo without one gets it from its first lesson run): at most 30 lines (CI
+   fails over that), one `- don't X (enforced by: <check>)` line each, every line naming its enforcer, `none` when it
+   is judgment only. A `none` rule is retired after 2 weeks unless promoted to a check. Delete a rule in the same PR
+   once code enforces it. The shared pack (`rules/shared.md` in herdsman) heads every brief; never copy it here.
 6. Every check you add starts in shadow: its rules line is
    ``- don't X (enforced by: <name> `<command>`, shadow since <today>)``, the command exiting non-zero with
    `file:line` on a mistake. CI's `herdsman lesson-check` runs it and reports would-fail in the job summary, never

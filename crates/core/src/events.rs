@@ -363,10 +363,13 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
         .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
 }
 
-/// #500: a design lane's spawn: never the issue's build or check lane.
+/// #500: a design (#730: or architect) lane's spawn: never the issue's build or check lane.
 pub fn design(e: &Event) -> bool {
-    e.kind == "spawn" && e.str("role") == Some("design")
+    e.kind == "spawn" && e.str("role").is_some_and(|r| STAGES.contains(&r))
 }
+
+/// #730: the owner-reviewed pre-impl roles, in the order they run.
+pub const STAGES: [&str; 2] = ["architect", "design"];
 
 /// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged
 /// without a pane (before #424, after the new spawn) ends none.
@@ -749,10 +752,13 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
         // branch (a `--design` issue's, before impl) is the issue's design stage.
         if design(e) {
-            if let Some(a) = e.str("agent") {
-                s.lanes.insert("design".into(), a.into());
+            if let (Some(r), Some(a)) = (e.str("role"), e.str("agent")) {
+                s.lanes.insert(r.into(), a.into());
             }
-            if !DESIGN.contains(&s.state.as_str()) || e.str("branch").is_none_or(|b| b.starts_with("design-")) {
+            if !DESIGN.contains(&s.state.as_str())
+                || e.str("branch")
+                    .is_none_or(|b| b.starts_with(&format!("{}-", e.str("role").unwrap_or_default())))
+            {
                 continue;
             }
             (s.state, s.lane) = ("design".into(), e.str("agent").map(String::from));
@@ -760,7 +766,7 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         s.last_ts = e.ts;
         s.last_event.clone_from(&e.kind);
         match e.kind.as_str() {
-            "spawn" if e.str("role") == Some("design") => {}
+            "spawn" if design(e) => {}
             "spawn" => {
                 s.lane = e.str("agent").map(String::from);
                 s.effort = e.str("effort").map(String::from);

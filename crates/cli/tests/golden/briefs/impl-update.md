@@ -23,7 +23,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Read narrowly: the brief, the exact target files. No repo-wide scans
   unless the brief requires them.
 - Implement the smallest change that meets the acceptance criteria; follow the repo's
-  AGENTS.md / CLAUDE.md. Don't refactor unrelated code or add deps without approval.
+  agent instruction files (`AGENTS.md`, `CLAUDE.md`). Don't refactor unrelated code or add deps without approval.
 - If the repo has a `justfile`, run `just --list` once and use its recipes.
 - Build output never goes in git: if the repo's `.gitignore` lacks `target*/`, add it in your PR.
 - Test with the exact commands from the brief. Save output to a named log and report the
@@ -104,6 +104,24 @@ This is a fix round; a fresh review follows at your pushed head.
 3. Run the repo's gates (build, lint, tests) and push.
 4. Report the resolved files.
 5. A merge-only round's `why.md` may be short: one `Decided:`, `Because:` and `Owner:` (`Rejected: none` allowed).
+
+## Shared rules (rules/shared.md)
+
+- Subtract before you add: delete dead code, duplicate paths and needless options before writing new ones.
+- Fix root causes, not symptoms: find why it broke and fix it there, once.
+- Keep boundary discipline: validate at the edges (CLI, files, network), trust typed values inside.
+- Model the domain: name types and functions for what they mean, so a wrong state cannot be built.
+- Prove it works with a run: the exact command and its exit code, not a reading of the code.
+- Encode lessons in structure: a type, a check or a test over a comment or a rule line.
+- Fix at the highest level that works: architecture, then types, then lint or CI, then a test, docs last.
+- Test behaviour, not implementation: drive the real entry point and assert what a user sees.
+- Migrate the callers, then delete the old API: never leave two ways to do one thing.
+- Make operations idempotent: running it twice does what running it once did.
+- Never block on the human: decide routine things, say what you decided, ask only for owner calls.
+- Guard the context window: read the files you need, not the repo; keep logs in files, not in the chat.
+- Smallest correct diff: no refactor, dependency or feature the issue did not ask for.
+- Every rule names its enforcer: a rule nothing checks is retired.
+- Leave the tree green: format, lint and test before you push.
 
 ## Output contract
 
