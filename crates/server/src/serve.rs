@@ -355,7 +355,7 @@ pub struct Server<'a> {
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
     /// #620: the [chat] tab's fold, by its key (`chat_tab`).
-    chat: Mutex<(serde_json::Value, serde_json::Value)>,
+    chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";

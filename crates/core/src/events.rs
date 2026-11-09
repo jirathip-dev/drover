@@ -546,15 +546,72 @@ impl Asks {
     }
 }
 
+/// #701: the chat's index, one event at a time (`add`, beside `Asks`): the threads, each thread's events, the first
+/// ask and the last decision of each (fleet, id), and the handoff rows sent on (`conductor::forwarded`); by position.
+#[derive(Default, Clone)]
+pub struct Threads {
+    pub new: Vec<usize>,
+    of: HashMap<String, Vec<usize>>,
+    asks: HashMap<(String, String), usize>,
+    decisions: HashMap<(String, String), usize>,
+    pub forwards: std::collections::BTreeSet<u64>,
+}
+
+impl Threads {
+    /// Index `events`' last event.
+    fn add(&mut self, events: &[Event]) {
+        let Some((e, i)) = events.last().map(|e| (e, events.len() - 1)) else {
+            return;
+        };
+        if let Some(t) = e.str("thread") {
+            self.of.entry(t.into()).or_default().push(i);
+        }
+        self.forwards.extend(e.data.get("forwards").and_then(Value::as_u64));
+        let id = (e.fleet.clone(), e.str("id").unwrap_or_default().to_string());
+        match e.kind.as_str() {
+            "thread-new" => self.new.push(i),
+            "needs-decision" => {
+                self.asks.entry(id).or_insert(i);
+            }
+            "decision" => {
+                self.decisions.insert(id, i);
+            }
+            _ => {}
+        }
+    }
+
+    /// Thread `id`'s events.
+    pub fn of(&self, id: &str) -> &[usize] {
+        self.of.get(id).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// #701: the cached `Log` whose events `events` are (none: a log read some other way).
+pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
+    let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
+    let hit = logs.values().find(|l| std::ptr::eq(l.events.as_slice(), events));
+    hit.cloned()
+}
+
+/// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
+/// a cached log, else one pass.
+pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> Option<&'a Event> {
+    let is = |e: &&Event| e.kind == kind && e.fleet == fleet && e.str("id").unwrap_or_default() == id;
+    let Some(l) = cached(events) else {
+        return if kind == "decision" {
+            events.iter().rfind(is)
+        } else {
+            events.iter().find(is)
+        };
+    };
+    let x = &l.threads;
+    let map = if kind == "decision" { &x.decisions } else { &x.asks };
+    map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+}
+
 /// #632: `f` on `events`' ask index: the cached `log`'s when `events` is it, else built in one pass.
 fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
-    let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs
-        .values()
-        .find(|l| std::ptr::eq(l.events.as_slice(), events))
-        .cloned();
-    drop(logs);
-    if let Some(l) = hit {
+    if let Some(l) = cached(events) {
         return f(&l.asks);
     }
     let mut x = Asks::default();
@@ -568,6 +625,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
 pub struct Log {
     pub events: Vec<Event>,
     pub asks: Asks,
+    pub threads: Threads,
     pub states: States,
     seq: u64,
     key: (Option<u64>, Option<u64>),
@@ -603,6 +661,7 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     for e in new {
         m.events.push(e);
         m.asks.add(&m.events);
+        m.threads.add(&m.events);
     }
     Ok(l.clone())
 }

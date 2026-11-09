@@ -133,11 +133,15 @@ pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>>
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
+/// #701: event rows read from the database (a full read's cost is the log's length).
+pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
     let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
     let rows = q.query_map([arg], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
         let (seq, json) = r?;
+        ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Event {
             seq,
             ..serde_json::from_str(&json)?
