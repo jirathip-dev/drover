@@ -21,7 +21,9 @@ d=$(dirname "$0"); s="$d/sandboxes"; touch "$s"; echo "$*" >> "$d/calls"
 id_ok() { [ -n "$1" ] || { echo "ACTED ON THE CURRENT SANDBOX" >> "$d/calls"; exit 0; }
   grep -q "^$1 " "$s" || { echo "error: no sandbox $1" >&2; exit 1; }; }
 set_state() { sed "s/^$1 \([^ ]*\) [^ ]*/$1 \1 $2/" "$s" > "$s.new" && mv "$s.new" "$s"; }
-[ "$1" = --help ] || [ "$BOAT_API_KEY" = "boat-key-635" ] || { echo "error: not logged in" >&2; exit 1; }
+# #707: boat owns its login (`boat login`); herdsman hands it no key.
+[ "$1" = --help ] || [ -f "$d/login" ] || { echo "error: not logged in" >&2; exit 1; }
+[ -z "$BOAT_API_KEY" ] || [ "$BOAT_API_KEY" = "boat-key-635" ] || { echo "error: bad key" >&2; exit 1; }
 case "$1" in
 --help) printf 'Usage: boat [OPTIONS] [COMMAND]\n\nCommands:\n  new       Create\n  info      Show\n  list      List\n  delete    Delete\n  stop      Stop\n  resume    Resume\n  ssh       SSH\n  snapshot  Save\n  help      Help\n' ;;
 new) shift; t=default; n=
@@ -76,9 +78,6 @@ impl Runner for Boat {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
 }
 
 /// One fleet (sendmeter) and boat1 on the built-in recipe at `size`; the fake boat CLI in `<dir>/bin`.
@@ -90,6 +89,7 @@ fn setup(name: &str, size: &str) -> (herdsman::Ctx, PathBuf) {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("login"), "").unwrap();
     for (f, text) in [("boat", BOAT), ("ssh-keyscan", KEYSCAN)] {
         std::fs::write(bin.join(f), text).unwrap();
         std::process::Command::new("chmod")
@@ -109,7 +109,7 @@ fn calls(bin: &std::path::Path) -> String {
 fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     let (c, bin) = setup("boat-boot", "medium");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin.clone());
     let mut out = vec![];
     let e = herdsman::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut out).unwrap_err();
     let e = format!("{e:#}");
@@ -142,7 +142,7 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
 fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
     let (c, bin) = setup("boat-ssh", "small");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(Fake::default(), bin.clone());
     let old = c.home.join(".ssh/config.d/herdsman-boat1.known");
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
     std::fs::write(&old, "[10.0.0.7]:2222 ssh-ed25519 OLD\n").unwrap();
@@ -193,25 +193,28 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
 }
 
 #[test]
-fn a_key_stored_under_the_hosts_fleet_is_found() {
+fn boat_runs_on_its_own_login_with_no_key_and_doctor_finds_a_key_file() {
     let (c, bin) = setup("boat-key", "small");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(
-        Fake::default().stored("herdsman/sendmeter/BOAT_API_KEY", KEY),
-        bin.clone(),
-    );
+    let r = Boat(Fake::default(), bin.clone());
     herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     assert!(calls(&bin).contains("new --type small --name boat1"), "{}", calls(&bin));
     std::fs::write(c.home.join(".ssh/ascii_box_ed25519"), "k").unwrap();
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
-        out.contains("✓ cloud boat1 key — herdsman/sendmeter/BOAT_API_KEY"),
+        out.contains("! cloud boat1 key — BOAT_API_KEY not in env or ")
+            && out.contains("boat's CLI uses its own login"),
         "{out}"
     );
     assert!(
         out.contains("✓ cloud boat1 identity — ~/.ssh/ascii_box_ed25519"),
         "{out}"
     );
+    // #707: the API key `[ci_runners]` calls need, in its 0600 file: found, and handed to the command.
+    let f = secret_file(&c, "BOAT_API_KEY", KEY, 0o600);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains(&format!("✓ cloud boat1 key — {}", f.display())), "{out}");
+    herdsman::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
 }
 
 #[test]
@@ -235,13 +238,13 @@ fn the_rates_are_boats_and_medium_is_default() {
             "{size}: {usd} {hours}"
         );
     }
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin);
+    let r = Boat(Fake::default(), bin);
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
         out.contains("! cloud boat1 size — \"medium\" is boat's \"default\""),
         "{out}"
     );
-    assert!(out.contains("✓ cloud boat1 key — herdsman/all/BOAT_API_KEY"), "{out}");
+    assert!(out.contains("! cloud boat1 key — BOAT_API_KEY not in env"), "{out}");
     assert!(out.contains("✓ cloud boat1 cli — boat has"), "{out}");
     assert!(
         out.contains("✗ cloud boat1 identity — ~/.ssh/ascii_box_ed25519 missing"),
@@ -264,7 +267,7 @@ fn doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known
     )
     .unwrap();
     std::fs::write(ssh.join("config"), "Include config.d/*\n\nHost *\n").unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin);
+    let r = Boat(Fake::default(), bin);
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(
@@ -282,7 +285,7 @@ fn doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known
 fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empty_id() {
     let (c, bin) = setup("boat-empty-id", "small");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(Fake::default(), bin.clone());
     herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     // Stopped, boat's default list omits it: `--all` still finds it, by its id.
     herdsman::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
@@ -317,7 +320,7 @@ fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empt
 fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     let (c, bin) = setup("boat-moved", "small");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin.clone());
     herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     let conf = || std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     let pin = c.home.join(".ssh/herdsman/boat1.known");

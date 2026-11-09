@@ -61,9 +61,6 @@ pub struct Fake {
     pub calls: Shared<Vec<String>>,
     pub replies: Vec<(String, Out)>,
     pub onces: Shared<Vec<(String, Out)>>,
-    /// #441: the fake OS store (service -> secret); `no_store` makes it unusable, as on a host without one.
-    pub store: Shared<std::collections::BTreeMap<String, String>>,
-    pub no_store: bool,
     /// Each `run_in`'s command line and its stdin.
     pub inputs: Shared<Vec<(String, String)>>,
     /// #664: `closing()`: the panes a `herdr … pane close` closed, left out of every later `agent list`.
@@ -109,11 +106,6 @@ impl Fake {
         self.closed = Some(Shared::default());
         self
     }
-    /// #441: `svc` holds `value` in the fake store.
-    pub fn stored(self, svc: &str, value: &str) -> Self {
-        self.store.borrow_mut().insert(svc.into(), value.into());
-        self
-    }
     pub fn called(&self, prefix: &str) -> bool {
         self.calls.borrow().iter().any(|c| c.starts_with(prefix))
     }
@@ -157,19 +149,6 @@ impl Runner for Fake {
         let line = format!("{prog} {}", args.join(" "));
         self.inputs.borrow_mut().push((line, input.into()));
         self.run(prog, args)
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        Ok(self.store.borrow().get(svc).cloned())
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        let mut m = self.store.borrow_mut();
-        let _ = match value {
-            Some(v) => m.insert(svc.into(), v.into()),
-            None => m.remove(svc),
-        };
-        Ok(())
     }
 }
 
@@ -314,6 +293,16 @@ pub fn tmpdir(name: &str) -> PathBuf {
     AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
     ALL.lock().unwrap().push(d.clone());
     d
+}
+
+/// #707: secret `name` as the 0600 (or `mode`) file `<config>/secrets/<name>`; its path.
+pub fn secret_file(c: &Ctx, name: &str, value: &str, mode: u32) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let p = c.config.with_file_name("secrets").join(name);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, value).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+    p
 }
 
 pub fn ctx(dir: &Path, config: &str) -> Ctx {
@@ -780,12 +769,6 @@ impl Runner for Shell<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.0.set_secret(svc, value)
-    }
 }
 
 pub const IMPL: &str = "sendmeter-impl-12";
@@ -795,6 +778,9 @@ pub const V1_PERMISSION: &str = "╭──────────────�
 
 /// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
 /// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
+/// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
+pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
+
 pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
@@ -811,6 +797,7 @@ pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
         .reply("herdr agent list", &list)
         .reply("herdr pane read", V1_PERMISSION)
         .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+        .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
         .reply("gh issue close", "");
     (c, r)

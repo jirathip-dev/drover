@@ -30,6 +30,33 @@ const CM: [&str; 3] = [
     "-oControlPersist=10m",
 ];
 
+/// #641: the ids of herdr's saved machine profiles labelled `m` (`herdr machine list` here).
+pub fn profiles(r: &dyn Runner, m: &str) -> Result<Vec<String>> {
+    let v = crate::runner::json(r, crate::herdr::BIN, &["machine", "list", "--json"])?;
+    let mine = v.as_array().into_iter().flatten().filter(|p| p["label"] == m);
+    Ok(mine.filter_map(|p| p["id"].as_str().map(String::from)).collect())
+}
+
+/// #641: label `m` names exactly one herdr machine profile, else `HOST_AMBIGUOUS` (listing them) or `HOST_UNKNOWN`
+/// (none; `none_ok` lets bootstrap add the first), each with its fix; nothing runs on a host it can't pin down.
+pub fn resolve(r: &dyn Runner, m: &str, none_ok: bool) -> Result<()> {
+    match &profiles(r, m)?[..] {
+        [_] => Ok(()),
+        [] if none_ok => Ok(()),
+        [] => refused(
+            "HOST_UNKNOWN",
+            format!("no herdr machine labelled {m}: `herdr machine add {m} --label {m}` (or hosts bootstrap)"),
+        ),
+        ids => refused(
+            "HOST_AMBIGUOUS",
+            format!(
+                "herdr machine label {m} names {}: keep one, `herdr machine remove <id>` the rest",
+                ids.join(", ")
+            ),
+        ),
+    }
+}
+
 /// A lane's host; `machine` None is this one (every call and file exactly as before).
 pub struct On<'a> {
     pub r: &'a dyn Runner,
@@ -178,13 +205,6 @@ impl Runner for On<'_> {
     fn local(&self) -> bool {
         self.machine.is_none() && self.r.local()
     }
-    /// #441: the store is the main host's; remote hosts keep none.
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        self.r.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        self.r.set_secret(svc, value)
-    }
 }
 
 /// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared
@@ -305,12 +325,6 @@ impl Runner for Pass<'_> {
     }
     fn local(&self) -> bool {
         self.r.local()
-    }
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        self.r.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        self.r.set_secret(svc, value)
     }
 }
 

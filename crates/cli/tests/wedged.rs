@@ -1,43 +1,16 @@
-//! #713: the 11-08 outage as a test. The login Keychain stops answering: `security` and `codesign` never return and
-//! the OS store's every call blocks. `doctor`, `serve` (startup through its first page render), `tick` and `check`
-//! each still finish within 10 s of wall-clock time; doctor shows the timed-out row, serve still serves the board.
+//! #713: the 11-08 outage as a test. The login Keychain stops answering: `security` and `codesign` never return.
+//! `doctor`, `serve` (startup through its first page render), `tick` and `check` each still finish within 10 s of
+//! wall-clock time, and serve still serves the board. #707 retired the store and the signing step, so today none of
+//! them calls either tool; the test keeps any that comes back bounded.
 mod common;
 use common::*;
 use herdsman::runner::{Out, Runner};
 use serde_json::json;
-use std::any::Any;
 use std::io::{Read, Write};
 use std::time::Duration;
 
 /// The tools that hang with the Keychain.
 const WEDGED: [&str; 2] = ["security", "codesign"];
-
-/// A keychain item behind a dialog nobody clicks: every call blocks for good.
-struct Dialog;
-
-impl keyring::credential::CredentialApi for Dialog {
-    fn set_secret(&self, _: &[u8]) -> keyring::Result<()> {
-        hang()
-    }
-    fn get_secret(&self) -> keyring::Result<Vec<u8>> {
-        hang()
-    }
-    fn delete_credential(&self) -> keyring::Result<()> {
-        hang()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl keyring::credential::CredentialBuilderApi for Dialog {
-    fn build(&self, _: Option<&str>, _: &str, _: &str) -> keyring::Result<Box<keyring::credential::Credential>> {
-        Ok(Box::new(Dialog))
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
 
 fn hang() -> ! {
     loop {
@@ -69,7 +42,6 @@ impl Runner for Wedged {
         if !WEDGED.contains(&prog) {
             return self.0.run_in(prog, args, input);
         }
-        self.0.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
         Ok(Self::cut(
             prog,
             args,
@@ -85,18 +57,11 @@ impl Runner for Wedged {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        herdsman::runner::store_get(self, svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        herdsman::runner::store_set(self, svc, value)
-    }
 }
 
-/// A Claude fleet with a `secret:` env and account A's usage meter (its login is read with `security`), and #12's
+/// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
 /// impl lane on A (check confirms its usage-limit banner from the meter).
 fn setup(name: &str) -> herdsman::Ctx {
-    keyring::set_default_credential_builder(Box::new(Dialog));
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -141,48 +106,28 @@ fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static
     }
 }
 
-/// `herdsman <args>` against the wedged Keychain, within 10 s: (exit code, output, the wedged calls made).
-fn cli(name: &str, args: &'static [&'static str]) -> (i32, String, Vec<String>) {
+/// `herdsman <args>` against the wedged Keychain, within 10 s: (exit code, output).
+fn cli(name: &str, args: &'static [&'static str]) -> (i32, String) {
     let c = setup(name);
     in_10_s(&format!("herdsman {}", args.join(" ")), move || {
-        let r = wedged();
-        let (code, out) = run(&c, &r, args);
-        let calls = r.0.calls.borrow().clone();
-        let hung = calls
-            .into_iter()
-            .filter(|l| WEDGED.iter().any(|w| l.starts_with(w)))
-            .collect();
-        (code, out, hung)
+        run(&c, &wedged(), args)
     })
 }
 
 #[test]
-fn doctor_finishes_in_10_s_and_shows_the_timed_out_row() {
-    let (_, out, hung) = cli("wedged-doctor", &["doctor"]);
-    if cfg!(target_os = "macos") {
-        assert!(hung.iter().any(|l| l.starts_with("codesign")), "{hung:?}");
-        let row = out
-            .lines()
-            .find(|l| l.contains("signature — "))
-            .unwrap_or_else(|| panic!("{out}"));
-        assert!(row.starts_with('✗') && row.contains("timed out"), "{row}");
-    }
+fn doctor_finishes_in_10_s() {
+    cli("wedged-doctor", &["doctor"]);
 }
 
 #[test]
 fn check_finishes_in_10_s() {
-    let (code, out, hung) = cli("wedged-check", &["check"]);
+    let (code, out) = cli("wedged-check", &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!hung.is_empty(), "check reads the meter's login with security");
 }
 
 #[test]
 fn tick_finishes_in_10_s() {
-    let (_, out, hung) = cli("wedged-tick", &["tick"]);
-    assert!(
-        !hung.is_empty(),
-        "tick's check reads the meter's login with security: {out}"
-    );
+    cli("wedged-tick", &["tick"]);
 }
 
 #[test]
