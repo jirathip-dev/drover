@@ -1,0 +1,11 @@
+Decided: unpark goes back to the state before the needs-human the park closed (the state at park time when parked from a failed extend), folded from the log like drive's `repaired`
+Because: "the state before the park (the park event already knows it; `repaired` stores it the same way)"
+Because: crates/core/src/gate.rs:1017
+Decided: `unparked` folds exactly like `repaired` (a queued state drops its build lane)
+Because: crates/core/src/events.rs:854
+Rejected: storing the earlier state on the `parked` event — logs parked before #712 have no such field; folding works for both
+Decided: the board's [unpark] is a paired-only form op (PAIRED_OPS), as [park]; Lanes rows get it via the row's `unpark` fleet and the tab's mtime
+Because: "show a `[unpark]` action for paired devices (same gate as `[park]`)"
+Rejected: an unpark through the jobs thread — unpark spawns nothing; drive's next pass starts it
+Check: drive test an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it and merge test unpark_restores_the_round_and_requeues_it_last pass
+Owner: You can now unpark an issue from the board or with `herdsman unpark`; it carries on where it was, and a park can say why.
