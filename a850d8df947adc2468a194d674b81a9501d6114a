@@ -1,0 +1,11 @@
+Decided: architect reuses the design stage (states design/design-review, design-* events) with the stage's role on each event; none means design
+Because: "Its output is reviewed by the owner exactly like a design (approve / revise / reject)"
+Because: crates/core/src/queue.rs:224
+Rejected: new architect-* events and states — a second copy of the whole design machinery for the same approve/revise/reject flow
+Decided: the approved ADR's folder is recorded on design-approved and linked in every later non-architect brief; rev's line says check the diff against it
+Because: "The impl brief of an `--architect` issue links the approved ADR, and rev checks the diff against it."
+Decided: an architect approval alone does not force the verify stage; only a UI design does
+Because: crates/core/src/verify.rs:31
+Check: design_and_architect_run_architect_then_design_then_impl_which_links_the_adr and architect_revise_reruns_it_with_the_note_and_reject_needs_a_human pass
+Check: the shed/ACP role label is `architect` because Fleet::family returns it (crates/core/src/config.rs:981)
+Owner: You can now queue an issue for an architect first; it writes the decision record you approve before design or building starts.
