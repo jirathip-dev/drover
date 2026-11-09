@@ -3,6 +3,7 @@
     "error": null,
     "failed": false,
     "live": true,
+    "mtime": "1794234768095938334",
     "now": 1000000,
     "pair": true,
     "paired": true,
@@ -64,6 +65,7 @@
                 "state": "blocked",
                 "thread": null,
                 "tone": "r",
+                "unpark": null,
                 "where": "",
                 "why": null,
                 "why_tone": ""
@@ -111,6 +113,7 @@
                 "state": "working",
                 "thread": null,
                 "tone": "g",
+                "unpark": null,
                 "where": "",
                 "why": null,
                 "why_tone": ""
@@ -150,6 +153,7 @@
                 "state": "asleep",
                 "thread": "t1",
                 "tone": "m",
+                "unpark": null,
                 "where": "",
                 "why": null,
                 "why_tone": ""
@@ -187,6 +191,7 @@
     "error": "null",
     "failed": "boolean",
     "live": "boolean",
+    "mtime": "string",
     "now": "number",
     "pair": "boolean",
     "paired": "boolean",

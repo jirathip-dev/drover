@@ -518,7 +518,7 @@ pub fn tone(state: &str) -> &'static str {
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "cond",
+    "unpair", "answer", "drive", "override", "extend", "park", "unpark", "orphans", "reap", "host", "bqueue", "cond",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -1471,6 +1471,7 @@ impl<'a> Server<'a> {
             // #130: a needs-human card's buttons.
             op @ ("override" | "extend" | "park") => {
                 let n = g("issue").parse().context("no issue")?;
+                let why = (op == "park").then_some(g("why"));
                 crate::gate::needs_human(
                     ctx,
                     &Config::load(&ctx.config)?,
@@ -1478,10 +1479,16 @@ impl<'a> Server<'a> {
                     &mut out,
                     (fleet, n),
                     op,
-                    (true, "owner"),
+                    (true, "owner", why),
                 )?;
                 crate::drive::kick(ctx, self.r, fleet, n, "board");
                 format!("#{n}: {op}")
+            }
+            // #712: a parked row's [unpark]; drive's next pass picks it up.
+            "unpark" => {
+                let n = g("issue").parse().context("no issue")?;
+                crate::gate::unpark(ctx, &Config::load(&ctx.config)?, &mut out, (fleet, n), "owner")?;
+                format!("#{n}: unparked")
             }
             "orphans" => {
                 let n = crate::check::orphans(ctx, &Config::load(&ctx.config)?, &mut out, true)?;
@@ -1831,6 +1838,8 @@ impl<'a> Server<'a> {
                     })
                     .collect();
                 let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
+                // #712: why it was parked (`park --why`).
+                notes.extend(queue::park_why(events, st, f, n).map(|w| format!("parked: {w}")));
                 // #417: a verify stage passed on at this head for want of the repo's recipe.
                 let bare = |e: &&Event| e.is("verify-no-recipe", f, n) && e.str("sha") == Some(head);
                 notes.extend(
@@ -2143,6 +2152,7 @@ impl<'a> Server<'a> {
             live: self.addr.is_some() && self.export.is_none(),
             paired,
             pair: !self.pairb().is_empty(),
+            mtime: mtime(ctx),
             ..LanesTab::default()
         };
         let events = shared(&ctx.state).unwrap_or_default();
@@ -2268,6 +2278,7 @@ impl<'a> Server<'a> {
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state == "dead",
             blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
+            unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }
 

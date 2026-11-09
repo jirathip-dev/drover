@@ -123,7 +123,24 @@ enum Cmd {
         why: Option<String>,
     },
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
-    Park { fleet: String, issue: u64 },
+    Park {
+        fleet: String,
+        issue: u64,
+        /// Why it is parked: `queue ls` and the board show it
+        #[arg(long)]
+        why: Option<String>,
+        /// Who parked it, as the log shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+    },
+    /// Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`
+    Unpark {
+        fleet: String,
+        issue: u64,
+        /// Who unparked it, as the log shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+    },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Ask {
@@ -1265,6 +1282,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["needs"].as_array().is_some_and(|n| !n.is_empty()) {
                     on += &format!("  needs {}", r["needs"].to_string().replace(['[', ']', '"'], ""));
                 }
+                if let Some(w) = r["why"].as_str() {
+                    on += &format!("  parked: {w}");
+                }
                 let n = |k: &str| r[k].as_u64().unwrap_or_default();
                 writeln!(
                     out,
@@ -1676,7 +1696,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     by,
                     no_spawn,
-                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by))?,
+                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
                 Cmd::Done {
                     fleet,
                     issue,
@@ -1728,9 +1748,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(4);
                     }
                 }
-                Cmd::Park { fleet, issue } => {
-                    gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;
+                Cmd::Park { fleet, issue, why, by } => {
+                    gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
                     let v = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, issue, false)?;
                     let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();

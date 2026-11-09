@@ -189,6 +189,8 @@ pub struct LanesTab {
     pub sections: Vec<LaneSection>,
     /// #630: each lane's workspace root and unsaved work.
     pub unsaved: Vec<LaneUnsaved>,
+    /// #712: fleet.toml's mtime, for a row's [unpark] form.
+    pub mtime: String,
 }
 
 /// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -239,6 +241,8 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
+    /// #712: its issue is parked: the fleet its [unpark] posts to.
+    pub unpark: Option<String>,
     // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
     // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,

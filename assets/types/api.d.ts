@@ -69,7 +69,11 @@ export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolea
 /**
  * #630: each lane's workspace root and unsaved work.
  */
-unsaved: Array<LaneUnsaved>, };
+unsaved: Array<LaneUnsaved>, 
+/**
+ * #712: fleet.toml's mtime, for a row's [unpark] form.
+ */
+mtime: string, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -84,7 +88,11 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, runtime: string, host: string, where: string, };
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
+/**
+ * #712: its issue is parked: the fleet its [unpark] posts to.
+ */
+unpark?: string | null, runtime: string, host: string, where: string, };
 
 /**
  * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.

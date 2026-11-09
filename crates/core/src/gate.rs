@@ -943,6 +943,7 @@ fn merged(
 }
 
 /// #130: a needs-human card's `override` / `extend` / `park`; #151: `herdsman extend|park` (`spawn: false` = `--no-spawn`).
+/// #712: `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
     cfg: &Config,
@@ -950,7 +951,7 @@ pub fn needs_human(
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
     op: &str,
-    (spawn, by): (bool, &str),
+    (spawn, by, why): (bool, &str, Option<&str>),
 ) -> Result<()> {
     // Only from needs-human (#217: or a failed extend's card): a stale card or a double tap never parks a merged
     // issue or extends twice.
@@ -985,7 +986,11 @@ pub fn needs_human(
             }
         }
         _ => {
-            crate::events::append(&ctx.state, &ev("parked"))?;
+            let mut e = ev("parked");
+            if let Some(w) = why.filter(|w| !w.trim().is_empty()) {
+                e.data.insert("why".into(), json!(w));
+            }
+            crate::events::append(&ctx.state, &e)?;
             // #186: a parked issue's lanes are closed: reap what they left (a live agent's worktree is spared).
             if let Ok(a) = herdr::agents(r) {
                 check::leftovers(ctx, cfg, r, &a, true)?;
@@ -993,5 +998,51 @@ pub fn needs_human(
         }
     }
     writeln!(out, "#{n}: {op}")?;
+    Ok(())
+}
+
+/// #712: `herdsman unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
+/// that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as
+/// `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
+pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);
+    let state = fold(&events).remove(&(fleet.to_string(), n)).map(|s| s.state);
+    let Some(at) = events
+        .iter()
+        .rposition(|e| mine(&e) && e.kind == "parked")
+        .filter(|_| state.as_deref() == Some("parked"))
+    else {
+        return refused(
+            "NOT_PARKED",
+            format!("#{n} is {}, not parked", state.as_deref().unwrap_or("unknown")),
+        );
+    };
+    let was = |i: usize| fold(&events[..i]).remove(&(fleet.to_string(), n)).map(|s| s.state);
+    let mut to = was(at).unwrap_or_else(|| "queued".into());
+    if to == "needs-human" {
+        let nh = events[..at]
+            .iter()
+            .rposition(|e| mine(&e) && e.kind == "needs-human")
+            .unwrap_or(at);
+        to = was(nh)
+            .filter(|s| s != "needs-human")
+            .unwrap_or_else(|| "queued".into());
+    }
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(n), "unparked", json!({"by": by, "state": to})),
+    )?;
+    if !crate::queue::replay(&events, fleet).iter().any(|i| i.issue == n) {
+        crate::queue_change(
+            ctx,
+            cfg,
+            fleet,
+            crate::queue::op("add", &[n], false, None, None, None),
+            None,
+        )?;
+    }
+    writeln!(out, "#{n}: unparked, back to {to}")?;
     Ok(())
 }
