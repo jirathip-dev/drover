@@ -794,6 +794,13 @@ pub fn scan(
         if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             w.what = SLOT.into();
         }
+        // #724: a failed spawn backing off says when drive retries it, and why.
+        if let Some(why) = spawn
+            .then(|| crate::drive::retrying(ctx, mine, &s.fleet, s.issue))
+            .flatten()
+        {
+            w.what = why;
+        }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
         if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {

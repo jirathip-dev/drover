@@ -274,6 +274,7 @@ pub fn plain(ev: &Event) -> String {
             )
         }
         "host-busy" => format!("host-busy {}: {}", s("host"), s("reason")),
+        "spawn-failing" => format!("spawn-failing {}#{}: {}", ev.fleet, ev.issue.unwrap_or(0), s("error")),
         "decision" => format!("{who} decision {} by {}: {}", s("id"), s("by"), s("choice")),
         "queue" => {
             let n: Vec<String> = ev.data["issues"]
@@ -428,6 +429,9 @@ pub const PASSIVE: &[&str] = &[
     "account-signed-out",
     "cap-banner-ignored",
     "spawn-failed",
+    // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.
+    "spawn-error",
+    "spawn-failing",
     "spawn-started",
     // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.
     "spawn-adopted",
