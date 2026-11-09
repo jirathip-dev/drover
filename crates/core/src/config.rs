@@ -118,7 +118,7 @@ pub struct ConductorCfg {
 
 /// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
-    ("design", "`spawn … design`"),
+    ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
     ("hosts", "`hosts on|off|refresh`"),
     ("reclaim", "`reclaim`"),
@@ -431,6 +431,8 @@ pub struct Fleet {
     pub ask_thread: Option<String>,
     /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
     pub runtime: Option<Runtime>,
+    /// #732: lets `rev` share `impl`'s provider; its line needs a `#` reason comment.
+    pub rev_same_provider: Option<bool>,
 }
 
 /// #350: `mode = "fast-first"` lands a PASS once its `fast` checks are green (one touching `full_first_paths` waits
@@ -484,7 +486,11 @@ impl Serial {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Role {
+    /// #732: unset with `agent` set, the harness whose adapter that agent is.
+    #[serde(default)]
     pub harness: String,
+    /// #732: the ACP agent id its shed-acp lanes run (`claude-acp`, `codex-acp`, …) over the runtime's `acp`.
+    pub agent: Option<String>,
     pub profile: Option<String>,
     pub model: Option<String>,
     /// Reasoning effort, mapped per harness (`harness::effort_ok`); `[limits].effort` when unset.
@@ -904,11 +910,25 @@ impl Config {
             if f.notify.iter().any(|n| !n.webpush() && n.cmd.trim().is_empty()) {
                 bail!("fleet.{name}.notify: cmd must not be empty");
             }
+            for (role, r) in &mut f.role {
+                let id = r.agent.as_deref();
+                match (id.map(|a| (a, crate::harness::of_agent(a))), r.harness.is_empty()) {
+                    (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
+                    (Some((_, Some(h))), true) => r.harness = h.into(),
+                    (Some((a, Some(h))), false) if h != r.harness => {
+                        bail!(
+                            "fleet.{name}.role.{role}: agent {a} runs harness {h}, not {}",
+                            r.harness
+                        )
+                    }
+                    _ => {}
+                }
+            }
             for (role, r) in &f.role {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::harness::NAMES.contains(&r.harness.as_str()) {
+                if !crate::harness::known().any(|h| h == r.harness) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
                         crate::harness::NAMES
@@ -938,7 +958,46 @@ impl Config {
                 }
             }
         }
+        for name in c.fleet.keys() {
+            c.same_provider(name, text)?;
+        }
         Ok(c)
+    }
+
+    /// #732 (q911): `REVIEW_SAME_PROVIDER` when fleet `name`'s `rev` runs on its `impl`'s provider (each role's
+    /// `agent`, else the fleet's ACP runtime's), once either names an `agent`, unless `rev_same_provider = true` has
+    /// a `#` reason on its line.
+    fn same_provider(&self, name: &str, text: &str) -> Result<()> {
+        let f = &self.fleet[name];
+        let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
+            return Ok(());
+        };
+        let run = self.shed_for(name).and_then(|b| b.acp);
+        let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
+        let p = (of(i), of(v));
+        let p = (
+            p.0.as_deref().and_then(crate::harness::provider),
+            p.1.as_deref().and_then(crate::harness::provider),
+        );
+        if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
+            return Ok(());
+        }
+        let mut head = "";
+        let ok = text.lines().any(|l| {
+            let t = l.trim();
+            if t.starts_with('[') {
+                head = t;
+            }
+            head == format!("[fleet.{name}]") && t.starts_with("rev_same_provider") && t.contains('#')
+        });
+        if f.rev_same_provider == Some(true) && ok {
+            return Ok(());
+        }
+        let why = format!(
+            "fleet.{name}: rev runs on impl's provider {}; give rev another agent, or set rev_same_provider = true # <why>",
+            p.0.unwrap_or_default()
+        );
+        crate::gate::refused("REVIEW_SAME_PROVIDER", why)
     }
 
     /// Notifiers for `fleet`'s events: its own if any (plus the global ones with `notify_global`), else the global.
@@ -1020,6 +1079,7 @@ impl Fleet {
     pub fn family(&self, role: &str) -> &'static str {
         match role {
             "design" => "design",
+            "architect" => "architect",
             "conductor" => "conductor",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",

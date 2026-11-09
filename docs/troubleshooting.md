@@ -148,3 +148,97 @@ Offline in `herdsman hosts` while `herdr agent list` over ssh is OK is this case
 install shed on that host.
 
 **Confirm.** `herdsman hosts` shows the host reachable, and a lane placed there starts.
+
+## 7. Wedged Keychain daemon (securityd)
+
+Seen on 2026-11-08 on a headless Mac. Commands marked *(unverified)* come from that outage and were not re-run for
+this page; the rest were run once on macOS 27.2 with FileVault and SIP on.
+
+**Symptom.** Every `security` call hangs, not only item reads: `security list-keychains`, `unlock-keychain` and
+`show-keychain-info` too. securityd's log loops on an unlock that waits for
+a dialog nobody sees:
+
+```sh
+perl -e 'alarm 30; exec @ARGV' log show --last 10m --predicate 'process == "securityd"' --style compact | tail -20
+```
+
+It repeats `unlocking for makeUnlocked()` followed by `new SecurityAgentXPCQuery`.
+
+**Cause.** securityd itself is stuck behind an unlock prompt, and every new reader (the tick and fast jobs, other
+pollers) queues behind it.
+
+**Fix.**
+
+1. Stop what keeps starting readers: herdsman's timer jobs and any other poller (unload their LaunchAgents, or stop
+   them as you started them). *(unverified)*
+2. Kill the waiting readers by pid and SecurityAgent, as in §2.
+3. Kill the per-session daemon; launchd starts a new one. `launchctl kickstart system/com.apple.securityd` is
+   refused while SIP is on, so kill it by pid: *(unverified)*
+
+   ```sh
+   ps -axo pid,etime,command | grep '[s]ecurityd -i'   # note the pid
+   sudo kill -9 <pid>
+   ```
+
+4. Wait a few seconds, then unlock the login keychain (§1) and re-grant each item (§3):
+
+   ```sh
+   K=~/Library/Keychains/login.keychain-db
+   read -rs P
+   perl -e 'alarm 20; exec @ARGV' security unlock-keychain -p "$P" "$K"
+   unset P
+   ```
+
+5. Start the jobs from step 1 again.
+
+**Confirm.** A bounded call returns at once and exits 0:
+
+```sh
+perl -e 'alarm 10; exec @ARGV' security list-keychains
+```
+
+Exit 142 means the alarm fired: still wedged.
+
+### Bounded commands
+
+Wrap every diagnostic `security` or `log` call in `perl -e 'alarm N; exec @ARGV' <command>`: the command is killed
+after N seconds (exit 142) instead of hanging the shell. Perl ships with macOS; `timeout` is missing on older macOS
+releases (macOS 27.2 has `/usr/bin/timeout`), so the perl form works everywhere.
+
+## 8. Keep a headless Mac's login usable
+
+A macOS host's Claude login lives in the login Keychain (the `Claude Code-credentials` item; see
+[accounts](accounts.md)), so a headless Mac must keep that keychain unlocked and the Mac awake:
+
+```sh
+security show-keychain-info ~/Library/Keychains/login.keychain-db   # want: no-timeout
+security set-keychain-settings ~/Library/Keychains/login.keychain-db  # no -t, no -l: never auto-lock (unverified)
+pmset -g | grep -E '^ *sleep '                                        # want: sleep 0
+sudo pmset -a sleep 0                                                 # (unverified)
+```
+
+**FileVault and reboots.** With FileVault on, a plain reboot stops at the pre-boot unlock screen and auto-login is
+impossible, so the Mac stays offline until someone types the password at it. For a planned restart use an
+authenticated restart, which unlocks the disk once on the way back up: *(unverified)*
+
+```sh
+sudo fdesetup authrestart
+```
+
+**A shell rc that exports `CLAUDE_CODE_OAUTH_TOKEN`.** A token exported in `~/.zshrc` (or another rc file) reaches
+every lane and overrides the account env herdsman gives it, so all lanes run on that one token. Remove the export;
+`doctor` flags a login-shell token (#708). Check without printing the value:
+
+```sh
+grep -n CLAUDE_CODE_OAUTH_TOKEN ~/.zshrc ~/.zprofile ~/.bashrc ~/.profile 2>/dev/null | cut -d= -f1
+```
+
+## 9. Notes from the outage
+
+- Paste one line at a time. In some terminals a multi-line paste arrives as literal `\n`, and a `read -rs` takes the
+  next pasted line as the password. *(unverified)*
+- `ls` aliased to `eza` breaks commands copied from docs, e.g. `ls ~/Library/LaunchAgents`; use `/bin/ls` or
+  `command ls`.
+- Tailscale SSH needs an ACL rule that allows your user on that machine; without it the ssh is refused. *(unverified)*
+- While securityd is wedged, Screen Sharing can accept the connection and then fail in the client, so ssh is the way
+  in. *(unverified)*

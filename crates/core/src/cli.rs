@@ -653,6 +653,9 @@ enum QueueCmd {
         /// A design lane first; impl once the owner approves the design
         #[arg(long)]
         design: bool,
+        /// An architect lane first (before any design); impl once the owner approves its ADR
+        #[arg(long)]
+        architect: bool,
         /// Force the verify stage on (plain) or off, whatever the PR touches
         #[arg(long, num_args = 0..=1, default_missing_value = "on", value_parser = ["on", "off"])]
         verify: Option<String>,
@@ -676,10 +679,10 @@ enum QueueCmd {
     },
     /// Drop an issue from the queue
     Rm { issue: u64 },
-    /// Replace a queued issue's `needs` host tags, serial groups, design, verify or repro mark (`queue set 12 needs docker,gpu`; `design on|off`)
+    /// Replace a queued issue's `needs` host tags, serial groups, design, architect, verify or repro mark (`queue set 12 needs docker,gpu`; `design on|off`)
     Set {
         issue: u64,
-        #[arg(value_parser = ["needs", "serial", "design", "verify", "repro"])]
+        #[arg(value_parser = ["needs", "serial", "design", "architect", "verify", "repro"])]
         key: String,
         #[arg(value_delimiter = ',')]
         tags: Vec<String>,
@@ -831,8 +834,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`).
-pub const HELP_AGENT_MAX: usize = 342;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles).
+pub const HELP_AGENT_MAX: usize = 344;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1256,6 +1259,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["design"] == true {
                     on += "  design";
                 }
+                if r["architect"] == true {
+                    on += "  architect";
+                }
                 if r["repro"] == true {
                     on += "  repro";
                 }
@@ -1296,7 +1302,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::harness::NAMES {
+            for h in crate::harness::known() {
                 crate::harness::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
@@ -1790,6 +1796,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             serial,
                             needs,
                             design,
+                            architect,
                             verify,
                             repro,
                         } => {
@@ -1814,6 +1821,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             if design {
                                 d["design"] = json!(true);
                             }
+                            if architect {
+                                d["architect"] = json!(true);
+                            }
                             if let Some(v) = verify {
                                 d["verify"] = json!(v);
                             }
@@ -1829,7 +1839,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             );
                             let on = ["on", "off"].iter().any(|o| tags == [*o]);
                             anyhow::ensure!(
-                                !["design", "verify", "repro"].contains(&&*key) || on,
+                                !["design", "architect", "verify", "repro"].contains(&&*key) || on,
                                 "{key} is `on` or `off`"
                             );
                             let mut d = queue::op("set", &[issue], false, None, None, None);
@@ -1850,11 +1860,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    // #412: a conductor's design mark: the design's approval asks in its thread too.
+                    // #412: a conductor's design (#730: or architect) mark: the approval asks in its thread too.
                     let mut d = d;
                     if let Some(t) = std::env::var("HERDSMAN_THREAD")
                         .ok()
-                        .filter(|_| d.get("design").is_some())
+                        .filter(|_| d.get("design").is_some() || d.get("architect").is_some())
                     {
                         d["design_thread"] = json!(t);
                     }
