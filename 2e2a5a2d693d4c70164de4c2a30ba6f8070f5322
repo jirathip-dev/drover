@@ -1,0 +1,12 @@
+Decided: check scans `ps -axo pid=,ppid=,etime=,command=` once a pass for find-generic-password readers over 60 s and a SecurityAgent over 10 min
+Because: "counts `security find-generic-password` processes older than 60 s and a `SecurityAgent` older than 10 min"
+Decided: alert when the reader count is strictly more than `[limits] keychain_readers` (3)
+Because: "Over a threshold (default 3 readers) it alerts `keychain-jammed` once per episode"
+Decided: an episode ends at the first pass below the threshold, logged quietly as `keychain-clear`; its seq keys the next alert
+Rejected: keying on the oldest reader's pid — a manual or reaped kill would re-alert inside the same jam
+Decided: alert text carries pids, oldest age, each parent's executable name and the §2 fix, never argv
+Because: "the parent command of each (names only, never arguments with values)"
+Decided: reaping only runs during a jam, kills the counted readers then the stale SecurityAgent, and logs `keychain-reap`
+Because: "kill readers older than the threshold and then the `SecurityAgent`, logged as `keychain-reap`"
+Check: crates/cli/tests/keychain_jam.rs — securityd, a young reader and find-internet-password are never killed; no service, account or token text reaches the log
+Owner: herdsman now warns once when stuck Keychain lookups pile up, and can clear them itself if you turn that on.
