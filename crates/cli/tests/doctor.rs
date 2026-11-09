@@ -430,6 +430,29 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     assert!(!out.contains('!'), "{out}");
 }
 
+/// #737: a profile hook naming another binary fails doctor and `profiles sync --check`, both naming it.
+#[test]
+fn a_hook_naming_another_binary_is_named() {
+    let (mut c, d) = setup("doc-stray-hook", "claude");
+    let other = d.join("other/herdsman");
+    write(&other, "", 0o755);
+    let real = c.exe.clone();
+    c.exe = other.display().to_string();
+    assert_eq!(run(&c, &good(), &["profiles", "sync"]).0, 0);
+    c.exe = real;
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    let row = line(&out, "profile hooks");
+    assert!(
+        code == 1 && row.starts_with('✗') && row.contains(&*other.to_string_lossy()),
+        "{out}"
+    );
+    let (code, out) = run(&c, &good(), &["profiles", "sync", "--check"]);
+    assert!(code == 1 && out.contains(&*other.to_string_lossy()), "{out}");
+    assert_eq!(run(&c, &good(), &["profiles", "sync"]).0, 0);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert!(code == 0 && line(&out, "profile hooks").starts_with('✓'), "{out}");
+}
+
 /// #708: the launchd row follows `[serve] launchd_label` (default `dev.herdsman.serve`), never another plist that
 /// mentions `herdsman serve`; a missing one lists what it found.
 #[test]
