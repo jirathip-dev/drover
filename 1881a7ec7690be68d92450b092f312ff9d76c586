@@ -1,0 +1,6 @@
+Decided: line_cap set to 36740 exactly as the issue states, with a cap-history note
+Because: "`ci/cap.toml`: `[fleet.herdsman] line_cap = 36740`. Nothing else in the file changes."
+Because: q889
+Rejected: re-sizing to today's projected 36828 — the issue and owner decision fix the figure
+Check: ci/cap.toml differs only in line_cap; cap-check at head reports cap 36740
+Owner: The code-size limit is now 36,740 lines, as you decided; it gets lowered again after the cut.
