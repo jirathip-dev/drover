@@ -109,7 +109,12 @@ fn calls(bin: &std::path::Path) -> String {
 fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     let (c, bin) = setup("boat-boot", "medium");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(
+        Fake::default()
+            .stored("herdsman/all/BOAT_API_KEY", KEY)
+            .reply("herdr machine list --json", "[]"),
+        bin.clone(),
+    );
     let mut out = vec![];
     let e = herdsman::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut out).unwrap_err();
     let e = format!("{e:#}");
@@ -317,7 +322,12 @@ fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empt
 fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     let (c, bin) = setup("boat-moved", "small");
     let cfg = Config::load(&c.config).unwrap();
-    let r = Boat(Fake::default().stored("herdsman/all/BOAT_API_KEY", KEY), bin.clone());
+    let r = Boat(
+        Fake::default()
+            .stored("herdsman/all/BOAT_API_KEY", KEY)
+            .reply("herdr machine list --json", "[]"),
+        bin.clone(),
+    );
     herdsman::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     let conf = || std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     let pin = c.home.join(".ssh/herdsman/boat1.known");

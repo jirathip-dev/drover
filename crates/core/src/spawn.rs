@@ -17,6 +17,7 @@ pub fn role_prompt(role: &str) -> &'static str {
     match role {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
+        "architect" => include_str!("../roles/architect.md"),
         "conductor" => include_str!("../roles/conductor.md"),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
@@ -322,19 +323,20 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
                 format!("origin/{impl_branch}"),
                 head,
             )
-        } else if role == "design" {
-            let head = format!("{fleet} · design #{issue}");
-            // #412: a `--design` issue's design, before impl, commits to the issue branch, where impl goes on.
+        } else if crate::events::STAGES.contains(&role) {
+            let head = format!("{fleet} · {role} #{issue}");
+            // #412: a `--design` (#730: `--architect`) issue's stage, before impl, commits to the issue branch, where
+            // impl goes on.
             let pre = st
                 .as_ref()
                 .is_none_or(|s| crate::events::DESIGN.contains(&s.state.as_str()));
             let pre = pre
                 && crate::queue::replay(&ev, fleet)
                     .iter()
-                    .any(|i| i.issue == issue && i.design);
+                    .any(|i| i.issue == issue && (i.design || i.architect));
             (
-                format!("{fleet}-design-{issue}"),
-                if pre { impl_branch } else { format!("design-{issue}") },
+                format!("{fleet}-{role}-{issue}"),
+                if pre { impl_branch } else { format!("{role}-{issue}") },
                 format!("origin/{}", f.integration),
                 head,
             )
@@ -436,6 +438,11 @@ fn brief(
             branch = branch,
             integration = integration
         ),
+        "architect" => format!(
+            include_str!("../roles/brief-architect.md"),
+            branch = branch,
+            integration = integration
+        ),
         _ => format!(
             include_str!("../roles/brief-impl.md"),
             branch = branch,
@@ -445,7 +452,7 @@ fn brief(
     };
     // #420: a `--repro` issue's steps: impl's failing test first, rev's proof it fails on base and passes at head.
     let steps = match (repro, p.family, p.stage.as_str()) {
-        (false, ..) | (_, "design", _) => "",
+        (false, ..) | (_, "design" | "architect", _) => "",
         (_, "rev", "verify") => include_str!("../roles/brief-repro-verify.md"),
         (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
         _ => include_str!("../roles/brief-repro-impl.md"),
@@ -453,10 +460,12 @@ fn brief(
     let contract = contract.trim_end().to_string() + "\n" + steps;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    // #733: the shared rules pack, then (#419) the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
     let rules = rules.map_or(String::new(), |r| {
         format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let shared = include_str!("../rules/shared.md").trim_end();
+    let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
@@ -902,7 +911,7 @@ pub fn spawn(
     o: &Opts,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    if f.paused && role != "design" {
+    if f.paused && !crate::events::STAGES.contains(&role) {
         return refused("PAUSED", format!("{fleet} is paused; `herdsman resume {fleet}` first"));
     }
     if o.update && f.family(role) != "impl" {
@@ -1238,7 +1247,7 @@ pub fn spawn(
             }
         }
         // #412: a design lane's start head is the tree a rejected design goes back to.
-        if p.family == "rev" || p.family == "design" {
+        if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
@@ -1268,12 +1277,23 @@ pub fn spawn(
         let update = o
             .update
             .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
+        // #730: an `--architect` issue's later lanes build to (rev: check the diff against) the approved ADR.
+        let adr = events
+            .iter()
+            .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
+            .and_then(|e| e.str("adr"))
+            .filter(|_| p.family != "architect")
+            .map(|a| match p.family {
+                "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
+                _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it."),
+            });
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
-            .chain((p.family != "design").then(|| {
+            .chain(adr)
+            .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
                 let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
                 crate::why::brief(r, f, &events, (fleet, issue), rev, body)
             }).flatten())
@@ -1904,7 +1924,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let res = if let Some(why) = stale {
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
-                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
+                    let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
                 }
                 herdr::close(&on, pane)?;

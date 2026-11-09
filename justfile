@@ -13,11 +13,12 @@ types-lint:
 
 # #269: crates/server builds no HTML but the page shell (`page`, its `pairb`, and the export's copy of it): every other
 # Rust string with a tag that has attributes or a closing tag fails; the board (web/) draws the rest from API v1.
+# #725: but the lifeboat (crates/server/src/lifeboat.rs), plain server-rendered HTML by design.
 html-lint:
     #!/usr/bin/env bash
     set -euo pipefail
     tags='p|div|span|b|i|a|button|form|input|details|summary|section|pre|code|h[1-6]|svg|use|small|figure|figcaption|img|ul|li|textarea|select|option|label|br|script|style|link|meta|html|head|body|header|main|nav|template'
-    bad=$(find crates/server/src -name '*.rs' | sort | xargs awk -v t="$tags" '
+    bad=$(find crates/server/src -name '*.rs' ! -name lifeboat.rs | sort | xargs awk -v t="$tags" '
       /^[[:space:]]*(pub(\([a-z]+\))? )?fn [a-z_0-9]+/ { match($0, /fn [a-z_0-9]+/); f = substr($0, RSTART + 3, RLENGTH - 3) }
       $0 ~ ("\"[^\"]*(</(" t ")>|<(" t ") [a-z-]+=)") && f !~ /^(page|pairb|export)$/ { print FILENAME ":" FNR ": " $0 }')
     test -z "$bad" || { echo "HTML built outside the page shell (draw it in web/ from API v1): $bad"; exit 1; }
