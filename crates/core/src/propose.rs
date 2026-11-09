@@ -82,11 +82,8 @@ pub fn stale(ctx: &Ctx, p: &Event) -> bool {
 
 /// #460: thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.
 pub fn waiting<'a>(ctx: &'a Ctx, events: &'a [Event], thread: &'a str) -> impl Iterator<Item = &'a Event> {
-    events.iter().filter(move |e| {
-        e.kind == "config-propose"
-            && e.str("thread") == Some(thread)
-            && settled(events, e.str("id").unwrap_or_default()).is_none()
-            && !stale(ctx, e)
+    crate::conductor::of(events, thread).filter(move |e| {
+        e.kind == "config-propose" && settled(events, e.str("id").unwrap_or_default()).is_none() && !stale(ctx, e)
     })
 }
 
