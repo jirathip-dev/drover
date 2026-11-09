@@ -1,0 +1,9 @@
+Decided: drive splits its fleet list: `live` (every fleet, honouring `only`) for the outbox drain and answer redelivery, `fleets` (unpaused) for everything else
+Because: "Drain the outbox for every fleet, paused or not (still honouring `only` for a one-fleet drive)"
+Because: crates/core/src/drive.rs:591
+Decided: a fast step takes a fresh look even when every fleet is paused, so the drain reads the hosts' outboxes now
+Because: crates/core/src/drive.rs:618
+Rejected: a separate look only at hosts with paused-fleet lanes — snapshot::take already looks at every host in one call each
+Rejected: draining in slow passes too — today's drain runs on the fast step only; pause changes nothing there
+Check: paused_delivery fails on staging + commit 1 (no needs-decision after drive --fast) and passes at head; drive's paused test still sees no herdr call on a slow pass
+Owner: A paused fleet's running remote lanes now get their questions, turn reports and your answers through; pause still starts nothing new.
