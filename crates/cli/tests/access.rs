@@ -678,6 +678,20 @@ fn signed_out_is_its_own_state_never_a_cap() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
+/// #707: `config` with account A's hand-placed `token-file:` at `<dir>/tokens/A` (mode `mode`).
+fn token_file(d: &Path, mode: u32) -> (String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let f = d.join("tokens/A");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, format!("{TOKEN_A}\n")).unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+    let cfg = config(d, "account = \"A\"").replace(
+        "A = \"CLAUDE_CODE_OAUTH_TOKEN_A\"",
+        &format!("A = \"token-file:{}\"", f.display()),
+    );
+    (cfg, f)
+}
+
 #[test]
 fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
     let d = tmpdir("acct-token-file");
