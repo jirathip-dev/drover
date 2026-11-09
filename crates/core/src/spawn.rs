@@ -1509,9 +1509,10 @@ const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pendin
 const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
 
 /// #359: whether the harness came up in `pane`: its process runs there and its startup title or a reported state has
-/// been seen. Reads it 5 s apart, never deciding from one read; any change restarts the window.
+/// been seen. Reads it 5 s apart, never deciding from one read; #718: gives up `CONFIRM_SECS` after it starts, however
+/// often the pane's title changes (a busy Claude's spinner never ends).
 fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
-    let (mut left, mut seen, mut titled, names) = (herdr::CONFIRM_SECS, String::new(), false, h.process_names());
+    let (mut left, mut titled, names) = (herdr::CONFIRM_SECS, false, h.process_names());
     loop {
         let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
         let agent = v["agent"].as_str().unwrap_or("");
@@ -1521,12 +1522,10 @@ fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
         if titled && !agent.is_empty() && (names.is_empty() || names.contains(&agent)) {
             return true;
         }
-        let now = format!("{agent}\n{title}");
-        left = if now == seen { left } else { herdr::CONFIRM_SECS };
         if left < 5 {
             return false;
         }
-        (left, seen) = (left - 5, now);
+        left -= 5;
         r.sleep(5);
     }
 }
