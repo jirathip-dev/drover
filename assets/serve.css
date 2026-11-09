@@ -286,6 +286,10 @@ details.q[open]{padding-bottom:var(--s2)}
 /* #423: beside an issue's plant (a theme with `stages`), a long theme + plain state pair (`inspect · review(1)`)
    ellipsises, never wraps the row. */
 :is(details.q,.qc)>summary:has(.rsp use[href^="#hq-"])>span>span:has(>.thw){display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #609: a row's `where` chip stays on the state's line (sprite or glyph); the state ellipsises first. */
+details.q[data-w]>summary>span:has(>.tag){display:flex;align-items:baseline;gap:1ch;min-width:0}
+details.q[data-w]>summary>span:has(>.tag)>span:first-child{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.q[data-w]>summary>span:has(>.tag)>.tag{flex:none}
 .cd{margin-left:calc(var(--gw) + var(--s2));padding:0 var(--s2);border:1px solid var(--edge);border-radius:6px;background:var(--card)}
 .cd>p{margin:var(--s2) 0}
 .gt,.gt i{font-style:normal;white-space:pre;color:var(--mute)}

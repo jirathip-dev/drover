@@ -18,10 +18,12 @@
             "model": null,
             "name": "sendmeter-impl-12",
             "role": "impl",
+            "runtime": "herdr",
             "shown": "working",
             "state": "working",
             "title": null,
-            "tone": "g"
+            "tone": "g",
+            "where": ""
           },
           {
             "account": null,
@@ -37,10 +39,12 @@
             "model": null,
             "name": "sendmeter-rev-9-r1",
             "role": "rev",
+            "runtime": "herdr",
             "shown": "blocked",
             "state": "blocked",
             "title": null,
-            "tone": "r"
+            "tone": "r",
+            "where": ""
           }
         ],
         "name": "sendmeter",

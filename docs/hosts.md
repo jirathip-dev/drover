@@ -155,7 +155,8 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
 ## Monitoring
 
 - `herdsman hosts` prints, per host: on or off, reachable or offline, its tags, load/cpu, memory, disk, and its lanes.
-- `herdsman status` gets a `HOST` column once fleet.toml has `[hosts]`.
+- `herdsman status` gets a `HOST` column once fleet.toml has `[hosts]`; #609: it shows a live lane's `where`
+  (`mini · shed`, docs/serve.md), as `board` and `waiting` do.
 - The Host tab's HOSTS section has one card per host, main first, then A→Z, each with the same rows (#234): load/cpu,
   swap-out, memory, disk, top memory, lanes and tags, the state and why its dot is amber or red in its head. Remote
   values (and top memory, with its age) come from the 5-minute `check`. An unreachable host is grey
