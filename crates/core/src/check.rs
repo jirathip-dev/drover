@@ -1877,7 +1877,7 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
 /// `wip/<agent>-<YYYYmmdd-HHMMSS>[-<machine>]-<tag>` (the epoch when `date` is unreadable); #664: never another
 /// save's name; #716: another host's save of the same lane in the same second neither.
 pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
-    let stamp = crate::usage::date(on, ctx.now, "+%Y%m%d-%H%M%S");
+    let stamp = crate::usage::date(on.r, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
     let mut w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
     if let Some(m) = on.machine {
