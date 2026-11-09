@@ -1,0 +1,7 @@
+Decided: the resolver stays wired at bootstrap and setup panes only; the PR body now says so
+Because: crates/core/src/cloud.rs:382
+Decided: hosts refresh needs no resolver; its probe pane goes through herdr --machine, never local
+Because: crates/core/src/hosts.rs:100
+Rejected: committing the supersede snapshot of CLAUDE.local.md — it is lane config, not part of the change
+Check: the PR body's evidence heading names head 99693b9 and the gates reran there
+Owner: No behaviour change this round; the proof in the PR now matches the latest code.
