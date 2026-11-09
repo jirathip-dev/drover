@@ -682,6 +682,7 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "config-invalid",
     "thread-msg",
     "blocked",
     "stall",
@@ -746,8 +747,48 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> Result<Config> {
+        Self::load_text(path).map(|c| c.0)
+    }
+
+    /// #709: the config and its text; a parse error is the one line `config invalid: <error> (fleet.toml:<line>)`
+    /// that tick, drive, `check`'s alert and the board's banner all show.
+    fn load_text(path: &Path) -> Result<(Config, String)> {
         let text = std::fs::read_to_string(path).with_context(|| format!("cannot read config {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("invalid config {}", path.display()))
+        let e = match Self::parse(&text) {
+            Ok(c) => return Ok((c, text)),
+            Err(e) => e,
+        };
+        let (msg, at) = match e.downcast_ref::<toml::de::Error>() {
+            Some(t) => (t.message().replace('\n', "; "), t.span().map(|s| s.start)),
+            None => (format!("{e:#}"), None),
+        };
+        // A check's error quotes the value it rejects (`account 'C'`): its first line in the file.
+        let quoted = msg.split(['\'', '"']).nth(1).filter(|q| !q.is_empty());
+        let at = at.or_else(|| text.find(&format!("\"{}\"", quoted?)));
+        let file = path.file_name().map_or("fleet.toml".into(), |f| f.to_string_lossy());
+        let line = at.map_or(String::new(), |i| format!(":{}", text[..i].matches('\n').count() + 1));
+        bail!("config invalid: {msg} ({file}{line})")
+    }
+
+    /// #709: the config, else (it fails to load) the error and the last good one, which each load keeps beside the
+    /// state log (`fleet.good.toml`): serve reads from it and `check` alerts through its notifiers.
+    pub fn loaded(ctx: &crate::Ctx) -> std::result::Result<Config, (anyhow::Error, Option<Box<Config>>)> {
+        let good = ctx.state.with_file_name("fleet.good.toml");
+        match Self::load_text(&ctx.config) {
+            Ok((c, text)) => {
+                if std::fs::read_to_string(&good).ok().as_deref() != Some(&text) {
+                    let _ = good.parent().map(std::fs::create_dir_all);
+                    let _ = std::fs::write(&good, text);
+                }
+                Ok(c)
+            }
+            Err(e) => Err((e, Self::load(&good).ok().map(Box::new))),
+        }
+    }
+
+    /// #709: serve's reads: the config, else the last good one; Err only with none kept.
+    pub fn kept(ctx: &crate::Ctx) -> Result<Config> {
+        Self::loaded(ctx).or_else(|(e, good)| good.map(|g| *g).ok_or(e))
     }
 
     pub fn parse(text: &str) -> Result<Config> {

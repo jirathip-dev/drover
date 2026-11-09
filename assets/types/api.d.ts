@@ -34,7 +34,11 @@ export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?
  * `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
  * export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
-export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
+/**
+ * #709: fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+ */
+config?: string | null, };
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a

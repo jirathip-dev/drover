@@ -9,8 +9,9 @@ use herdsman::serve::Server;
 use serde_json::Value;
 
 const HOST: &str = "127.0.0.1:7777";
-const GOOD: &str = "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/tmp/does-not-matter/app\"\nintegration = \"staging\"\n";
-const WANT: &str = "config invalid: fleet.acme.role.impl: account 'C' is not in [accounts] (fleet.toml:8)";
+const GOOD: &str =
+    "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/tmp/does-not-matter/app\"\nintegration = \"staging\"\n";
+const WANT: &str = "config invalid: fleet.acme.role.conductor: account 'C' is not in [accounts] (fleet.toml:8)";
 
 fn bad() -> String {
     format!("{GOOD}\n[fleet.acme.role.impl]\nharness = \"claude\"\naccount = \"C\"\n")
@@ -34,11 +35,18 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
 
     std::fs::write(&c.config, bad()).unwrap();
     // The board still reads, from the last good config; the needs strip above every tab carries the banner.
-    assert!(api(&s, HOST, "", c.now, "queue").contains("acme/app"), "the queue tab keeps its data");
+    assert!(
+        api(&s, HOST, "", c.now, "queue").contains("acme/app"),
+        "the queue tab keeps its data"
+    );
     let [needs, ..] = parts(&s, HOST, "", c.now);
     assert!(needs.contains(WANT), "banner: {needs}");
     let h = health(&s, c.now);
-    assert_eq!((h["ok"].as_bool(), h["config"].as_str()), (Some(false), Some("invalid")), "{h}");
+    assert_eq!(
+        (h["ok"].as_bool(), h["config"].as_str()),
+        (Some(false), Some("invalid")),
+        "{h}"
+    );
     assert_eq!(h["error"], WANT);
 
     // `check` alerts once per distinct error; `tick` is refused with the same message.
@@ -57,7 +65,11 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
     let [needs, ..] = parts(&s, HOST, "", c.now);
     assert!(!needs.contains("config invalid"), "{needs}");
     let h = health(&s, c.now);
-    assert_eq!((h["ok"].as_bool(), h["config"].as_str()), (Some(true), Some("ok")), "{h}");
+    assert_eq!(
+        (h["ok"].as_bool(), h["config"].as_str()),
+        (Some(true), Some("ok")),
+        "{h}"
+    );
     run(&c, &r, &["check"]);
     assert_eq!(alerts(&c, "config-ok"), 1);
 }

@@ -7,7 +7,8 @@
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
-    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
+    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health, IssueView, Lane, LessonFleet,
+    LessonRun,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
@@ -64,6 +65,18 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
+            ("GET", Some("health")) => {
+                let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
+                let config = if error.is_some() { "invalid" } else { "ok" };
+                out(
+                    "200 OK",
+                    &Health {
+                        ok: error.is_none(),
+                        config: config.into(),
+                        error,
+                    },
+                )
+            }
             ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
@@ -79,7 +92,7 @@ impl Server<'_> {
                     x[8..].strip_suffix("/digest").unwrap_or_default(),
                     f.get("days").and_then(|d| d.parse().ok()).unwrap_or(7),
                 );
-                let text = Config::load(&ctx.config).and_then(|c| crate::lesson::digest(ctx, &c, self.r, fleet, days));
+                let text = Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, self.r, fleet, days));
                 text.map_or_else(
                     |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
                     |text| {
@@ -112,7 +125,7 @@ impl Server<'_> {
             // #681: a repo's conductor threads, newest-active first (cooee's side threads).
             ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
                 let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
-                match Config::load(&ctx.config) {
+                match Config::kept(ctx) {
                     Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
                         let ev = shared(&ctx.state).unwrap_or_default();
                         out("200 OK", &repo(&ev, fleet))
@@ -189,7 +202,7 @@ impl Server<'_> {
             ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
                 let f = fields(body);
                 let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
-                let cfg = Config::load(&ctx.config);
+                let cfg = Config::kept(ctx);
                 if op == "conductor-detach" {
                     return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
                 }
@@ -233,7 +246,7 @@ impl Server<'_> {
 
     /// #576: the CLI's `lesson <fleet>`, logged `by` the paired device.
     fn lesson(&self, ctx: &Ctx, f: &BTreeMap<String, String>, by: &str) -> Result<String> {
-        let (cfg, mut out) = (Config::load(&ctx.config)?, vec![]);
+        let (cfg, mut out) = (Config::kept(ctx)?, vec![]);
         let fleet = f.get("fleet").map_or("", String::as_str);
         let confirmed = crate::lesson::run(ctx, &cfg, self.r, &mut out, fleet, Some(by))?;
         let out = String::from_utf8_lossy(&out);
@@ -267,7 +280,7 @@ impl Server<'_> {
     /// #555: a backlog row's [close]: `gh issue close` on an issue neither queued nor worked on, then the backlog read
     /// again (it drops out); logs `closed`.
     fn close(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
         let fleet = f.get("fleet").map_or("", String::as_str);
         let Some(fc) = cfg.fleet.get(fleet) else {
             return refused("BAD_VALUE", format!("no fleet `{fleet}`"));
@@ -298,7 +311,7 @@ impl Server<'_> {
     }
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
         let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
@@ -430,7 +443,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
     anyhow::ensure!(["on", "off"].contains(&value), "{key} is `on` or `off`");
     let mut d = crate::queue::op("set", &[n], false, None, None, None);
     d[key] = serde_json::json!([value]);
-    crate::queue_change(ctx, &Config::load(&ctx.config)?, g("fleet"), d, Some("web"))?;
+    crate::queue_change(ctx, &Config::kept(ctx)?, g("fleet"), d, Some("web"))?;
     Ok(format!("#{n}: {key} {value}"))
 }
 
@@ -482,7 +495,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
 /// #576: `lessons`: each fleet's setting, its newest lesson lane's issue and when `tick` runs the next.
 fn lessons(ctx: &Ctx) -> Lessons {
     let (cfg, ev) = (
-        Config::load(&ctx.config).unwrap_or_default(),
+        Config::kept(ctx).unwrap_or_default(),
         shared(&ctx.state).unwrap_or_default(),
     );
     let st = ev.states.clone();
@@ -558,7 +571,7 @@ fn about(ctx: &Ctx, f: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 
 /// #555: `roles?fleet=`: the fleet's [config] sheet and `[chat]`'s defaults.
 fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
-    let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+    let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
     let fc = cfg.fleet(fleet)?;
     let c = &cfg.chat;
     let harness = |h: &&str| Harness {
@@ -592,7 +605,7 @@ pub(super) fn ask(a: &Event) -> Ask {
 
 /// #259: the events with `since < seq <= until`; over `cap`, none and `refresh`. #266: each as the Events tab says it.
 pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
-    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::load(&ctx.config).ok());
+    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::kept(ctx).ok());
     let after: Vec<_> = ev.iter().filter(|e| e.seq > since && e.seq <= until).collect();
     let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > cap);
     let mut prs = BTreeMap::new();
@@ -664,7 +677,7 @@ impl Server<'_> {
     /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
     fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
         let events = shared(&ctx.state).unwrap_or_default();
-        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let Ok(cfg) = Config::kept(ctx) else { return tab };
         let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
         let r = self.cached(ctx.now, 30);
         let rows = tab

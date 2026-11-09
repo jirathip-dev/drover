@@ -251,7 +251,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     }
     let mark = ctx.state.with_file_name("tick.step");
     let pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
-    let loaded = Config::load(&ctx.config);
+    let loaded = crate::check::config(ctx); // #709: `config-invalid` once per error
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         pass.step("herdr status");
         herdr::status(&pass).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;

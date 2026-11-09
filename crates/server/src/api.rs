@@ -118,6 +118,8 @@ pub struct NeedsTab {
     pub asks: Vec<NeedAsk>,
     pub blocked: Vec<Blocked>,
     pub issues: Vec<NeedIssue>,
+    /// #709: fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+    pub config: Option<String>,
 }
 
 /// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
@@ -1021,6 +1023,14 @@ pub struct ChatDefaults {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub harnesses: Vec<Harness>,
+}
+
+/// #709: `/api/v1/health`: `ok` unless fleet.toml fails to load (`config` `invalid`, its `error`); a dead process
+/// answers nothing.
+pub struct Health {
+    pub ok: bool,
+    pub config: String,
+    pub error: Option<String>,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

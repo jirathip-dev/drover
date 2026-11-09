@@ -35,6 +35,42 @@ fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Opti
     Some((url.to_string(), line))
 }
 
+/// #709: the config for `check` and `tick`; failing to load, `config-invalid` alerts once per distinct error (to the
+/// last good config's notifiers) and the error stands; loading again after one logs `config-ok`.
+pub fn config(ctx: &Ctx) -> Result<Config> {
+    let loaded = Config::loaded(ctx);
+    let events = read(&ctx.state)?;
+    let last = events
+        .iter()
+        .rev()
+        .find(|e| e.kind == "config-invalid" || e.kind == "config-ok")
+        .filter(|e| e.kind == "config-invalid")
+        .and_then(|e| e.str("key"));
+    match loaded {
+        Ok(cfg) => {
+            if last.is_some() {
+                let ev = Event::new(ctx.now, "herdsman", None, "config-ok", json!({}));
+                emit(&ctx.state, &cfg, ev)?;
+            }
+            Ok(cfg)
+        }
+        Err((e, good)) => {
+            let why = format!("{e:#}");
+            if last != Some(why.as_str()) {
+                let ev = Event::new(
+                    ctx.now,
+                    "herdsman",
+                    None,
+                    "config-invalid",
+                    json!({"key": why, "reason": why}),
+                );
+                emit(&ctx.state, &good.map(|g| *g).unwrap_or_default(), ev)?;
+            }
+            Err(e)
+        }
+    }
+}
+
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
