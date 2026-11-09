@@ -109,6 +109,20 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 json!({"key": sha, "reason": why}),
             )?;
         }
+        // #733: a weekly fleet (unset is weekly) whose last lesson run (its lane, or tick's skip) is over 8 days old;
+        // a new fleet counts from its first event; once per last run; a paused fleet is skipped.
+        let ran = |e: &&Event| {
+            e.fleet == *name && (e.kind == "lesson-skipped" || e.kind == "spawn" && e.str("role") == Some("lesson"))
+        };
+        let last = (events.iter().rfind(ran))
+            .or_else(|| events.iter().find(|e| e.fleet == *name))
+            .map(|e| e.ts)
+            .filter(|t| !f.paused && f.lessons.as_deref() != Some("off") && ctx.now > t + 8 * 86400);
+        if let Some(t) = last {
+            let why = format!("no lessons issue for {} days", (ctx.now - t) / 86400);
+            let d = json!({"key": t, "reason": why});
+            fire(ctx, cfg, out, &events, (name, None), "lessons-missed", d)?;
+        }
         // #331: a queued issue never spawned had no cached spec, so no Queue row title: fetch it once (cached after).
         for i in crate::queue::replay(&events, name) {
             let _ = gh::spec(ctx, r, f, name, i.issue, false);
@@ -144,6 +158,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         );
         let d = json!({"key": since, "reason": why});
         fire(ctx, cfg, out, &events, (name, None), "spawn-held", d)?;
+    }
+    // #724: a spawn failing the same way 3 times in a row alerts once per distinct error.
+    let ids: std::collections::BTreeSet<_> = events
+        .iter()
+        .filter(|e| e.kind == "spawn-error")
+        .filter_map(|e| Some((e.fleet.clone(), e.issue?)))
+        .collect();
+    for (fleet, n) in ids {
+        let f = crate::drive::failures(&events, &fleet, n);
+        if let Some((_, error)) = crate::drive::same_run(&f).filter(|r| r.0 >= 3) {
+            let d = json!({"key": error, "error": error});
+            fire(ctx, cfg, out, &events, (&fleet, Some(n)), "spawn-failing", d)?;
+        }
     }
     // #604: every start a pass logged refused by one host gate (code and host) for 30 min alerts once per episode (its
     // first such pass is the key); a start that ran, or another refusal, ends it. A kick still pending says nothing.
@@ -506,7 +533,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 
 /// #248: when lane `e` handed off: the latest `pushed`/`verdict` since it spawned (design: its latest commit since).
 fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) -> Option<u64> {
-    if e.str("role") == Some("design") {
+    if crate::events::design(e) {
         let t = ok(r, "git", &["-C", wt, "log", "-1", "--format=%ct"]).ok()?;
         let t = t.trim().parse().ok();
         return t.filter(|t| *t > e.ts);
@@ -624,7 +651,7 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         let (Some(wt), Some(pane), on) = (e.str("worktree"), e.str("pane"), On::of(r, Some(e))) else {
             continue;
         };
-        if e.str("role") == Some("design") || !seen.insert(wt) || !on.exists(Path::new(wt)) {
+        if crate::events::design(e) || !seen.insert(wt) || !on.exists(Path::new(wt)) {
             continue;
         }
         match dirty(&on, Path::new(wt)) {
@@ -809,12 +836,14 @@ pub fn clean(
             }
             dirty(&on, Path::new(wt))
         };
+        // #716: what a verified save left behind (build folders, scratch, big files) never keeps the worktree.
+        let saved = keep.is_some() && yes && !live && lane.is_none();
         let keep = match keep {
             Some(why) if !yes && !live && lane.is_none() => {
                 writeln!(out, "would save {shown} to wip/ ({why}), then remove it")?;
                 continue;
             }
-            Some(_) if yes && !live && lane.is_none() => save(ctx, cfg, &on, out, &events, e, wt)?,
+            Some(_) if saved => save(ctx, cfg, &on, out, &events, e, wt)?,
             k => k,
         };
         if let Some(reason) = keep {
@@ -836,6 +865,7 @@ pub fn clean(
             e.str("workspace")
                 .or_else(|| pane.split(':').next())
                 .unwrap_or_default(),
+            saved,
         ) {
             writeln!(out, "failed {shown}: {err:#}")?;
             failed += 1;
@@ -1003,7 +1033,7 @@ pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt:
 fn save(
     ctx: &Ctx,
     cfg: &Config,
-    r: &dyn Runner,
+    r: &On,
     out: &mut dyn Write,
     events: &[Event],
     e: &Event,
@@ -1597,11 +1627,12 @@ fn closed_issues<'a>(
 }
 
 /// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES` and `SHOT_DIRS`.
-pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<()> {
+/// `saved`: its work is on `wip/` (#716), so what is left goes too (`--force`).
+pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str, saved: bool) -> Result<()> {
     if !ws.is_empty() && herdr::worktree_remove(r, ws)? {
         return Ok(());
     }
-    if let Some(why) = dirty(r, Path::new(wt)) {
+    if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
     }
     for f in OWN_FILES {
@@ -1619,7 +1650,11 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str) -> Result<(
         None => cfg.fleet(fleet)?.local_path().to_string_lossy().into_owned(),
         Some(_) => wt.into(),
     };
-    ok(r, "git", &["-C", &local, "worktree", "remove", wt])?;
+    let mut args = vec!["-C", &local, "worktree", "remove", wt];
+    if saved {
+        args.insert(4, "--force");
+    }
+    ok(r, "git", &args)?;
     Ok(())
 }
 
@@ -1716,7 +1751,7 @@ fn kill_as(
     let on = On::of(r, Some(e));
     let wt = e.str("worktree").filter(|w| on.exists(Path::new(w)));
     let (dirty, ahead) = wt.map_or(Ok((0, 0)), |w| pending(&on, w))?;
-    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, r, agent));
+    let wip = (dirty + ahead > 0).then(|| wip_branch(ctx, &on, agent));
     let pr = e.issue.zip(cfg.fleet.get(&e.fleet)).and_then(|(n, f)| {
         let b = crate::gate::branch_of(st.as_ref(), n);
         gh::pr(ctx, r, f, (&e.fleet, n), &b, ctx.now).ok()
@@ -1862,15 +1897,20 @@ pub fn save_lane(ctx: &Ctx, on: &On, agent: &str, wt: &str) -> Result<Option<Str
     if !on.exists(Path::new(wt)) || pending(on, wt)? == (0, 0) {
         return Ok(None);
     }
-    let w = wip_branch(ctx, on.r, agent);
+    let w = wip_branch(ctx, on, agent);
     save_on(on, agent, wt, &w, "wip: supersede snapshot").map(|(w, _)| Some(w))
 }
 
-/// `wip/<agent>-<YYYYmmdd-HHMMSS>-<tag>` (the epoch when `date` is unreadable); #664: never another save's name.
-pub(crate) fn wip_branch(ctx: &Ctx, r: &dyn Runner, agent: &str) -> String {
-    let stamp = crate::usage::date(r, ctx.now, "+%Y%m%d-%H%M%S");
+/// `wip/<agent>-<YYYYmmdd-HHMMSS>[-<machine>]-<tag>` (the epoch when `date` is unreadable); #664: never another
+/// save's name; #716: another host's save of the same lane in the same second neither.
+pub(crate) fn wip_branch(ctx: &Ctx, on: &On, agent: &str) -> String {
+    let stamp = crate::usage::date(on.r, ctx.now, "+%Y%m%d-%H%M%S");
     let ok = stamp.chars().all(|c| c.is_ascii_digit() || c == '-');
-    let w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    let mut w = format!("wip/{agent}-{}", if ok { stamp } else { ctx.now.to_string() });
+    if let Some(m) = on.machine {
+        w += "-";
+        w.extend(m.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }));
+    }
     format!("{w}-{}", tag(&w))
 }
 

@@ -5,8 +5,9 @@ This week's lessons for `{fleet}`, worked by a `lesson` lane (#419).
 3. Fix each class at the highest level that works: architecture or types, then a lint or CI check whose error names
    the fix, then a behaviour test, and a "don't X" line in `.herdsman/rules.md` last.
 4. Prove each new check fails on a real past mistake from the digest: the command and its output go in the PR body.
-5. `.herdsman/rules.md` stays at most 30 lines, each naming its enforcer (or `none`); a rule code now enforces is
-   deleted in the same PR.
+5. No `.herdsman/rules.md` yet: this run creates it. It stays at most 30 lines, each naming its enforcer (or `none`); a rule code now enforces is
+   deleted in the same PR; a `none` rule older than 2 weeks is retired unless promoted. The PR adds or changes at
+   least one enforcer: a prose-only one is a FAIL in rev unless it retires lines.
 6. New checks start in shadow (`shadow since <date>` on their rules line); `herdsman lesson apply {fleet}` promotes or
    retires the existing ones by their history (#510). Hand-written rules lines are never changed.
 

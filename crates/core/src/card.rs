@@ -105,6 +105,19 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on
 /// card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
+    settle_via(ctx, cfg, r, id, approve, sha, None)
+}
+
+/// #725: `settle`, its `run-settled` logged `via` the surface the tap came from (the lifeboat's `lifeboat`).
+pub fn settle_via(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    id: &str,
+    approve: bool,
+    sha: Option<&str>,
+    via: Option<&str>,
+) -> Result<String> {
     let events = read(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
@@ -129,7 +142,10 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, 
     if let Some(w) = forbidden(cmd).filter(|_| approve) {
         return refused("CARD_FORBIDDEN", format!("{id}'s command {w}"));
     }
-    let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "approved": approve});
+    let mut d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "approved": approve});
+    if let Some(v) = via {
+        d["via"] = json!(v);
+    }
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-settled", d))?;
     let line = if approve {
         let limit = std::time::Duration::from_secs(c.data["timeout"].as_u64().unwrap_or(600));

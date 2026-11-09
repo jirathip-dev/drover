@@ -537,12 +537,20 @@ fn waits(
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
-        "design" => w(
-            "none",
-            "design lane idle without a pushed design (check the pane)",
-            s.last_ts,
-            cmd("spawn", " design --supersede"),
-        ),
+        "design" => {
+            // #730: the stage's lane is the architect's or the designer's.
+            let role = if s.lane.is_some() && s.lanes.get("architect") == s.lane.as_ref() {
+                "architect"
+            } else {
+                "design"
+            };
+            w(
+                "none",
+                &format!("{role} lane idle without a pushed {role} (check the pane)"),
+                s.last_ts,
+                cmd("spawn", &format!(" {role} --supersede")),
+            )
+        }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
 }
@@ -793,6 +801,13 @@ pub fn scan(
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
         if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             w.what = SLOT.into();
+        }
+        // #724: a failed spawn backing off says when drive retries it, and why.
+        if let Some(why) = spawn
+            .then(|| crate::drive::retrying(ctx, mine, &s.fleet, s.issue))
+            .flatten()
+        {
+            w.what = why;
         }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);

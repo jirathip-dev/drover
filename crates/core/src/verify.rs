@@ -28,7 +28,12 @@ pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files
     match mark {
         _ if events.iter().any(repro) => Some("Repro: verify".into()),
         Some(on) => on.then(|| "queued --verify".into()),
-        None if events.iter().any(|e| e.is("design-approved", fleet, n)) => Some("had a design stage".into()),
+        None if events
+            .iter()
+            .any(|e| e.is("design-approved", fleet, n) && e.str("role") != Some("architect")) =>
+        {
+            Some("had a design stage".into())
+        }
         None => ui(),
     }
 }
