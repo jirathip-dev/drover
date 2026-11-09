@@ -161,6 +161,10 @@ pub trait Harness: Sync {
     fn credential(&self) -> Credential {
         Credential::None
     }
+    /// #708: the env var a token in the shell overrides its CLI's login with (generic: none).
+    fn token_env(&self) -> Option<&'static str> {
+        None
+    }
     /// The interactive login a person runs for it (setup panes, login hints).
     fn login(&self) -> Option<&'static str> {
         None

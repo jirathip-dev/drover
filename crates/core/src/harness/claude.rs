@@ -161,6 +161,9 @@ impl Harness for Claude {
     fn credential(&self) -> Credential {
         Credential::Account("claude")
     }
+    fn token_env(&self) -> Option<&'static str> {
+        Some("CLAUDE_CODE_OAUTH_TOKEN")
+    }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
     }

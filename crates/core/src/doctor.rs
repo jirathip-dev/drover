@@ -319,9 +319,7 @@ const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
 /// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports the accounts harness's token var overrides
 /// each lane's account: the warning names the startup files that mention it, never the value or any other line.
 fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
-    let crate::harness::Credential::Token(var) = crate::harness::accounts()?.credential() else {
-        return None;
-    };
+    let var = crate::harness::accounts()?.token_env()?;
     let probe = format!(
         "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{{var}:+set}}\"' </dev/null 2>/dev/null); \
          case \"$t\" in *token:set*) echo token:set; cd \"$HOME\" && \
