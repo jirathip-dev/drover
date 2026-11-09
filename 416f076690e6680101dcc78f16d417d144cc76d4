@@ -1,0 +1,13 @@
+Decided: rules/shared.md heads every lane brief (impl, rev, verify, design, lesson) before .herdsman/rules.md
+Because: "It is prepended to every impl, rev, verify, design and architect brief, before the repo's own"
+Decided: herdsman verdict records a lesson PR's prose-only PASS as a FAIL with the rule as its finding
+Because: crates/core/src/gate.rs:105
+Rejected: a new verdict refusal code — drive would retry the refused PASS every pass; demotion mirrors form-only
+Decided: a lesson-skipped tick counts as a lesson run for lessons-missed, as does a lesson lane's spawn
+Because: crates/core/src/check.rs:124
+Rejected: counting only filed issues — a quiet fleet that tick rightly skips would page every week
+Decided: lessons stays weekly when unset (already true); the alert test pins it for a fleet with no key
+Because: "lessons = \"weekly\" is the default for every fleet (not only those that set it)"
+Check: prose_only treats an added `shadow since` rules line or any removed rules line as an enforcer change
+Check: no architect role exists today; every role's brief goes through spawn::brief, so it gets the pack
+Owner: Every lane now reads one shared rules list; fleets that skip their weekly lessons raise an alert, and lesson PRs with only prose fail review.
