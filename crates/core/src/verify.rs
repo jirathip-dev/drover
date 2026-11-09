@@ -68,8 +68,8 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     Ok(false)
 }
 
-/// The PNGs verify's verdict.md (at `file`) lists, as `{name, path}`: #547: only a relative word with no `..` that is
-/// a regular file inside the verify lane's folder `lane` (none: no shots).
+/// The PNGs (#731: and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`:
+/// #547: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
 pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     let dir = file.parent().unwrap_or(Path::new(""));
     let words = body.split(|c: char| c.is_whitespace() || "`()[]<>\"'".contains(c));
@@ -80,7 +80,8 @@ pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     };
     let mut out: Vec<Value> = vec![];
     for w in words.map(|w| w.trim_end_matches([',', '.', ':', ';'])) {
-        let png = w.to_ascii_lowercase().ends_with(".png") && plain(w);
+        let ext = Path::new(w).extension().map(std::ffi::OsStr::to_ascii_lowercase);
+        let png = ext.is_some_and(|e| ["png", "log", "json", "txt"].iter().any(|x| e == *x)) && plain(w);
         let path = lane.filter(|_| png).and_then(|l| inside(&dir.join(w), Path::new(l)));
         if let Some(p) = path.filter(|_| !out.iter().any(|v| v["name"] == w)) {
             out.push(json!({"name": w, "path": p}));

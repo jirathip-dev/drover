@@ -72,7 +72,7 @@ next = { PASS = "gates", FAIL = "impl" }
   force it either way. Otherwise drive logs `verify-skipped` at that head and the issue goes on to the gates.
 - **No recipe:** when it should run but the head has no `.herdsman/verify.md`, drive logs `verify-no-recipe`, the
   Queue card says so, and the issue goes on to the gates. It never blocks. `roles/verify-recipe.md` is the brief
-  for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map), proving each step.
+  for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map, Known noise), proving each step.
 - Fleets without a `verify` role run the pipeline above, unchanged. A custom pipeline places a check with role
   `verify` itself; it gets the same prompt and skip rules, and counts its own rounds.
 
