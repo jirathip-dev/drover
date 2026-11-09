@@ -1,0 +1,9 @@
+Decided: a no-dep scripts/verify-browser.mjs over Chrome's DevTools pipe, copied into each verify lane as .verify-browser.mjs
+Because: "drives CDP with no npm dependency (Node's built-in WebSocket, as the ui-audit does), so every repo's recipe can call it"
+Rejected: a herdsman verify subcommand — more Rust lines near the cap; the script is enough for any recipe
+Decided: console errors and failed or 4xx/5xx requests fail unless the recipe's Known noise names them; warnings and a11y are notes
+Because: "any console error or failed request during the run is a blocking finding"
+Decided: verdicts list .log/.json/.txt evidence; /shot/ serves them as text/plain and the board links them
+Because: crates/core/src/verify.rs:79
+Check: crates/cli/tests/verify_browser.rs drives real headless Chrome for AC2 and AC3 (CI ui job sets CHROME)
+Owner: verify now fails a run on console errors, failed requests or a design diff over the threshold, with the logs on the board
