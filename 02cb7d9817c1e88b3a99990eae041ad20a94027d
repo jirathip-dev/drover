@@ -1,0 +1,12 @@
+Decided: Config::load builds the one line `config invalid: <error> (fleet.toml:<line>)`; tick, drive, check's alert, the banner and health all show it
+Because: "`tick`/`drive` stay refused with the same message in one place"
+Decided: every load that succeeds keeps its text as fleet.good.toml beside the state log; serve reads through Config::kept, which falls back to it
+Because: "`serve` keeps the last good config for reads and shows a red banner"
+Decided: the banner rides the needs strip (NeedsTab.config), drawn above every tab and re-pushed by serve's 15 s render, so a fix clears it without a restart
+Decided: check/tick alert `config-invalid` keyed by the error, deduped against the newest config-invalid/config-ok event, and log `config-ok` once it loads again
+Because: "`check` alerts `config-invalid` once per distinct error"
+Decided: GET /api/v1/health answers ok/config/error; the store-locked case is not built
+Because: q857
+Rejected: a process-global last-good cache inside Config::load — tick and drive must stay refused, and the CLI is a new process each run
+Check: crates/cli/tests/config_invalid.rs fails on base and passes at head; board_errors.rs now expects the new message wording
+Owner: A broken fleet.toml now shows as a red line on every board tab with the line to fix, the board keeps its data, and you get one alert per new error.
