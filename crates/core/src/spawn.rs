@@ -553,6 +553,14 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }
 
+/// #722: the linked worktree of `local`'s repo where `branch` is checked out, if any.
+fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
+    let list = ok(r, "git", &["-C", local, "worktree", "list", "--porcelain"]).ok()?;
+    let want = format!("branch refs/heads/{branch}");
+    let held = list.split("\n\n").skip(1).find(|b| b.lines().any(|l| l == want))?;
+    held.lines().next()?.strip_prefix("worktree ").map(String::from)
+}
+
 /// #298: `git worktree add` for a shed lane: its branch checked out if it exists (`have`), else made at the base.
 fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     let wt = p.worktree.to_string_lossy();
@@ -1085,6 +1093,33 @@ pub fn spawn(
         let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
+        }
+        // #722: its branch still checked out in another worktree (a herdr-era root): saved to `wip/`, then removed.
+        if let Some(held) = checked_out(r, &local, &p.branch).filter(|_| !reopen) {
+            let live = host::agents(r)?;
+            let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
+                .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
+                .collect();
+            if !names.is_empty() {
+                return refused(
+                    "LANE_LIVE",
+                    format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch),
+                );
+            }
+            let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
+            if on.exists(Path::new(&held)) {
+                wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                // Its work is on `wip/` or pushed: only lane scratch can stop a plain remove.
+                if git(&["remove", &held]).is_err() {
+                    git(&["remove", "--force", &held])?;
+                }
+            } else {
+                git(&["prune"])?;
+            }
+            event(
+                "worktree-moved",
+                json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip}),
+            )?;
         }
         let created = match bt {
             None => herdr::json(r, &create_argv(&local, &p, reopen))?,
