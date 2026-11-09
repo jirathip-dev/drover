@@ -1,0 +1,35 @@
+{
+  "now": 1793942837,
+  "rw": true,
+  "live": true,
+  "paired": false,
+  "pair": true,
+  "mtime": "mtime text",
+  "snap": 1793942750,
+  "choosing": 3,
+  "asks": [
+    {
+      "ask": {
+        "id": "q531",
+        "fleet": "fleet-1",
+        "issue": 3075,
+        "question": "question text",
+        "options": [
+          "options text",
+          "options text",
+          "options text"
+        ],
+        "recommend": 1,
+        "ts": 1793942717
+      },
+      "who": "fleet-1 · #3075 · fleet-1-impl-3075 · 2m",
+      "kind": "kind text",
+      "from": null,
+      "pngs": [],
+      "thread": null,
+      "title": null
+    }
+  ],
+  "blocked": [],
+  "issues": []
+}

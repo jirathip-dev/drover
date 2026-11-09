@@ -3,3 +3,4 @@ target*/
 .role-prompt.md
 /site/
 web/node_modules/
+web/plugin/node_modules/

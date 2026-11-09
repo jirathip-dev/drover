@@ -1,0 +1,22 @@
+{
+  "fleets": [
+    {
+      "fleet": "fleet-1",
+      "lessons": "weekly",
+      "last": null,
+      "next": 1794443324
+    },
+    {
+      "fleet": "fleet-2",
+      "lessons": "weekly",
+      "last": null,
+      "next": 1794443324
+    },
+    {
+      "fleet": "fleet-3",
+      "lessons": "weekly",
+      "last": null,
+      "next": 1794537978
+    }
+  ]
+}

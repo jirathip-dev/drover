@@ -1,0 +1,175 @@
+{
+  "seq": 38188,
+  "now": 1793925696,
+  "tz": 25200,
+  "age": 184,
+  "mtime": "mtime text",
+  "theme": "farm",
+  "fleets": [
+    {
+      "name": "fleet-1",
+      "repo": "example/repo",
+      "color": "c",
+      "paused": false
+    },
+    {
+      "name": "fleet-2",
+      "repo": "example/repo",
+      "color": "a",
+      "paused": false
+    },
+    {
+      "name": "fleet-3",
+      "repo": "example/repo",
+      "color": "p",
+      "paused": false
+    }
+  ],
+  "queue": [
+    {
+      "fleet": "fleet-1",
+      "issue": 22,
+      "title": "title text",
+      "state": "fix(0)",
+      "blocked_by": null
+    },
+    {
+      "fleet": "fleet-2",
+      "issue": 9,
+      "title": "title text",
+      "state": "parked",
+      "blocked_by": null
+    },
+    {
+      "fleet": "fleet-2",
+      "issue": 5,
+      "title": "title text",
+      "state": "ready",
+      "blocked_by": null
+    }
+  ],
+  "lanes": [
+    {
+      "name": "conductor-t9",
+      "fleet": null,
+      "issue": null,
+      "title": null,
+      "role": "other",
+      "harness": "claude",
+      "model": null,
+      "state": "idle",
+      "shown": "shown text",
+      "tone": "a",
+      "since": 0
+    },
+    {
+      "name": "fleet-2-design-1",
+      "fleet": "fleet-2",
+      "issue": 1,
+      "title": "title text",
+      "role": "design",
+      "harness": "claude",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "shown": "shown text",
+      "tone": "m",
+      "since": 1793886388
+    },
+    {
+      "name": "fleet-2-impl-9",
+      "fleet": "fleet-2",
+      "issue": 9,
+      "title": "title text",
+      "role": "impl",
+      "harness": "claude",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "shown": "shown text",
+      "tone": "m",
+      "since": 1793887871
+    }
+  ],
+  "asks": [
+    {
+      "id": "q422",
+      "fleet": "fleet-4",
+      "issue": null,
+      "question": "question text",
+      "options": [
+        "options text",
+        "options text",
+        "options text"
+      ],
+      "recommend": 1,
+      "ts": 1793908426
+    },
+    {
+      "id": "q425",
+      "fleet": "fleet-4",
+      "issue": null,
+      "question": "question text",
+      "options": [
+        "options text",
+        "options text",
+        "options text"
+      ],
+      "recommend": 1,
+      "ts": 1793909809
+    },
+    {
+      "id": "q445",
+      "fleet": "fleet-2",
+      "issue": null,
+      "question": "question text",
+      "options": [
+        "options text",
+        "options text",
+        "options text"
+      ],
+      "recommend": 1,
+      "ts": 1793920813
+    }
+  ],
+  "hosts": [
+    {
+      "name": "mini",
+      "tone": "g",
+      "detail": "detail text",
+      "fix": "fix text"
+    },
+    {
+      "name": "air",
+      "tone": "m",
+      "detail": "detail text",
+      "fix": "fix text"
+    }
+  ],
+  "services": [
+    {
+      "name": "board",
+      "tone": "g",
+      "detail": "detail text",
+      "fix": "fix text"
+    },
+    {
+      "name": "tick",
+      "tone": "g",
+      "detail": "detail text",
+      "fix": "fix text"
+    },
+    {
+      "name": "drive fleet-1",
+      "tone": "r",
+      "detail": "detail text",
+      "fix": "fix text"
+    }
+  ],
+  "alerts": [
+    {
+      "name": "push",
+      "tone": "g",
+      "detail": "detail text",
+      "fix": "fix text"
+    }
+  ]
+}
