@@ -1,0 +1,12 @@
+Decided: limit() returns a Duration for every call (60 s default, security/codesign 10 s, longer ones in a table) matched on the program's file name
+Because: "`limit()` returns `Some` for every call: a default (60 s)"
+Because: crates/core/src/runner.rs:252
+Decided: premerge checks (`sh -c "cd wt && cargo test"`) get 30 min through run_for, not a table entry for all of sh
+Because: crates/core/src/gate.rs:644
+Decided: the notifier runs as `env -u HERMES_* sh -c` through Real, its streams sent to /dev/null inside the shell as before
+Because: crates/core/src/events.rs:302
+Rejected: an Option<Duration> kept for limit() — a None arm would let an unbounded call back in
+Rejected: a sh entry in the table — every short script would then wait 30 min
+Check: cargo test --test wedged fails on fb52f6c9d (all four still running after 10 s) and passes at head in under a second
+Check: tests/runner_limits.rs names crates/core/src/x/mail.rs:3 in its fixture and finds nothing on the tree
+Owner: When a tool like the Keychain stops answering, herdsman now gives up on it after a set time instead of hanging; doctor, the board, tick and check keep working.
