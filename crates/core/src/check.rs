@@ -676,12 +676,12 @@ pub fn clean(
     (issue, lane, sched): (Option<u64>, Option<&str>, bool),
     yes: bool,
 ) -> Result<()> {
-    sweep(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
+    clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
 }
 
 /// `clean`; #678: `all` (an explicit `herdsman clean`) also sweeps each disabled host that answers its one bounded
 /// probe: its worktrees and dead lanes' scratch.
-pub fn sweep(
+pub fn clean_all(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,

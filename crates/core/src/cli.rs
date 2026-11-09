@@ -1637,7 +1637,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::sweep(
+                    check::clean_all(
                         ctx,
                         &cfg,
                         r,
