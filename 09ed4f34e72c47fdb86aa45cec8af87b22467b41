@@ -1,0 +1,12 @@
+Decided: the wedged fake also never answers lsof, which doctor, serve, tick and check all still call
+Because: crates/core/src/host.rs:25
+Because: crates/core/src/doctor.rs:243
+Decided: limit() returns a Duration for every call (60 s default, security/codesign 10 s, longer ones in a table) matched on the program's file name
+Because: "`limit()` returns `Some` for every call: a default (60 s)"
+Decided: hosts::On sends a remote call to run_for with the limit of the command it carries
+Because: crates/core/src/hosts.rs:175
+Rejected: an owner ask to amend AC4 after #707 — lsof keeps the test red on staging without a spec change
+Rejected: wedging herdr or gh — check would then fail on its own reads, not prove the bound
+Check: cargo test --locked --test wedged exits 101 on staging 7abb427af with head's wedged.rs (4 still running after 10 s) and 0 at head
+Check: runner_limits tests pass at head (AC2, AC3)
+Owner: When a tool herdsman calls stops answering, herdsman now gives up on it after a set time instead of hanging; the test proves it with a hung lsof.
