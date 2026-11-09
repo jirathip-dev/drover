@@ -26,6 +26,9 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   equivalent. Name the lines.
 - The implementer's standing answers (staging re-merges, a minimal "staging build fix", one
   host-tool retry, amendment text for the cap or shared files) are not findings.
+- A lesson PR (`lessons: <fleet> week of <date>`) adds or changes at least one enforcer (a CI step, a test, a type,
+  a lint rule, a lesson check). A PR that only edits prose is a FAIL in rev, unless it retires lines; `herdsman
+  verdict` records such a PASS as a FAIL.
 - Label every finding `blocking` or `non-blocking` with `file:line`.
 - A finding blocks only with proof; anything else is a `non-blocking` note. Right under each
   `- blocking [<category>] file:line: what` line goes a `Proof:` block, one of:

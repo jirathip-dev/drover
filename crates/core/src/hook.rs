@@ -134,12 +134,12 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
     }
-    // A V4A `patch` names its files inside the patch text.
-    let file = ["file_path", "notebook_path", "path", "patch"]
+    // A V4A `patch` (#732: Codex's `apply_patch` `command`) names its files inside the patch text.
+    let file = ["file_path", "notebook_path", "path", "patch", "command"]
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
-    if p.cap && file.ends_with(CAP_FILE) {
+    if p.cap && file.contains(CAP_FILE) {
         return Some(NO_CAP_EDIT.into());
     }
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
@@ -532,7 +532,7 @@ fn gh(t: &[&str]) -> Option<String> {
 fn group(r: &[&str]) -> Option<&'static str> {
     let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
     Some(match (*r.first()?, r.get(1).copied()) {
-        ("spawn", _) if r[1..].contains(&"design") => "design",
+        ("spawn", _) if r[1..].iter().any(|w| crate::events::STAGES.contains(w)) => "design",
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",
