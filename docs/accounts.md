@@ -39,3 +39,8 @@ than 300 days old (these tokens last a year). Folder logins stay the default: th
 herdsman ≤ #683 kept secrets in the login Keychain as `herdsman/<fleet>/<NAME>`. It reads none of them now and deletes
 none: `herdsman migrate` prints the `security delete-generic-password` lines for the owner to run. `secret:` env and the
 other secrets are files: see [providers](providers.md).
+
+On macOS, Claude Code's own login lives in the login Keychain (the `Claude Code-credentials` item), so a headless Mac
+on folder logins keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md)
+§7 (or give its accounts a `token-file:`). On Linux it is said to be a plain file in the config folder
+(`.credentials.json`): unverified.

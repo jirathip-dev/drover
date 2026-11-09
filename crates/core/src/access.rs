@@ -290,13 +290,14 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
 }
 
 /// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var
-/// its lane gets the token as (`harness::TOKEN_ENV`) and the file.
+/// its lane gets the token as (`Harness::token_env`) and the file.
 pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, std::path::PathBuf)> {
-    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+    let h = crate::harness::get(harness);
+    let Credential::Account(_) = h.credential() else {
         return None;
     };
     let f = cfg.accounts.names.get(name)?.strip_prefix("token-file:")?;
-    let var = crate::harness::TOKEN_ENV.iter().find(|p| p.0 == provider)?.1;
+    let var = h.token_env()?;
     cfg.accounts
         .account_env
         .is_none()

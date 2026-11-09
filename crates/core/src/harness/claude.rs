@@ -152,7 +152,7 @@ impl Harness for Claude {
     fn acp(&self) -> Option<&'static str> {
         Some("claude-acp")
     }
-    fn acp_env(&self, model: Option<&str>) -> Vec<(&'static str, String)> {
+    fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
     /// #683: Claude Code keeps the folder's account in `.claude.json` (`oauthAccount`) while it is signed in.
@@ -168,6 +168,9 @@ impl Harness for Claude {
     /// #683: `[accounts]` of provider `claude` (`harness::CONFIG_ENV`).
     fn credential(&self) -> Credential {
         Credential::Account("claude")
+    }
+    fn token_env(&self) -> Option<&'static str> {
+        Some("CLAUDE_CODE_OAUTH_TOKEN")
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")

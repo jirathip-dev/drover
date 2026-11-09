@@ -61,7 +61,7 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
-        for h in harness::NAMES {
+        for h in harness::known() {
             harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
         harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
@@ -149,6 +149,10 @@ impl Plan {
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        // #708: a token the pane inherited (a login shell's export) never picks the account of a lane without one.
+        if let (None, Some(v)) = (&self.account, harness::get(&self.harness).token_env()) {
+            c.push(format!("&& unset {v}"));
+        }
         if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
@@ -571,7 +575,7 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
     let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
-    let env = harness::get(&p.harness).acp_env(p.model.as_deref());
+    let env = harness::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
@@ -935,7 +939,12 @@ pub fn spawn(
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
     let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
-        herdr::Shed(crate::shed::Shed { wire, ..b })
+        // #732: an ACP lane runs its role's own agent over the runtime's.
+        let acp = b
+            .acp
+            .clone()
+            .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
+        herdr::Shed(crate::shed::Shed { wire, acp, ..b })
     });
     // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
     if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
@@ -1890,7 +1899,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let res = if let Some(why) = stale {
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
-                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
+                    let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
                 }
                 herdr::close(&on, pane)?;
