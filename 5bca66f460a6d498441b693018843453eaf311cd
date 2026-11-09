@@ -1,0 +1,11 @@
+Decided: wip_branch adds the lane host's machine (sanitised) after the stamp, so each host's save has its own name up front
+Because: "Make the wip/ branch name unique per host, for example by adding the host name"
+Because: crates/core/src/check.rs:1879
+Decided: the stale-orphan save in spawn.rs uses wip_branch too; cloud.rs keeps `wip/<host>-<lane>`, already unique per host
+Because: crates/core/src/spawn.rs:1861
+Decided: after a verified save, clean removes the worktree with `git worktree remove --force` and no dirty check
+Because: "After a successful save, the worktree can be removed even if the save was the only change."
+Because: crates/core/src/check.rs:813
+Rejected: counting the snapshot's skipped files as clean in dirty() — it also guards spawn reuse and verdict close
+Check: two_hosts_saving_one_lane_in_the_same_second_get_two_branches fails on staging and passes at head
+Owner: Two machines saving the same finished lane no longer clash, and a saved lane's folder is now removed instead of failing every tick.
