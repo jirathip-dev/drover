@@ -1,0 +1,14 @@
+Decided: every secret is a 0600 file read by one function (secret::file), refused SECRET_FILE_OPEN if looser; the keyring store, probe, NO_STORE and KEYCHAIN_LOCKED are gone
+Because: crates/core/src/secret.rs:31
+Because: "`secret:<NAME>` is kept as a 0600 file; the `boat` CLI owns its key; the usage meter is the status-line feed only."
+Decided: the webhook secret is the file `[serve] webhook_secret_file` names; a recipe key is env, else <config>/secrets/<key_env>, and optional
+Because: "read from a 0600 file whose path is in config (never inline: `SECRET_IN_CONFIG` stays). No store."
+Decided: Runner::secret/set_secret, usage::meter/reading and shown's Result stay as stubs only because the frozen board (serve.rs, serve/chat.rs) still calls them
+Because: crates/core/src/runner.rs:51
+Rejected: editing crates/server/src/serve.rs — board-freeze.sh fails without a board-fix line in the spec
+Decided: token-file:<path> as an [accounts] value; its token goes to the lane's sourced secrets file as Harness::token_env (#708's hook), and to the proxy
+Because: crates/core/src/access.rs:294
+Decided: doctor shows one account-source row plus token-file warnings; doctor --tokens and the install/self-update signing step are removed
+Because: q855
+Check: store.rs serve test, webhook 0644/inline tests, cloud no-key_env test, access token-file tests pass; the harness-neutral grep finds nothing
+Owner: herdsman no longer touches the Keychain; put old secrets in 0600 files and run the delete lines `herdsman migrate` prints.
