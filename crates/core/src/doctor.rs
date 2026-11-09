@@ -53,8 +53,8 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
 }
 
-/// #631 `doctor --tokens`, the install gates' secret check: each `[accounts]` token read from the store (a dialog is
-/// `KEYCHAIN_LOCKED` within `KEYCHAIN_SECS`); exit 1 on any ✗ (each with its fix).
+/// #631 `doctor --tokens`, the install gate: each `[accounts]` account signed in (#683: its own folder's login, never
+/// a Keychain read); exit 1 on any ✗ (each with its fix).
 pub fn tokens(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let mut rows = vec![];
     match Config::load(&ctx.config) {
@@ -65,24 +65,11 @@ pub fn tokens(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     Ok(i32::from(rows.iter().any(|line| line.starts_with('✗'))))
 }
 
+/// #683: each account's sign-in (`access::sign_in`: its env, its folder's own login; no Keychain read, no CLI call).
 fn account_rows(cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
-    for (name, var) in &cfg.accounts.names {
-        let svc = crate::secret::service("all", var);
-        let line = format!("account {name} — {svc} in the store → herdsman accounts import <tokens.env>");
-        let bad = if cfg.legacy_secret(var).is_some() { '!' } else { '✗' }; // #539: the retired file still serves it
-        match r.secret(&svc) {
-            // #548: an item the Keychain guards with a dialog gets its one-time fix.
-            Err(e)
-                if e.downcast_ref::<crate::gate::Refusal>()
-                    .is_some_and(|f| f.code == "KEYCHAIN_LOCKED") =>
-            {
-                let fix = crate::runner::keychain_fix(&svc);
-                rows.push(format!(
-                    "✗ account {name} — {svc} prompts for Keychain access → approve herdsman in the Keychain dialog: {fix}"
-                ));
-            }
-            got => row(rows, got.is_ok_and(|v| v.is_some()), bad, &line),
-        }
+    for name in cfg.accounts.names.keys() {
+        let (ok, line) = crate::access::sign_in(cfg, r, name);
+        row(rows, ok, '✗', &format!("account {name} — {line}"));
     }
 }
 

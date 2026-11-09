@@ -6,7 +6,7 @@ use crate::api::{
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
-use crate::events::{closed, Event};
+use crate::events::{ask_event, closed, Event};
 use crate::runner::Runner;
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -43,13 +43,10 @@ fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
 /// answer the last, under `CHANGE` old).
 fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
-    let is = |d: &&Event| d.kind == "decision" && d.fleet == e.fleet && d.str("id") == Some(id);
-    let d = events.iter().rfind(is)?;
+    let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
     (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
-    events
-        .iter()
-        .find(|a| a.kind == "needs-decision" && a.fleet == e.fleet && a.str("id") == Some(id))
+    ask_event(events, "needs-decision", &e.fleet, id)
 }
 
 /// #407: a queued message's id, and its files.
@@ -89,7 +86,7 @@ fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
 
 /// `[chat·N]`: the threads where a choice waits for the owner.
 pub fn choosing(events: &[Event]) -> usize {
-    let ids = events.iter().filter(|e| e.kind == "thread-new");
+    let ids = conductor::threads(events).into_iter();
     ids.filter(|t| open_ask(events, t.str("thread").unwrap_or_default()).is_some())
         .count()
 }
@@ -104,8 +101,7 @@ fn link(e: &Event) -> Option<Link> {
 
 /// An ask as its thread shows it: decided, the answer; else open (no `closed` event) for the choice rows.
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
-    let is = |e: &&Event| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id");
-    let answer = events.iter().rfind(is).map(|d| {
+    let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
         let opts = a.data["options"].as_array().into_iter().flatten();
         Answered {
@@ -401,7 +397,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             return tab;
         }
     };
-    let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
+    let threads = conductor::threads(events);
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
     for (repo, k) in repos {
         let (mut rows, mut arch) = (vec![], vec![]);
@@ -430,19 +426,17 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
 impl super::Server<'_> {
     /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads. #620: the fold is kept by the log's
     /// last seq, fleet.toml's mtime, the agents, `rw` and the minute; a request in between reuses it, the log unread.
+    /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
+    /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        let key = json!([
-            crate::db::last_seq(&ctx.state),
-            super::mtime(ctx),
-            agents,
-            rw,
-            ctx.now / 60
-        ]);
-        let mut c = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seen: Vec<_> = agents.iter().map(|a| [&a["name"], &a["agent_status"]]).collect();
+        let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
+        let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
             let (cfg, events) = match (Config::load(&ctx.config), crate::events::shared(&ctx.state)) {
@@ -626,7 +620,7 @@ pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
         return vec![];
     };
     let mut out = vec![];
-    for t in events.iter().filter(|e| e.kind == "thread-new") {
+    for t in conductor::threads(&events) {
         let id = t.str("thread").unwrap_or_default();
         for e in queued(&events, id)
             .values()

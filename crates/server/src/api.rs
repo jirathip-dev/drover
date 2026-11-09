@@ -354,6 +354,7 @@ pub struct Msg {
     pub answer: Option<Answered>,
     pub open: bool,
     pub cmds: Vec<String>,
+    pub handoff: Option<Handoff>,
     pub run: Option<RunCard>,
 }
 
@@ -372,6 +373,66 @@ pub struct RunCard {
     pub by: Option<String>,
     pub code: Option<i64>,
     pub tail: String,
+}
+
+
+/// #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending
+/// conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line;
+/// `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the
+/// receiver's; while pending, the card's `choices`.
+pub struct Handoff {
+    pub kind: String,
+    pub id: u64,
+    pub from: HandoffFrom,
+    pub to: Value,
+    pub title: String,
+    pub summary: String,
+    pub text: String,
+    pub state: String,
+    pub error: Option<String>,
+    pub folded: bool,
+    pub choices: Vec<HandoffChoice>,
+}
+
+pub struct HandoffFrom {
+    pub agent: String,
+    pub thread: String,
+    pub repo: String,
+}
+
+/// #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to
+/// (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
+pub struct HandoffChoice {
+    pub n: u64,
+    pub text: String,
+    pub thread: String,
+    pub op: String,
+    pub fleet: String,
+    pub id: String,
+}
+
+/// #681: API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
+pub struct RepoThreads {
+    pub repo: String,
+    pub threads: Vec<RepoThread>,
+}
+
+/// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing
+/// one (the first not archived).
+#[allow(clippy::struct_excessive_bools)] // the four flags #681's cooee contract names
+pub struct RepoThread {
+    pub id: String,
+    pub title: String,
+    pub last: LastLine,
+    pub unread: bool,
+    pub awake: bool,
+    pub archived: bool,
+    pub newest: bool,
+}
+
+pub struct LastLine {
+    pub line: String,
+    pub ts: u64,
 }
 
 pub struct FileRef {
@@ -991,6 +1052,9 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "HERDSMAN_PORT")]
     pub port: String,
+    /// #683: the role's account env (`access::account_env`), the thread's own login (empty: no account).
+    #[serde(flatten)]
+    pub account: BTreeMap<String, String>,
 }
 
 }

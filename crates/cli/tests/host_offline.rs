@@ -71,12 +71,16 @@ fn an_unreachable_host_refuses_only_its_own_spawns() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "14", "impl", "--host", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(r.called("herdr agent start sendmeter-impl-14"));
-    // A lane that sticks to bazzite (its last spawn there) is refused the same way, never a generic error.
+    // #676: a lane whose issue last ran on bazzite leaves it while it is unreachable: the main host takes it.
     remote_spawn(&c);
     ev(&c, NOW - 100, "verdict", json!({"verdict": "FAIL", "sha": "abc"}));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("REFUSED HOST_OFFLINE"), "{out}");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        r.called("herdr agent start sendmeter-rev-12-r2"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 #[test]
@@ -157,10 +161,12 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]),
         )
-        .reply(
+        .once(
             "herdr --machine bazzite agent list",
+            0,
             &agents(&[("sendmeter-impl-12", "idle", WT, "w9:p1")]),
         )
+        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("herdr --machine bazzite pane close w9:p1", "{}");
     for _ in 0..2 {
         herdsman::check::stale(&c, &cfg, &back, &mut Vec::new()).unwrap();
@@ -204,10 +210,12 @@ fn kill_and_close_take_a_host_when_names_collide() {
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]),
         )
-        .reply(
+        .once(
             "herdr --machine bazzite agent list",
+            0,
             &agents(&[("sendmeter-impl-12", "idle", WT, "w9:p1")]),
         )
+        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("herdr --machine bazzite pane close w9:p1", "{}");
     let (code, out) = run(&c, &r, &["close", "sendmeter-impl-12"]);
     assert_eq!(code, 3, "{out}");

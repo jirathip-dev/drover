@@ -12,6 +12,8 @@ pub enum Sabotage {
     DoubleLane,
     /// I4: the head's CI turns red just before a merge lands.
     RedMerge,
+    /// #688's planted bug, deep where random seeds rarely go: I1, a second pane, only at a lane's fourth start.
+    Planted,
 }
 
 /// I7: an event may be this far behind the true time it is appended at (owner, q836).
