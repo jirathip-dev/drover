@@ -71,12 +71,16 @@ fn an_unreachable_host_refuses_only_its_own_spawns() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "14", "impl", "--host", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(r.called("herdr agent start sendmeter-impl-14"));
-    // A lane that sticks to bazzite (its last spawn there) is refused the same way, never a generic error.
+    // #676: a lane whose issue last ran on bazzite leaves it while it is unreachable: the main host takes it.
     remote_spawn(&c);
     ev(&c, NOW - 100, "verdict", json!({"verdict": "FAIL", "sha": "abc"}));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("REFUSED HOST_OFFLINE"), "{out}");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        r.called("herdr agent start sendmeter-rev-12-r2"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 #[test]

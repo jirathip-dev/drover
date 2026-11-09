@@ -219,7 +219,10 @@ impl Server<'_> {
             .as_ref()
             .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
         else {
-            return self.write(ctx, &f);
+            // #715: an answer's conductor wake is delivered after the reply.
+            let (res, later) = crate::conductor::deferred(|| self.write(ctx, &f));
+            self.later(ctx, later);
+            return res;
         };
         if !lock(&self.running).insert(fleet.clone()) {
             return refused("DRIVE_RUNNING", format!("{fleet} has a {op} running"));

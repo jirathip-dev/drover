@@ -485,10 +485,8 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         placed(&c, &r, 14, "impl", None).unwrap_err(),
         "REFUSED NO_HOST: no host with docker"
     );
-    // Its running lane still gets its review and fix rounds there.
+    // Its running lane drains there; #676: the issue's next lanes go to an enabled host.
     remote_spawn(&c, NOW - 60);
-    assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("bazzite"));
-    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("bazzite"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = host_tab(&s, ADDR, NOW);
     assert!(
@@ -504,6 +502,46 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         placed(&c, &r, 15, "impl", None).unwrap_err(),
         "REFUSED NO_HOST: no enabled host"
     );
+}
+
+/// #676: an issue whose last lane ran on bazzite leaves it once bazzite is off: its next lanes go to the main host.
+#[test]
+fn after_hosts_off_the_issue_leaves_its_last_host() {
+    let c = setup("hosts-off-sticky", "", true, 0);
+    let r = fake(2.0, 0.1);
+    remote_spawn(&c, NOW - 60);
+    assert_eq!(
+        placed(&c, &r, 12, "impl", None).as_deref(),
+        Ok("bazzite"),
+        "sticky while on"
+    );
+    assert_eq!(run(&c, &r, &["hosts", "off", "bazzite"]).0, 0);
+    assert_eq!(placed(&c, &r, 12, "impl", None).as_deref(), Ok("mini"));
+    assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("mini"));
+}
+
+/// #676: the sticky host refusing DISK_LOW sends the lane to another enabled host in the same pass; a worktree there
+/// with unpushed work keeps it, and the refusal says why.
+#[test]
+fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work() {
+    let c = setup("hosts-sticky-disk", "", true, 0);
+    remote_spawn(&c, NOW - 60);
+    let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 90% /\n";
+    let low = || fake(2.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
+    assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
+    let kept = low()
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'status'"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "2\n");
+    let e = placed(&c, &kept, 12, "impl", None).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
+    assert!(
+        e.ends_with("; stays on bazzite: its worktree there has unpushed work"),
+        "{e}"
+    );
+    // A pin holds it there too.
+    let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
+    assert!(e.starts_with("DISK_LOW: bazzite"), "{e}");
 }
 
 #[test]
@@ -1277,6 +1315,57 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
         r.calls.borrow()
     );
     assert!(!r.called("herdr pane close w9:p1"), "never on the main host's herdr");
+}
+
+/// #676: a lane moved off its last host (now off) starts from the pushed branch, with that host's unpushed work on `wip/`.
+#[test]
+fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
+    let c = setup("hosts-move-wip", "enabled = false", true, 0);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    remote_spawn(&c, NOW - 900);
+    ev(
+        &c,
+        NOW - 600,
+        12,
+        "lane-killed",
+        json!({"role": "impl", "agent": "sendmeter-impl-12"}),
+    );
+    let r = fake(2.0, 0.1)
+        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{SSH}'git' '-C' '{WT}' 'rev-list'"), "1\n")
+        .reply(&format!("{SSH}'git'"), "")
+        .reply("git ", "")
+        .reply(
+            "herdr worktree create",
+            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
+        )
+        .reply(
+            "herdr pane list --workspace w1",
+            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
+        )
+        .reply("herdr pane run w1:p1 export", "{}")
+        .reply("herdr agent start sendmeter-impl-12", "{}")
+        .reply("herdr agent wait sendmeter-impl-12", "{}");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    let calls = r.calls.borrow().clone();
+    assert_eq!(code, 0, "{out} {calls:?}");
+    let create = calls.iter().find(|l| l.starts_with("herdr worktree create")).unwrap();
+    assert!(create.contains("--base origin/issue-12"), "{create}");
+    assert!(
+        calls
+            .iter()
+            .any(|l| l.starts_with(&format!("{SSH}'git' '-C' '{WT}' 'push'"))),
+        "{calls:?}"
+    );
+    let e = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "spawn")
+        .unwrap();
+    assert_eq!(e.str("host"), Some("mini"));
+    let brief = std::fs::read_to_string(std::path::Path::new(e.str("worktree").unwrap()).join(".brief.md")).unwrap();
+    assert!(brief.contains("work is on `origin/wip/sendmeter-impl-12-"), "{brief}");
 }
 
 /// #438: short of disk on a remote host, its shared build folder is trimmed over ssh first; then its disk is read again.
