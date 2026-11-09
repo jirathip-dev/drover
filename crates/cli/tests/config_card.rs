@@ -298,3 +298,30 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
         "{kicks:?}"
     );
 }
+
+/// #732: `config apply` syncs the profiles itself: a role it adds has its hook (and a Hermes profile its approval)
+/// before doctor runs, so an apply never leaves `✗ hermes hooks`.
+#[test]
+fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
+    let c = setup("cfg-sync");
+    let yaml = c.hermes.join("fleet-verify/config.yaml");
+    std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
+    std::fs::write(&yaml, "model: x\n").unwrap();
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let file = c.config.with_file_name("proposed.toml");
+    let role = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
+    std::fs::write(&file, format!("{old}{role}")).unwrap();
+    let r = Fake::default();
+    assert_eq!(
+        run(&c, &r, &["config", "propose", "t1", file.to_str().unwrap()]).1,
+        "c1\n"
+    );
+    let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
+    assert_eq!(code, 0, "{out}");
+    // A check role's hook is rev's (read-only).
+    let allow = std::fs::read_to_string(c.hermes.join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
+    assert!(allow.contains("hook --role rev"), "{allow}");
+    assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));
+    let settings = herdsman::harness::profiles_root(&c).join("fleet-verify/settings.json");
+    assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
+}
