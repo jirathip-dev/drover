@@ -41,6 +41,9 @@ ps -axo pid,etime,command | grep -E '[S]ecurityAgent|[s]ecurity (find|unlock)'
 ```
 
 A SecurityAgent with a long elapsed time plus `security find-generic-password` processes that never finish is the jam.
+`herdsman check` alerts `keychain-jammed` (once per episode) with their pids and this fix when more than
+`[limits] keychain_readers` (3) wait over 60 s; `herdsman doctor` shows the count. `reap_keychain_readers = true`
+lets `check` run the fix itself (`keychain-reap`).
 
 **Fix.** Kill the waiting `find-generic-password` calls by pid, then SecurityAgent; macOS restarts it. The queued
 dialogs count as Deny.

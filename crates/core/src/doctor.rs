@@ -190,6 +190,10 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("signature — {} signed by \"herdsman-local\" → {fix}", ctx.exe);
         row(rows, signed, '✗', &line);
     }
+    // #710: the readers `check` counts for `keychain-jammed`.
+    let jam = crate::host::keychain_jam(r);
+    let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
+    row(rows, jam.0.len() <= cfg.limits.keychain_readers, '!', &line);
     let roles: Vec<_> = cfg.fleet.values().flat_map(|fleet| &fleet.role).collect();
     let harnesses: BTreeSet<_> = roles.iter().map(|role| role.1.harness.as_str()).collect();
     for binary in harnesses {
