@@ -1,0 +1,12 @@
+Decided: drive's full pass runs roots::watch (moved from check), and restart retries every pass while the active lane's last spawn is still on the gone root.
+Because: "respawns the lane on the host's next available root, once per lane, logging `root-moved` with old and new root"
+Because: crates/core/src/roots.rs:204
+Decided: root-moved is logged after the start, only once the lane's newest spawn left the root, with `to` and `to_host` read from that spawn.
+Because: crates/core/src/roots.rs:261
+Rejected: logging root-moved before the start (as #630 did) — a failed start then left the lane stuck with no retry, the bug's shape.
+Rejected: predicting the new root before spawning — spawn may place the lane on another host; the logged spawn is the truth.
+Decided: waiting's lost-work note reads "moved off a pulled root, lost …" instead of "root gone".
+Because: "the next drive pass respawns it on the other root at its pushed head, once, with a `root-moved` event"
+Check: crates/cli/tests/roots.rs a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass fails with the old once-per-root logic.
+Check: `herdsman check` no longer restarts lanes; only `drive`/`tick` do (tick runs check then drive).
+Owner: Lanes on a disk that was unplugged now restart on the next disk by themselves, retried each pass until they do.
