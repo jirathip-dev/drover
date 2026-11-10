@@ -1113,7 +1113,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(ctx, f, &events, fleet, issue, role)?;
+    lane_admit(ctx, (cfg, r), &events, fleet, issue, role)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
@@ -1640,8 +1640,16 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
 }
 
 /// `SERIAL_BUSY` (a group of the issue's is full, unless it holds a slot there) and CAP (`max_impl` / `max_rev`).
-pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
-    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
+pub(crate) fn lane_admit(
+    ctx: &Ctx,
+    (cfg, r): (&Config, &dyn Runner),
+    events: &[Event],
+    fleet: &str,
+    issue: u64,
+    role: &str,
+) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
+    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat(); // #318: spawns still starting count as lanes
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1987,7 +1995,10 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
-        let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
+        // #812: a pane id herdr reused for another agent is not that agent's: the pane matches with its name.
+        let named = |e: &&Event| name.is_none_or(str::is_empty) || e.str("agent") == name;
+        let at =
+            |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
         // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
         // #500: one adoption per pane, ever: a pane adopted once is never an orphan again.
@@ -2026,8 +2037,19 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             .flatten()
             .and_then(head)
             .filter(|(x, h): &(String, String)| !x.eq_ignore_ascii_case(h));
+        // #812: a review of another round than the one due is replaced, as `--supersede` would.
+        let due = s
+            .stage_rounds
+            .get(f.flow().stage_of(&role))
+            .copied()
+            .unwrap_or_default()
+            + 1;
+        let lane = name.filter(|n| !n.is_empty()).or(wt.as_deref());
+        let round = lane.and_then(|l| l.rsplit_once("-r")?.1.parse::<u32>().ok());
+        let round = round.filter(|k| f.family(&role) == "rev" && *k != due);
         let stale = match old {
             _ if s.done() => Some(format!("{fleet}#{n} is {}", s.state)),
+            _ if let Some(k) = round => Some(format!("round r{k}, r{due} is due")),
             Some((x, h)) => Some(format!("verdict for {x:.7}, head is {h:.7}")),
             None => None,
         };

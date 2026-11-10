@@ -1653,7 +1653,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             (w.who, w.what) = ("drive", l);
                         }
                     }
-                    let slots = crate::drive::holders(ctx);
+                    let slots = crate::drive::holders(ctx, &cfg, r);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
                     }

@@ -78,7 +78,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if l.expires_at > ctx.now && age <= cfg.limits.spawn_pending_max_secs && !gone(r, &l, ctx.now) {
+        if holds(ctx, cfg, r, &l) {
             live.push(name);
             continue;
         }
@@ -96,6 +96,26 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
         stale.push(e);
     }
     (live, stale)
+}
+
+/// #812: lease `l` still holds its slot: unexpired, no older than `spawn_pending_max_secs`, its kick alive.
+fn holds(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease) -> bool {
+    l.expires_at > ctx.now && ctx.now.saturating_sub(l.at) <= cfg.limits.spawn_pending_max_secs && !gone(r, l, ctx.now)
+}
+
+/// #812: the spawn markers holding a slot, oldest first.
+fn starting(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<crate::db::Lease> {
+    let mut v: Vec<_> = (crate::db::leases(&ctx.state, "spawn-").into_iter())
+        .filter(|l| l.key.ends_with(".pending") && holds(ctx, cfg, r, l))
+        .collect();
+    v.sort_by_key(|l| l.at);
+    v
+}
+
+/// #812: what holds the spawn slots, each marker's key and age (`spawn-a-1.pending 4m, …`); empty when none does.
+pub fn held_by(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
+    let at = |l: &crate::db::Lease| format!("{} {}", l.key, crate::events::age(ctx.now.saturating_sub(l.at)));
+    starting(ctx, cfg, r).iter().map(at).collect::<Vec<_>>().join(", ")
 }
 
 /// #333: `spawns starting N/<max>` and the stale markers swept in the last day: doctor's and the Host tab's line.
@@ -303,7 +323,7 @@ fn launch(
 ) -> Result<i32> {
     let role = c[3];
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
-    let live = pending(ctx);
+    let live = pending(ctx, cfg, r);
     // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
     let low =
         |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
@@ -323,9 +343,11 @@ fn launch(
         || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
         || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
     {
-        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
+        let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
+        let by = by.map_or(String::new(), |b| format!(": {b}"));
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
-    crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
+    crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
         return crate::gate::refused(code, why);
     }
@@ -515,10 +537,10 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
     append(&ctx.state, &Event::new(e.ts, fleet, None, "drive-pass", d))
 }
 
-/// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
-pub(crate) fn pending(ctx: &Ctx) -> Vec<Event> {
-    let all = crate::db::leases(&ctx.state, "spawn-").into_iter();
-    let live = all.filter(|l| l.key.ends_with(".pending") && l.expires_at > ctx.now);
+/// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting (#812: by
+/// `holds`, the sweep's own rule).
+pub(crate) fn pending(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<Event> {
+    let live = starting(ctx, cfg, r).into_iter();
     live.filter_map(|l| serde_json::from_str(&l.data).ok()).collect()
 }
 
@@ -532,7 +554,10 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("DISK_LOW") => format!("disk nearly full ({why})"),
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
-        Some("SPAWN_PENDING") => crate::waiting::SLOT.into(),
+        Some("SPAWN_PENDING") => match why.split_once(": ") {
+            Some((_, by)) => format!("{}: {by}", crate::waiting::SLOT),
+            None => crate::waiting::SLOT.into(),
+        },
         Some("SPAWN_BACKOFF") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
@@ -817,7 +842,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
                 .active_lane()
                 .is_some_and(|(_, l)| live.iter().any(|a| a["name"] == l));
             if lane
-                || pending(ctx)
+                || pending(ctx, cfg, r)
                     .iter()
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
             {
@@ -1759,9 +1784,9 @@ fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
 }
 
 /// #638: each pending spawn's fleet with its count, most first (`cooee 3, berth 2`): who holds the slots.
-pub fn holders(ctx: &Ctx) -> String {
+pub fn holders(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let mut by = BTreeMap::<String, usize>::new();
-    for p in pending(ctx) {
+    for p in pending(ctx, cfg, r) {
         *by.entry(p.fleet).or_default() += 1;
     }
     let mut by: Vec<_> = by.into_iter().collect();
@@ -1805,7 +1830,7 @@ fn starts<'a>(
     while go && !todo.is_empty() {
         i %= todo.len();
         let fleet = todo[i].0;
-        let held = || pending(ctx).iter().filter(|p| p.fleet == fleet).count();
+        let held = || pending(ctx, cfg, r).iter().filter(|p| p.fleet == fleet).count();
         let full = max > 0 && KICK.get().is_none() && todo.len() > 1 && held() * total >= share(fleet);
         let Some(n) = todo[i].1.pop_front().filter(|_| !full) else {
             todo.remove(i);
