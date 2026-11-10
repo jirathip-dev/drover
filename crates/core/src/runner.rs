@@ -67,10 +67,10 @@ impl Runner for Real {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
-        self.within(prog, args, input, limit(prog, args))
+        self.within(prog, args, input.as_bytes(), limit(prog, args))
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
-        self.within(prog, args, input, Some(limit))
+        self.within(prog, args, input.as_bytes(), limit)
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
@@ -126,8 +126,8 @@ impl Real {
         let out = c.stdout.take().context("stdout")?;
         Ok(Box::new(Streamed(c, out)))
     }
-    /// `run_in`, killed (exit 124) once `limit` has passed.
-    pub fn within(&self, prog: &str, args: &[String], input: &str, limit: Option<Duration>) -> Result<Out> {
+    /// `run_in` with bytes on stdin, killed (exit 124) once `limit` has passed.
+    pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
         let mut c = Command::new(prog)
@@ -137,17 +137,8 @@ impl Real {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("cannot run {prog}"))?;
-        let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
+        let _ = c.stdin.take().unwrap().write_all(input);
         let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        let Some(limit) = limit else {
-            let o = c.wait_with_output()?;
-            let code = o.status.code().unwrap_or(-1);
-            return Ok(Out {
-                code,
-                stdout: text(&o.stdout),
-                stderr: text(&o.stderr),
-            });
-        };
         let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
         let end = Instant::now() + limit;
         while Instant::now() < end {
@@ -174,10 +165,36 @@ impl Real {
     }
 }
 
-/// #478: another host's `herdr --machine m … list` (its ssh has no timeout of its own) answers in 20 s.
-pub fn limit(prog: &str, args: &[String]) -> Option<Duration> {
-    let remote = prog == crate::herdr::BIN && args.first().is_some_and(|a| a == "--machine");
-    (remote && args.get(3).is_some_and(|a| a == "list")).then(|| Duration::from_secs(20))
+/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is
+/// killed and exits 124.
+/// - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick.
+/// - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08).
+/// - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it.
+/// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
+/// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
+/// - `cargo`: 30 min; self-update's release build.
+/// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
+/// - anything else: 60 s.
+pub fn limit(prog: &str, args: &[String]) -> Duration {
+    let a = |i: usize| args.get(i).map_or("", String::as_str);
+    let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
+    let wait = args
+        .iter()
+        .position(|w| w == "--timeout")
+        .and_then(|i| a(i + 1).parse::<u64>().ok());
+    let name = std::path::Path::new(prog)
+        .file_name()
+        .map_or(prog.into(), |n| n.to_string_lossy());
+    let secs = match &*name {
+        p if p == crate::herdr::BIN && a(0) == "--machine" && a(3) == "list" => 20,
+        "security" | "codesign" => 10,
+        p if p == crate::herdr::BIN => wait.map_or(60, |ms| ms / 1000 + 30),
+        "git" if args.iter().any(net) => 600,
+        "cp" | "rm" => 600,
+        "cargo" => 1800,
+        _ => 60,
+    };
+    Duration::from_secs(secs)
 }
 
 fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
