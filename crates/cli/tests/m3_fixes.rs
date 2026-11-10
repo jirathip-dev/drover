@@ -47,11 +47,9 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
     let c = ctx(&d, CONFIG);
     merged_13(&c);
     let before = read(&c.state).unwrap().len();
-    let r = Fake::default()
-        .reply("herdr", "{}")
-        .reply("gh", "{}")
-        .reply("git", "")
-        .reply("sysctl", "1");
+    let sh = FakeShed::new(); // #771: lanes on shed
+    sh.attach(&c);
+    let r = Fake::default().reply("gh", "{}").reply("git", "").reply("sysctl", "1");
     for args in [
         vec!["spawn", "sendmeter", "13", "impl"],
         vec!["spawn", "sendmeter", "13", "rev", "--dry-run"],
@@ -62,9 +60,14 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
         assert!(out.contains("REFUSED MERGED"), "{args:?}: {out}");
     }
     assert!(
-        !r.called("herdr agent") && !r.called("herdr worktree"),
+        !r.called("herdr agent") && !r.called("herdr worktree") && !r.called("git worktree"),
         "{:?}",
         r.calls.borrow()
+    );
+    assert!(
+        !sh.called("run", "sendmeter-impl-13"),
+        "no lane started: {:?}",
+        sh.methods()
     );
     assert_eq!(read(&c.state).unwrap().len(), before, "nothing logged");
 }

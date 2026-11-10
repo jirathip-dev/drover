@@ -45,10 +45,40 @@ fn fixture(name: &str, last: &str) -> herdsman::Ctx {
     c
 }
 
-fn runner() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
+/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
+struct OnShed(Fake, FakeShed);
+
+impl OnShed {
+    fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl herdsman::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<herdsman::shed::Shed> {
+        Some(self.1.shed())
+    }
+}
+
+fn runner() -> OnShed {
+    OnShed::new(Fake::default())
 }
 
 /// The response at `path`; the page (#269) with its needs cards as the board draws them.

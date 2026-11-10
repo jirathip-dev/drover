@@ -10,7 +10,39 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
+/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
+struct OnShed(Fake, FakeShed);
+
+impl OnShed {
+    fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl herdsman::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<herdsman::shed::Shed> {
+        Some(self.1.shed())
+    }
+}
+
+fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -47,22 +79,27 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
         json!({"title": "Herd mode"}).to_string(),
     )
     .unwrap();
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [
-        a("sendmeter-impl-12", "working", "w1:p2"),
-        a("synergy-impl-7", "blocked", "w2:p1"),
-        a("synergy-impl-8", "done", "w2:p2"),
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/home/me/side", "workspace_id": "w4"},
-    ]}});
-    let ws = json!({"result": {"workspaces": [{"workspace_id": "w4", "label": "side-project"}]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", &ws.to_string())
-        .reply("herdr pane read", SCREEN)
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
-        .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
-        .reply("sysctl -n hw.ncpu", "10\n")
-        .reply("vm_stat", "Swapouts: 100.\n");
+    let r = OnShed::new(
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
+            .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Swapouts: 100.\n"),
+    );
+    for (n, st) in [
+        ("sendmeter-impl-12", "working"),
+        ("synergy-impl-7", "blocked"),
+        ("synergy-impl-8", "done"),
+    ] {
+        r.1.lane(n, st, "/x");
+        r.1.screen(n, SCREEN);
+    }
+    // A terminal no lane of the log claims, outside every fleet: one of Others.
+    r.1.add("side-project", json!({"fleet": "-", "harness": "codex"}));
+    r.1.set("side-project", |t| {
+        t["cwd"] = json!("/home/me/side");
+        t["reported"] = json!({"state": "idle"});
+    });
     (c, r)
 }
 
@@ -182,7 +219,10 @@ fn herd_json_refuses_a_foreign_host_or_origin() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert!(get(&s, "/herd.json", "evil.example", "").starts_with("HTTP/1.1 403 "));
     assert!(get(&s, "/herd.json", ADDR, "Origin: https://evil.example\r\n").starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr agent list"), "refused before any read");
+    assert!(
+        !r.called("herdr agent list") && r.1.methods().is_empty(),
+        "refused before any read"
+    );
     body(&get(&s, "/herd.json", "mac.example", "Origin: https://mac.example\r\n"));
 }
 

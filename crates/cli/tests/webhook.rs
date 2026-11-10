@@ -267,8 +267,9 @@ fn open_pr() -> String {
 #[test]
 fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery() {
     let c = setup("hook-catchup");
+    let sh = FakeShed::new(); // no lanes
+    sh.attach(&c);
     let r = Fake::default()
-        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")

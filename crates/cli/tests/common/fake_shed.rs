@@ -88,10 +88,18 @@ impl FakeShed {
             self.sock.display()
         )
     }
-    /// Ctx `c`'s fleet config, its lanes now on this server (`config`).
+    /// Ctx `c`'s fleet config, its lanes now on this server (`config`); a `[runtime]` an earlier `attach` added is
+    /// replaced, so attaching again (or another server) is safe.
     pub fn attach(&self, c: &herdsman::Ctx) {
         let base = std::fs::read_to_string(&c.config).unwrap();
-        std::fs::write(&c.config, self.config(&base)).unwrap();
+        let base = base.split("\n[runtime]\nkind = \"shed\"\n").next().unwrap_or_default();
+        std::fs::write(&c.config, self.config(base)).unwrap();
+    }
+    /// A new server, ctx `c`'s lanes on it (`attach`).
+    pub fn attached(c: &herdsman::Ctx) -> FakeShed {
+        let sh = FakeShed::new();
+        sh.attach(c);
+        sh
     }
     pub fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()

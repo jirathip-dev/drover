@@ -29,13 +29,6 @@ fn folders(d: &Path, role_extra: &str) -> String {
     config(d, role_extra) + "\n[accounts.usage]\n" + &dirs
 }
 
-/// `c`'s lanes on a fake shed.
-fn shed(c: &herdsman::Ctx) -> FakeShed {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    sh
-}
-
 /// What lane `lane`'s shell on `sh` prints of `"$<var>"` after running the `export` line typed into it.
 fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
     let typed = sh.sent(lane);
@@ -135,7 +128,7 @@ fn no_token_in_log(c: &herdsman::Ctx) {
 fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
     let d = tmpdir("acct-b");
     let c = ctx(&d, &folders(&d, "account = \"B\""));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (r, got) = spawn(&c, &sh, 12);
     // #683: with no `account_env`, B's folder as CLAUDE_CONFIG_DIR; no token, no secrets file.
@@ -178,7 +171,7 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
 fn capped_account_is_skipped_until_reset() {
     let d = tmpdir("acct-cap");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
@@ -239,7 +232,7 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
     let d = tmpdir("acct-hook");
     let mut c = ctx(&d, &folders(&d, "account = \"A\""));
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (_, got) = spawn_var(&c, &sh, 12, SIGN_IN);
     let a = d.join("accounts/A");
@@ -288,7 +281,7 @@ fn helper_config(d: &Path) -> String {
 fn a_helpers_json_env_reaches_the_lane_and_nothing_else_signs_it_in() {
     let d = tmpdir("acct-helper");
     let c = ctx(&d, &helper_config(&d));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let env = r#"{"CLAUDE_CONFIG_DIR": "/cooee/accounts/claude/A", "COOEE_ACCOUNT": "it's A"}"#;
     let f = |r: Fake| r.reply("fake-cooee accounts env claude A", env);
@@ -310,7 +303,7 @@ fn a_helpers_json_env_reaches_the_lane_and_nothing_else_signs_it_in() {
 fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
     let d = tmpdir("acct-helper-bad");
     let c = ctx(&d, &helper_config(&d));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let fails = [
         Fake::default().once_err("fake-cooee", 2, "cooee: no account claude/A"),
@@ -401,7 +394,7 @@ fn cap_expires_after_cap_reset_minutes() {
         &d,
         &config(&d, "accounts = [\"A\", \"B\"]").replace("[accounts]\n", "[accounts]\ncap_reset_minutes = 10\n"),
     );
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -452,7 +445,7 @@ fn cap_until_parses_the_banner_reset_in_local_time() {
 fn capped_account_is_used_again_after_its_banner_reset() {
     let d = tmpdir("acct-until");
     let mut c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     // now = 1_000_000 (1970-01-12 13:46:40; `date` unscripted: UTC): 3pm is 1_004_400.
@@ -470,7 +463,7 @@ fn capped_account_is_used_again_after_its_banner_reset() {
 fn every_account_capped_refuses_all_capped() {
     let d = tmpdir("acct-all");
     let c = ctx(&d, &config(&d, "accounts = [\"A\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     cap(&c, &sh, "You've hit your limit · resets 3pm");
@@ -487,7 +480,7 @@ fn every_account_capped_refuses_all_capped() {
 fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     let d = tmpdir("acct-respawn");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     cap(&c, &sh, "You've hit your limit · resets 3pm");
@@ -511,7 +504,7 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
 fn capped_ready_lane_is_not_told_to_respawn() {
     let d = tmpdir("acct-ready");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     cap(&c, &sh, "You've hit your limit · resets 3pm");
@@ -533,7 +526,7 @@ fn capped_ready_lane_is_not_told_to_respawn() {
 fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     let d = tmpdir("mcp");
     let c = ctx(&d, &config(&d, "mcp = [\"supabase-dev\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     let (code, out) = run(
         &c,
         &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
@@ -567,7 +560,7 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     // Default: no MCP at all, still strict.
     let d2 = tmpdir("mcp-none");
     let c2 = ctx(&d2, &config(&d2, ""));
-    let sh2 = shed(&c2);
+    let sh2 = FakeShed::attached(&c2);
     assert_eq!(run(&c2, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c2, &sh2, 12);
     let lane: Value =
@@ -634,7 +627,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_account() {
     let d = tmpdir("acct-meter-ok");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(23.0), 60);
@@ -659,7 +652,7 @@ fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_accoun
 fn a_banner_with_the_week_at_100_caps_until_the_reset() {
     let d = tmpdir("acct-meter-full");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(100.0), 60);
@@ -685,7 +678,7 @@ fn a_banner_with_the_week_at_100_caps_until_the_reset() {
 fn a_banner_with_no_fresh_reading_still_caps() {
     let d = tmpdir("acct-meter-stale");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(23.0), 601);
@@ -696,7 +689,7 @@ fn a_banner_with_no_fresh_reading_still_caps() {
 fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
     let d = tmpdir("acct-banner-src");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     for screen in [
@@ -713,7 +706,7 @@ fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
 fn signed_out_is_its_own_state_never_a_cap() {
     let d = tmpdir("acct-signed-out");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
     let out = check_shows(&c, &sh, "  ⎿  API Error: 401 · Please run /login\n");
@@ -754,7 +747,7 @@ fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
     let d = tmpdir("acct-token-file");
     let (cfg, _) = token_file(&d, 0o600);
     let c = ctx(&d, &cfg);
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     keep_secrets(&c, 12);
     let (r, got) = spawn(&c, &sh, 12);
@@ -782,7 +775,7 @@ fn a_token_file_others_can_read_refuses_the_spawn() {
     let d = tmpdir("acct-token-0644");
     let (cfg, f) = token_file(&d, 0o644);
     let c = ctx(&d, &cfg);
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();

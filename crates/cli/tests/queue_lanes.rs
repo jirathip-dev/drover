@@ -1,4 +1,4 @@
-//! #205: an open Queue card lists its issue's lanes newest first (5, then `+N older`); a lane herdr lists
+//! #205: an open Queue card lists its issue's lanes newest first (5, then `+N older`); a lane shed lists
 //! (and the card's current lane name) links to its Lanes sheet, a gone one is muted text with no tap; #218: unless its
 //! transcript is stored (`data-gone`). The name and `state age` are spans, so the name ellipsises first.
 mod common;
@@ -29,13 +29,14 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         )
         .unwrap();
     }
-    let r = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[
-            ("impl-3-u1", "working", "/x", "w1:p1"),
-            ("rev-3-r3", "done", "/x", "w1:p2"),
-        ]),
-    );
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (n, status) in [("impl-3-u1", "working"), ("rev-3-r3", "done")] {
+        sh.lane(n, status, "/x");
+        sh.screen(n, ""); // no transcript stored
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
     // #268: the Queue tab as the board draws it from API v1's `queue`.
     let page = queue_tab(&Server::new(&c, &r, None), "", T);
     let card = &page[page.find("<div class=qls>").expect("lanes list")..];
@@ -78,7 +79,8 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         page.contains("<p><a href=#lanes class=\"ql nw el\" data-agent=\"impl-3-u1\">impl-3-u1</a></p>"),
         "{page}"
     );
-    // A current lane herdr no longer lists stays plain text.
-    let page = queue_tab(&Server::new(&c, &Fake::default(), None), "", T);
+    // A current lane no runtime answers for (shed down) stays plain text.
+    drop(sh);
+    let page = queue_tab(&Server::new(&c, &r, None), "", T);
     assert!(page.contains("<p>impl-3-u1</p>"), "{page}");
 }

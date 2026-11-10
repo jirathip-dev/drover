@@ -202,7 +202,7 @@ fn choosing(c: &herdsman::Ctx) -> u64 {
 #[test]
 fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
     let mut c = ctx(&tmpdir("expire-thread"), CONFIG);
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     threads(&c, NOW - 26 * H);
     thread_ask(&c, NOW - 25 * H, "q1", "t1");
     assert_eq!(choosing(&c), 1);
@@ -213,13 +213,6 @@ fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
     assert!(open(&c).is_empty());
     assert_eq!(choosing(&c), 0);
     assert!(row(&c, "q1").ends_with("[expired]"), "{}", row(&c, "q1"));
-}
-
-/// `c`'s lanes on a fake shed (none live yet).
-fn shed(c: &herdsman::Ctx) -> FakeShed {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    sh
 }
 
 /// The asking lane's spawn on #36, and its ask `id` at `ts`.
@@ -239,7 +232,7 @@ fn lane_ask(c: &herdsman::Ctx, ts: u64, id: &str) {
 #[test]
 fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
     let mut c = ctx(&tmpdir("expire-live"), CONFIG);
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     sh.lane(LANE, "idle", "/x");
     let t0 = NOW - 30 * H;
     lane_ask(&c, t0, "q1");
@@ -266,7 +259,7 @@ fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
 #[test]
 fn an_ask_whose_lane_was_killed_expires_after_24_h() {
     let mut c = ctx(&tmpdir("expire-killed"), CONFIG);
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane_ask(&c, NOW - 25 * H, "q1");
     c.now = NOW;
     check(&c, &Fake::default());
@@ -277,7 +270,7 @@ fn an_ask_whose_lane_was_killed_expires_after_24_h() {
 #[test]
 fn the_sweep_closes_a_logs_stale_asks_once() {
     let mut c = ctx(&tmpdir("sweep"), CONFIG);
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     sh.lane(LANE, "idle", "/x");
     threads(&c, NOW - 40 * H);
     // A handoff card whose handoff went out (before #584 no decision was logged for it).

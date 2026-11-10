@@ -43,19 +43,65 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
+/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
+/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
+struct OnShed(Fake, FakeShed);
+
+impl OnShed {
+    fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl herdsman::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<herdsman::shed::Shed> {
+        Some(self.1.shed())
+    }
+}
+/// `v1_board` with its lanes on a fake shed (#771): #12's impl lane working, #9's rev lane blocked on a permission menu
+/// (each its own pane); gh's writes succeed. The setup terminal on bazzite stays `v1_board`'s (herdr's).
+fn shed_board(name: &str) -> (herdsman::Ctx, OnShed) {
+    let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
+    let c = ctx(&tmpdir(name), &cfg);
+    let r = OnShed::new(Fake::default().reply("gh issue close", ""));
+    for (issue, role, agent, state) in [(12, "impl", IMPL, "working"), (9, "rev", REV, "blocked")] {
+        let d = json!({"role": role, "agent": agent, "harness": "claude", "pane": agent});
+        herdsman::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(issue), "spawn", d)).unwrap();
+        r.1.lane(agent, state, "/x");
+        r.1.screen(agent, V1_PERMISSION);
+    }
+    (c, r)
+}
+
 #[test]
 fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
-    let (c, r) = v1_board("v1-send");
+    let (c, r) = shed_board("v1-send");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
     assert_eq!(post(&s, "send", msg.clone(), "").1, "UNPAIRED");
-    assert!(!r.called("herdr agent prompt"));
+    assert!(r.1.sent(IMPL).is_empty());
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
         post(&s, "send", msg.clone(), &ck),
         (200, "OK".into(), format!("sent to {IMPL}"))
     );
-    assert!(r.called(&format!("herdr agent prompt {IMPL} run the tests again")));
+    assert_eq!(r.1.sent(IMPL), ["run the tests again"]);
     let e = kinds(&c, "prompt").pop().unwrap();
     assert_eq!(
         (e.str("via"), e.str("agent"), e.data.get("text")),
@@ -76,7 +122,7 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
 
 #[test]
 fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
-    let (c, r) = v1_board("v1-menu");
+    let (c, r) = shed_board("v1-menu");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let needs = req(&s, "GET", "/api/v1/needs", "", &ck).1;
@@ -85,10 +131,10 @@ fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
     assert_eq!(post(&s, "menu", pick("1", &h), "").1, "UNPAIRED");
     assert_eq!(post(&s, "menu", pick("1", "123"), &ck).1, "STALE");
     assert_eq!(post(&s, "menu", pick("7", &h), &ck).1, "BAD_VALUE");
-    assert!(!r.called("herdr pane send-keys"), "never a guessed key");
+    assert!(r.1.all("keys").is_empty(), "never a guessed key");
     let (status, code, _) = post(&s, "menu", pick("1", &h), &ck);
     assert_eq!((status, code.as_str()), (200, "OK"));
-    assert!(r.called("herdr pane send-keys w1:p3 1"));
+    assert_eq!(r.1.all("keys"), [json!({"name": REV, "keys": ["1"]})]);
     let e = kinds(&c, "answer").pop().unwrap();
     assert_eq!(
         (e.issue, e.str("choice"), e.str("via")),
@@ -98,7 +144,7 @@ fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
 
 #[test]
 fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
-    let (c, r) = v1_board("v1-act");
+    let (c, r) = shed_board("v1-act");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert_eq!(post(&s, "act", json!({"agent": IMPL, "op": "stop"}), "").1, "UNPAIRED");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
@@ -107,7 +153,7 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
         (status, code.as_str(), msg.as_str()),
         (200, "OK", "sent Esc to sendmeter-impl-12")
     );
-    assert!(r.called("herdr pane send-keys w1:p2 Escape"));
+    assert_eq!(r.1.all("keys"), [json!({"name": IMPL, "keys": ["esc"]})]);
     assert_eq!(kinds(&c, "act").pop().unwrap().str("op"), Some("stop"));
     assert_eq!(
         post(&s, "act", json!({"agent": "nobody", "op": "stop"}), &ck).1,
@@ -143,7 +189,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
 
 #[test]
 fn herd_and_roles_read_as_the_old_board_draws_them() {
-    let (c, r) = v1_board("v1-reads");
+    let (c, r) = shed_board("v1-reads");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, herd) = req(&s, "GET", "/api/v1/herd", "", "");
     assert_eq!(status, "200 OK");
@@ -179,7 +225,7 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
 
 #[test]
 fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
-    let (c, r) = v1_board("v1-chat");
+    let (c, r) = shed_board("v1-chat");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     // A form op takes a JSON body too (the role picker's `set`).
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
@@ -238,7 +284,27 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
 
 #[test]
 fn a_backlog_issue_gets_a_thread_or_closes() {
-    let (c, r) = v1_board("v1-backlog");
+    // #771: #12 has a lane; the new thread's conductor runs on shed, an ACP session (its profile synced, its account's
+    // sign-in).
+    let sh = FakeShed::new();
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
+    );
+    let mut c = ctx(&tmpdir("v1-backlog"), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL});
+    herdsman::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let agents =
+        json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
+    let host = Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed", "")
+        .reply("gh issue close", "");
+    let cli = sh.cli(&host);
+    let r = herdsman::shed::With(&cli, sh.shed()); // as `serve_on` wraps it from the config
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let bl = json!({"ts": T, "issues": {"30": {"number": 30, "title": "Meter export", "state": "OPEN"}}});
@@ -266,9 +332,9 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         "NOT_BACKLOG"
     );
     assert_eq!(post(&s, "close", json!({"fleet": "sendmeter"}), &ck).1, "BAD_VALUE");
-    assert!(!r.called("gh issue close"));
+    assert!(!host.called("gh issue close"));
     assert_eq!(post(&s, "close", about, &ck), (200, "OK".into(), "closed #30".into()));
-    assert!(r.called("gh issue close 30 -R jirathip-dev/sendmeter"));
+    assert!(host.called("gh issue close 30 -R jirathip-dev/sendmeter"));
     let e = kinds(&c, "closed").pop().unwrap();
     assert_eq!(
         (e.issue, e.str("why"), e.str("via")),

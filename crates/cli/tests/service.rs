@@ -95,7 +95,9 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     };
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = api.local_addr().unwrap().to_string();
-    let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default().reply("herdr", "{}"), c.clone())));
+    let sh = FakeShed::new(); // #771: lanes on shed, none live
+    sh.attach(&c);
+    let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default(), c.clone())));
     let sc = c.clone();
     std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api, None));
     let mut pid = None;
@@ -276,23 +278,23 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
                 log.display()
             ),
         ),
-        ("herdr", format!("echo '{NO_AGENTS}'")),
         ("hermes", "exit 0".into()),
+        ("shed", "exit 0".into()), // #771: the lanes' runtime is on PATH
     ];
     for (name, body) in tools {
         let p = bin.join(name);
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     }
+    let sh = FakeShed::new(); // #771: lanes on shed (the service's too), none live
+    sh.attach(&c);
     let pass = |r: &Fake| assert_eq!(run(&c, r, &["drive"]).0, 0);
     let host = || {
         Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
             .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
-            .reply("herdr", "{}")
             .reply("git -C", "")
     };
     let cfgv = herdsman::config::Config::load(&c.config).unwrap();

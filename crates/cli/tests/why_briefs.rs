@@ -76,7 +76,6 @@ fn setup(name: &str) -> (herdsman::Ctx, String, String) {
 
 fn fake(rev_head: &str, wt: &Path) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "gh issue view 12",
             r#"{"title":"Meter retries","body":"Retries double the count in `src/meter.rs`."}"#,
@@ -86,20 +85,13 @@ fn fake(rev_head: &str, wt: &Path) -> Fake {
             &format!("{rev_head}\n"),
         )
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Spawn `args` (after `spawn sendmeter 12`) and read the lane's brief.
+/// Spawn `args` (after `spawn sendmeter 12`) on a fake shed (#771: no lane live before it) and read the lane's brief.
 fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
+    let sh = FakeShed::new();
+    sh.attach(c);
     let dir = if args[0] == "rev" { "rev-12-r1" } else { "issue-12" };
     let wt = c.worktrees.join("sendmeter").join(dir);
     let f = fake(head, &wt);

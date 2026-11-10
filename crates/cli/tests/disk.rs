@@ -26,13 +26,6 @@ fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
     wt.join(dir)
 }
 
-/// `c` with its lanes on a fake shed (returned: the test keeps it).
-fn on_shed(c: &herdsman::Ctx) -> FakeShed {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    sh
-}
-
 /// A lane's spawn event (a shed lane's: its pane its name, no workspace) and its worktree dir under the root.
 fn lane(c: &herdsman::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(name);
@@ -66,7 +59,7 @@ fn verdict(c: &herdsman::Ctx, r: &Fake, v: &str) -> String {
 #[test]
 fn a_reviewer_verdict_frees_its_build_folders() {
     let c = ctx(&tmpdir("disk-rev"), CONFIG);
-    let _sh = on_shed(&c);
+    let _sh = FakeShed::attached(&c);
     let imp = lane(&c, 10, 12, "impl", "issue-12");
     let rev = lane(&c, 20, 12, "rev", "rev-12-r1");
     let (rt, it) = (build(&rev, "target", 100), build(&imp, "target", 100));
@@ -88,7 +81,7 @@ fn a_reviewer_verdict_frees_its_build_folders() {
 fn a_builder_with_a_pass_frees_its_build_folders() {
     for (status, freed) in [("idle", true), ("working", false)] {
         let c = ctx(&tmpdir("disk-impl"), CONFIG);
-        let sh = on_shed(&c);
+        let sh = FakeShed::attached(&c);
         let imp = lane(&c, 10, 12, "impl", "issue-12");
         let (nm, dist) = (build(&imp, "node_modules", 100), build(&imp, "dist", 100));
         sh.lane("sendmeter-impl-12", status, "/x");
@@ -180,7 +173,7 @@ fn drive_refuses_starts_over_budget() {
     );
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1", "2"]).0, 0);
     build(&c.worktrees.join("old"), "x", 5000);
-    let _sh = on_shed(&c);
+    let _sh = FakeShed::attached(&c);
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
@@ -200,7 +193,7 @@ fn the_hourly_sweep_runs_once_per_hour() {
     // Paused: drive's own after-merge `clean` (#155: every unpaused fleet gets a pass) would sweep too.
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
-    let _sh = on_shed(&c);
+    let _sh = FakeShed::attached(&c);
     let merged = |c: &herdsman::Ctx, n: u64| {
         ev(
             c,
@@ -287,7 +280,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
         &d,
         &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
     );
-    let _sh = on_shed(&c);
+    let _sh = FakeShed::attached(&c);
     let wt = |n: u64, file: &str, body: &str| {
         let p = c.worktrees.join("sendmeter").join(format!("issue-{n}"));
         git(
@@ -391,7 +384,7 @@ fn orphans_are_listed_and_removed_only_with_the_flag() {
         std::fs::create_dir_all(p).unwrap();
     }
     build(&old, "issue-3", 10);
-    let _sh = on_shed(&c);
+    let _sh = FakeShed::attached(&c);
     let r = Fake::default;
     for args in [&["clean"][..], &["clean", "--yes"], &["clean", "--orphans"]] {
         let (code, out) = run(&c, &r(), args);
@@ -423,7 +416,7 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let c = ctx(&tmpdir("disk-orphans-page"), CONFIG);
     let old = c.worktrees.join("oldproj");
     std::fs::create_dir_all(&old).unwrap();
-    let sh = on_shed(&c);
+    let sh = FakeShed::attached(&c);
     let r = Fake::default();
     let w = sh.on(&r);
     let s = herdsman::serve::Server::new(&c, &w, Some(ADDR.into()));
@@ -494,7 +487,7 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     git(&local, &["push", "-q", "origin", "HEAD"]);
     let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
-    let (_sh, air_shed) = (on_shed(&c), FakeShed::new());
+    let (_sh, air_shed) = (FakeShed::attached(&c), FakeShed::new());
     let wt = |dir: &str, host: Option<&str>| {
         let p = c.worktrees.join(dir).join("issue-48");
         git(&local, &["worktree", "add", "-q", "--detach", p.to_str().unwrap()]);

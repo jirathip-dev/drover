@@ -22,13 +22,6 @@ impl Runner for Mixed {
     fn sleep(&self, _: u64) {}
 }
 
-/// #771: ctx `c`'s lanes on a fake shed (none running till a test adds one); keep it alive for the test.
-fn shed(c: &herdsman::Ctx) -> FakeShed {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    sh
-}
-
 fn git(dir: &Path, args: &[&str]) -> String {
     let o = std::process::Command::new("git")
         .arg("-C")
@@ -126,7 +119,7 @@ fn merger(n: u64, head: &str) -> Mixed {
 #[test]
 fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (_d, seed, c, cfg) = repos("au-clean");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     strict(&c);
     let from = head(&seed, "issue-3");
@@ -212,7 +205,7 @@ fn merge_staging(d: &Path, extra: Option<&str>) {
 #[test]
 fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     let (d, seed, c, _) = repos("au-impure");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
     // A merge of integration with an extra edit folded in: not a pure update.
@@ -253,7 +246,7 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
 #[test]
 fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     let (_d, seed, mut c, _) = repos("au-ci-pending");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, true);
     strict(&c);
@@ -365,7 +358,7 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
 #[test]
 fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
     let (_d, seed, c, _) = repos("order");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     for n in 1..=3 {
         lane(&c, &seed, n, true);
     }
@@ -390,7 +383,7 @@ fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
 #[test]
 fn heads_up_reaches_a_working_lane_once() {
     let (_d, seed, c, cfg) = repos("heads-up");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, false);
     lane(&c, &seed, 2, true);
     sh.lane("sendmeter-impl-1", "working", "/w/issue-1");
@@ -459,7 +452,7 @@ fn pending_pr(n: u64, head: &str) -> String {
 #[test]
 fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
     let (_d, seed, c, _) = repos("au-order");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, false);
     strict(&c);
@@ -496,7 +489,7 @@ fn a_branch_in_review_is_not_updated() {
     reviewed(&c, 3, &from);
     commit(&seed, "c.txt", "c\n", "staging");
     // A reviewer still working, then one done whose verdict is not recorded yet.
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     sh.lane("sendmeter-rev-3-r1", "working", "/wt");
     for live in [true, false] {
         if !live {
@@ -512,7 +505,7 @@ fn a_branch_in_review_is_not_updated() {
 #[test]
 fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let (d, seed, c, _) = repos("au-carry");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
@@ -550,7 +543,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
 #[test]
 fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let (d, seed, c, _) = repos("au-no-carry");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
@@ -595,7 +588,7 @@ const RULES: &str = "gh api repos/jirathip-dev/sendmeter/rules/branches/staging"
 #[test]
 fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let (_d, seed, mut c, cfg) = repos("au-non-strict");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
@@ -637,7 +630,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
 #[test]
 fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     let (d, seed, c, _) = repos("au-strict");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     let cfg = labelled(&d);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
@@ -702,7 +695,7 @@ fn moved(seed: &Path) -> (String, String) {
 #[test]
 fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
     let (_d, seed, c, _) = repos("named-head");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let label = "integration = \"staging\"\nmerge_label = \"merge-ready\"";
     let cfg = cfg.replacen("integration = \"staging\"", label, 1);
@@ -737,7 +730,7 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
         .enumerate()
     {
         let (_d, seed, c, _) = repos(&format!("named-stale-{i}"));
-        let _sh = shed(&c);
+        let _sh = FakeShed::attached(&c);
         lane(&c, &seed, 3, false);
         let (a, b) = moved(&seed);
         reviewed_with(&c, 3, &a, &body.replace("{a}", &a));
@@ -756,7 +749,7 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
 #[test]
 fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let (d, seed, c, _) = repos("named-carry");
-    let _sh = shed(&c);
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     reviewed_with(&c, 3, &x, &format!("PASS\nReviewed head: {x}\n"));
@@ -818,7 +811,7 @@ fn cap_check_warns_within_reach_of_the_cap() {
 #[test]
 fn check_emits_cap_near_once_per_integration_sha() {
     let (_d, seed, c, cfg) = repos("cap-near");
-    let sh = shed(&c);
+    let sh = FakeShed::attached(&c);
     let put = |files: &[(&str, &str)]| {
         for (f, t) in files {
             let p = seed.join(f);

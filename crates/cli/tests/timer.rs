@@ -8,13 +8,6 @@ use std::path::Path;
 const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
 const MAC: bool = cfg!(target_os = "macos");
 
-/// #771: ctx `c`'s lanes on a fake shed with none running (keep it alive for the test).
-fn no_lanes(c: &herdsman::Ctx) -> FakeShed {
-    let sh = FakeShed::new();
-    sh.attach(c);
-    sh
-}
-
 fn host(r: Fake) -> Fake {
     r.reply("herdr status", HERDR)
         .reply("which hermes", "/opt/hermes/bin/hermes\n")
@@ -65,7 +58,7 @@ fn job(c: &herdsman::Ctx, label: &str) -> std::path::PathBuf {
 #[test]
 fn install_no_load_writes_without_loading_and_remove_deletes() {
     let c = ctx(&tmpdir("timer-install"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let r = host(Fake::default());
     let (code, out) = run(&c, &r, &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
@@ -103,7 +96,7 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
 #[test]
 fn install_loads_and_prints_the_command() {
     let c = ctx(&tmpdir("timer-load"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let r = host(Fake::default());
     let (code, out) = run(&c, &r, &["timer", "install"]);
     let cmd = if MAC {
@@ -142,7 +135,7 @@ fn install_loads_and_prints_the_command() {
 #[test]
 fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let c = ctx(&tmpdir("timer-tick"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // Memory pressure critical: the start is refused HOST_BUSY; the tick still exits 0.
     let r = host(Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n"))
@@ -211,7 +204,7 @@ fn steps(out: &str) -> Vec<&str> {
 fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let cfg = format!("{CONFIG}\n[serve]\ntailscale_https_port = 7443\n");
     let c = ctx(&tmpdir("timer-setup"), &cfg);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let probe = if MAC {
         "launchctl print"
     } else {
@@ -254,7 +247,7 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
 #[test]
 fn setup_adopts_a_serve_job_under_another_label() {
     let c = ctx(&tmpdir("timer-adopt"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let theirs = c.home.join("Library/LaunchAgents/com.someone.herdsman-serve.plist");
     std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
     std::fs::write(
@@ -289,7 +282,7 @@ fn rows(c: &herdsman::Ctx, r: &Fake) -> Vec<(String, &'static str, String, Strin
 #[test]
 fn services_rows_go_green_amber_and_red() {
     let c = ctx(&tmpdir("timer-svc"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let stamp = |w: &str, ago: u64| std::fs::write(c.state.with_file_name(w), (c.now - ago).to_string()).unwrap();
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);
@@ -423,7 +416,7 @@ fn slow_du_never_blocks_the_board() {
         }
     }
     let c = ctx(&tmpdir("timer-slow-du"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let r = SlowDu(host(Fake::default()).reply("df -k /", "F\n/dev/disk1 1 1 209715200\n"));
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     for path in ["/?all=1", "/api/v1/host", "/api/v1/queue"] {
@@ -452,7 +445,7 @@ const LOAD: &str = if MAC {
 #[test]
 fn drift_is_missing_outdated_or_loaded() {
     let c = ctx(&tmpdir("timer-drift"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let up = host(Fake::default()).reply(PROBE, "");
     let drift = |r: &Fake| herdsman::timer::drift(&c, &cfg, r);
@@ -499,7 +492,7 @@ fn drift_is_missing_outdated_or_loaded() {
 #[test]
 fn tick_repairs_only_the_missing_job() {
     let c = ctx(&tmpdir("timer-repair"), CONFIG);
-    let _sh = no_lanes(&c);
+    let _sh = FakeShed::attached(&c);
     let r = host(Fake::default())
         .reply(PROBE, "")
         .reply(LOAD, "")

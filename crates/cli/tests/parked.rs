@@ -9,8 +9,40 @@ const NOW: u64 = 1_000_000;
 const SAFE: &str = "sendmeter-impl-12";
 const RISKY: &str = "sendmeter-impl-14";
 
-/// impl #12 (clean, pushed, PR #42 open) and impl #14 (dirty), both without a herdr pane.
-fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, Fake) {
+/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
+/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
+struct OnShed(Fake, FakeShed);
+
+impl OnShed {
+    fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl herdsman::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<herdsman::shed::Shed> {
+        Some(self.1.shed())
+    }
+}
+
+/// impl #12 (clean, pushed, PR #42 open) and impl #14 (dirty), both without a live pane.
+fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",
         &format!("integration = \"staging\"\npaused = {paused}"),
@@ -29,8 +61,6 @@ fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, Fake) {
     )
     .unwrap();
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
         .reply(&format!("git -C /wt/{SAFE} status"), "?? .brief.md\n")
         .reply(&format!("git -C /wt/{SAFE} rev-list"), "0\n")
         .reply(&format!("git -C /wt/{SAFE} rev-parse"), "6a258db\n")
@@ -39,7 +69,7 @@ fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, Fake) {
             &format!("6a258db{} {}", "0".repeat(33), NOW - 7200),
         )
         .reply(&format!("git -C /wt/{RISKY} status"), " M src/a.rs\n");
-    (c, r)
+    (c, OnShed::new(r))
 }
 
 /// The body at `path`; the page (#269) with every tab as the board draws it.

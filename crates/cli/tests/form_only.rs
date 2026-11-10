@@ -207,15 +207,45 @@ fn the_card_says_not_counted_in_amber() {
     let file = json!({"ts": 1_000_000, "branch": "issue-12", "pr": pr});
     std::fs::write(cache.join("pr-sendmeter-12.json"), file.to_string()).unwrap();
     c.now = 1_000_000;
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#);
+    let r = OnShed::new(Fake::default());
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = queue_tab(&s, "127.0.0.1:7777", c.now); // #268: the board's Queue tab
     assert!(
         page.contains("rev <span class=a>FAIL (form-only)</span> r1 · <span class=a>not counted · form 1/3</span>"),
         "{page}"
     );
+}
+
+/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
+/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
+struct OnShed(Fake, FakeShed);
+
+impl OnShed {
+    fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl herdsman::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<herdsman::shed::Shed> {
+        Some(self.1.shed())
+    }
 }
 
 /// #249: a `## Blocking` heading is no finding; tagged items under it are form-only, an untagged one is not.
