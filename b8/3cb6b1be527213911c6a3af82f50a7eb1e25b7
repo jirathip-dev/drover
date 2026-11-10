@@ -1,0 +1,7 @@
+Decided: merge origin/staging 2abe5a1 instead of rebasing; the branch is already pushed and lanes never force-push
+Decided: no code change this round; the red line cap is fixed by the owner's cap raise in #802
+Because: q1178
+Rejected: trimming 202 more lines — it would drop the docs check or the comment check, both acceptance criteria
+Check: cap-check prints 38274 / 41000 at this head; staging 2abe5a1 alone is 38015, so src/ net stays +259
+Check: the chat_tab test at chat_tab.rs:1592 fails the same way on plain staging 78d769f on this macOS host
+Owner: no behaviour change this round: staging and the raised line cap are merged in, so the line check passes
