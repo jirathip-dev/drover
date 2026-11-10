@@ -1,0 +1,6 @@
+Decided: no code change; merge origin/staging and re-run the gates at the new head, with the PR body naming it before the push
+Because: scripts/ui-audit.sh:39
+Rejected: a code fix for the `ui` failure — headless Chrome hung on herd-night-storm (exit 124); the PR touches no web/ file and staging's ui is green
+Rejected: a fix for `evidence` — its re-run after the body edit already passed at 890648f; the failed run predates the edit
+Check: the evidence and ui checks are green at this head; `cargo test -p herdsman --test shed` 46 passed
+Owner: No behaviour change this round: the red checks were a stale run and a browser hang in CI, and the latest staging is merged in.
