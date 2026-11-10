@@ -1,0 +1,5 @@
+Decided: the doctor meter note names no harness; it says only an interactive status line writes a reading.
+Because: crates/core/src/doctor.rs:75
+Rejected: exempting the line from CI's harness-neutral grep — the #316 rule keeps harness names inside crates/core/src/harness/.
+Check: CI's harness-neutral grep is empty at this head; no behaviour changed.
+Owner: wording fix so the build's harness-neutral check passes.
