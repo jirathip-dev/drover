@@ -2220,10 +2220,14 @@ fn a_pty_lane_still_returns_its_screen() {
 }
 
 fn session(b: &Server, kinds: &[Value]) {
+    session_of(b, "sendmeter-impl-12", kinds);
+}
+
+fn session_of(b: &Server, name: &str, kinds: &[Value]) {
     let mut ev = b.events.lock().unwrap();
     for k in kinds {
         let seq = ev.iter().filter_map(|e| e["seq"].as_u64()).max().unwrap_or(0) + 1;
-        let mut e = json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels()});
+        let mut e = json!({"seq": seq, "name": name, "labels": lane_labels()});
         e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
         ev.push(e);
     }
@@ -2294,6 +2298,30 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
     assert_eq!(logged(&c, "needs-human").len(), 1);
     assert_eq!(logged(&c, "spawn").len(), 2);
     assert_eq!(logged(&c, "respawned-silent").len(), 1);
+}
+
+#[test]
+fn a_silent_design_lane_is_nudged() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let cfg = acp_config(&b.sock, "claude", true)
+        + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\naccount = \"C\"\n";
+    let c = acp_ctx("acp-silent-design", &cfg);
+    let f = acp_fake(&["true"])
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(run(&c, &cli, &["queue", "sendmeter", "add", "12", "--design"]).0, 0);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "design"]);
+    assert_eq!(code, 0, "{out}");
+    let lane = "sendmeter-design-12";
+    b.terms.lock().unwrap().get_mut(lane).unwrap()["reported"] = json!({"state": "working"});
+    session_of(&b, lane, &[turn(), tool("failed")]);
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-design-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
 }
 
 #[test]

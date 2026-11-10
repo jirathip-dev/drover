@@ -145,7 +145,13 @@ pub enum Silent {
 pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &str) -> Vec<(u64, String, Silent)> {
     let mut out = vec![];
     for s in fold(ev).values().filter(|s| s.fleet == fleet) {
-        let Some((role, lane)) = s.active_lane() else { continue };
+        let staged = s.lanes.iter().find_map(|(r, a)| {
+            let on = s.state == "design" && crate::events::STAGES.contains(&r.as_str()) && s.lane.as_ref() == Some(a);
+            on.then_some((r.as_str(), a.as_str()))
+        });
+        let Some((role, lane)) = s.active_lane().or(staged) else {
+            continue;
+        };
         let (Some(sp), o) = (last_spawn(ev, lane), crate::shed::session(ctx, lane)) else {
             continue;
         };
