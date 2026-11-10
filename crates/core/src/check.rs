@@ -95,7 +95,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
         }
     }
-    crate::roots::watch(ctx, cfg, r, out)?; // #630
     crate::setup::reap(ctx, r, &events)?;
     // #537: CI runners below `slots × VMs` alert once per drop, `runners-ok` once on the way back.
     match crate::runners::tick(ctx, cfg, r, &events) {
