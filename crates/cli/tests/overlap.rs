@@ -1031,9 +1031,6 @@ fn cap_shows_each_cap_a_script_prints() {
     }
 }
 
-/// #803: cooee's CI counts with its own `scripts/line-cap.sh` (copied verbatim) and names it in no fleet key:
-/// `herdsman cap` runs the repo's script and prints its total (non-blank lines before `#[cfg(test)]` in crates/*/src
-/// and web/src, plus web/ts), not the built-in Rust count, and says which count it used.
 #[test]
 fn cap_runs_the_repos_line_cap_script_when_the_fleet_names_none() {
     let script = include_str!("support/cooee-line-cap.sh");
