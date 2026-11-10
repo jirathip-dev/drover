@@ -547,14 +547,12 @@ hash: string,
 text: string, fields: Array<ConfigField>, };
 
 /**
- * #786: one setting: `path` (dotted; an array of tables' entries by index), its TOML `kind`, the values it may take
- * (`allowed`, empty: any), fleet.example.toml's comment on its key, and `secret:NAME`'s name (the value is in the store).
+ * #786: one setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
  */
 export type ConfigField = { path: string, kind: string, value: JsonValue, allowed: Array<string>, doc: string, secret?: string | null, };
 
 /**
- * #786: `POST /api/v1/config-check` and `config-edit`'s body: the raw TOML (`text`), or field edits, a fleet added or
- * one removed over the file read at `hash`; `confirm` removes a fleet with live lanes.
+ * #786: `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
  */
 export type ConfigChange = { hash: string, text?: string | null, set: Array<ConfigSet>, add?: NewFleet | null, remove?: string | null, confirm: boolean, };
 
