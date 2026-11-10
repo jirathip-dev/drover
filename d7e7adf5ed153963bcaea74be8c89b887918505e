@@ -1,0 +1,5 @@
+Decided: the clap tree walk is a closure over the built command inside stale_docs, so arch.rs names no clap type
+Because: crates/core/src/arch.rs:401
+Rejected: narrowing the CI layers grep to std::process — the check is shared policy, the closure is the smaller fix
+Check: the CI layers grep over crates/core/src prints nothing at this head
+Owner: the review's red CI check came from a type name in the new docs check; renamed away, behaviour unchanged
