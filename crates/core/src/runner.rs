@@ -130,6 +130,17 @@ impl Real {
     pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
+        // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
+        if let Some(dir) = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1)) {
+            if hung(dir, PROBE, |d| drop(std::fs::read_dir(d).map(|mut e| e.next()))) {
+                let stderr = format!("{prog} {}: {dir} is on a disk that is not answering", args.join(" "));
+                return Ok(Out {
+                    code: 124,
+                    stderr,
+                    ..Out::default()
+                });
+            }
+        }
         let mut c = Command::new(prog)
             .args(args)
             .stdin(Stdio::piped())
@@ -155,7 +166,10 @@ impl Real {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        let _ = (c.kill(), c.wait()); // its readers may outlive it while a grandchild (ssh) holds the pipes
+        // #775: reaped off this thread: a child stuck in disk I/O outlives SIGKILL, and waiting here would never return.
+        // Its readers may outlive it too while a grandchild (ssh) holds the pipes.
+        let _ = c.kill();
+        std::thread::spawn(move || c.wait());
         let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
         Ok(Out {
             code: 124,
@@ -195,6 +209,43 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
         _ => 60,
     };
     Duration::from_secs(secs)
+}
+
+/// #776: how long a folder's listing may take before its disk counts as not answering.
+pub const PROBE: Duration = Duration::from_secs(2);
+
+/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (a listing) runs on its own thread and must finish
+/// within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends.
+/// A folder that answered is trusted for a minute.
+pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) + Send + 'static) -> bool {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    use std::sync::{Arc, Mutex, OnceLock};
+    /// Per folder: its last probe's done flag and when it started.
+    type Probes = HashMap<String, (Arc<AtomicBool>, Instant)>;
+    static SEEN: OnceLock<Mutex<Probes>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Mutex::default);
+    let done = {
+        let mut m = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match m.get(dir) {
+            Some((d, _)) if !d.load(Relaxed) => return true,
+            Some((_, at)) if at.elapsed() < Duration::from_secs(60) => return false,
+            _ => {}
+        }
+        let d = Arc::new(AtomicBool::new(false));
+        m.insert(dir.into(), (d.clone(), Instant::now()));
+        d
+    };
+    let (d, owned) = (done.clone(), dir.to_string());
+    std::thread::spawn(move || (probe(&owned), d.store(true, Relaxed)));
+    let end = Instant::now() + wait;
+    while Instant::now() < end {
+        if done.load(Relaxed) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    !done.load(Relaxed)
 }
 
 fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {

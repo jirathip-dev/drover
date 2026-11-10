@@ -150,3 +150,59 @@ fn a_remote_call_keeps_the_limit_of_the_command_it_carries() {
     let want = [("ssh", 600), ("ssh", 1800), ("ssh", 60), ("ssh", 1800), ("git", 0)];
     assert_eq!(seen, want.map(|(p, s)| (p.to_string(), s)));
 }
+
+/// #776: a folder whose listing hangs (its disk stopped answering) counts as hung after the wait, and is never probed
+/// again while that probe is still stuck.
+#[test]
+fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
+    use herdsman::runner::hung;
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    use std::sync::Arc;
+    let dir = tmpdir("hung-probe").to_string_lossy().into_owned();
+    let probes = Arc::new(AtomicUsize::new(0));
+    let slow =
+        |n: Arc<AtomicUsize>| move |_: &str| (n.fetch_add(1, Relaxed), std::thread::sleep(Duration::from_secs(5))).1;
+    let t = Instant::now();
+    assert!(hung(&dir, Duration::from_millis(300), slow(probes.clone())));
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    let t = Instant::now();
+    assert!(hung(&dir, Duration::from_millis(300), slow(probes.clone())));
+    assert!(
+        t.elapsed() < Duration::from_millis(100),
+        "the second call waits on nothing: {:?}",
+        t.elapsed()
+    );
+    assert_eq!(probes.load(Relaxed), 1, "one probe thread, not one per call");
+}
+
+#[test]
+fn a_folder_that_answers_is_not_hung() {
+    let dir = tmpdir("hung-ok").to_string_lossy().into_owned();
+    assert!(!herdsman::runner::hung(&dir, Duration::from_secs(2), |d| drop(
+        std::fs::read_dir(d)
+    )));
+}
+
+/// #776: `git -C <dir>` on a hung folder answers 124 at once instead of starting a child that never exits.
+#[test]
+fn a_git_call_on_a_hung_folder_fails_at_once() {
+    let dir = tmpdir("hung-git").to_string_lossy().into_owned();
+    assert!(herdsman::runner::hung(&dir, Duration::from_millis(100), |_| {
+        std::thread::sleep(Duration::from_secs(5))
+    }));
+    let t = Instant::now();
+    let o = Real.run("git", &argv(&["-C", &dir, "status", "--porcelain"])).unwrap();
+    assert_eq!(o.code, 124, "{o:?}");
+    assert!(o.stderr.contains("not answering"), "{}", o.stderr);
+    assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
+}
+
+/// #776: a healthy folder still runs git normally (the probe passes within its wait).
+#[test]
+fn a_git_call_on_a_healthy_folder_runs() {
+    let dir = tmpdir("hung-healthy-git").to_string_lossy().into_owned();
+    let o = Real
+        .run("git", &argv(&["-C", &dir, "rev-parse", "--is-inside-work-tree"]))
+        .unwrap();
+    assert_ne!(o.code, 124, "{o:?}");
+}
