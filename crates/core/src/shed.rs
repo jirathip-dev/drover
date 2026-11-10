@@ -20,7 +20,7 @@ pub use shed_proto as proto;
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
-pub const REV: &str = "8bac04fdb8542ef496c614b47126d85c50a7892e";
+pub const REV: &str = "56de739060d99e54e2ded43ab9702ff1c5270c37";
 
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]

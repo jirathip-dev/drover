@@ -1,5 +1,5 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), the board's data: `state`, `events?since=N`, `host`,
-//! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
+//! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::LaneChat`) and a POST per form
 //! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`. #555: the drover plugins' routes
 //! (`herd`, `roles`, `setup/<pane>`; POST `send`, `menu`, `act`, `setup`, `chat-about`, `chat`, `close`) run the old
 //! board's code; every POST takes JSON (or the board's form) and answers `Reply`. #576: the queue rows' marks (`qset`
@@ -7,7 +7,8 @@
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, States, HTML, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
-    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, IssueView, Lane, LessonFleet, LessonRun,
+    ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
+    IssueView, Lane, LaneChat, LessonFleet, LessonRun,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
@@ -64,7 +65,7 @@ impl Server<'_> {
             // #725: the lifeboat (`crate::lifeboat`), plain HTML; an unpaired device gets the pair hint only.
             ("GET", Some("lifeboat")) if !paired => ("401 Unauthorized", HTML, crate::lifeboat::hint().into_bytes()),
             ("GET", Some("lifeboat")) => {
-                let lanes = Config::load(&ctx.config).ok().zip(shared(&ctx.state).ok());
+                let lanes = Config::kept(ctx).ok().zip(shared(&ctx.state).ok());
                 let lanes = lanes.map_or_else(Vec::new, |(c, e)| self.lane_list(ctx, &c, &e, &e.states));
                 let msg = f.get("msg").map_or("", String::as_str);
                 ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
@@ -78,6 +79,18 @@ impl Server<'_> {
                 |e| reply("500 Internal Server Error", "ERROR", shown(&e)),
                 |s| out("200 OK", &s),
             ),
+            ("GET", Some("health")) => {
+                let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
+                let config = if error.is_some() { "invalid" } else { "ok" };
+                out(
+                    "200 OK",
+                    &Health {
+                        ok: error.is_none(),
+                        config: config.into(),
+                        error,
+                    },
+                )
+            }
             ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
@@ -93,7 +106,7 @@ impl Server<'_> {
                     x[8..].strip_suffix("/digest").unwrap_or_default(),
                     f.get("days").and_then(|d| d.parse().ok()).unwrap_or(7),
                 );
-                let text = Config::load(&ctx.config).and_then(|c| crate::lesson::digest(ctx, &c, self.r, fleet, days));
+                let text = Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, self.r, fleet, days));
                 text.map_or_else(
                     |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
                     |text| {
@@ -126,7 +139,7 @@ impl Server<'_> {
             // #681: a repo's conductor threads, newest-active first (cooee's side threads).
             ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
                 let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
-                match Config::load(&ctx.config) {
+                match Config::kept(ctx) {
                     Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
                         let ev = shared(&ctx.state).unwrap_or_default();
                         out("200 OK", &repo(&ev, fleet))
@@ -171,9 +184,10 @@ impl Server<'_> {
             ("GET", _) if lane.is_some() => {
                 let q = form(&format!("{query}&agent={}", lane.unwrap_or_default())); // the path's agent wins
                 let t = self.transcript(ctx, &q).filter(|_| !q.contains_key("setup"));
+                let t = t.and_then(|t| serde_json::from_str::<Chat>(&t).ok());
                 t.map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such agent pane"),
-                    |t| ("200 OK", JSON, t.into_bytes()),
+                    |t| out("200 OK", &self.blocks(ctx, &q, t)),
                 )
             }
             ("POST", Some(op)) if paired_op(op) && !paired => {
@@ -203,7 +217,7 @@ impl Server<'_> {
             ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
                 let f = fields(body);
                 let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
-                let cfg = Config::load(&ctx.config);
+                let cfg = Config::kept(ctx);
                 if op == "conductor-detach" {
                     return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
                 }
@@ -247,7 +261,7 @@ impl Server<'_> {
 
     /// #576: the CLI's `lesson <fleet>`, logged `by` the paired device.
     fn lesson(&self, ctx: &Ctx, f: &BTreeMap<String, String>, by: &str) -> Result<String> {
-        let (cfg, mut out) = (Config::load(&ctx.config)?, vec![]);
+        let (cfg, mut out) = (Config::kept(ctx)?, vec![]);
         let fleet = f.get("fleet").map_or("", String::as_str);
         let confirmed = crate::lesson::run(ctx, &cfg, self.r, &mut out, fleet, Some(by))?;
         let out = String::from_utf8_lossy(&out);
@@ -281,7 +295,7 @@ impl Server<'_> {
     /// #555: a backlog row's [close]: `gh issue close` on an issue neither queued nor worked on, then the backlog read
     /// again (it drops out); logs `closed`.
     fn close(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
         let fleet = f.get("fleet").map_or("", String::as_str);
         let Some(fc) = cfg.fleet.get(fleet) else {
             return refused("BAD_VALUE", format!("no fleet `{fleet}`"));
@@ -311,6 +325,43 @@ impl Server<'_> {
         Ok(format!("closed #{n}"))
     }
 
+    /// #749: `lane/<agent>`'s blocks: an ACP lane's transcript from shed's events (the last `n` before event `before`;
+    /// no screen `lines`, `before` the next page's), else the one `screen` block of the chat's `lines`.
+    fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
+        let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
+        let acp = || {
+            let (cfg, ev) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);
+            let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
+            let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
+            let (on, pane) = (l.on(self.r), l.pane.as_deref()?);
+            let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
+            let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
+            let ev = crate::herdr::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
+            ev.ok().flatten()
+        };
+        let Some(ev) = self.export.is_none().then(acp).flatten() else {
+            return LaneChat {
+                chat,
+                blocks: vec![Block::Screen],
+            };
+        };
+        let first = ev.first().map_or(0, |e| e.seq);
+        let chat = Chat {
+            said: None,
+            older: false,
+            lines: vec![],
+            live: 0,
+            status: None,
+            before: usize::try_from(first).unwrap_or_default(),
+            more: first > 1,
+            ..chat
+        };
+        LaneChat {
+            chat,
+            blocks: acp_blocks(&ev),
+        }
+    }
+
     /// API v1's live lanes from the step's snapshot (#337: no subprocess on a request); `state`'s and the lifeboat's.
     fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
         let all = self.lanes(ctx.now, cfg, events, st).unwrap_or_default();
@@ -338,7 +389,7 @@ impl Server<'_> {
     }
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
         let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
         let lanes = self.lane_list(ctx, &cfg, &events, &st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
@@ -450,7 +501,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
     anyhow::ensure!(["on", "off"].contains(&value), "{key} is `on` or `off`");
     let mut d = crate::queue::op("set", &[n], false, None, None, None);
     d[key] = serde_json::json!([value]);
-    crate::queue_change(ctx, &Config::load(&ctx.config)?, g("fleet"), d, Some("web"))?;
+    crate::queue_change(ctx, &Config::kept(ctx)?, g("fleet"), d, Some("web"))?;
     Ok(format!("#{n}: {key} {value}"))
 }
 
@@ -502,7 +553,7 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
 /// #576: `lessons`: each fleet's setting, its newest lesson lane's issue and when `tick` runs the next.
 fn lessons(ctx: &Ctx) -> Lessons {
     let (cfg, ev) = (
-        Config::load(&ctx.config).unwrap_or_default(),
+        Config::kept(ctx).unwrap_or_default(),
         shared(&ctx.state).unwrap_or_default(),
     );
     let st = ev.states.clone();
@@ -578,7 +629,7 @@ fn about(ctx: &Ctx, f: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 
 /// #555: `roles?fleet=`: the fleet's [config] sheet and `[chat]`'s defaults.
 fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
-    let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+    let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
     let fc = cfg.fleet(fleet)?;
     let c = &cfg.chat;
     let harness = |h: &&str| Harness {
@@ -612,7 +663,7 @@ pub(super) fn ask(a: &Event) -> Ask {
 
 /// #259: the events with `since < seq <= until`; over `cap`, none and `refresh`. #266: each as the Events tab says it.
 pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
-    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::load(&ctx.config).ok());
+    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::kept(ctx).ok());
     let after: Vec<_> = ev.iter().filter(|e| e.seq > since && e.seq <= until).collect();
     let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > cap);
     let mut prs = BTreeMap::new();
@@ -684,7 +735,7 @@ impl Server<'_> {
     /// #630: each Lanes row's workspace root and unsaved work (uncommitted files, unpushed commits), in its card's facts too.
     fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
         let events = shared(&ctx.state).unwrap_or_default();
-        let Ok(cfg) = Config::load(&ctx.config) else { return tab };
+        let Ok(cfg) = Config::kept(ctx) else { return tab };
         let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
         let r = self.cached(ctx.now, 30);
         let rows = tab
@@ -876,3 +927,107 @@ fn repo(events: &[Event], fleet: &str) -> RepoThreads {
         threads: threads.collect(),
     }
 }
+
+/// #749: an ACP transcript's events as `lane/<agent>`'s blocks, from ACP's fields only (any agent, any provider): a turn's
+/// prompt; the text chunks between other events joined into one reply (shed's `reply` only when no chunk came); a tool
+/// call's updates folded into its first block; a plan update in place within its turn; an approval with the option
+/// taken. Masked last, so a secret split across chunks is caught whole.
+fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
+    use crate::shed::proto::EventKind as E;
+    let mut out: Vec<Block> = vec![];
+    let turn = |out: &[Block]| {
+        out.iter()
+            .rposition(|b| matches!(b, Block::Prompt { .. }))
+            .map_or(0, |i| i + 1)
+    };
+    for e in events {
+        match &e.kind {
+            E::Turn { prompt } => out.push(Block::Prompt { text: prompt.clone() }),
+            E::Text { text } => match out.last_mut() {
+                Some(Block::Reply { markdown }) => markdown.push_str(text),
+                _ => out.push(Block::Reply { markdown: text.clone() }),
+            },
+            E::Reply { text, .. } if !out[turn(&out)..].iter().any(|b| matches!(b, Block::Reply { .. })) => {
+                out.push(Block::Reply { markdown: text.clone() });
+            }
+            E::ToolCall {
+                id,
+                title,
+                status,
+                kind,
+            } => {
+                let was = out
+                    .iter_mut()
+                    .find(|b| matches!(b, Block::Tool { id: i, .. } if i == id));
+                let old = match &was {
+                    Some(Block::Tool { kind, .. }) => kind.clone(),
+                    _ => None,
+                };
+                let (title, status, kind) = (title.clone(), status.clone(), kind.clone().or(old));
+                let t = Block::Tool {
+                    id: id.clone(),
+                    kind,
+                    title_line: String::new(),
+                    title,
+                    status,
+                };
+                match was {
+                    Some(b) => *b = t,
+                    None => out.push(t),
+                }
+            }
+            E::Plan { entries } => {
+                let at = turn(&out);
+                let p = Block::Plan {
+                    entries: entries.clone(),
+                };
+                match out[at..].iter_mut().find(|b| matches!(b, Block::Plan { .. })) {
+                    Some(b) => *b = p,
+                    None => out.push(p),
+                }
+            }
+            E::ApprovalRequest { tool, options } => out.push(Block::Approval {
+                tool: tool.clone(),
+                options: options
+                    .iter()
+                    .map(|o| ApprovalChoice {
+                        id: o.id.clone(),
+                        name: o.name.clone(),
+                        kind: o.kind.clone(),
+                    })
+                    .collect(),
+                answered: None,
+            }),
+            E::Approved { option } => {
+                let open = out.iter_mut().rev().find_map(|b| match b {
+                    Block::Approval { answered: a @ None, .. } => Some(a),
+                    _ => None,
+                });
+                if let Some(a) = open {
+                    *a = Some(option.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    for b in &mut out {
+        match b {
+            Block::Prompt { text: t } | Block::Reply { markdown: t } | Block::Approval { tool: t, .. } => {
+                *t = lanes::mask(t);
+            }
+            Block::Tool { title, title_line, .. } => {
+                *title = lanes::mask(title);
+                let first = title.lines().next().unwrap_or_default();
+                *title_line = first.chars().take(TITLE_LINE).collect();
+                if title_line.len() < title.len() {
+                    title_line.push('…');
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// #749: a tool block's `title_line` keeps this many characters of the title's first line.
+const TITLE_LINE: usize = 120;
