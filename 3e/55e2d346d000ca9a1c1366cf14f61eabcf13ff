@@ -1,0 +1,11 @@
+Decided: a dot folder is walked only when a [[ban]] path starts with it, so `.github/workflows/*.yml` is scanned but `.git` never is
+Because: crates/core/src/arch.rs:250
+Decided: layer crossings live in the same baseline file as `<file> -> <layer>` lines; once any is listed, --write-baseline keeps only listed ones and exits 1 naming each new crossing
+Because: "a listed one passes, a new one fails, and the list may only shrink"
+Rejected: a CI check on the baseline file's git diff — it would also fail the first PR that records a repo's crossings
+Decided: the `//` skip applies to Rust, TS/JS (all module flavours), Swift, Go, Kotlin, Java and C-family; a ban with comments = true checks every line
+Because: "The comment skip applies only to languages with `//` comments."
+Decided: deleted the two private-item doc comments this PR edited (arch-check #735 fails edited comments); their content is in docs/arch-check.md
+Because: crates/core/src/arch.rs:162
+Check: the 4 new tests in crates/cli/tests/arch_check.rs fail on base arch.rs (7 pass, 4 fail) and all 11 pass at head; herdsman's own arch-check is 0 violations both ways
+Owner: Architecture rules can now skip test files, ban things in comments, and check any file type including workflows, and old layer crossings can be baselined.
