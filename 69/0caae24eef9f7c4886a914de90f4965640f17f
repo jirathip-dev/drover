@@ -1,0 +1,10 @@
+Decided: deleted every comment line this PR added or edited, since #735's arch-check fails new comments; the reasons live in these why notes
+Because: crates/core/src/doctor.rs:214
+Decided: re-ran the gates at 690caae and moved the PR body's evidence to that head
+Because: "shows the signing identity and fails if a build is unsigned"
+Decided: herdsman owns no Keychain item, so it adds no access lists; signing plus the doctor row cover the scope
+Because: "Keychain items herdsman still owns get an access list naming that identity"
+Rejected: restoring the staging comments that said "no signing step" — they are false once builds are signed
+Rejected: a herdsman Keychain read added only to prove criterion 1 — that would be production code added only for a test
+Check: the PR body's Tests section names 690caae24eef9f7c4886a914de90f4965640f17f and CI's rust job is green there
+Owner: Each herdsman build is signed with one fixed identity, and doctor now flags an unsigned build.
