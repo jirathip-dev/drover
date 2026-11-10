@@ -1,0 +1,8 @@
+Decided: trim arch.rs to fit the cap again after staging moved; behaviour unchanged, all checks and fixtures as before
+Because: ci/cap.toml:6
+Decided: diff lines parse in one branch, missing_path returns early, undocumented filters keys in its let-else
+Decided: the --pr-body help text is shorter so rustfmt keeps the attribute on one line
+Rejected: asking to raise the cap — trimming first got this PR under it with 2 lines spare
+Check: cap-check prints 38026 / 38028 at this head merged with staging 3004bbd
+Check: the push-time evidence run saw the old body; the body-edit run names 838d813
+Owner: no behaviour change this round: the new checks were made shorter so the repo stays under its line cap
