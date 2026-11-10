@@ -207,7 +207,7 @@ impl<'a> Log<'a> {
 /// `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
-/// #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push).
+/// #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push); #790: the lane moved on.
 pub fn waiting_on(
     log: &Log,
     events: &[Event],
@@ -221,7 +221,7 @@ pub fn waiting_on(
     let mut since = events.iter().rev().take_while(|e| !e.is("pushed", &s.fleet, s.issue));
     let moved = since.find(|e| e.is("root-moved", &s.fleet, s.issue));
     if let Some(l) = moved.and_then(|e| e.str("lost")).filter(|l| !l.is_empty()) {
-        w.what += &format!(" · root gone, lost {l}");
+        w.what += &format!(" · moved off a pulled root, lost {l}");
     }
     w
 }
