@@ -875,7 +875,7 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
         &Event::new(T, "sendmeter", Some(49), "spawn", json!({"role": "impl"})),
     )
     .unwrap();
-    let r = RealGit(Fake::default(), "");
+    let r = RealGit(Fake::default().reply("herdr agent list", NO_AGENTS), "");
     let remote = || sh_git(&["ls-remote", "--heads", &o, "wip/*"]);
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
@@ -889,6 +889,12 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
         "{out}"
     );
     assert_eq!(remote().lines().count(), 7, "a dry run deletes nothing");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter"]);
+    assert!(
+        code == 0 && out.contains("#48 closed: 5 wip, 4 would delete, 1 kept\n"),
+        "{code} {out}"
+    );
+    assert_eq!(remote().lines().count(), 7, "clean without --yes deletes nothing");
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("#48 closed: 5 wip, 4 deleted, 1 kept\n"), "{out}");

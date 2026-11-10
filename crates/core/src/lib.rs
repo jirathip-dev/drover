@@ -590,6 +590,14 @@ fn answer_with(
         d["basis"] = json!(b);
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
+    // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).
+    if ask.data.get("respawn_loop").is_some() && text == "park" {
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, ask.issue, "parked", json!({"by": by})),
+        )?;
+    }
     if let (Some(b), Some(t)) = (basis, by.strip_prefix("conductor-")) {
         let at = ask.issue.map_or(String::new(), |n| format!(" for #{n}"));
         let text = format!("answered {id}{at}: {text}, because {b}");

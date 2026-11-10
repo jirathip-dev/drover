@@ -1983,8 +1983,9 @@ fn build(p: &str) -> bool {
 }
 
 /// #646 `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration
-/// branch, its issue's state and whether it carries build output; unless `dry`, those of a merged or closed issue with
-/// build output deleted on origin (a branch delete: never a history rewrite or force-push).
+/// branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on
+/// origin (a branch delete: never a history rewrite or force-push): #779 those of a merged or closed issue but its
+/// newest per role, and that one too if it carries build output. An open issue's are kept.
 pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
     let (f, states) = (cfg.fleet(fleet)?, fold(&read(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
@@ -1996,6 +1997,30 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         "--format=%(refname:lstrip=3)",
         "refs/remotes/origin/wip/",
     ])?;
+    // `wip/<fleet>-<role>-<issue>…-<YYYYmmdd>-<HHMMSS>…`: (issue, role), and its save time to find the newest.
+    let of = |b: &str| {
+        let mut w = b.split_once(&format!("{fleet}-"))?.1.split('-');
+        let role = w.next()?.to_string();
+        Some((w.next()?.parse::<u64>().ok()?, role))
+    };
+    let stamp = |b: &str| {
+        let w: Vec<&str> = b.split('-').collect();
+        let digits = |s: &str, n| s.len() == n && s.bytes().all(|c| c.is_ascii_digit());
+        w.windows(2)
+            .find(|p| digits(p[0], 8) && digits(p[1], 6))
+            .map(|p| p.join("-"))
+    };
+    let mut newest: BTreeMap<(u64, String), (Option<String>, &str)> = BTreeMap::new();
+    for b in refs.lines() {
+        if let Some(k) = of(b) {
+            let e = newest.entry(k).or_insert((None, b));
+            if (stamp(b), b) >= (e.0.clone(), e.1) {
+                *e = (stamp(b), b);
+            }
+        }
+    }
+    let mut rows = vec![];
+    let mut counts: BTreeMap<Option<u64>, (usize, usize)> = BTreeMap::new();
     for b in refs.lines() {
         let tip = format!("origin/{b}");
         let size: u64 = git(&["rev-list", "--objects", "--disk-usage", &tip, "--not", &integ])?
@@ -2004,13 +2029,28 @@ pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         let has = git(&["log", "--name-only", "--format=", &tip, "--not", &integ])?
             .lines()
             .any(build);
-        let n = (b.split_once(&format!("{fleet}-"))).and_then(|x| x.1.split('-').nth(1)?.parse::<u64>().ok());
+        let k = of(b);
+        let n = k.as_ref().map(|k| k.0);
         let st = n.and_then(|n| states.get(&(fleet.to_string(), n)));
-        let go = has && st.is_some_and(crate::events::IssueState::done);
+        let last = k.and_then(|k| newest.get(&k)).is_some_and(|e| e.1 == b);
+        let go = (has || !last) && st.is_some_and(crate::events::IssueState::done);
         if go && !dry {
             git(&["push", "origin", "--delete", b])?;
         }
-        let what = ["kept", "would delete", "kept", "deleted"][usize::from(go) + 2 * usize::from(!dry)];
+        let c = counts.entry(n).or_default();
+        (c.0, c.1) = (c.0 + 1, c.1 + usize::from(go));
+        rows.push((b, size, n, st, has, go));
+    }
+    let gone = ["would delete", "deleted"][usize::from(!dry)];
+    for (n, (all, del)) in &counts {
+        let st = n
+            .and_then(|n| states.get(&(fleet.to_string(), n)))
+            .map_or("?", |s| &s.state);
+        let issue = n.map_or("no issue".into(), |n| format!("#{n} {st}"));
+        writeln!(out, "{issue}: {all} wip, {del} {gone}, {} kept", all - del)?;
+    }
+    for (b, size, n, st, has, go) in rows {
+        let what = if go { gone } else { "kept" };
         let issue = n.map_or("no issue".into(), |n| format!("#{n} {}", st.map_or("?", |s| &s.state)));
         let has = ["", " · build output"][usize::from(has)];
         writeln!(out, "{b} · {} MB · {issue}{has} · {what}", size >> 20)?;
