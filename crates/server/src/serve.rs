@@ -460,6 +460,23 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
 }
 
 /// #386: a thread file's type by its extension.
+/// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
+fn disk_file<P: AsRef<std::path::Path>>(
+    at: Option<P>,
+    ct: &'static str,
+    missing: &str,
+) -> (&'static str, &'static str, Vec<u8>) {
+    match at.map(crate::runner::read_file) {
+        Some(Ok(b)) => ("200 OK", ct, b),
+        Some(Err(e)) if e.kind() == std::io::ErrorKind::TimedOut => (
+            "504 Gateway Timeout",
+            "text/plain",
+            b"its disk is not answering\n".to_vec(),
+        ),
+        _ => ("404 Not Found", "text/plain", missing.as_bytes().to_vec()),
+    }
+}
+
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
         "png" => PNG,
@@ -1019,10 +1036,7 @@ impl<'a> Server<'a> {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
                 let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
-                match at.and_then(crate::runner::read_file) {
-                    Some(b) => ("200 OK", ctype(&name), b),
-                    None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
-                }
+                disk_file(at, ctype(&name), "no such file in the thread\n")
             }
             // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
@@ -1032,10 +1046,7 @@ impl<'a> Server<'a> {
                 let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                match at.and_then(crate::runner::read_file) {
-                    Some(b) => ("200 OK", PNG, b),
-                    None => ("404 Not Found", "text/plain", text("no such design file\n")),
-                }
+                disk_file(at, PNG, "no such design file\n")
             }
             // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
@@ -1045,10 +1056,7 @@ impl<'a> Server<'a> {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                match at.and_then(|(_, p)| crate::runner::read_file(p)) {
-                    Some(b) => ("200 OK", PNG, b),
-                    None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
-                }
+                disk_file(at.map(|(_, p)| p), PNG, "no such screenshot\n")
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
@@ -3145,7 +3153,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
                 f["name"].as_str().unwrap_or_default(),
             );
             let to = dir.join("thread").join(t);
-            let b = chat::file(ctx, &events, t, name, demo).and_then(crate::runner::read_file);
+            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| crate::runner::read_file(p).ok());
             if let Some(b) = b.filter(|_| !name.contains('/')) {
                 std::fs::create_dir_all(&to)?;
                 std::fs::write(to.join(name), b)?;

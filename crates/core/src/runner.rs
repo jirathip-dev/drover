@@ -130,57 +130,53 @@ impl Real {
     pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
+        let dir = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1));
+        let fail = |why: String| {
+            let stderr = format!("{prog} {}: {why}", args.join(" "));
+            Ok(Out {
+                code: 124,
+                stderr,
+                ..Out::default()
+            })
+        };
         // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
-        if let Some(dir) = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1)) {
-            if hung(dir, PROBE, list) {
-                let stderr = format!("{prog} {}: {dir} is on a disk that is not answering", args.join(" "));
-                return Ok(Out {
-                    code: 124,
-                    stderr,
-                    ..Out::default()
-                });
-            }
+        if let Some(dir) = dir.filter(|d| hung(d, PROBE, list)) {
+            return fail(format!("{dir} is on a disk that is not answering"));
         }
-        let mut c = Command::new(prog)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("cannot run {prog}"))?;
-        let _ = c.stdin.take().unwrap().write_all(input);
-        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
-        let end = Instant::now() + limit;
-        while Instant::now() < end {
-            if let Some(st) = c.try_wait()? {
-                let (stdout, stderr) = (
-                    text(&so.join().unwrap_or_default()),
-                    text(&se.join().unwrap_or_default()),
-                );
-                return Ok(Out {
+        let mut pipes = None;
+        let start = || {
+            let mut c = Command::new(prog)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("cannot run {prog}"))?;
+            let _ = c.stdin.take().unwrap().write_all(input);
+            pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
+            Ok(c)
+        };
+        let ended = settle(dir.map(String::as_str), limit, start)?;
+        let text =
+            |b: std::thread::JoinHandle<Vec<u8>>| String::from_utf8_lossy(&b.join().unwrap_or_default()).into_owned();
+        match ended {
+            Ended::Exited(st) => {
+                let (so, se) = pipes.context("pipes")?;
+                Ok(Out {
                     code: st.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
+                    stdout: text(so),
+                    stderr: text(se),
+                })
             }
-            std::thread::sleep(Duration::from_millis(50));
+            // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from
+            // memory passes the probe while its files hang. Its readers may outlive it while a grandchild (ssh) holds
+            // the pipes.
+            Ended::TimedOut => {
+                dir.inspect(|d| sicken(d));
+                fail(format!("no answer in {limit:?}"))
+            }
+            Ended::Busy => fail(format!("an earlier call on {} has not ended", dir.map_or("", |d| d))),
         }
-        // #775: reaped off this thread: a child stuck in disk I/O outlives SIGKILL, and waiting here would never return.
-        // Its readers may outlive it too while a grandchild (ssh) holds the pipes.
-        let _ = c.kill();
-        std::thread::spawn(move || c.wait());
-        // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from memory
-        // passes the probe while its files hang.
-        if let Some(dir) = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1)) {
-            sicken(dir);
-        }
-        let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
-        Ok(Out {
-            code: 124,
-            stderr,
-            ..Out::default()
-        })
     }
 }
 
@@ -327,20 +323,148 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
     !done.load(Relaxed)
 }
 
-/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files): None when its folder is
-/// hung (#776) or the read takes over `PROBE`, which marks the folder's disk; the stuck read keeps its own thread.
-pub fn read_file(path: impl AsRef<std::path::Path>) -> Option<Vec<u8>> {
+/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a
+/// `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long,
+/// which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
+pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
-    let dir = path.parent()?.to_string_lossy().into_owned();
+    let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
+    let end = Instant::now() + PROBE;
+    let dir = path
+        .parent()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if hung(&dir, PROBE, list) {
-        return None;
+        return Err(late());
     }
+    let claim = Claim::take(&path.to_string_lossy(), end).ok_or_else(late)?;
+    let gone = claim.gone.clone();
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || drop(tx.send(std::fs::read(path).ok())));
-    rx.recv_timeout(PROBE).unwrap_or_else(|_| {
-        sicken(&dir);
-        None
-    })
+    let p = path.clone();
+    std::thread::spawn(move || {
+        let _claim = claim;
+        drop(tx.send(std::fs::read(p)));
+    });
+    rx.recv_timeout(end.saturating_duration_since(Instant::now()))
+        .unwrap_or_else(|_| {
+            gone.store(true, std::sync::atomic::Ordering::Relaxed);
+            sicken(&dir);
+            Err(late())
+        })
+}
+
+/// #775: a started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so
+/// nothing may wait on it. Tests use one that never ends.
+pub trait Proc: Send + 'static {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>>;
+    fn kill(&mut self) -> std::io::Result<()>;
+}
+
+impl Proc for std::process::Child {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        std::process::Child::try_wait(self)
+    }
+    fn kill(&mut self) -> std::io::Result<()> {
+        std::process::Child::kill(self)
+    }
+}
+
+/// #775: how a call `settle` watched ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ended {
+    Exited(std::process::ExitStatus),
+    /// It ran out of time: killed and abandoned, never waited on.
+    TimedOut,
+    /// An earlier call on its path was abandoned and has not ended, or still ran at the limit: none was started.
+    Busy,
+}
+
+type Calls = std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>;
+
+/// #775: the call in flight per path (a `-C` folder, a file serve reads), its flag set once it was abandoned.
+fn calls() -> std::sync::MutexGuard<'static, Calls> {
+    static CALLS: std::sync::OnceLock<std::sync::Mutex<Calls>> = std::sync::OnceLock::new();
+    let m = CALLS.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+static FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+type Abandoned = (Box<dyn Proc>, Option<Claim>);
+
+/// #775: the children abandoned at their limit, with their path's claim; each `settle` reaps those that ended.
+fn gone() -> std::sync::MutexGuard<'static, Vec<Abandoned>> {
+    static GONE: std::sync::Mutex<Vec<Abandoned>> = std::sync::Mutex::new(Vec::new());
+    GONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// #775: the one call on a path in flight; dropping it frees the path.
+struct Claim {
+    key: String,
+    gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Claim {
+    /// Waits while another call on `key` runs, up to `until`; None at `until`, or when that call was abandoned.
+    fn take(key: &str, until: Instant) -> Option<Claim> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut m = calls();
+        loop {
+            match m.get(key) {
+                None => {
+                    let gone = std::sync::Arc::default();
+                    m.insert(key.into(), std::sync::Arc::clone(&gone));
+                    return Some(Claim { key: key.into(), gone });
+                }
+                Some(g) if g.load(Relaxed) => return None,
+                Some(_) => {
+                    let left = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+                    m = FREED
+                        .wait_timeout(m, left)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        let mut m = calls();
+        if m.get(&self.key).is_some_and(|g| std::sync::Arc::ptr_eq(g, &self.gone)) {
+            m.remove(&self.key);
+        }
+        drop(m);
+        FREED.notify_all();
+    }
+}
+
+/// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and
+/// abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on
+/// `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an
+/// abandoned one lives.
+pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() -> Result<P>) -> Result<Ended> {
+    let end = Instant::now() + limit;
+    gone().retain_mut(|(c, _)| matches!(c.try_wait(), Ok(None)));
+    let claim = match key.map(|k| Claim::take(k, end)) {
+        Some(None) => return Ok(Ended::Busy),
+        c => c.flatten(),
+    };
+    let mut c = start()?;
+    while Instant::now() < end {
+        if let Some(st) = c.try_wait()? {
+            return Ok(Ended::Exited(st));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = c.kill();
+    if let Some(cl) = &claim {
+        cl.gone.store(true, std::sync::atomic::Ordering::Relaxed);
+        FREED.notify_all();
+    }
+    gone().push((Box::new(c), claim));
+    Ok(Ended::TimedOut)
 }
 
 fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
