@@ -1,0 +1,9 @@
+Decided: a timed-out call is killed and abandoned to a reap list; nothing waits on it
+Because: "A timed-out external call is abandoned: killed and no longer waited on"
+Decided: one outstanding call per -C path or served file; a later call answers Busy while it lives
+Because: "No new call for a lane or path while an earlier call for it is still outstanding"
+Decided: /shot/, /design/, /thread/ read through runner::read_file and answer 504 on timeout
+Because: q1045
+Rejected: waiting on the killed child — a child in kernel I/O never exits, so the wait hangs
+Check: abandoned_child, runner_limits, hung_read and verify_stage pass at the head
+Owner: A dead disk now gives one 504 for its file instead of freezing the board.
