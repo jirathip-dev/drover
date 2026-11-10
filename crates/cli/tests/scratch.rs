@@ -375,3 +375,105 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
     );
     assert!(out.contains("(disk low)"), "{out}");
 }
+
+/// #678: `air` turned off for new lanes but answering: its merged lane #12 (worktree and scratch), #13's lane now live
+/// on this host, #14's lane live on the Air.
+fn air_off(name: &str) -> (herdsman::Ctx, PathBuf, [PathBuf; 3]) {
+    let (c, home, s) = air_setup(name);
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, format!("{text}enabled = false\n")).unwrap();
+    for (n, a) in [
+        (12, "sendmeter-impl-12"),
+        (13, "sendmeter-impl-13"),
+        (14, "sendmeter-impl-14"),
+    ] {
+        air_spawn(&c, n, "impl", a);
+    }
+    merged(&c, 12);
+    let dirs = ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-impl-14"].map(|a| blob(&s, &format!("{a}/debug")));
+    (c, home, dirs)
+}
+
+/// #678: the disabled Air's runner: #12's worktree there clean and pushed, removable.
+fn air_off_runner(home: &Path) -> Air {
+    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+    let fake = Fake::default()
+        .reply(
+            "herdr agent list",
+            &agents(&[("sendmeter-impl-13", "working", "/x", "w5:p1")]),
+        )
+        .reply(
+            "herdr --machine air agent list",
+            &agents(&[("sendmeter-impl-14", "idle", "/y", "w2:p1")]),
+        )
+        .reply("gh issue list", "[]")
+        .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply("herdr --machine air worktree remove", "{}")
+        .reply("herdr --machine air pane close", "{}");
+    Air {
+        fake,
+        free_kb: 200 * 1_048_576,
+        home: home.into(),
+    }
+}
+
+/// #678: an explicit `clean` sweeps a disabled host that answers: the dry run lists the merged lane's worktree and the
+/// dead lane's scratch there, `--yes` removes both.
+#[test]
+fn clean_sweeps_a_disabled_but_reachable_host() {
+    let (c, home, [dead, ..]) = air_off("scratch-off-clean");
+    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
+    let (code, dry) = run(&c, &air_off_runner(&home), &["clean"]);
+    assert_eq!(code, 0, "{dry}");
+    assert!(!dry.contains("not cleaned"), "{dry}");
+    assert!(
+        dry.contains(&format!("would remove air:{wt} (pane w1:p1, sendmeter#12 merged)")),
+        "{dry}"
+    );
+    assert!(
+        dry.contains(&format!(
+            "would remove scratch air:{AIR_ROOT}/.build/.scratch/sendmeter-impl-12"
+        )),
+        "{dry}"
+    );
+    assert!(dead.exists(), "a dry run removes nothing");
+    let r = air_off_runner(&home);
+    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("removed air:{wt} (sendmeter#12 merged)")),
+        "{out}"
+    );
+    assert!(
+        r.fake.called("herdr --machine air worktree remove --workspace w1"),
+        "{out}"
+    );
+    assert!(!dead.exists(), "{out}");
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-impl-12 "
+        )),
+        "{out}"
+    );
+}
+
+/// #678: on a disabled host a lane's scratch stays only while an agent of that name is live there: one that moved to
+/// another host loses its old copy (`reclaim --apply` too).
+#[test]
+fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
+    let (c, home, [dead, moved, live]) = air_off("scratch-off-reclaim");
+    let r = air_off_runner(&home);
+    let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!dead.exists() && !moved.exists(), "{out}");
+    assert!(live.exists(), "the Air's own live agent keeps its scratch: {out}");
+    assert!(
+        out.contains(&format!(
+            "scratch: air: removed {AIR_ROOT}/.build/.scratch/sendmeter-impl-13 "
+        )),
+        "{out}"
+    );
+}

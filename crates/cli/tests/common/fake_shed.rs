@@ -227,6 +227,18 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
+        // #749: an ACP terminal's events (`events`), the last `n` before `before`, as shed pages them.
+        "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
+            let before = p["before"].as_u64().unwrap_or(u64::MAX);
+            let all: Vec<&Value> = terms[&name]["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["seq"].as_u64() < Some(before))
+                .collect();
+            let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
+            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+        }
         // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),

@@ -145,6 +145,16 @@ fn a_blocked_conductor_start_holds_no_request() {
     );
     assert!(ms < 1000, "the answer took {ms} ms");
     r.2.store(true, SeqCst);
+    // The released start writes its events after this thread's tmpdir sweep: let it finish so the dir stays gone.
+    let (t, mut last) = (Instant::now(), String::new());
+    while t.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(300));
+        let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
+        if log.contains("\"conductor-start\"") && log == last {
+            break;
+        }
+        last = log;
+    }
 }
 
 #[test]

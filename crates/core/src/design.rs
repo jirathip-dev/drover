@@ -145,5 +145,12 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         ask.data["role"].clone(),
         review.map_or(Value::Null, |e| e.data["adr"].clone()),
     );
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))?;
+    // #778: approve starts impl, revise the design lane again: pending until it spawns.
+    let (action, role) = match kind {
+        "design-approved" => ("approve", cfg.fleet(f)?.flow().start()),
+        "design-revise" => ("revise", ask.str("role").unwrap_or("design")),
+        _ => return Ok(()),
+    };
+    crate::pending::record(ctx, (f, n), action, role, None)
 }

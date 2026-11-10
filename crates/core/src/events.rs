@@ -1,15 +1,14 @@
 //! The append-only event log (#344: in `state.db`, `db`), the state fold over it, and notifiers.
 use crate::config::Config;
+use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,12 +123,8 @@ pub(crate) fn archives(path: &Path) -> Result<Vec<Event>> {
     gz.sort();
     let mut all = vec![];
     for g in gz {
-        let o = Command::new("gzip")
-            .arg("-dc")
-            .arg(&g)
-            .stderr(Stdio::inherit())
-            .output()?;
-        all.extend(parse(&String::from_utf8_lossy(&o.stdout), &g));
+        let o = Real.run("gzip", &["-dc".into(), g.to_string_lossy().into_owned()])?;
+        all.extend(parse(&o.stdout, &g));
     }
     Ok(all)
 }
@@ -294,31 +289,22 @@ pub fn plain(ev: &Event) -> String {
 
 /// Runs without `HERMES_*` / `_HERMES_*`: a lane's Hermes profile must not leak into the notifier's `hermes send`.
 fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
-    let mut c = Command::new("sh");
-    let hermes = |k: &std::ffi::OsString| k.to_string_lossy().trim_start_matches('_').starts_with("HERMES_");
-    for (k, _) in std::env::vars_os().filter(|(k, _)| hermes(k)) {
-        c.env_remove(k);
-    }
-    let mut child = c
-        .args(["-c", cmd])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    // A sink that exits without reading stdin must not fail the write.
-    let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if let Some(st) = child.try_wait()? {
-            anyhow::ensure!(st.success(), "exit {}", st.code().unwrap_or(-1));
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            anyhow::bail!("timed out after 15s");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let hermes = |k: &String| k.trim_start_matches('_').starts_with("HERMES_");
+    let mut args: Vec<String> = std::env::vars()
+        .map(|(k, _)| k)
+        .filter(hermes)
+        .flat_map(|k| ["-u".into(), k])
+        .collect();
+    // Both streams go nowhere, as before: a sink that backgrounds a child must not hold the reply open.
+    args.extend(crate::runner::argv(&[
+        "sh",
+        "-c",
+        &format!("exec >/dev/null 2>&1\n{cmd}"),
+    ]));
+    let o = Real.run_for("env", &args, payload, Duration::from_secs(15))?;
+    anyhow::ensure!(o.code != 124, "timed out after 15s");
+    anyhow::ensure!(o.code == 0, "exit {}", o.code);
+    Ok(())
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
@@ -402,6 +388,8 @@ pub fn checks(e: &Event) -> bool {
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    // #778: a tapped start still waiting; the decision before it moved the issue.
+    "pending-action",
     "lane-state",
     "lesson-prompted",
     // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.

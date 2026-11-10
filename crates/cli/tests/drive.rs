@@ -1954,9 +1954,9 @@ impl herdsman::runner::Runner for Spy<'_> {
     }
 }
 
-/// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
-/// with the reason, and the next drive pass starts the recorded round as its fix step. The spawn runs under
-/// drive.lock, so no pass starts the same round meanwhile.
+/// #217: `[one more round]` logs its decision before the spawn runs; #778: a spawn refused HOST_BUSY keeps it pending
+/// with the reason (no `extend-failed`), and the next drive pass starts the recorded round as its fix step. The spawn
+/// runs under drive.lock, so no pass starts the same round meanwhile.
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1982,20 +1982,18 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     let spy = Spy(busy, &c, Default::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 3 && out.contains("REFUSED HOST_BUSY"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
     assert!(
         !seen.is_empty() && seen.iter().all(|&l| l),
         "a command ran before the decision or outside drive.lock: {seen:?}"
     );
     let all = read(&c.state).unwrap();
-    let failed = all
-        .iter()
-        .find(|e| e.kind == "extend-failed")
-        .expect("no extend-failed");
-    assert!(
-        failed.str("reason").unwrap().starts_with("REFUSED HOST_BUSY"),
-        "{failed:?}"
+    assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
+    let p = herdsman::pending::of(&all, "sendmeter", 12).expect("pending");
+    assert_eq!(
+        (p.action.as_str(), p.reason.as_deref(), p.failed),
+        ("extend", Some("HOST_BUSY"), false)
     );
     assert_eq!(state(&c), "fix(3)");
 
@@ -2003,6 +2001,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
+    assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
 /// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the

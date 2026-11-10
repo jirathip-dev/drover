@@ -1120,11 +1120,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let w = waits
+                    // #778: a tapped start waiting for its lane says so first.
+                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let wait = waits
                         .iter()
                         .flatten()
-                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue)
-                        .map(|w| w.1.what.clone())
+                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue);
+                    let w = pending
+                        .or_else(|| wait.map(|w| w.1.what.clone()))
                         .or(skip)
                         .or_else(|| {
                             let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
@@ -1326,8 +1329,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
-            let cfg = Config::load(&ctx.config)?;
-            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            let cfg = match cmd {
+                Cmd::Check => check::config(ctx)?, // #709
+                _ => Config::load(&ctx.config)?,
+            };
+            // #561: check, clean, drive (#678: and reclaim) probe each remote host once and bound every remote call.
             let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
             let pass = if fast {
                 crate::hosts::Pass::fast(r)
@@ -1335,7 +1341,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::hosts::Pass::new(r, None)
             };
             let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
             };
             let kick = |f: &str, n, why| {
@@ -1604,6 +1610,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
+                    for w in &mut rows {
+                        // #778: a tapped start waiting for its lane, as `status` says it.
+                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                            (w.who, w.what) = ("drive", l);
+                        }
+                    }
                     let slots = crate::drive::holders(ctx);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
@@ -1650,7 +1662,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
+                    let what = (None, lane.as_deref(), false, true); // #678: disabled hosts that answer too
+                    check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
@@ -1925,6 +1938,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let report = shed_proto::Reported {
             state: state.into(),
             note: None,
+            state_source: None,
         };
         if let Err(e) = crate::shed::call(
             r,

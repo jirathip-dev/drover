@@ -214,20 +214,20 @@ fn another_hosts_agent_list_is_cut_off_at_its_limit() {
     use herdsman::runner::{argv, limit, Real};
     use std::time::{Duration, Instant};
     let list = argv(&["--machine", "air", "agent", "list"]);
-    assert_eq!(limit("herdr", &list), Some(Duration::from_secs(20)));
+    assert_eq!(limit("herdr", &list), Duration::from_secs(20));
     assert_eq!(
         limit("herdr", &argv(&["agent", "list"])),
-        None,
-        "this host's own herdr waits"
+        Duration::from_mins(1),
+        "#713: this host's own herdr gets the default"
     );
     assert_eq!(
         limit("herdr", &argv(&["--machine", "air", "agent", "start"])),
-        None,
-        "only a read is cut off"
+        Duration::from_mins(1),
+        "only a read is cut short"
     );
     let t = Instant::now();
     let o = Real
-        .within("sh", &argv(&["-c", "sleep 30"]), "", Some(Duration::from_millis(300)))
+        .within("sh", &argv(&["-c", "sleep 30"]), b"", Duration::from_millis(300))
         .unwrap();
     assert_eq!(o.code, 124, "{o:?}");
     assert!(o.stderr.contains("no answer"), "{}", o.stderr);
@@ -236,7 +236,7 @@ fn another_hosts_agent_list_is_cut_off_at_its_limit() {
         "killed at its limit, not after the sleep"
     );
     let o = Real
-        .within("sh", &argv(&["-c", "echo up"]), "", Some(Duration::from_secs(5)))
+        .within("sh", &argv(&["-c", "echo up"]), b"", Duration::from_secs(5))
         .unwrap();
     assert_eq!((o.code, o.stdout.trim()), (0, "up"), "an answer in time is kept");
 }

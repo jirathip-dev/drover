@@ -111,9 +111,16 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
     assert_eq!(kinds(&c, "design-approved").len(), 1);
     assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
+    // #778: approved on a busy host: impl's start stays pending with the reason, then starts once load drops.
+    let busy = fake(&c, c.now + 60).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    drive(&c, &busy);
+    let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
+    assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));
+    assert_eq!(spawned(&c, "impl"), 1, "only #13's");
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-impl-12"));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
+    assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
 /// A paired device's `POST path` with `body`.

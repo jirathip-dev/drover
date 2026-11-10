@@ -704,7 +704,10 @@ pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Che
     let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
     cs.iter().filter(hit).find_map(|c| {
         let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
-        let o = r.run("sh", &sh).unwrap_or_default();
+        // #713: a check is a build or a test run: 30 min, not the 60 s default.
+        let o = r
+            .run_for("sh", &sh, "", std::time::Duration::from_mins(30))
+            .unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
     })
 }
@@ -1031,7 +1034,9 @@ pub fn needs_human(
     // issue or extends twice.
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    if state != "needs-human" && last != "extend-failed" {
+    // #778: or a pending start whose card is back (refused, or 30 min unstarted).
+    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
+    if state != "needs-human" && last != "extend-failed" && !back {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
@@ -1045,6 +1050,9 @@ pub fn needs_human(
                 let d = json!({"by": by, "spawn": spawn});
                 crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
             }
+            if spawn {
+                crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
+            }
             if spawn && held.is_none() {
                 writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
             } else if spawn {
@@ -1053,6 +1061,13 @@ pub fn needs_human(
                     ..Default::default()
                 };
                 if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o) {
+                    // #778: a soft refusal keeps the round pending: drive starts it, the card stays answered.
+                    let rf = e.downcast_ref::<Refusal>();
+                    let (code, why) = rf.map_or(("ERROR", format!("{e:#}")), |r| (r.code, r.msg.clone()));
+                    if crate::pending::refused(ctx, (fleet, n), code, &why)? {
+                        writeln!(out, "#{n}: starting, waiting for host ({code}); drive starts the round")?;
+                        return Ok(());
+                    }
                     let d = json!({"by": by, "reason": format!("{e:#}")});
                     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "extend-failed", d))?;
                     return Err(e);

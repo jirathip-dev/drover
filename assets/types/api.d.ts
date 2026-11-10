@@ -24,6 +24,25 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
+ * #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
+ * events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
+ * screen is `lines`).
+ */
+export type LaneChat = { blocks: Array<Block>, said?: Array<JsonValue> | null, older: boolean, notices: Array<Notice>, harness: string, acts: Array<string>, pane?: string | null, lines: Array<string>, live: number, status?: string | null, before: number, more: boolean, };
+
+/**
+ * #749: one of an approval's options, as ACP sent it (`allow_once`, `reject_once`, …).
+ */
+export type ApprovalChoice = { id: string, name: string, kind: string, };
+
+/**
+ * #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
+ * prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
+ * title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+ */
+export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown: string, } | { "k": "tool", id: string, kind?: string | null, title_line: string, title: string, status: string, } | { "k": "plan", entries: Array<JsonValue>, } | { "k": "approval", tool: string, options: Array<ApprovalChoice>, answered?: string | null, } | { "k": "screen" };
+
+/**
  * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
  */
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
@@ -34,7 +53,11 @@ export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?
  * `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
  * export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
-export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
+/**
+ * #709: fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+ */
+config?: string | null, };
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
@@ -231,7 +254,17 @@ export type Queued = { fleet: string, issue: number, title?: string | null, stat
 /**
  * #667: its blockers in another fleet or repo, as `owner/repo#N`.
  */
-blocked_on: Array<string>, };
+blocked_on: Array<string>, 
+/**
+ * #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+ */
+pending?: PendingStart | null, status?: string | null, };
+
+/**
+ * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+ * refusal `reason` (a code; a hard one with its words).
+ */
+export type PendingStart = { action: string, since: number, reason?: string | null, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -414,7 +447,7 @@ export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null
 /**
  * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
  */
-export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, };
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, pending?: PendingStart | null, };
 
 /**
  * #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.

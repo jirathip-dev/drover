@@ -56,13 +56,14 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none).
+/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none); #778:
+/// its pending action, until a hard refusal ends it (logs before #778: the round's own event, last).
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
     let last = events
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    s.last_event == "extend-failed"
+    crate::pending::of(events, &s.fleet, s.issue).is_some_and(|p| p.action == "extend" && !p.failed)
         || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 

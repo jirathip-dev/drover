@@ -2013,6 +2013,13 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         words(code, step, &result)
     };
     let why = code.map(|_| result.split_once(": ").map_or(&*result, |p| p.1));
+    // #778: a refused build start is logged on the issue's pending action (a hard refusal ends it).
+    if let Some((n, k)) = spawn
+        .zip(code)
+        .filter(|_| !cfg.fleet(fleet).is_ok_and(|f| f.flow().is_check(c[3])))
+    {
+        crate::pending::refused(ctx, (fleet, n), k, why.unwrap_or_default())?;
+    }
     ACTS.with_borrow_mut(|a| {
         a.entry(fleet.into()).or_default().push(
             json!({"issue": issue, "step": step, "outcome": outcome, "code": code, "words": w, "why": why, "kick": kicks}),

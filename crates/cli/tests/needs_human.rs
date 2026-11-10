@@ -179,7 +179,8 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
 }
 
 /// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
-/// `round-extended` first; a refused spawn logs `extend-failed` and brings the card back, and a retry grants no more.
+/// `round-extended` first; #778: a spawn held back (PAUSED) keeps it pending, its card answered, and a second tap grants
+/// no more.
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");
@@ -206,15 +207,18 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
             .count()
     };
 
-    for _ in 0..2 {
-        let res = post("extend");
-        assert!(res.contains("REFUSED%20PAUSED"), "PAUSED refuses the spawn: {res}");
-        let k = card(&get(&s, "/", &cookie)).to_string();
-        assert!(
-            k.contains("REFUSED PAUSED") && k.contains("value=extend"),
-            "the card is back: {k}"
-        );
-    }
+    let res = post("extend");
+    assert!(
+        res.contains("msg=%2312%3A%20extend"),
+        "PAUSED only holds the spawn: {res}"
+    );
+    let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
+    assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
+    assert!(
+        !get(&s, "/", &cookie).contains("<div class=ask data-n=12>"),
+        "the card stays answered"
+    );
+    assert!(post("extend").contains("not%20needs"), "a second tap");
     assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
     let failed = read(&c.state)
@@ -222,7 +226,7 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         .into_iter()
         .filter(|e| e.kind == "extend-failed")
         .count();
-    assert_eq!(failed, 2);
+    assert_eq!(failed, 0);
 
     append(&c.state, &Event::new(40, "sendmeter", Some(12), "merged", json!({}))).unwrap();
     for op in ["park", "extend", "override"] {
