@@ -2219,7 +2219,6 @@ fn a_pty_lane_still_returns_its_screen() {
     assert_eq!(v["blocks"], json!([{"k": "screen"}]), "{v}");
 }
 
-/// #792: the lane's shed session events (`kinds`), after those kept so far.
 fn session(b: &Server, kinds: &[Value]) {
     let mut ev = b.events.lock().unwrap();
     for k in kinds {
@@ -2230,7 +2229,6 @@ fn session(b: &Server, kinds: &[Value]) {
     }
 }
 
-/// #792: the lane's hook reports it `working` (mid-turn), as a live ACP lane's does.
 fn mid_turn(b: &Server) {
     b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "working"});
 }
@@ -2251,7 +2249,6 @@ fn drive_at(c: &herdsman::Ctx, r: &dyn Runner, secs: u64) -> String {
     out
 }
 
-/// #792: a host sample `f` answers first from now on.
 fn host(f: &mut Fake, prog: &str, stdout: &str) {
     let o = herdsman::runner::Out {
         code: 0,
@@ -2261,8 +2258,6 @@ fn host(f: &mut Fake, prog: &str, stdout: &str) {
     f.replies.insert(0, (prog.into(), o));
 }
 
-/// #792: cooee #183 sat 64 min after a tool call completed, no session event since: drive cancels its turn and nudges
-/// it once, respawns it once when it stays silent, and a second stall within the hour is the owner's (one card).
 #[test]
 fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
     let (c, b, f, wt, _) = acp_lane("acp-silent");
@@ -2280,12 +2275,10 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
     assert_eq!(f.count("shed cancel"), 1, "one nudge");
     let (_, w) = run(&later(&c, 60 + SILENT + 60), &cli, &["waiting", "sendmeter"]);
     assert!(w.contains("nudged"), "waiting shows the nudge: {w}");
-    // Still silent 10 min after the nudge: respawned once, past the busy host.
     let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
     assert_eq!(logged(&c, "respawned-silent").len(), 1, "{out}");
     assert_eq!(logged(&c, "spawn").len(), 2, "{out}");
     assert!(logged(&c, "needs-human").is_empty());
-    // The respawned lane starts its turn, then goes silent too within the hour: one owner card, no second respawn.
     mid_turn(&b);
     session(&b, &[turn()]);
     drive_at(&c, &cli, 60 + 2 * SILENT + 30);
@@ -2299,7 +2292,6 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
     assert_eq!(logged(&c, "respawned-silent").len(), 1);
 }
 
-/// #792: a long test that prints nothing (its tool call still running in a live session) is not silent.
 #[test]
 fn a_pending_tool_call_in_a_live_session_is_not_silent() {
     let (c, b, f, wt, _) = acp_lane("acp-tool");
@@ -2310,14 +2302,12 @@ fn a_pending_tool_call_in_a_live_session_is_not_silent() {
     drive_at(&c, &cli, 60 + 3 * SILENT);
     assert!(!f.called("shed cancel"));
     assert!(logged(&c, "nudged").is_empty());
-    // The tool call ends; then silence counts.
     session(&b, &[tool("completed")]);
     drive_at(&c, &cli, 60 + 3 * SILENT + 1);
     let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
     assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
 }
 
-/// #792 (q1137): a silent lane's respawn skips HOST_BUSY (logged as an override); MEM_LOW still holds it.
 #[test]
 fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
     for (name, prog, sample, spawns) in [
@@ -2343,8 +2333,6 @@ fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
     }
 }
 
-/// #792 (q1139): cooee #183's account had its token replaced mid-session: the session's 401 marks the account signed
-/// out, alerts once with its sign-in command, and the lane respawns on the role's next account.
 #[test]
 fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_next_account() {
     let (c, b, f, wt, _) = acp_lane("acp-auth");
@@ -2367,7 +2355,6 @@ fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_
     assert_eq!(sp[1].str("account"), Some("D"));
 }
 
-/// #792: a fix round drive skipped for a busy host says so in `waiting`, never "nothing drives this".
 #[test]
 fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     let (c, b, mut f, wt, _) = acp_lane("acp-held");

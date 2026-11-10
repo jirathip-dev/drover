@@ -306,7 +306,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                         "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
                         "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
                         _ => {
-                            // #792 (q1139): the account's own sign-in command, once, with the alert.
                             let fix = account.map(|a| crate::access::sign_in(cfg, r, a).1);
                             let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
                             let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));

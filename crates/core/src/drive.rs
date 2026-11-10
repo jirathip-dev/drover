@@ -326,7 +326,6 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
-    // #792: a `--force`d respawn (a dead or silent lane) goes ahead on a busy host, as its spawn does.
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
         return crate::gate::refused(code, why);
     }
@@ -948,7 +947,6 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
-/// #792: each silent ACP lane of `fleet` (a kick's: its issue's) nudged, respawned past `HOST_BUSY`, or escalated.
 fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Value], fleet: &str) -> Result<()> {
     let ev = read(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
@@ -969,7 +967,6 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
     Ok(())
 }
 
-/// A lane's needs-human card (and its alert), with why.
 fn escalate(
     ctx: &Ctx,
     cfg: &Config,
@@ -1202,7 +1199,6 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
-            // #792 (q1137): a dead lane's respawn skips HOST_BUSY; MEM_LOW and DISK_LOW still hold it.
             let args = if step == "respawn" {
                 [&args[..], &["--force"]].concat()
             } else {

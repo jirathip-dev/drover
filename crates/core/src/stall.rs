@@ -134,17 +134,11 @@ pub const NUDGE: &str = "continue: your last step finished or failed; carry on, 
 
 /// #792: what drive does about a silent ACP lane (`fleet` #`issue`'s `lane`).
 pub enum Silent {
-    /// Cancel its turn and prompt it once (why).
     Nudge(String),
-    /// Still silent after the nudge: `spawn <role> --supersede --force` once (why).
     Respawn(String, String),
-    /// Silent again within the hour after a nudge or respawn: the owner's (one needs-human card).
     Escalate(String),
 }
 
-/// #792: each of `fleet`'s live ACP lanes whose open turn had no session event for `silent_minutes` (a tool call still
-/// running in the live session is no silence): nudged once, then respawned once, then a second stall within the hour
-/// is escalated. (issue, lane, what to do).
 pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &str) -> Vec<(u64, String, Silent)> {
     let mut out = vec![];
     for s in fold(ev).values().filter(|s| s.fleet == fleet) {
@@ -167,7 +161,6 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
         let respawned = ev.iter().rfind(mine("respawned-silent")).filter(hour);
         let recent = respawned.or(ev.iter().rfind(mine("nudged")).filter(hour));
         let quiet = crate::events::age(ctx.now - since);
-        // The nudge went unanswered: nothing from the agent since it.
         let unanswered = nudged.filter(|n| o["said"].as_u64().is_none_or(|t| t <= n.ts));
         let act = match (unanswered, respawned, recent) {
             (Some(_), None, _) => Silent::Respawn(role.into(), format!("silent {quiet} after its nudge")),

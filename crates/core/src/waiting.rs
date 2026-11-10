@@ -606,7 +606,6 @@ pub fn scan(
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
         let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
-        // #792 (q1139): a lane whose account went resting (signed out, capped) since its spawn is respawned, working or not.
         let sp = last_spawn(mine, &lane);
         let rested = |e: &Event| {
             crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
@@ -825,7 +824,6 @@ pub fn scan(
         {
             w.what = why;
         }
-        // #792: a due spawn drive's last try was refused names the hold.
         if let Some(h) = spawn
             .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
             .flatten()
@@ -913,8 +911,6 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
     out
 }
 
-/// #792: `fleet` #`n`'s last drive step, if it was a spawn refused (not an error, nor a slot or backoff wait, which say
-/// so themselves), and of `cmd` when given: `held: <CODE> <why>`.
 pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
     let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
     let e = events.iter().rfind(mine)?;
@@ -966,7 +962,6 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
     let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
-    // #792: a step drive owns but its last try was refused is held, not undriven: `waiting` names the hold.
     let held = held || self::held(log.all, (&s.fleet, s.issue), None).is_some();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
