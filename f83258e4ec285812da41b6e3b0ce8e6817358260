@@ -1,0 +1,4 @@
+Decided: merge origin/staging 3cd14c0 (#749); the one conflict, crates/server/src/serve/v1.rs's crate::api import list, keeps both sides' names
+Because: crates/server/src/serve/v1.rs:10
+Rejected: none
+Owner: The branch is up to date with staging again; the broken-config banner is unchanged.
