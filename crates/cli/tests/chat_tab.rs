@@ -70,6 +70,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "<span class=ds><i class=dt></i>acme-api · claude · opus · awake</span>",
         "conductor in ",
         " class=\"blk me\" open><summary><span class=k>you</span>",
+        " class=\"blk ai\" open><summary><span class=k>conductor</span><span class=pv>I see it:",
         "<code>/v1/search</code>",
         "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
         "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
@@ -88,6 +89,10 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         assert!(t4.contains(want), "{want} not in {t4}");
     }
     assert!(!t4.contains("DECISION q31"), "a DECISION line shows as the ✓ line only");
+    assert!(
+        chat.contains("<span class=ds>all · claude · opus · asleep</span>"),
+        "{chat}"
+    );
     assert!(!t4.contains("disabled"), "a paired owner device writes");
     // The needs-you stack keeps lane asks, and (#517) a thread's ask tied to an issue with where it was asked;
     // `[chat·N]` counts the threads that wait on a choice (t4, t5).
@@ -655,7 +660,10 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
         &agents(&[("orchestrator-t1", "working", "/x", "w9:p1")]),
     );
     let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
-    assert!(!chat.contains("<p class=\"tlv wk\""), "{chat}");
+    assert!(
+        chat.contains("<p class=\"tlv wk\" data-since=1000000><i class=tld aria-hidden=true></i> working</p>"),
+        "{chat}"
+    );
 }
 
 /// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
@@ -1287,7 +1295,6 @@ fn until(f: impl Fn() -> bool) -> bool {
 /// watcher types the queued ones in, oldest first, each logged as the owner's. `steer` sends Esc (the turn stops), then
 /// the message; [send now] steers a queued one in and unqueues it.
 #[test]
-#[ignore = "#780 (q1173): the frozen board matches the old conductor-* types, so it no longer sees a turn to wait for"]
 fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now() {
     use std::sync::atomic::Ordering::SeqCst;
     let c = setup("chat-queue");
@@ -1438,9 +1445,11 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
         "{w}"
     );
     assert!(
-        w.contains(&fold(seq("3"), "1 command", &row("3"))) && !w.contains(&format!("data-since={since}")),
-        "{w}"
+        w.contains(&row("3").replacen("<details", &format!("<details data-n={}", seq("3")), 1))
+            && !w.contains(&fold(seq("3"), "1 command", &row("3"))),
+        "the live turn's row stays: {w}"
     );
+    assert!(w.contains(&format!("<p class=\"tlv wk\" data-since={since}>")), "{w}");
     let i = chat("idle");
     assert!(
         i.contains(&fold(seq("3"), "1 command", &row("3"))) && !i.contains("tlv wk"),
