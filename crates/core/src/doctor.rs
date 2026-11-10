@@ -287,13 +287,19 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let notifier = cfg.webpush_sub().is_some();
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
-    // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof.
+    // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof. #791: a tick still beating is running.
+    let running = crate::timer::running(ctx, cfg);
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
-        let line = format!("watchdog {what} — ran {age} → herdsman timer install");
-        row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
+        let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
+        let ran = match running.filter(|_| !fresh) {
+            Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
+            None => format!("ran {age}"),
+        };
+        let line = format!("watchdog {what} — {ran} → herdsman timer install");
+        row(rows, fresh || running.is_some(), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
         let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
