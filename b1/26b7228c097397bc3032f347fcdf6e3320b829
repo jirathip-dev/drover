@@ -1,0 +1,7 @@
+Decided: merged origin/staging again and moved the PR body's evidence to the new head b126b72
+Because: "shows the signing identity and fails if a build is unsigned"
+Decided: herdsman owns no Keychain item, so it adds no access lists; signing plus the doctor row cover the scope
+Because: crates/core/src/doctor.rs:56
+Rejected: a herdsman Keychain read added only to prove criterion 1 — that would be production code added only for a test
+Check: the PR body's Tests section names b126b7228c097397bc3032f347fcdf6e3320b829; rust CI's live.rs failure is a timing flake that needs a re-run
+Owner: Each herdsman build is signed with one fixed identity, and doctor now flags an unsigned build.
