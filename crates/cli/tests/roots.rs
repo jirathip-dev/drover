@@ -377,3 +377,61 @@ fn reflinks(d: &std::path::Path) -> bool {
     let _ = (std::fs::remove_file(&src), std::fs::remove_file(&dst));
     ok
 }
+
+/// #790: a root gone under a live lane: the next drive pass restarts the lane on the other root at its pushed head,
+/// once, with one `root-moved` naming both roots; `waiting` no longer says "root gone".
+#[test]
+fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
+    let r = repo("roots-drive");
+    working_on_nvme(&r);
+    std::fs::remove_dir_all(&r.nvme).unwrap(); // force-unmounted
+    let f = fake(&r.internal);
+    let (code, out) = run(&r.c, &Git(&f), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let sp = spawns(&r.c);
+    assert_eq!(
+        (sp.len(), sp.last().unwrap().str("root")),
+        (2, Some(&*r.internal.to_string_lossy())),
+        "{out}"
+    );
+    let new = r.internal.join("sendmeter/issue-12");
+    assert_eq!(
+        git(&new, &["rev-parse", "HEAD"]),
+        git(&r.origin, &["rev-parse", "issue-12"])
+    );
+    // The next pass: nothing new.
+    let (code, out) = run(&r.c, &Git(&f), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(spawns(&r.c).len(), 2, "{out}");
+    let ev = read(&r.c.state).unwrap();
+    let moved: Vec<&Event> = ev.iter().filter(|e| e.kind == "root-moved").collect();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].str("root"), Some(&*r.nvme.to_string_lossy()));
+    assert_eq!(moved[0].str("to"), Some(&*r.internal.to_string_lossy()));
+    let (code, out) = run(&r.c, &Git(&f), &["waiting"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("sendmeter #12") && !out.contains("root gone"), "{out}");
+}
+
+/// #790: a restart that fails (here gh and herdr answer nothing) logs no move and is tried again on the next pass.
+#[test]
+fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
+    let r = repo("roots-retry");
+    working_on_nvme(&r);
+    std::fs::remove_dir_all(&r.nvme).unwrap();
+    let down = Fake::default().reply("herdr agent list", NO_AGENTS); // nothing else answers: the start fails
+    let (code, out) = run(&r.c, &Git(&down), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("{AGENT}: restart failed")), "{out}");
+    let moved = |c: &herdsman::Ctx| {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "root-moved")
+            .count()
+    };
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (1, 0), "{out}");
+    let (code, out) = run(&r.c, &Git(&fake(&r.internal)), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (2, 1), "{out}");
+}

@@ -30,7 +30,7 @@ fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
         .find_map(|e| e.str("sha").filter(|s| !s.is_empty()))
 }
 
-/// A design lane that ended its turn (not working) with a pushed commit made since it spawned hands off:
+/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off:
 /// `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
 pub fn handoff(
     ctx: &Ctx,
@@ -55,13 +55,16 @@ pub fn handoff(
     let Some(wt) = sp.str("worktree").filter(|_| !busy) else {
         return Ok(());
     };
-    let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).unwrap_or_default();
-    let (head, t) = log.trim().split_once(' ').unwrap_or_default();
-    let new = t.parse().is_ok_and(|t: u64| t > sp.ts) && sp.str("sha") != Some(head);
-    if !new || crate::spawn::dirty(r, Path::new(wt)).is_some() {
+    let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H"]).unwrap_or_default();
+    let head = log.trim();
+    let (f, n) = (s.fleet.as_str(), s.issue);
+    // #789: the head's design is handed off once, whichever lane pushed it (a `--supersede` one pushes nothing new).
+    let handed = ev
+        .iter()
+        .any(|e| e.is("design-review", f, n) && e.str("sha") == Some(head));
+    if head.is_empty() || handed || crate::spawn::dirty(r, Path::new(wt)).is_some() {
         return Ok(());
     }
-    let (f, n) = (s.fleet.as_str(), s.issue);
     let role = sp.str("role").unwrap_or("design");
     let pre = pre(&ev, f, n, role).unwrap_or(head);
     let dir = if role == "architect" {
@@ -70,6 +73,9 @@ pub fn handoff(
         "docs/design"
     };
     let names = ok(r, "git", &["-C", wt, "diff", "--name-only", pre, head, "--", dir]).unwrap_or_default();
+    if names.trim().is_empty() {
+        return Ok(()); // no design on the branch yet
+    }
     // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
     let adr = names.lines().next().filter(|_| role == "architect");
     let adr = adr.map(|l| l.split('/').take(3).collect::<Vec<_>>().join("/"));
