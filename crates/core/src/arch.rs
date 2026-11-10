@@ -342,15 +342,44 @@ fn changes(diff: &str) -> Vec<Change> {
     v
 }
 
-fn comment_lines(lines: &[&str]) -> Vec<bool> {
-    let mut open = false;
+fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
+    let (mut block, mut quote, mut raw) = (false, None::<char>, None::<usize>);
     let each = lines.iter().map(|l| {
-        let t = l.trim_start();
-        let c = open || t.starts_with("//") || t.starts_with("/*");
-        if open {
-            open = !l.contains("*/");
-        } else if let Some(r) = t.strip_prefix("/*") {
-            open = !r.contains("*/");
+        let s: Vec<char> = l.chars().collect();
+        let (mut c, mut i) = (block, 0);
+        while i < s.len() {
+            let (ch, next) = (s[i], s.get(i + 1).copied());
+            if block {
+                block = !(ch == '*' && next == Some('/'));
+                i += if block { 1 } else { 2 };
+            } else if let Some(n) = raw {
+                let end = ch == '"' && s[i + 1..].iter().take(n).filter(|&&x| x == '#').count() == n;
+                raw = if end { None } else { raw };
+                i += if end { n + 1 } else { 1 };
+            } else if let Some(q) = quote {
+                quote = if ch == q { None } else { quote };
+                i += if ch == '\\' { 2 } else { 1 };
+            } else if ch == '/' && next == Some('/') {
+                c = true;
+                break;
+            } else if ch == '/' && next == Some('*') {
+                (c, block, i) = (true, true, i + 2);
+            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && (i == 0 || !s[i - 1].is_alphanumeric()) {
+                let n = s[i + 1..].iter().take_while(|&&x| x == '#').count();
+                raw = (s.get(i + 1 + n) == Some(&'"')).then_some(n);
+                i += if raw.is_some() { n + 2 } else { 1 };
+            } else if ch == '"' || (!rust && matches!(ch, '\'' | '`')) {
+                (quote, i) = (Some(ch), i + 1);
+            } else if rust && ch == '\'' && (next == Some('\\') || s.get(i + 2) == Some(&'\'')) {
+                let close = s.get(i + 3..).and_then(|r| r.iter().position(|&x| x == '\''));
+                i += if next == Some('\\') {
+                    close.map_or(1, |p| p + 4)
+                } else {
+                    3
+                };
+            } else {
+                i += 1;
+            }
         }
         c
     });
@@ -377,7 +406,10 @@ fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
         let (lines, com) = seen.entry(&c.file).or_insert_with(|| {
             let src = std::fs::read_to_string(&c.file).unwrap_or_default();
             let lines: Vec<String> = src.lines().map(String::from).collect();
-            let com = comment_lines(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+            let com = comment_lines(
+                &lines.iter().map(String::as_str).collect::<Vec<_>>(),
+                Path::new(&c.file).extension().is_some_and(|x| x == "rs"),
+            );
             (lines, com)
         });
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();

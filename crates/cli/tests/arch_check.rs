@@ -225,10 +225,20 @@ fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_
         "}",
         "/* block",
         "  still */",
+        "fn d() { let x = 1; // trailing",
+        "    let s = 2; /* inline */ }",
+        "const U: &str = \"https://x // y /* z\";",
+        "const R: &str = r#\"a \" // b\"#;",
+        "const C: char = '\"'; // after a char",
+        "fn e<'a>(v: &'a str) -> &'a str { v }",
     ];
     let lib = format!("{OLD}{}\n", added.join("\n"));
     std::fs::write(d.join("src/lib.rs"), lib).unwrap();
-    std::fs::write(d.join("web/a.ts"), "/** Shown. */\nexport const a = 1;\n// not ok\n").unwrap();
+    std::fs::write(
+        d.join("web/a.ts"),
+        "/** Shown. */\nexport const a = 1;\n// not ok\nconst b = '//' + `/*`; /* not ok */\nconst c = \"// fine\";\n",
+    )
+    .unwrap();
     let (code, out) = arch(&d, &["--base", "HEAD"]);
     assert_eq!(code, 1, "{out}");
     let flagged: Vec<&str> = out
@@ -243,7 +253,11 @@ fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_
             "src/lib.rs:11",
             "src/lib.rs:13",
             "src/lib.rs:14",
-            "web/a.ts:3"
+            "src/lib.rs:15",
+            "src/lib.rs:16",
+            "src/lib.rs:19",
+            "web/a.ts:3",
+            "web/a.ts:4"
         ],
         "{out}"
     );
