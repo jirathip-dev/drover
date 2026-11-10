@@ -557,9 +557,7 @@ enum ThreadCmd {
     New {
         repo: String,
         title: String,
-        #[arg(
-            help = "Its orchestrator's harness for good: claude | hermes | dsh (default `[chat]`'s, else the orchestrator role's)"
-        )]
+        #[arg(help = "Its orchestrator's harness for good (default `[chat]`'s, else the orchestrator role's)")]
         #[arg(long)]
         harness: Option<String>,
         #[arg(help = "The `[orchestrator.<id>]` it talks to (default: the first whose fleets cover the repo)")]
