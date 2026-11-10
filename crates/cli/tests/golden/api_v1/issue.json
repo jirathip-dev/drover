@@ -2,6 +2,7 @@
   "response": {
     "fleet": "sendmeter",
     "issue": 12,
+    "pending": null,
     "verdicts": [],
     "why": null
   },
@@ -9,6 +10,7 @@
   "schema": {
     "fleet": "string",
     "issue": "number",
+    "pending": "null",
     "verdicts": [],
     "why": "null"
   },

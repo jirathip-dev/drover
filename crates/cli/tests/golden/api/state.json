@@ -64,7 +64,9 @@
       "blocked_on": [],
       "fleet": "sendmeter",
       "issue": 17,
+      "pending": null,
       "state": "queued",
+      "status": null,
       "title": null
     }
   ],
