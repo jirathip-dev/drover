@@ -408,8 +408,14 @@ pub fn skipped(
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
+/// #712: a parked issue's `park --why`.
+pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
+    let parked = |e: &&Event| e.is("parked", fleet, n);
+    (state(st, fleet, n) == "parked").then(|| events.iter().rfind(parked)?.str("why"))?
+}
+
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "architect": i.architect, "verify": i.verify, "repro": i.repro, "playbook": i.playbook});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "architect": i.architect, "verify": i.verify, "repro": i.repro, "playbook": i.playbook, "why": park_why(events, st, fleet, i.issue)});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 
