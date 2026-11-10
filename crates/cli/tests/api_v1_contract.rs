@@ -185,7 +185,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
         ("repo/<fleet>/threads", "/api/v1/repo/sendmeter/threads", RepoThreads),
-        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), Chat),
+        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
         ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),
