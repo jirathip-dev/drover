@@ -23,6 +23,9 @@ pub const BETA_HEADER: &str = "anthropic-beta";
 pub const OAUTH_BETA: &str = "oauth-2025-04-20";
 pub const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
 pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
+/// #770: what `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
+pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
+pub const LOCAL_DIR: &str = ".claude/";
 
 pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
@@ -163,7 +166,8 @@ impl Harness for Claude {
     }
     /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
-        format!(" && mkdir -p .claude && cp {settings} .claude/settings.local.json && cp {role} CLAUDE.local.md")
+        let [md, json] = LOCAL_FILES;
+        format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
     /// #683: `[accounts]` of provider `claude` (`harness::CONFIG_ENV`).
     fn credential(&self) -> Credential {

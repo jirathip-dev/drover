@@ -751,9 +751,12 @@ pub const OWN_FILES: &[&str] = &[
     ".review-brief.md",
     "why.md",              // #677: herdsman attaches it as a note; never committed
     ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
-    "CLAUDE.local.md",     // #770: the role's role.md, copied in by spawn
-    ".claude/settings.local.json",
 ];
+
+/// #770: `OWN_FILES` and the harness files spawn copies in (`harness::LOCAL_FILES`).
+pub fn own_files() -> impl Iterator<Item = &'static str> {
+    OWN_FILES.iter().chain(&harness::LOCAL_FILES).copied()
+}
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
@@ -768,11 +771,13 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
 }
 
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages; #770: the
-/// `.claude/` folder spawn made for its settings).
+/// harness folder spawn made for its settings).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
-        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/", ".claude/"]))
-            .any(|f| l.trim_end() == format!("?? {f}"))
+        (own_files()
+            .chain(SHOT_DIRS.iter().copied())
+            .chain(["node_modules/", harness::LOCAL_DIR]))
+        .any(|f| l.trim_end() == format!("?? {f}"))
     };
     st.lines().filter(|l| !own(l)).count()
 }

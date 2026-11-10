@@ -16,8 +16,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub use claude::{
-    remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, OAUTH_BETA,
-    PROXY_UPSTREAM,
+    remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, LOCAL_DIR, LOCAL_FILES,
+    OAUTH_BETA, PROXY_UPSTREAM,
 };
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
