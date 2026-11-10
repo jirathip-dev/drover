@@ -1,0 +1,9 @@
+[comments]
+policy = "off"
+except = ["assets/types/**", "web/dist/**"]
+
+[docs]
+paths = ["docs/**/*.md", "README.md"]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
+cli = true
+skip = [".herdsman/**"]
