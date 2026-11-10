@@ -62,7 +62,7 @@ pub fn back(msg: &str) -> String {
 
 /// The page for a paired device: `lanes` are API v1's (the step's snapshot), `msg` the last post's result.
 pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
-    let (Ok(cfg), Ok(ev)) = (Config::load(&ctx.config), shared(&ctx.state)) else {
+    let (Ok(cfg), Ok(ev)) = (Config::kept(ctx), shared(&ctx.state)) else {
         return shell("<p>fleet.toml or the event log could not be read</p>");
     };
     let mut b = String::new();
@@ -158,7 +158,7 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
 pub fn act(ctx: &Ctx, r: &dyn Runner, f: &BTreeMap<String, String>) -> String {
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     let mut out = Vec::new();
-    let res = Config::load(&ctx.config).and_then(|cfg| match g("op") {
+    let res = Config::kept(ctx).and_then(|cfg| match g("op") {
         op @ ("pause" | "resume") => crate::pause(ctx, &mut out, g("fleet"), op == "pause", Some(VIA)).map(|()| None),
         "answer" => {
             let who = (g("fleet"), g("id"));
