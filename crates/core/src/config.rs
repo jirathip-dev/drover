@@ -1253,7 +1253,6 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
         let l = lines[i];
         let eq = l.find('=').unwrap() + 1;
         let v = eq + l[eq..].len() - l[eq..].trim_start().len();
-        // #786: the value runs to an unquoted `#` (its comment, kept) or the line's end, whatever its type.
         let mut q = false;
         let end = l[v..]
             .find(|c| (q ^= c == '"', c == '#' && !q).1)

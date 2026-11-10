@@ -102,7 +102,6 @@ impl Server<'_> {
                     },
                 )
             }
-            // #786: fleet.toml for cooee's config screens, a paired device only.
             ("GET", Some("config")) if !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             ("GET", Some("config")) => crate::propose::view(ctx).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v)),
             ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),

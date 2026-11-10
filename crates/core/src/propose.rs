@@ -89,13 +89,11 @@ pub fn waiting<'a>(ctx: &'a Ctx, events: &'a [Event], thread: &'a str) -> impl I
     })
 }
 
-/// Write `text` over fleet.toml `cur` (backup kept), sync the profiles and run `doctor`: (the new config, backup, doctor ok).
 fn install(ctx: &Ctx, r: &dyn Runner, cur: &str, text: &str) -> Result<(Config, String, bool)> {
     let new = Config::parse(text)?;
     let backup = format!("{}.bak-{}", ctx.config.display(), ctx.now);
     std::fs::write(&backup, cur)?;
     crate::devices::write0600(&ctx.config, text.as_bytes())?;
-    // #732: the new roles' profiles (hooks, Hermes' approval) before doctor looks at them.
     crate::spawn::profiles_sync(ctx, &new, &crate::cli::usage_doc(), &mut vec![])?;
     let ok = crate::doctor::doctor(ctx, r, &mut vec![], false, false)? == 0;
     Ok((new, backup, ok))
@@ -175,8 +173,7 @@ pub struct ConfigView {
     pub fields: Vec<ConfigField>,
 }
 
-/// #786: one setting: `path` (dotted; an array of tables' entries by index), its TOML `kind`, the values it may take
-/// (`allowed`, empty: any), fleet.example.toml's comment on its key, and `secret:NAME`'s name (the value is in the store).
+/// #786: one setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -189,8 +186,7 @@ pub struct ConfigField {
     pub secret: Option<String>,
 }
 
-/// #786: `POST /api/v1/config-check` and `config-edit`'s body: the raw TOML (`text`), or field edits, a fleet added or
-/// one removed over the file read at `hash`; `confirm` removes a fleet with live lanes.
+/// #786: `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -271,7 +267,6 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
     })
 }
 
-/// The leaves under `v` at `path`: tables and arrays of tables walked, any other value one leaf.
 fn walk(path: String, v: toml::Value, out: &mut Vec<(String, toml::Value)>) {
     let at = |k: &dyn std::fmt::Display| format!("{path}.{k}").trim_start_matches('.').to_string();
     match v {
@@ -283,7 +278,6 @@ fn walk(path: String, v: toml::Value, out: &mut Vec<(String, toml::Value)>) {
     }
 }
 
-/// #786: `c` over fleet.toml `cur`: its text (not yet validated).
 fn changed(cfg: &Config, cur: &str, c: &ConfigChange) -> Result<String> {
     let mut text = c.text.clone().unwrap_or_else(|| cur.into());
     for s in &c.set {
@@ -337,7 +331,6 @@ fn changed(cfg: &Config, cur: &str, c: &ConfigChange) -> Result<String> {
     ))
 }
 
-/// The table a `[t]` or `[[t]]` header line names.
 fn table(l: &str) -> Option<&str> {
     let t = l.trim_start().strip_prefix('[')?.trim_start_matches('[');
     Some(t.split(']').next()?.trim())
@@ -356,8 +349,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, c: &ConfigChange) -> Result<ConfigCheck> {
     })
 }
 
-/// #786: the owner's manual edit (cooee): `c` applied as `config apply` applies a proposal (backup, profiles, doctor),
-/// refused `STALE` if fleet.toml moved since `c.hash` was read, logged `config-edit` `by`.
+/// #786: the owner's manual edit: refused `STALE` if fleet.toml moved since `c.hash`, logged `config-edit` `by`.
 pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str) -> Result<String> {
     let cur = std::fs::read_to_string(&ctx.config)?;
     if sha256(cur.as_bytes()) != c.hash {

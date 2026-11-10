@@ -1,6 +1,3 @@
-//! #786: fleet.toml over API v1 for cooee: `GET config` (every setting, secrets as names only, the hash), `POST
-//! config-check` (diff and errors, nothing written) and the owner's `POST config-edit` (a stale hash refused, an invalid
-//! edit writes nothing, comments kept, a fleet added or removed, logged `by: owner (cooee)`); pause/resume round-trip.
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
@@ -20,7 +17,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16, V
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-/// The board as a paired device: (ctx, server's runner, cookie).
 fn board(name: &str, extra: &str) -> (herdsman::Ctx, Fake, String) {
     let (c, r) = v1_board(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
@@ -83,7 +79,6 @@ fn read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device() {
         json!("herdsman merge target; main is never a target")
     );
     assert_eq!(field(&v, "limits.review_rounds")["kind"], json!("integer"));
-    // A secret value pasted into the file never comes back: the read is refused, the value not echoed.
     let token = format!("ghp_{}", "a1".repeat(18));
     std::fs::write(&c.config, text.replace("secret:STRIPE_KEY", &token)).unwrap();
     let (status, v) = req(&s, "GET", "/api/v1/config", "", &ck);
@@ -161,7 +156,6 @@ fn a_field_edit_keeps_comments_backs_up_and_logs_the_owner() {
     );
     assert_eq!(std::fs::read_to_string(e.str("backup").unwrap()).unwrap(), before);
     assert!(e.str("diff").unwrap().contains("+ model = \"sonnet\""));
-    // The same body again: its hash is stale now.
     assert_eq!(
         req(&s, "POST", "/api/v1/config-edit", &body, &ck).1["code"],
         json!("STALE")
@@ -184,7 +178,6 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
     assert_eq!(web.role("rev").unwrap().harness, "hermes");
     assert!(std::fs::read_to_string(&c.config).unwrap().starts_with(&before));
     assert_eq!(edits(&c).pop().unwrap().str("added"), Some("web"));
-    // Removed: only its sections go; the file is as before.
     let (status, v) = post("config-edit", json!({"hash": get(&s, &ck)["hash"], "remove": "web"}));
     assert_eq!(status, 200, "{v}");
     assert_eq!(
@@ -196,14 +189,12 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
         (e.fleet.as_str(), e.str("removed"), e.str("by")),
         ("web", Some("web"), Some("owner (cooee)"))
     );
-    // A fleet with a live lane is kept unless confirmed.
     let gone = json!({"hash": get(&s, &ck)["hash"], "remove": "sendmeter"});
     assert_eq!(post("config-edit", gone).1["code"], json!("LANE_LIVE"));
     assert_eq!(
         std::fs::read_to_string(&c.config).unwrap().trim_end(),
         before.trim_end()
     );
-    // Pause and resume: the owner's verbs, logged.
     for op in ["pause", "resume"] {
         let mtime = req(&s, "GET", "/api/v1/state", "", "").1["mtime"].clone();
         let (status, v) = post(op, json!({"fleet": "sendmeter", "mtime": mtime}));
