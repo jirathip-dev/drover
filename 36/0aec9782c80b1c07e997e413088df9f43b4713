@@ -1,0 +1,8 @@
+Decided: lane tests run on one shared fake shed server in crates/cli/tests/common/fake_shed.rs; herdr-only tests are listed for #721
+Because: "The fake shed lives in one shared helper, not copied into each test file"
+Decided: tests that run the real binary against a shed fleet get a stub `shed` on PATH from FakeShed::path_in
+Because: crates/core/src/spawn.rs:991
+Rejected: a herdr fleet for access.rs's dry run — it would put a herdr fake back in a migrated test
+Decided: staging's new lane tests (#779 #789 #790) merged onto the fake shed too
+Check: cargo test with no shed on PATH (as CI) passes; git diff on crates/*/src is empty
+Owner: Test code only; lanes in tests now run on a pretend shed so retiring herdr won't break the suite.
