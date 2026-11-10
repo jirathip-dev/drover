@@ -27,43 +27,38 @@ fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
     }
 }
 
-/// #12's impl lane, spawned at ts 10 in a real worktree, and a Fake on which it sits idle in its pane (`live`) or is
-/// gone; `pr` = the PR view (`None`: no PR), `head` = the worktree's (`None`: unread).
-fn lane(name: &str, live: bool, pr: Option<&str>) -> (herdsman::Ctx, Fake) {
+/// #12's impl lane, spawned at ts 10 in a real worktree on a fake shed, where it sits idle (`live`) or is gone, and
+/// a Fake for the rest; `pr` = the PR view (`None`: no PR), `head` = the worktree's (`None`: unread).
+fn lane(name: &str, live: bool, pr: Option<&str>) -> (herdsman::Ctx, Fake, FakeShed) {
     lane_at(name, live, pr, None)
 }
 
-fn lane_at(name: &str, live: bool, pr: Option<&str>, head: Option<&str>) -> (herdsman::Ctx, Fake) {
+fn lane_at(name: &str, live: bool, pr: Option<&str>, head: Option<&str>) -> (herdsman::Ctx, Fake, FakeShed) {
     let c = setup(name);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
-    let d = json!({"role": "impl", "agent": LANE, "pane": "w9:p1", "workspace": "w9", "worktree": wt,
-        "branch": "issue-12"});
+    let d = json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt, "branch": "issue-12",
+        "runtime": "shed"});
     ev(&c, 10, "spawn", d);
-    let list = agents(&[(LANE, "idle", &wt.to_string_lossy(), "w9:p1")]);
+    if live {
+        sh.lane(LANE, "idle", &wt.to_string_lossy());
+    }
     let mut r = Fake::default()
-        .reply("herdr agent list", if live { &list } else { NO_AGENTS })
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
-        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}");
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#);
     if let Some(pr) = pr {
         r = r.reply("gh pr view issue-12", pr);
     }
     if let Some(h) = head {
         r = r.reply(&format!("git -C {} log", wt.display()), &format!("{h} 20"));
     }
-    (c, r.reply("git -C", ""))
+    (c, r.reply("git -C", ""), sh)
 }
 
 fn pr(head: &str, ci: &str) -> String {
@@ -110,12 +105,22 @@ fn texts(c: &herdsman::Ctx, r: &Fake) -> (String, String) {
     )
 }
 
-const NUDGE: &str = "herdr agent prompt sendmeter-impl-12 herdsman: you reported `done`, but nothing new is pushed";
-const GO_ON: &str = "herdr agent prompt sendmeter-impl-12 herdsman: continue the task";
+const NUDGE: &str = "herdsman: you reported `done`, but nothing new is pushed";
+const GO_ON: &str = "herdsman: continue the task";
+
+/// How many prompts starting `text` shed typed into the lane.
+fn typed(sh: &FakeShed, text: &str) -> usize {
+    sh.sent(LANE).iter().filter(|t| t.starts_with(text)).count()
+}
+
+/// Whether the lane was started again (a shed `run`).
+fn respawned(sh: &FakeShed) -> bool {
+    sh.methods().iter().any(|m| m == "run")
+}
 
 #[test]
 fn the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity() {
-    let (c, r) = lane("turn-verb", true, None);
+    let (c, r, _sh) = lane("turn-verb", true, None);
     let out = turn(&c, &r, &["working", "--why", "tests left"]);
     assert!(out.contains("recorded sendmeter#12 turn-end: working"), "{out}");
     let e = &kinds(&c, "turn-end")[0];
@@ -136,7 +141,7 @@ fn the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity() {
 
 #[test]
 fn no_state_reads_idle_without_pushing_as_before() {
-    let (c, r) = lane("turn-none", true, None);
+    let (c, r, _sh) = lane("turn-none", true, None);
     let (w, st) = texts(&c, &r);
     assert!(w.contains("idle without pushing (check the pane)"), "{w}");
     assert!(st.contains("idle without pushing (check the pane)"), "{st}");
@@ -146,7 +151,7 @@ fn no_state_reads_idle_without_pushing_as_before() {
 fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
     // The PR head moved (the worktree is elsewhere), CI still running: no handoff before `done`.
     let head = sha("abc");
-    let (c, r) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
+    let (c, r, sh) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
     let (w, _) = texts(&c, &r);
     assert!(w.contains("idle without pushing"), "{w}");
     // #677: with its why note (git and gh writes are the Fake's).
@@ -158,12 +163,12 @@ fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains(&format!("pushed: {head:.7} via pr")), "{out}");
     assert_eq!(state(&c), "review(1)");
-    assert!(!r.called(NUDGE));
+    assert_eq!(typed(&sh, NUDGE), 0);
 }
 
 #[test]
 fn done_with_nothing_pushed_is_nudged_once_then_blocked() {
-    let (c, r) = lane("turn-done-empty", true, None);
+    let (c, r, sh) = lane("turn-done-empty", true, None);
     turn(&c, &r, &["done"]);
     let (w, st) = texts(&c, &r);
     assert!(
@@ -179,12 +184,12 @@ fn done_with_nothing_pushed_is_nudged_once_then_blocked() {
         steps.is_empty() && out.contains("sendmeter #12 turn done: prompted"),
         "{out}"
     );
-    assert_eq!(r.count(NUDGE), 1, "{:?}", r.calls.borrow());
+    assert_eq!(typed(&sh, NUDGE), 1, "{:?}", sh.methods());
     // Nudged: the next pass waits, the nudge is never sent twice.
     let (w, _) = texts(&at(&c, 60), &r);
     assert!(w.contains("reported done, nothing pushed: nudged 60s ago"), "{w}");
     drive(&at(&c, 60), &r);
-    assert_eq!(r.count(NUDGE), 1);
+    assert_eq!(typed(&sh, NUDGE), 1);
     // `done` again with still nothing pushed: an evidence mismatch, now blocked on the owner.
     turn(&at(&c, 120), &r, &["done"]);
     let (out, _) = drive(&at(&c, 120), &r);
@@ -197,16 +202,16 @@ fn done_with_nothing_pushed_is_nudged_once_then_blocked() {
     assert_eq!(nh.str("code"), Some("LANE_BLOCKED"));
     drive(&at(&c, 7200), &r);
     assert_eq!(
-        (kinds(&c, "needs-human").len(), r.count(NUDGE)),
+        (kinds(&c, "needs-human").len(), typed(&sh, NUDGE)),
         (1, 1),
         "it never loops"
     );
-    assert!(!r.called("herdr agent start"), "never respawned");
+    assert!(!respawned(&sh), "never respawned");
 }
 
 #[test]
 fn a_nudged_done_left_unanswered_is_blocked_after_10_min() {
-    let (c, r) = lane("turn-done-quiet", true, None);
+    let (c, r, _sh) = lane("turn-done-quiet", true, None);
     turn(&c, &r, &["done"]);
     drive(&c, &r);
     let (out, _) = drive(&at(&c, 601), &r);
@@ -218,7 +223,7 @@ fn a_nudged_done_left_unanswered_is_blocked_after_10_min() {
 
 #[test]
 fn blocked_is_an_owner_card_with_its_reason() {
-    let (c, r) = lane("turn-blocked", true, None);
+    let (c, r, sh) = lane("turn-blocked", true, None);
     turn(&c, &r, &["blocked", "--why", "the API key is missing"]);
     let (w, st) = texts(&c, &r);
     assert!(w.contains("reported blocked: the API key is missing"), "{w}");
@@ -231,12 +236,12 @@ fn blocked_is_an_owner_card_with_its_reason() {
     let nh = &kinds(&c, "needs-human")[0];
     assert_eq!(nh.str("reason"), Some("lane blocked: the API key is missing"));
     assert_eq!(state(&c), "needs-human");
-    assert!(!r.called("herdr agent prompt") && !r.called("herdr agent start"));
+    assert!(sh.sent(LANE).is_empty() && !respawned(&sh), "{:?}", sh.methods());
 }
 
 #[test]
 fn working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn() {
-    let (c, r) = lane("turn-working", true, None);
+    let (c, r, sh) = lane("turn-working", true, None);
     turn(&c, &r, &["working", "--why", "two tests left"]);
     let (w, st) = texts(&at(&c, 300), &r);
     assert!(
@@ -249,20 +254,20 @@ fn working_gets_one_continue_prompt_after_the_idle_threshold_never_a_respawn() {
     );
     let (out, _) = drive(&at(&c, 300), &r);
     assert!(!out.contains("turn working"), "{out}");
-    assert_eq!(r.count(GO_ON), 0);
+    assert_eq!(typed(&sh, GO_ON), 0);
     let (out, _) = drive(&at(&c, 1801), &r);
     assert!(out.contains("sendmeter #12 turn working: prompted"), "{out}");
-    assert_eq!(r.count(GO_ON), 1, "{:?}", r.calls.borrow());
+    assert_eq!(typed(&sh, GO_ON), 1, "{:?}", sh.methods());
     let (w, _) = texts(&at(&c, 1900), &r);
     assert!(w.contains("prompted to continue 99s ago"), "{w}");
     drive(&at(&c, 7200), &r);
-    assert_eq!(r.count(GO_ON), 1);
-    assert!(!r.called("herdr agent start") && kinds(&c, "respawn").is_empty());
+    assert_eq!(typed(&sh, GO_ON), 1);
+    assert!(!respawned(&sh) && kinds(&c, "respawn").is_empty());
 }
 
 #[test]
 fn need_input_without_an_ask_says_so() {
-    let (c, r) = lane("turn-input", true, None);
+    let (c, r, _sh) = lane("turn-input", true, None);
     turn(&c, &r, &["need-input", "--why", "which port"]);
     let (w, st) = texts(&c, &r);
     assert!(w.contains("reported need-input (which port) with no open ask"), "{w}");
@@ -276,10 +281,11 @@ fn need_input_without_an_ask_says_so() {
 
 #[test]
 fn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path() {
-    let (c, r) = lane("turn-gone", false, None);
+    let (c, r, sh) = lane("turn-gone", false, None);
     turn(&c, &r, &["working"]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["respawn"], "{out}");
+    assert_eq!(sh.last("run")["name"], LANE, "{:?}", sh.methods());
 }
 
 /// `herdsman hook` fed Claude's `event` JSON (`active`: its `stop_hook_active`): its stdout.
@@ -294,7 +300,7 @@ fn hook(c: &herdsman::Ctx, event: &str, active: bool) -> String {
 
 #[test]
 fn the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops() {
-    let (c, r) = lane("turn-hook", true, None);
+    let (c, r, _sh) = lane("turn-hook", true, None);
     let asked = |o: &str| {
         let v: serde_json::Value = serde_json::from_str(o.trim()).unwrap();
         v["decision"] == "block" && v["reason"] == herdsman::hook::TURN_ASK

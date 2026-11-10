@@ -29,56 +29,94 @@ fn folders(d: &Path, role_extra: &str) -> String {
     config(d, role_extra) + "\n[accounts.usage]\n" + &dirs
 }
 
-/// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; its pane's shell's `SIGN_IN`.
-fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
-    spawn_var(c, n, SIGN_IN)
+/// `c`'s lanes on a fake shed.
+fn shed(c: &herdsman::Ctx) -> FakeShed {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    sh
 }
 
-/// As `spawn`; `var` is what its pane's shell printed of `"$<var>"`.
-fn spawn_var(c: &herdsman::Ctx, n: u64, var: &'static str) -> (Fake, String) {
-    spawn_with(c, n, var, |r| r)
+/// What lane `lane`'s shell on `sh` prints of `"$<var>"` after running the `export` line typed into it.
+fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
+    let typed = sh.sent(lane);
+    let line = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
+    let line = format!("{}; printf %s \"${var}\"", line.trim_end_matches('\r'));
+    // #683: the pane's shell starts with neither credential var of the test's own env.
+    let mut c = std::process::Command::new("sh");
+    c.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
+    String::from_utf8_lossy(&c.arg("-c").arg(line).output().unwrap().stdout).into()
+}
+
+/// Lane `n`'s secrets file (`<worktree>.env`) made empty (0600) beforehand, also linked as `<worktree>.env.keep`:
+/// spawn writes it in place and removes only its name, so the shell can source what spawn wrote after the spawn
+/// (shed's typed lines go over its socket, past the test's runner).
+fn keep_secrets(c: &herdsman::Ctx, n: u64) {
+    use std::os::unix::fs::PermissionsExt;
+    let f = format!("{}.env", c.worktrees.join(format!("sendmeter/issue-{n}")).display());
+    std::fs::create_dir_all(Path::new(&f).parent().unwrap()).unwrap();
+    std::fs::write(&f, "").unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::hard_link(&f, format!("{f}.keep")).unwrap();
+}
+
+/// A real (faked gh/git) impl spawn of issue `n` on shed `sh` (terminal `sendmeter-impl-<n>`); its shell's `SIGN_IN`.
+fn spawn(c: &herdsman::Ctx, sh: &FakeShed, n: u64) -> (Fake, String) {
+    spawn_var(c, sh, n, SIGN_IN)
+}
+
+/// As `spawn`; `var` is what its shell printed of `"$<var>"`.
+fn spawn_var(c: &herdsman::Ctx, sh: &FakeShed, n: u64, var: &'static str) -> (Fake, String) {
+    spawn_with(c, sh, n, var, |r| r)
 }
 
 /// As `spawn_var`, its runner given more replies by `more`.
-fn spawn_with(c: &herdsman::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) -> Fake) -> (Fake, String) {
+fn spawn_with(
+    c: &herdsman::Ctx,
+    sh: &FakeShed,
+    n: u64,
+    var: &'static str,
+    more: impl Fn(Fake) -> Fake,
+) -> (Fake, String) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
-    let pane = format!("w9:p{n}");
     let r = more(Fake::default())
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
-        .reply("git -C", "")
-        .reply(
-            "herdr worktree open",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w9",
-            &format!(r#"{{"result":{{"panes":[{{"pane_id":"{pane}","agent":null}}]}}}}"#),
-        )
-        .reply(&format!("herdr pane run {pane} export"), "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}");
-    let sh = Shell(&r, var, Shared::default());
-    let (code, out) = run(c, &sh, &["spawn", "sendmeter", &n.to_string(), "impl"]);
+        .reply("git -C", "");
+    let lane = format!("sendmeter-impl-{n}");
+    let (code, out) = run(c, &r, &["spawn", "sendmeter", &n.to_string(), "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(sh.last("run")["name"], lane, "{:?}", sh.methods());
     assert!(
         !out.contains(TOKEN_A) && !out.contains(TOKEN_B),
         "token in stdout: {out}"
     );
-    let token = sh.2.borrow().concat();
-    assert!(
-        !Path::new(&format!("{}.env", wt.display())).exists(),
-        "the secrets file is left behind"
-    );
+    let secrets = format!("{}.env", wt.display());
+    assert!(!Path::new(&secrets).exists(), "the secrets file is left behind");
+    // `keep_secrets`: what spawn wrote to it, back under its name while the shell sources it.
+    let kept = format!("{secrets}.keep");
+    if Path::new(&kept).exists() {
+        std::fs::hard_link(&kept, &secrets).unwrap();
+    }
+    let token = shell(sh, &lane, var);
+    for f in [&secrets, &kept] {
+        let _ = std::fs::remove_file(f);
+    }
     (r, token)
+}
+
+/// Everything typed into lane `n`'s shell on `sh`, and every command line `r` ran.
+fn lines(sh: &FakeShed, r: &Fake, n: u64) -> Vec<String> {
+    let mut all = sh.sent(&format!("sendmeter-impl-{n}"));
+    all.extend(r.calls.borrow().iter().cloned());
+    all
 }
 
 fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
     let (code, out) = run(
         c,
-        &Fake::default(),
+        &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
         &["spawn", "sendmeter", &n.to_string(), "impl", "--dry-run", "--json"],
     );
     assert_eq!(code, 0, "{out}");
@@ -97,14 +135,20 @@ fn no_token_in_log(c: &herdsman::Ctx) {
 fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
     let d = tmpdir("acct-b");
     let c = ctx(&d, &folders(&d, "account = \"B\""));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let (r, got) = spawn(&c, 12);
+    let (r, got) = spawn(&c, &sh, 12);
     // #683: with no `account_env`, B's folder as CLAUDE_CONFIG_DIR; no token, no secrets file.
-    let calls = r.calls.borrow();
-    assert!(!calls.iter().any(|l| l.contains(TOKEN_B)), "token passed through argv");
+    let calls = lines(&sh, &r, 12);
+    assert!(
+        !calls.iter().any(|l| l.contains(TOKEN_B)),
+        "token passed through argv or the pane"
+    );
     assert_eq!(got, format!("{}/accounts/B|", d.display()));
     assert!(!calls.iter().any(|l| l.contains("&& . '")), "a secrets file: {calls:?}");
-    assert!(r.index("herdr pane run w9:p12 export").unwrap() < r.index("herdr agent start").unwrap());
+    let typed = sh.sent("sendmeter-impl-12");
+    let at = |p: &str| typed.iter().position(|t| t.starts_with(p));
+    assert!(at("export ").unwrap() < at("exec 'claude'").unwrap(), "{typed:?}");
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().str("account"), Some("B"));
     no_token_in_log(&c);
@@ -134,20 +178,18 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
 fn capped_account_is_skipped_until_reset() {
     let d = tmpdir("acct-cap");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
 
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
-        )
-        .reply(
-            "herdr pane read w9:p12",
-            "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n",
-        );
+    sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
+    sh.screen(
+        "sendmeter-impl-12",
+        "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n",
+    );
+    let r = Fake::default();
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("account-capped: A:"), "{out}");
@@ -177,7 +219,7 @@ fn capped_account_is_skipped_until_reset() {
     // #683: A capped again, a real spawn signs in with B's (default) folder, never a token.
     let d = json!({"account": "A", "agent": "sendmeter-impl-12", "until": c.now + 3600});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "account-capped", d)).unwrap();
-    let (_, got) = spawn(&c, 15);
+    let (_, got) = spawn(&c, &sh, 15);
     let b = herdsman::config::home().join(".config/herdsman/accounts/B");
     assert_eq!(got, format!("{}|", b.display()), "B's default folder, no token");
     no_token_in_log(&c);
@@ -197,16 +239,17 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
     let d = tmpdir("acct-hook");
     let mut c = ctx(&d, &folders(&d, "account = \"A\""));
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let (r, got) = spawn_var(&c, 12, SIGN_IN);
+    let (_, got) = spawn_var(&c, &sh, 12, SIGN_IN);
     let a = d.join("accounts/A");
     assert_eq!(got, format!("{}|", a.display()));
     // The profile goes on top of the account's login.
     let profile = c.config.with_file_name("claude").join("fleet-impl");
-    let calls = r.calls.borrow();
-    let start = calls.iter().find(|l| l.starts_with("herdr agent start")).unwrap();
+    let typed = sh.sent("sendmeter-impl-12");
+    let start = typed.iter().find(|l| l.starts_with("exec 'claude'")).unwrap();
     assert!(
-        start.contains(&format!("--settings {}", profile.join("settings.json").display())),
+        start.contains(&format!("'--settings' '{}'", profile.join("settings.json").display())),
         "{start}"
     );
     // That profile's `PreToolUse` hook, run as Claude Code runs it in the lane's env, refuses a guarded command.
@@ -245,10 +288,17 @@ fn helper_config(d: &Path) -> String {
 fn a_helpers_json_env_reaches_the_lane_and_nothing_else_signs_it_in() {
     let d = tmpdir("acct-helper");
     let c = ctx(&d, &helper_config(&d));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let env = r#"{"CLAUDE_CONFIG_DIR": "/cooee/accounts/claude/A", "COOEE_ACCOUNT": "it's A"}"#;
     let f = |r: Fake| r.reply("fake-cooee accounts env claude A", env);
-    let (r, got) = spawn_with(&c, 12, "CLAUDE_CONFIG_DIR|$COOEE_ACCOUNT|$CLAUDE_CODE_OAUTH_TOKEN", f);
+    let (r, got) = spawn_with(
+        &c,
+        &sh,
+        12,
+        "CLAUDE_CONFIG_DIR|$COOEE_ACCOUNT|$CLAUDE_CODE_OAUTH_TOKEN",
+        f,
+    );
     assert_eq!(
         got, "/cooee/accounts/claude/A|it's A|",
         "the helper's env exactly, no token"
@@ -260,6 +310,7 @@ fn a_helpers_json_env_reaches_the_lane_and_nothing_else_signs_it_in() {
 fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
     let d = tmpdir("acct-helper-bad");
     let c = ctx(&d, &helper_config(&d));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let fails = [
         Fake::default().once_err("fake-cooee", 2, "cooee: no account claude/A"),
@@ -267,7 +318,7 @@ fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
         Fake::default().reply("fake-cooee", r#"{"BAD KEY; rm -rf /": "x"}"#),
     ];
     for (i, r) in fails.into_iter().enumerate() {
-        let r = r.reply("herdr agent list", NO_AGENTS).reply("git -C", "");
+        let r = r.reply("which shed", "/opt/shed/bin/shed\n").reply("git -C", "");
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
         assert_eq!(code, 3, "{i}: {out}");
         assert!(
@@ -279,9 +330,10 @@ fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
             "{out}"
         );
         assert!(
-            !r.called("herdr worktree open") && !r.called("herdr agent start"),
-            "{i}: {:?}",
-            r.calls.borrow()
+            !r.calls.borrow().iter().any(|l| l.contains(" worktree add ")) && !sh.methods().iter().any(|m| m == "run"),
+            "{i}: {:?} {:?}",
+            r.calls.borrow(),
+            sh.methods()
         );
     }
 }
@@ -349,31 +401,22 @@ fn cap_expires_after_cap_reset_minutes() {
         &d,
         &config(&d, "accounts = [\"A\", \"B\"]").replace("[accounts]\n", "[accounts]\ncap_reset_minutes = 10\n"),
     );
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
-        )
-        .reply("herdr pane read w9:p12", "Claude usage limit reached.");
+    sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
+    sh.screen("sendmeter-impl-12", "Claude usage limit reached.");
+    let r = Fake::default();
     assert!(run(&c, &r, &["check"]).1.contains("account-capped"));
     assert_eq!(dry_account(&c, 13), "B");
     c.now += 601;
     assert_eq!(dry_account(&c, 13), "A");
 }
 
-/// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `herdsman check`.
-fn cap(c: &herdsman::Ctx, banner: &str) {
-    let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
-        )
-        .reply("herdr pane read w9:p12", banner);
-    assert!(run(c, &r, &["check"]).1.contains("account-capped"));
+/// Caps lane `sendmeter-impl-12` (live on `sh`) with `banner` on its screen via `herdsman check`.
+fn cap(c: &herdsman::Ctx, sh: &FakeShed, banner: &str) {
+    assert!(check_shows(c, sh, banner).contains("account-capped"));
 }
 
 #[test]
@@ -409,10 +452,11 @@ fn cap_until_parses_the_banner_reset_in_local_time() {
 fn capped_account_is_used_again_after_its_banner_reset() {
     let d = tmpdir("acct-until");
     let mut c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     // now = 1_000_000 (1970-01-12 13:46:40; `date` unscripted: UTC): 3pm is 1_004_400.
-    cap(&c, "You've hit your limit · resets 3pm (Asia/Bangkok)");
+    cap(&c, &sh, "You've hit your limit · resets 3pm (Asia/Bangkok)");
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().data["until"], 1_004_400);
     assert_eq!(dry_account(&c, 13), "B");
@@ -426,10 +470,12 @@ fn capped_account_is_used_again_after_its_banner_reset() {
 fn every_account_capped_refuses_all_capped() {
     let d = tmpdir("acct-all");
     let c = ctx(&d, &config(&d, "accounts = [\"A\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    cap(&c, "You've hit your limit · resets 3pm");
-    let (code, out) = run(&c, &Fake::default(), &["spawn", "sendmeter", "13", "impl", "--dry-run"]);
+    spawn(&c, &sh, 12);
+    cap(&c, &sh, "You've hit your limit · resets 3pm");
+    let r = Fake::default().reply("which shed", "/opt/shed/bin/shed\n");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "13", "impl", "--dry-run"]);
     assert_eq!(code, 3, "{out}");
     assert!(
         out.contains("REFUSED ALL_CAPPED") && out.contains("[\"A\"] is capped; the first resets in 73m"),
@@ -441,9 +487,10 @@ fn every_account_capped_refuses_all_capped() {
 fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     let d = tmpdir("acct-respawn");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    cap(&c, "You've hit your limit · resets 3pm");
+    spawn(&c, &sh, 12);
+    cap(&c, &sh, "You've hit your limit · resets 3pm");
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let agents = [serde_json::json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
@@ -455,7 +502,7 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     // That respawn (as drive runs it) picks the free account.
     let mut args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
     args.extend(["--dry-run", "--json"]);
-    let (code, out) = run(&c, &Fake::default(), &args);
+    let (code, out) = run(&c, &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"), &args);
     assert_eq!(code, 0, "{out}");
     assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["account"], "B");
 }
@@ -464,9 +511,10 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
 fn capped_ready_lane_is_not_told_to_respawn() {
     let d = tmpdir("acct-ready");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    cap(&c, "You've hit your limit · resets 3pm");
+    spawn(&c, &sh, 12);
+    cap(&c, &sh, "You've hit your limit · resets 3pm");
     let pass = json!({"verdict": "PASS", "sha": "1".repeat(40)});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "verdict", pass)).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
@@ -485,25 +533,32 @@ fn capped_ready_lane_is_not_told_to_respawn() {
 fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     let d = tmpdir("mcp");
     let c = ctx(&d, &config(&d, "mcp = [\"supabase-dev\"]"));
+    let sh = shed(&c);
     let (code, out) = run(
         &c,
-        &Fake::default(),
+        &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
         &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"],
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    let start: Vec<&str> = p["commands"][3]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|w| w.as_str().unwrap())
-        .collect();
+    // The harness launch the lane's shell is typed (`shed send`).
+    let start = &p["commands"][4];
+    assert_eq!(
+        (start[0].as_str(), start[1].as_str()),
+        (Some("shed"), Some("send")),
+        "{start}"
+    );
+    let typed: Value = serde_json::from_str(start[2].as_str().unwrap()).unwrap();
+    let typed = typed["text"].as_str().unwrap();
     let file = c.worktrees.join("sendmeter/issue-12/.mcp.lane.json");
-    let i = start.iter().position(|w| *w == "--mcp-config").unwrap();
-    assert_eq!(start[i + 1..i + 3], [file.to_str().unwrap(), "--strict-mcp-config"]);
+    assert!(typed.starts_with("exec 'claude'"), "{typed}");
+    assert!(
+        typed.contains(&format!("'--mcp-config' '{}' '--strict-mcp-config'", file.display())),
+        "{typed}"
+    );
 
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     let lane: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     let names: Vec<&String> = lane["mcpServers"].as_object().unwrap().keys().collect();
     assert_eq!(names, ["supabase-dev"]);
@@ -512,8 +567,9 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     // Default: no MCP at all, still strict.
     let d2 = tmpdir("mcp-none");
     let c2 = ctx(&d2, &config(&d2, ""));
+    let sh2 = shed(&c2);
     assert_eq!(run(&c2, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c2, 12);
+    spawn(&c2, &sh2, 12);
     let lane: Value =
         serde_json::from_str(&std::fs::read_to_string(c2.worktrees.join("sendmeter/issue-12/.mcp.lane.json")).unwrap())
             .unwrap();
@@ -553,16 +609,12 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     );
 }
 
-/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `herdsman check`'s output.
-fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
+/// #640: lane `sendmeter-impl-12` on account A, idle on `sh` in its worktree, shows `screen`; `herdsman check`'s output.
+fn check_shows(c: &herdsman::Ctx, sh: &FakeShed, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
-        )
-        .reply("herdr pane read w9:p12", screen);
-    let (code, out) = run(c, &r, &["check"]);
+    sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
+    sh.screen("sendmeter-impl-12", screen);
+    let (code, out) = run(c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
     out
 }
@@ -582,10 +634,11 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_account() {
     let d = tmpdir("acct-meter-ok");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(23.0), 60);
-    let out = check_shows(&c, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
+    let out = check_shows(&c, &sh, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
     assert!(!out.contains("account-capped"), "{out}");
     let ignored = kinds(&c, "cap-banner-ignored");
     assert_eq!(ignored.len(), 1, "{out}");
@@ -606,10 +659,11 @@ fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_accoun
 fn a_banner_with_the_week_at_100_caps_until_the_reset() {
     let d = tmpdir("acct-meter-full");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(100.0), 60);
-    let out = check_shows(&c, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
+    let out = check_shows(&c, &sh, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
     assert!(
         out.contains("account-capped: A:") && !out.contains("signed out"),
         "{out}"
@@ -631,24 +685,26 @@ fn a_banner_with_the_week_at_100_caps_until_the_reset() {
 fn a_banner_with_no_fresh_reading_still_caps() {
     let d = tmpdir("acct-meter-stale");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     reading(&c, Value::Null, json!(23.0), 601);
-    assert!(check_shows(&c, "You've hit your limit · resets 3pm").contains("account-capped: A:"));
+    assert!(check_shows(&c, &sh, "You've hit your limit · resets 3pm").contains("account-capped: A:"));
 }
 
 #[test]
 fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
     let d = tmpdir("acct-banner-src");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
+    spawn(&c, &sh, 12);
     for screen in [
         "⏺ Bash(rg -n 'hit your limit' crates)\n  ⎿  claude.rs:19: usage limit reached|hit your limit\n",
         "⏺ The pane said \"You've hit your limit · resets 3pm\", so I matched it.\n",
         "❯ why did it say usage limit reached?\n",
     ] {
-        assert!(!check_shows(&c, screen).contains("account-capped"), "{screen}");
+        assert!(!check_shows(&c, &sh, screen).contains("account-capped"), "{screen}");
     }
     assert_eq!(dry_account(&c, 13), "A");
 }
@@ -657,9 +713,10 @@ fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
 fn signed_out_is_its_own_state_never_a_cap() {
     let d = tmpdir("acct-signed-out");
     let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    let out = check_shows(&c, "  ⎿  API Error: 401 · Please run /login\n");
+    spawn(&c, &sh, 12);
+    let out = check_shows(&c, &sh, "  ⎿  API Error: 401 · Please run /login\n");
     assert!(
         out.contains("account-signed-out") && !out.contains("account-capped"),
         "{out}"
@@ -697,13 +754,19 @@ fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
     let d = tmpdir("acct-token-file");
     let (cfg, _) = token_file(&d, 0o600);
     let c = ctx(&d, &cfg);
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let (r, got) = spawn(&c, 12);
-    // The token from the file, through the secrets file the pane sources: no config folder, never argv or the log.
+    keep_secrets(&c, 12);
+    let (r, got) = spawn(&c, &sh, 12);
+    // The token from the file, through the secrets file the pane sources: no config folder, never argv, the pane or the
+    // log.
     assert_eq!(got, format!("|{TOKEN_A}"));
-    let calls = r.calls.borrow();
+    let calls = lines(&sh, &r, 12);
     assert!(calls.iter().any(|l| l.contains("&& . '")), "{calls:?}");
-    assert!(!calls.iter().any(|l| l.contains(TOKEN_A)), "token in argv: {calls:?}");
+    assert!(
+        !calls.iter().any(|l| l.contains(TOKEN_A)),
+        "token in argv or the pane: {calls:?}"
+    );
     no_token_in_log(&c);
     let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(
@@ -719,22 +782,15 @@ fn a_token_file_others_can_read_refuses_the_spawn() {
     let d = tmpdir("acct-token-0644");
     let (cfg, f) = token_file(&d, 0o644);
     let c = ctx(&d, &cfg);
+    let sh = shed(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
-        .reply("git -C", "")
-        .reply(
-            "herdr worktree open",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w9",
-            r#"{"result":{"panes":[{"pane_id":"w9:p12","agent":null}]}}"#,
-        );
+        .reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -744,7 +800,8 @@ fn a_token_file_others_can_read_refuses_the_spawn() {
         )),
         "{out}"
     );
-    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    let started = |m: &String| ["run", "send", "keys"].contains(&m.as_str());
+    assert!(!sh.methods().iter().any(started), "no lane started: {:?}", sh.methods());
     assert!(!out.contains(TOKEN_A), "{out}");
     let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(

@@ -3,7 +3,7 @@
 mod common;
 use common::*;
 use herdsman::events::read;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
 
@@ -70,39 +70,46 @@ fn spawn_rev_with(name: &str, states: &[(&str, &str)], screen: &str) -> (herdsma
 fn dry_run_launches_pinned_dsh_tui_with_role_patch() {
     let d = tmpdir("dsh-plan");
     let c = ctx(&d, &dsh_config());
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let (code, out) = run(
         &c,
-        &Fake::default(),
+        &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
         &["spawn", "sendmeter", "12", "rev", "--dry-run", "--json"],
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    let cmd = |i: usize| -> Vec<String> {
-        p["commands"][i]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|w| w.as_str().unwrap().to_string())
-            .collect()
+    // The lane is shed terminal `<agent>`: each step a shed request (method, params).
+    let cmd = |i: usize| -> (String, Value) {
+        let w = p["commands"][i].as_array().unwrap();
+        assert_eq!(w[0], "shed", "{w:?}");
+        let params = serde_json::from_str(w[2].as_str().unwrap()).unwrap();
+        (w[1].as_str().unwrap().to_string(), params)
     };
-    let patch = c.config.parent().unwrap().join("dsh/fleet-rev.patch.yml");
-    assert_eq!(
-        cmd(3),
-        [
-            "herdr",
-            "pane",
-            "run",
-            "<pane>",
-            "dsh-tui",
-            "--patch",
-            &format!("'{}'", patch.display())
-        ]
+    let (lane, patch) = (
+        "sendmeter-rev-12-r1",
+        c.config.parent().unwrap().join("dsh/fleet-rev.patch.yml"),
     );
-    assert_eq!(cmd(4), ["herdr", "pane", "get", "<pane>"]);
-    assert_eq!(cmd(5), ["herdr", "pane", "read", "<pane>", "--source", "visible"]);
-    assert_eq!(cmd(6), ["herdr", "pane", "send-keys", "<pane>", "esc"]);
-    assert_eq!(cmd(7), ["herdr", "agent", "rename", "<pane>", "sendmeter-rev-12-r1"]);
-    assert_eq!(cmd(8)[..4], ["herdr", "pane", "send-text", "<pane>"].map(String::from));
+    let at = |m: &str, v: Value| (m.to_string(), v);
+    assert_eq!(cmd(2).0, "run");
+    assert_eq!(cmd(2).1["labels"]["harness"], "dsh");
+    let launch = format!("exec dsh-tui --patch '{}'\r", patch.display());
+    assert_eq!(cmd(4), at("send", json!({"name": lane, "text": launch})));
+    assert_eq!(cmd(5), at("get", json!({"name": lane})));
+    assert_eq!(cmd(6), at("read", json!({"name": lane, "history": false})));
+    assert_eq!(cmd(7), at("keys", json!({"name": lane, "keys": ["esc"]})));
+    assert_eq!(
+        cmd(8),
+        at("get", json!({"name": lane})),
+        "the rename: shed names it already"
+    );
+    let (m, kick) = cmd(9);
+    assert!(
+        m == "send" && kick["text"].as_str().unwrap().starts_with("Read "),
+        "{kick}"
+    );
+    assert_eq!(cmd(11), at("keys", json!({"name": lane, "keys": ["enter"]})));
+    assert!(sh.methods().is_empty(), "a dry run calls nothing");
 }
 
 #[test]
@@ -241,11 +248,21 @@ fn check_finds_unnamed_dsh_lane_by_its_pane() {
 fn spawn_refuses_unpinned_dsh_tui() {
     let d = tmpdir("dsh-pin");
     let c = ctx(&d, &dsh_config());
+    let sh = FakeShed::new();
+    sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let r = Fake::default().reply("dsh-tui version", "profile: 0.18.0  /x\n");
-    let (code, _) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 1);
-    assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("dsh-tui version", "profile: 0.18.0  /x\n");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 1, "{out}");
+    let started = |m: &String| ["run", "send", "keys"].contains(&m.as_str());
+    assert!(!sh.methods().iter().any(started), "no lane started: {:?}", sh.methods());
+    assert!(
+        !r.called("git -C /tmp/does-not-matter/sendmeter worktree add"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 fn pre_push(c: &herdsman::Ctx, role: &str, lines: &str) -> (i32, String) {
