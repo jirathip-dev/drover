@@ -288,7 +288,9 @@ fn waiting_reads_a_long_running_tick_as_running_not_stuck() {
     let d = tmpdir("orphan-791");
     let mut c = ctx(&d, CONFIG);
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     let line = |c: &herdsman::Ctx| {
         let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
         assert_eq!(code, 0, "{out}");
