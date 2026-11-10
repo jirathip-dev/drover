@@ -412,3 +412,26 @@ fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("sendmeter #12") && !out.contains("root gone"), "{out}");
 }
+
+/// #790: a restart that fails (here gh and herdr answer nothing) logs no move and is tried again on the next pass.
+#[test]
+fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
+    let r = repo("roots-retry");
+    working_on_nvme(&r);
+    std::fs::remove_dir_all(&r.nvme).unwrap();
+    let down = Fake::default().reply("herdr agent list", NO_AGENTS); // nothing else answers: the start fails
+    let (code, out) = run(&r.c, &Git(&down), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("{AGENT}: restart failed")), "{out}");
+    let moved = |c: &herdsman::Ctx| {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "root-moved")
+            .count()
+    };
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (1, 0), "{out}");
+    let (code, out) = run(&r.c, &Git(&fake(&r.internal)), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (2, 1), "{out}");
+}
