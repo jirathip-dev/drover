@@ -262,7 +262,17 @@ export type Queued = { fleet: string, issue: number, title?: string | null, stat
 /**
  * #667: its blockers in another fleet or repo, as `owner/repo#N`.
  */
-blocked_on: Array<string>, };
+blocked_on: Array<string>, 
+/**
+ * #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+ */
+pending?: PendingStart | null, status?: string | null, };
+
+/**
+ * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+ * refusal `reason` (a code; a hard one with its words).
+ */
+export type PendingStart = { action: string, since: number, reason?: string | null, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -445,7 +455,7 @@ export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null
 /**
  * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
  */
-export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, };
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, pending?: PendingStart | null, };
 
 /**
  * #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.

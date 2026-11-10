@@ -1035,7 +1035,9 @@ pub fn needs_human(
     // issue or extends twice.
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    if state != "needs-human" && last != "extend-failed" {
+    // #778: or a pending start whose card is back (refused, or 30 min unstarted).
+    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
+    if state != "needs-human" && last != "extend-failed" && !back {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
@@ -1049,6 +1051,9 @@ pub fn needs_human(
                 let d = json!({"by": by, "spawn": spawn});
                 crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
             }
+            if spawn {
+                crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
+            }
             if spawn && held.is_none() {
                 writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
             } else if spawn {
@@ -1057,6 +1062,13 @@ pub fn needs_human(
                     ..Default::default()
                 };
                 if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o) {
+                    // #778: a soft refusal keeps the round pending: drive starts it, the card stays answered.
+                    let rf = e.downcast_ref::<Refusal>();
+                    let (code, why) = rf.map_or(("ERROR", format!("{e:#}")), |r| (r.code, r.msg.clone()));
+                    if crate::pending::refused(ctx, (fleet, n), code, &why)? {
+                        writeln!(out, "#{n}: starting, waiting for host ({code}); drive starts the round")?;
+                        return Ok(());
+                    }
                     let d = json!({"by": by, "reason": format!("{e:#}")});
                     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "extend-failed", d))?;
                     return Err(e);

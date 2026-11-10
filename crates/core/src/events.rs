@@ -388,6 +388,8 @@ pub fn checks(e: &Event) -> bool {
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    // #778: a tapped start still waiting; the decision before it moved the issue.
+    "pending-action",
     "lane-state",
     "lesson-prompted",
     // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
