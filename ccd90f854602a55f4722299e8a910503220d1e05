@@ -1,0 +1,7 @@
+Decided: the red evidence check was the push-time run against the old body; later body-edit runs passed, so no code change
+Because: scripts/evidence-check.sh:10
+Decided: drop logs-735/ scratch logs that two supersede snapshots committed, and exclude them locally
+Decided: merge origin/staging, which moved, before re-running the gates at the new head
+Rejected: re-running the failed evidence run — a re-run replays the old event body and fails again
+Check: the PR body names the head sha before the push, so the synchronize-run evidence check passes
+Owner: only housekeeping this round: stray log files removed and staging merged in; the checks are unchanged
