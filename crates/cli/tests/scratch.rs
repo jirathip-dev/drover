@@ -109,6 +109,87 @@ fn drive_deletes_an_ended_lanes_scratch() {
     assert!(out.contains("(lane ended)"), "{out}");
 }
 
+/// #798: a lane's `.build/<agent>` folder and its scratch go on the next pass once it is finished (a recorded verdict,
+/// its own `turn done`, or replaced by a newer round), its session open or not; a working, building, active or unknown
+/// one stays. Worktrees are never touched; each removal logs `build-freed`.
+#[test]
+fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
+    let (c, s) = setup("build-finished", 1 << 40);
+    let root = s.parent().unwrap().to_path_buf();
+    let verdict = |n| ev(&c, n, "verdict", json!({"verdict": "FAIL", "sha": "a", "stage": "rev"}));
+    spawn(&c, 13, "impl", "sendmeter-impl-13");
+    spawn(&c, 13, "rev", "sendmeter-rev-13-r1");
+    verdict(13);
+    spawn(&c, 13, "impl", "sendmeter-impl-13-f1"); // the fix round's newer lane
+    for n in [14, 15] {
+        spawn(&c, n, "rev", &format!("sendmeter-rev-{n}-r1"));
+        verdict(n);
+    }
+    spawn(&c, 16, "impl", "sendmeter-impl-16");
+    ev(&c, 16, "turn-end", json!({"state": "done", "role": "impl"}));
+    let lanes = [
+        "sendmeter-impl-13",
+        "sendmeter-rev-13-r1",
+        "sendmeter-impl-13-f1",
+        "sendmeter-rev-14-r1",
+        "sendmeter-rev-15-r1",
+        "sendmeter-impl-16",
+        "stray",
+    ];
+    let builds = lanes.map(|a| blob(&root, &format!("{a}/debug")).parent().unwrap().to_path_buf());
+    let scratch = blob(&s, "sendmeter-rev-13-r1");
+    for b in &builds {
+        std::fs::write(b.join("debug/.cargo-lock"), "").unwrap();
+    }
+    let held = std::fs::File::open(builds[4].join("debug/.cargo-lock")).unwrap();
+    held.lock().unwrap(); // cargo building in #15's rev lane
+    let wts = lanes.map(|a| blob(&c.worktrees.join("sendmeter"), &format!("{a}/src")));
+    let open: Vec<_> = lanes[..6]
+        .iter()
+        .map(|a| (*a, if a.contains("-14-") { "working" } else { "idle" }, "/x", "p"))
+        .collect();
+    let r = Fake::default().reply("herdr agent list", &agents(&open));
+    let out = budget(&c, &r);
+    let gone = builds.each_ref().map(|d| !d.exists());
+    assert_eq!(
+        gone,
+        [true, true, false, false, false, true, false],
+        "superseded, verdict and turn done go; active, working, building and unknown stay: {out}"
+    );
+    assert!(!scratch.exists(), "the finished lane's scratch goes too: {out}");
+    assert!(
+        wts.iter().all(|w| w.join("blob").is_file()),
+        "worktrees untouched: {out}"
+    );
+    let freed = events(&c, "build-freed");
+    let mut got: Vec<_> = (freed.iter())
+        .map(|e| {
+            (
+                e.str("agent").unwrap(),
+                e.str("why").unwrap(),
+                e.data["bytes"].as_u64().unwrap() > 0,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("sendmeter-impl-13", "superseded", true),
+            ("sendmeter-impl-16", "lane finished", true),
+            ("sendmeter-rev-13-r1", "lane finished", true),
+            ("sendmeter-rev-13-r1", "lane finished", true),
+        ],
+        "{out}"
+    );
+    drop(held);
+}
+
+fn events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+    let all = herdsman::events::read(&c.state).unwrap();
+    all.into_iter().filter(|e| e.kind == kind).collect()
+}
+
 /// Over `build_budget_gb`, scratch dirs count and the oldest unlocked one goes first.
 #[test]
 fn the_oldest_scratch_is_trimmed_over_budget() {
@@ -297,6 +378,10 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     air_spawn(&c, 13, "impl", "sendmeter-impl-13");
     let [ended, working, orphan] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(&s, &format!("{a}/debug")));
+    // #798: the lanes' build folders there too: the finished one goes, the working one and an unknown one stay.
+    let b = s.parent().unwrap();
+    let [built, building, unknown] =
+        ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(b, &format!("{a}/debug")));
     let air = [
         ("sendmeter-impl-12", "done", "/x", "w1:p1"),
         ("sendmeter-impl-13", "working", "/x", "w2:p1"),
@@ -304,6 +389,15 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     let (r, out) = tick(&c, &home, &air, 200 * 1_048_576);
     assert!(!ended.exists() && !orphan.exists(), "{out}");
     assert!(working.exists(), "a working lane's scratch stays: {out}");
+    assert!(!built.parent().unwrap().exists(), "{out}");
+    assert!(building.exists() && unknown.exists(), "{out}");
+    let freed = events(&c, "build-freed");
+    assert!(
+        freed
+            .iter()
+            .any(|e| e.str("agent") == Some("sendmeter-impl-12") && e.str("host") == Some("air")),
+        "{out}"
+    );
     assert!(
         r.fake
             .calls

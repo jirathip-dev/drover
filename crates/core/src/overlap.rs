@@ -235,26 +235,28 @@ struct Count {
     limit: i64,
 }
 
-/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap; #803: else the
-/// repo's `scripts/line-cap.sh` at `sha`, the script its CI enforces the cap with (cooee's).
+/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap; #788: else the
+/// repo's `scripts/line-cap.sh` at `sha`.
 fn cap_script(r: &dyn Runner, f: &Fleet, sha: &str) -> Option<String> {
     let run = |p: &crate::config::Premerge| match p {
         crate::config::Premerge::Cmd(c) => c.clone(),
         crate::config::Premerge::Named(c) => c.run.clone(),
     };
-    let repo = || {
-        let at = format!("{sha}:scripts/line-cap.sh");
-        git(r, &f.local_path(), &["cat-file", "-e", &at])
-            .ok()
-            .map(|_| "sh scripts/line-cap.sh".to_string())
+    let own = || {
+        git(
+            r,
+            &f.local_path(),
+            &["cat-file", "-e", &format!("{sha}:scripts/line-cap.sh")],
+        )
+        .ok()
     };
     (f.cap_script.clone())
         .or_else(|| f.premerge.iter().flatten().map(run).find(|c| c.contains("cap")))
-        .or_else(repo)
+        .or_else(|| own().map(|_| "sh scripts/line-cap.sh".to_string()))
 }
 
-/// #754: every `<label> N / cap M` line (#803: or `<label>: N / M`) `script` prints in a scratch worktree at `base` (with `branch` merged in);
-/// `None` when the merge conflicts or it prints none.
+/// #754: every `<label> N / cap M` (#788: or `<label> N / M`) line `script` prints in a scratch worktree at `base`
+/// (with `branch` merged in); else why not: the merge conflicts, or the last line it printed.
 fn script_caps(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -262,7 +264,7 @@ fn script_caps(
     script: &str,
     base: &str,
     branch: Option<&str>,
-) -> Option<Vec<Count>> {
+) -> Result<Vec<Count>, String> {
     let (dir, wt) = (
         f.local_path(),
         ctx.state.with_file_name(format!("cap-{}", f.repo.replace('/', "-"))),
@@ -270,16 +272,15 @@ fn script_caps(
     let wts = wt.to_string_lossy();
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     let _ = tree(&["remove", "--force", &wts]);
-    tree(&["add", "-f", "--detach", &wts, base]).ok()?;
+    tree(&["add", "-f", "--detach", &wts, base]).map_err(|e| e.to_string())?;
     let merged = branch.is_none_or(|b| git(r, &wt, &["merge", "--no-ff", "--no-edit", b]).is_ok());
     let sh = argv(&["-c", &format!("cd \"$0\" && {script}"), &wts]);
-    let o = merged.then(|| r.run("sh", &sh).ok()).flatten();
+    let o = merged.then(|| r.run("sh", &sh));
     let _ = tree(&["remove", "--force", &wts]);
-    let o = o?;
+    let o = o.ok_or("conflicts")?.map_err(|e| e.to_string())?;
     let num = |w: &str| w.replace(',', "").parse::<i64>().ok();
     let cap = |l: &str| {
         let (left, rest) = l.split_once(" / ")?;
-        let rest = rest.strip_prefix("cap ").unwrap_or(rest);
         let (label, n) = left
             .trim()
             .rsplit_once(char::is_whitespace)
@@ -287,11 +288,15 @@ fn script_caps(
         Some(Count {
             label: label.trim().trim_end_matches(':').trim().to_string(),
             lines: num(n)?,
-            limit: num(rest.split_whitespace().next()?)?,
+            limit: num(rest.trim_start().trim_start_matches("cap ").split_whitespace().next()?)?,
         })
     };
-    let caps: Vec<Count> = format!("{}{}", o.stdout, o.stderr).lines().filter_map(cap).collect();
-    (!caps.is_empty()).then_some(caps)
+    let text = format!("{}{}", o.stdout, o.stderr);
+    let caps: Vec<Count> = text.lines().filter_map(cap).collect();
+    let last = text.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("nothing");
+    (!caps.is_empty())
+        .then_some(caps)
+        .ok_or_else(|| format!("printed `{}`", last.trim()))
 }
 
 /// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
@@ -303,13 +308,15 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
     let dir = f.local_path();
     let _ = git(r, &dir, &["fetch", "-q", "origin"]);
     let head = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]);
-    let script = head.as_deref().ok().and_then(|h| cap_script(r, f, h));
+    let script = head.as_ref().ok().and_then(|h| cap_script(r, f, h));
     let (sha, caps, warn) = if let Some(s) = &script {
         let sha = head?;
         let toml = git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).unwrap_or_default();
         let warn = limits(&toml).map_or(500, |l| l.1);
-        let caps = script_caps(ctx, r, f, s, &sha, None)
-            .ok_or_else(|| anyhow::anyhow!("`{s}` printed no `N / cap M` line at origin/{}", f.integration))?;
+        let caps = script_caps(ctx, r, f, s, &sha, None).map_err(|got| {
+            let at = &f.integration;
+            anyhow::anyhow!("`{s}` at origin/{at} printed no `N / cap M` line herdsman can parse: {got}")
+        })?;
         (sha, caps, warn)
     } else {
         let (sha, lines, cap, warn) = cap_at(ctx, cfg, r, fleet).ok_or_else(|| {
@@ -365,7 +372,7 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
         )
     };
     let scripted = |s: &str, b: &str| -> Option<Vec<i64>> {
-        let m = script_caps(ctx, r, f, s, &sha, Some(&format!("origin/{b}")))?;
+        let m = script_caps(ctx, r, f, s, &sha, Some(&format!("origin/{b}"))).ok()?;
         let net = |c: &Count| Some(m.iter().find(|x| x.label == c.label)?.lines - c.lines);
         caps.iter().map(net).collect()
     };
