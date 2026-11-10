@@ -1030,3 +1030,36 @@ fn cap_shows_each_cap_a_script_prints() {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
 }
+
+/// #803: cooee's CI counts with its own `scripts/line-cap.sh` (copied verbatim) and names it in no fleet key:
+/// `herdsman cap` runs the repo's script and prints its total (non-blank lines before `#[cfg(test)]` in crates/*/src
+/// and web/src, plus web/ts), not the built-in Rust count, and says which count it used.
+#[test]
+fn cap_runs_the_repos_line_cap_script_when_the_fleet_names_none() {
+    let script = include_str!("support/cooee-line-cap.sh");
+    let (c, r) = script_repos("cap-repo-script", "", script);
+    let seed = c.worktrees.with_file_name("seed");
+    for dir in ["crates/core/src", "web/src", "ci"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    std::fs::write(
+        seed.join("ci/cap.toml"),
+        "[fleet.cooee]\nline_cap = 1000\napple_cap = 50\n",
+    )
+    .unwrap();
+    std::fs::write(seed.join("web/src/main.rs"), "fn main() {}\n").unwrap();
+    let lib = "fn a() {}\n\nfn b() {}\n#[cfg(test)]\nmod t {\n    fn x() {}\n}\n";
+    commit(&seed, "crates/core/src/lib.rs", lib, "staging");
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: non-test lines 8 / cap 1000 at staging",
+        "headroom 992\n",
+        "sendmeter: apple lines 0 / cap 50 at staging",
+        "counted by `sh scripts/line-cap.sh`",
+        "  #4 (PR #14): +3 non-test lines, +0 apple lines (script)",
+        "non-test lines: sum of open PRs: +3; projected total 11 / cap 1000, headroom 989",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
