@@ -349,6 +349,11 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
             c.limit - c.lines
         )?;
     }
+    let by = script.as_deref().map_or_else(
+        || "the built-in count of src/**/*.rs and crates/*/src/**/*.rs".to_string(),
+        |s| format!("`{s}`"),
+    );
+    writeln!(out, "counted by {by}")?;
     let prs = gh::snapshot(ctx, r, f, fleet, ctx.now)?;
     let mut prs: Vec<&Value> = (prs.as_object().into_iter().flat_map(|m| m.values()))
         .filter(|p| p["baseRefName"] == f.integration.as_str())

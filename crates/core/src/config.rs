@@ -1289,19 +1289,11 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
         let l = lines[i];
         let eq = l.find('=').unwrap() + 1;
         let v = eq + l[eq..].len() - l[eq..].trim_start().len();
-        let end = if l[v..].starts_with('"') {
-            l[v + 1..].find('"').map(|c| v + c + 2)
-        } else if lit.starts_with('"') {
-            None
-        } else {
-            Some(
-                v + l[v..]
-                    .find(|c: char| c.is_whitespace() || c == '#')
-                    .unwrap_or(l.len() - v),
-            )
-        };
-        let end = end.ok_or_else(|| anyhow!("{header} {key}: value must be a \"string\""))?;
-        out[i] = format!("{}{lit}{}", &l[..v], &l[end..]);
+        let mut q = false;
+        let end = l[v..]
+            .find(|c| (q ^= c == '"', c == '#' && !q).1)
+            .map_or(l.trim_end().len().max(v), |c| v + c);
+        out[i] = format!("{}{lit}{}", &l[..v], &l[v + l[v..end].trim_end().len()..]);
     } else {
         let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
         if !out[last].ends_with('\n') {
