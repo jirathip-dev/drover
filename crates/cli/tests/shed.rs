@@ -2241,6 +2241,10 @@ fn tool(status: &str) -> Value {
     json!({"event": "tool_call", "id": "t1", "title": "cargo test", "status": status, "kind": "execute"})
 }
 
+fn cpu(pct: u64) -> Value {
+    json!({"event": "resources", "rss_mb": 900, "cpu_pct": pct})
+}
+
 const SILENT: u64 = 600;
 
 fn drive_at(c: &herdsman::Ctx, r: &dyn Runner, secs: u64) -> String {
@@ -2296,9 +2300,8 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
 fn a_pending_tool_call_in_a_live_session_is_not_silent() {
     let (c, b, f, wt, _) = acp_lane("acp-tool");
     mid_turn(&b);
-    session(&b, &[turn(), tool("in_progress")]);
+    session(&b, &[turn(), tool("in_progress"), cpu(80)]);
     let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
-    drive_at(&c, &cli, 60);
     drive_at(&c, &cli, 60 + 3 * SILENT);
     assert!(!f.called("shed cancel"));
     assert!(logged(&c, "nudged").is_empty());
@@ -2306,6 +2309,18 @@ fn a_pending_tool_call_in_a_live_session_is_not_silent() {
     drive_at(&c, &cli, 60 + 3 * SILENT + 1);
     let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
     assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+}
+
+#[test]
+fn a_pending_tool_call_whose_process_died_is_silent() {
+    let (c, b, f, wt, _) = acp_lane("acp-tool-dead");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("in_progress"), cpu(80), cpu(0)]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
 }
 
 #[test]
