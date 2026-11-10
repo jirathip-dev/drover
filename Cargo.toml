@@ -40,7 +40,7 @@ toml = "0.8"
 # #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed's rename merge commit until it tags a release.
-shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "1f08d108afc54450d6fdf4b49f68c09d0ca7a8df" }
+shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "56de739060d99e54e2ded43ab9702ff1c5270c37" }
 herdsman-core = { path = "crates/core" }
 herdsman-server = { path = "crates/server" }
 herdsman-service = { path = "crates/service" }
