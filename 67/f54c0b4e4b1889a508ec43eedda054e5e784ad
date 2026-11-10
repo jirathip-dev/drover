@@ -1,0 +1,14 @@
+Decided: rename conductor to orchestrator everywhere but the frozen board and API v1's wire values; old names read at the edges (config parse, CLI --by, event reads)
+Because: "full rename (code, config, CLI flags, profile, events), old names still read as aliases for one release"
+Decided: event types and from: also renamed; old log rows read as the new names in one place (events::aliased)
+Because: q1173
+Decided: a name per orchestrator resolved from config at display time; ids in [orchestrator.<id>], a thread's id on its thread-new
+Because: "Changing the name touches one field."
+Decided: an orchestrator lane's events carry orchestrator: <id>, added in db::insert from HERDSMAN_ORCHESTRATOR
+Because: "Every action an orchestrator takes logs"
+Rejected: by: orchestrator-<id> for every action — by already means orchestrator-<thread> for answers and withdraws, so the id goes in its own field
+Rejected: rewrite the frozen board's string matches — acceptance 4 forbids touching its files
+Decided: rename-only comments restored as they were; CLI help moved to clap attributes
+Because: crates/core/src/arch.rs:383
+Check: crates/cli/tests/orchestrator_names.rs covers acceptance 1-3; chat_tab's ignored queue test and the old-board expectations follow q1173
+Owner: The conductor is now the orchestrator, can have its own name, and you can run several. The old board's chat tab loses its live-thread status as decided in q1173.
