@@ -121,6 +121,18 @@ fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Val
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
+        // #749: an ACP terminal's events (`events`), the last `n` before `before`, as shed pages them.
+        "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
+            let before = p["before"].as_u64().unwrap_or(u64::MAX);
+            let all: Vec<&Value> = terms[&name]["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["seq"].as_u64() < Some(before))
+                .collect();
+            let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
+            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+        }
         // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),
@@ -2076,4 +2088,132 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
         .unwrap_err()
         .contains("no harness adapter guards it"));
     assert!(load(&base.replace("harness = \"hermes\"", "harness = \"claude\"")).is_ok());
+}
+
+/// #749: `GET /api/v1/lane/<agent>` for lane `agent` on fake shed `b` (a paired phone), its JSON.
+fn lane_json(b: &Server, agent: &str, query: &str) -> Value {
+    let c = ctx(
+        &tmpdir(&format!("acp-blocks-{agent}")),
+        &acp_config(&b.sock, "claude", false),
+    );
+    let d = json!({"role": "impl", "agent": agent, "harness": "claude", "runtime": "shed", "pane": agent});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let fake = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = shed::With(&fake, b.shed());
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", 1_000_000);
+    let q = format!("GET /api/v1/lane/{agent}{query} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{cookie}\r\n");
+    let res = String::from_utf8_lossy(&s.respond(&q, 1_000_000)).into_owned();
+    assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+/// An ACP lane on `b` whose transcript is shed's recorded `agent` session (tests/golden/acp/<agent>.events.json).
+fn recorded(b: &Server, agent: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/acp/{agent}.events.json"));
+    let events: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    b.add("sendmeter-impl-12", lane_labels());
+    let mut terms = b.terms.lock().unwrap();
+    let t = terms.get_mut("sendmeter-impl-12").unwrap();
+    (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events);
+    drop(terms);
+    lane_json(b, "sendmeter-impl-12", "")
+}
+
+/// A block's shape: its `k` and field names, plus a tool's status and ACP kind (never the agent's wording).
+fn shape(b: &Value) -> String {
+    let keys: Vec<&str> = b.as_object().unwrap().keys().map(String::as_str).collect();
+    let tool = if b["k"] == "tool" {
+        format!(" {} {}", b["status"], b["kind"])
+    } else {
+        String::new()
+    };
+    format!("{} {keys:?}{tool}", b["k"])
+}
+
+/// #749: recorded sessions of three ACP agents (claude, codex, gemini: shed's #52 fixtures) give the same block
+/// shapes in `lane/<agent>`: the prompt, the plan, one block per tool call (its updates folded, its status the last),
+/// the approval with the option taken, one reply of the joined text chunks. A multi-line command is one `tool` block
+/// whose `title_line` has no newline, the whole title beside it.
+#[test]
+fn acp_transcripts_from_different_agents_give_the_same_blocks() {
+    let got: Vec<Value> = ["claude", "codex", "gemini"]
+        .iter()
+        .map(|a| recorded(&Server::new(shed::proto::VERSION, vec![]), a))
+        .collect();
+    let shapes: Vec<Vec<String>> = got
+        .iter()
+        .map(|v| v["blocks"].as_array().unwrap().iter().map(shape).collect())
+        .collect();
+    assert_eq!(
+        shapes[0],
+        [
+            r#""prompt" ["k", "text"]"#,
+            r#""plan" ["entries", "k"]"#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "completed" "read""#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "completed" "execute""#,
+            r#""approval" ["answered", "k", "options", "tool"]"#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "failed" "search""#,
+            r#""reply" ["k", "markdown"]"#,
+        ],
+        "{}",
+        got[0]
+    );
+    assert_eq!(shapes[1], shapes[0], "codex: {}", got[1]);
+    assert_eq!(shapes[2], shapes[0], "gemini: {}", got[2]);
+    let claude = got[0]["blocks"].as_array().unwrap();
+    assert_eq!(claude[0]["text"], "replay");
+    assert_eq!(claude[4]["answered"], "allow");
+    assert_eq!(
+        claude[4]["options"][0],
+        json!({"id": "allow_always", "name": "Always Allow", "kind": "allow_always"})
+    );
+    assert!(claude[6]["markdown"]
+        .as_str()
+        .unwrap()
+        .starts_with("## Fixed\n\nThe parser now:\n- skips"));
+    assert!(claude[6]["markdown"]
+        .as_str()
+        .unwrap()
+        .ends_with("```\nAll 12 tests pass."));
+    for v in &got {
+        let cmd = &v["blocks"][3];
+        assert!(cmd["title"].as_str().unwrap().contains('\n'), "{cmd}");
+        assert!(!cmd["title_line"].as_str().unwrap().contains('\n'), "{cmd}");
+        assert!(cmd["title"]
+            .as_str()
+            .unwrap()
+            .starts_with(cmd["title_line"].as_str().unwrap().trim_end_matches('…')));
+        assert_eq!(v["lines"], json!([]), "an ACP lane sends no screen lines");
+        assert_eq!((v["before"].as_u64(), &v["more"]), (Some(1), &json!(false)), "{v}");
+    }
+    assert_eq!(got[0]["blocks"][3]["title_line"], "`cargo test -p parser \\…");
+}
+
+/// #749: an ACP transcript pages by `before` (an event `seq`) and `n`: claude's last 4 events before seq 13 (seqs 9-12)
+/// are two tool blocks, the cargo command's last updates and the failed search; the next page is `before` 9.
+#[test]
+fn an_acp_transcript_pages_by_event_seq() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    recorded(&b, "claude");
+    let v = lane_json(&b, "sendmeter-impl-12", "?before=13&n=4");
+    let kinds: Vec<String> = v["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| format!("{} {}", b["k"], b["status"]))
+        .collect();
+    assert_eq!(kinds, [r#""tool" "completed""#, r#""tool" "failed""#], "{v}");
+    assert_eq!((v["before"].as_u64(), &v["more"]), (Some(9), &json!(true)), "{v}");
+    assert_eq!(b.last("read")["before"], 13);
+}
+
+/// #749: a PTY lane on shed (no `acp`) still returns its screen: its lines, and the one `screen` block naming them.
+#[test]
+fn a_pty_lane_still_returns_its_screen() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let v = lane_json(&b, "sendmeter-impl-12", "");
+    assert_eq!(v["lines"], json!(["screen of sendmeter-impl-12"]), "{v}");
+    assert_eq!(v["blocks"], json!([{"k": "screen"}]), "{v}");
 }

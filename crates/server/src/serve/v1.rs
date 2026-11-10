@@ -1,5 +1,5 @@
 //! #265: the JSON API v1 under `/api/v1/` (docs/serve.md), the board's data: `state`, `events?since=N`, `host`,
-//! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::Chat`) and a POST per form
+//! `queue`, #269 `needs`, `lanes`, `chat` and `thread/<t>`, `lane/<agent>` (`crate::api::LaneChat`) and a POST per form
 //! op. Its types are in `crate::api`, beside the board's. A breaking change is `/v2`. #555: the drover plugins' routes
 //! (`herd`, `roles`, `setup/<pane>`; POST `send`, `menu`, `act`, `setup`, `chat-about`, `chat`, `close`) run the old
 //! board's code; every POST takes JSON (or the board's form) and answers `Reply`. #576: the queue rows' marks (`qset`
@@ -7,8 +7,8 @@
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, States, HTML, JSON, PAIRED_OPS};
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
-    Ask, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health, IssueView, Lane, LessonFleet,
-    LessonRun,
+    ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
+    IssueView, Lane, LaneChat, LessonFleet, LessonRun,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
@@ -184,9 +184,10 @@ impl Server<'_> {
             ("GET", _) if lane.is_some() => {
                 let q = form(&format!("{query}&agent={}", lane.unwrap_or_default())); // the path's agent wins
                 let t = self.transcript(ctx, &q).filter(|_| !q.contains_key("setup"));
+                let t = t.and_then(|t| serde_json::from_str::<Chat>(&t).ok());
                 t.map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such agent pane"),
-                    |t| ("200 OK", JSON, t.into_bytes()),
+                    |t| out("200 OK", &self.blocks(ctx, &q, t)),
                 )
             }
             ("POST", Some(op)) if paired_op(op) && !paired => {
@@ -322,6 +323,43 @@ impl Server<'_> {
         crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "closed", d))?;
         let _ = gh::backlog(ctx, self.r, fc, fleet);
         Ok(format!("closed #{n}"))
+    }
+
+    /// #749: `lane/<agent>`'s blocks: an ACP lane's transcript from shed's events (the last `n` before event `before`;
+    /// no screen `lines`, `before` the next page's), else the one `screen` block of the chat's `lines`.
+    fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
+        let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
+        let acp = || {
+            let (cfg, ev) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);
+            let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
+            let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
+            let (on, pane) = (l.on(self.r), l.pane.as_deref()?);
+            let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
+            let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
+            let ev = crate::herdr::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
+            ev.ok().flatten()
+        };
+        let Some(ev) = self.export.is_none().then(acp).flatten() else {
+            return LaneChat {
+                chat,
+                blocks: vec![Block::Screen],
+            };
+        };
+        let first = ev.first().map_or(0, |e| e.seq);
+        let chat = Chat {
+            said: None,
+            older: false,
+            lines: vec![],
+            live: 0,
+            status: None,
+            before: usize::try_from(first).unwrap_or_default(),
+            more: first > 1,
+            ..chat
+        };
+        LaneChat {
+            chat,
+            blocks: acp_blocks(&ev),
+        }
     }
 
     /// API v1's live lanes from the step's snapshot (#337: no subprocess on a request); `state`'s and the lifeboat's.
@@ -889,3 +927,107 @@ fn repo(events: &[Event], fleet: &str) -> RepoThreads {
         threads: threads.collect(),
     }
 }
+
+/// #749: an ACP transcript's events as `lane/<agent>`'s blocks, from ACP's fields only (any agent, any provider): a turn's
+/// prompt; the text chunks between other events joined into one reply (shed's `reply` only when no chunk came); a tool
+/// call's updates folded into its first block; a plan update in place within its turn; an approval with the option
+/// taken. Masked last, so a secret split across chunks is caught whole.
+fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
+    use crate::shed::proto::EventKind as E;
+    let mut out: Vec<Block> = vec![];
+    let turn = |out: &[Block]| {
+        out.iter()
+            .rposition(|b| matches!(b, Block::Prompt { .. }))
+            .map_or(0, |i| i + 1)
+    };
+    for e in events {
+        match &e.kind {
+            E::Turn { prompt } => out.push(Block::Prompt { text: prompt.clone() }),
+            E::Text { text } => match out.last_mut() {
+                Some(Block::Reply { markdown }) => markdown.push_str(text),
+                _ => out.push(Block::Reply { markdown: text.clone() }),
+            },
+            E::Reply { text, .. } if !out[turn(&out)..].iter().any(|b| matches!(b, Block::Reply { .. })) => {
+                out.push(Block::Reply { markdown: text.clone() });
+            }
+            E::ToolCall {
+                id,
+                title,
+                status,
+                kind,
+            } => {
+                let was = out
+                    .iter_mut()
+                    .find(|b| matches!(b, Block::Tool { id: i, .. } if i == id));
+                let old = match &was {
+                    Some(Block::Tool { kind, .. }) => kind.clone(),
+                    _ => None,
+                };
+                let (title, status, kind) = (title.clone(), status.clone(), kind.clone().or(old));
+                let t = Block::Tool {
+                    id: id.clone(),
+                    kind,
+                    title_line: String::new(),
+                    title,
+                    status,
+                };
+                match was {
+                    Some(b) => *b = t,
+                    None => out.push(t),
+                }
+            }
+            E::Plan { entries } => {
+                let at = turn(&out);
+                let p = Block::Plan {
+                    entries: entries.clone(),
+                };
+                match out[at..].iter_mut().find(|b| matches!(b, Block::Plan { .. })) {
+                    Some(b) => *b = p,
+                    None => out.push(p),
+                }
+            }
+            E::ApprovalRequest { tool, options } => out.push(Block::Approval {
+                tool: tool.clone(),
+                options: options
+                    .iter()
+                    .map(|o| ApprovalChoice {
+                        id: o.id.clone(),
+                        name: o.name.clone(),
+                        kind: o.kind.clone(),
+                    })
+                    .collect(),
+                answered: None,
+            }),
+            E::Approved { option } => {
+                let open = out.iter_mut().rev().find_map(|b| match b {
+                    Block::Approval { answered: a @ None, .. } => Some(a),
+                    _ => None,
+                });
+                if let Some(a) = open {
+                    *a = Some(option.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    for b in &mut out {
+        match b {
+            Block::Prompt { text: t } | Block::Reply { markdown: t } | Block::Approval { tool: t, .. } => {
+                *t = lanes::mask(t);
+            }
+            Block::Tool { title, title_line, .. } => {
+                *title = lanes::mask(title);
+                let first = title.lines().next().unwrap_or_default();
+                *title_line = first.chars().take(TITLE_LINE).collect();
+                if title_line.len() < title.len() {
+                    title_line.push('…');
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// #749: a tool block's `title_line` keeps this many characters of the title's first line.
+const TITLE_LINE: usize = 120;

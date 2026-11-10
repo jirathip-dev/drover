@@ -6,6 +6,11 @@
       "clean"
     ],
     "before": 0,
+    "blocks": [
+      {
+        "k": "screen"
+      }
+    ],
     "harness": "claude",
     "lines": [],
     "live": 0,
@@ -25,6 +30,7 @@
   "schema": {
     "acts": [],
     "before": "number",
+    "blocks": [],
     "harness": "string",
     "lines": [],
     "live": "number",
@@ -35,5 +41,5 @@
     "said": "null",
     "status": "null"
   },
-  "type": "Chat"
+  "type": "LaneChat"
 }

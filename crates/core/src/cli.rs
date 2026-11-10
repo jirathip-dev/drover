@@ -1928,6 +1928,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let report = shed_proto::Reported {
             state: state.into(),
             note: None,
+            state_source: None,
         };
         if let Err(e) = crate::shed::call(
             r,

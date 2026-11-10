@@ -5,6 +5,11 @@
     "clean"
   ],
   "before": 2,
+  "blocks": [
+    {
+      "k": "screen"
+    }
+  ],
   "harness": "claude",
   "lines": [
     "⏺ Bash(cargo test)",
