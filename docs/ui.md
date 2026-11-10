@@ -110,6 +110,8 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `sheet-other` (#95) opens the demo's Others agent (a herdr agent that is no lane) and fails unless only
    `[close pane]` shows (no `[stop]`, `[kill]`, `[clean]`), `p.st` reads `not a herdsman lane: herdsman can only
    close its pane`, and nothing in the sheet is in the red (danger) colour.
+   `sheet-acp` (#750) opens a lane whose transcript is an ACP session's (`> prompt`, `[tool] title (status)`, the
+   reply) and fails unless its text keeps its line breaks and each tool is one closed one-line row.
    `lanes-now` (#276; also `~terminal`, glyph mode) redraws the Lanes tab twice through `frag()` (the `/live` path) with
    long `now:` lines as the server emits them (plain; Claude's spinner word, a long action and its time; the word with a
    long action; an idle row with no spinner), and fails unless each stays one ellipsised line inside its row in every
