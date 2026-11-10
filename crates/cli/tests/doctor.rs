@@ -559,3 +559,26 @@ fn a_login_shell_exporting_the_token_warns() {
     assert_eq!(l, format!("{warn} ~/.zshrc"), "{out}");
     assert!(!out.contains("FAKEtoken") && !out.contains("Welcome"), "{out}");
 }
+
+/// #791: a tick still running with a fresh heartbeat reads `running for Nm`, never stuck; with no heartbeat for 2
+/// intervals (slow_secs 300) the stale stamp reads stuck again.
+#[test]
+fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
+    let (c, _) = setup("doc-beat", "claude");
+    let st = c.state.parent().unwrap().to_path_buf();
+    write(&st.join("check.at"), &(c.now - 1080).to_string(), 0o644);
+    write(&st.join("tick.beat"), &format!("{} {}", c.now - 360, c.now - 30), 0o644);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✓') && l.contains("running for 6m"), "{l}");
+    write(
+        &st.join("tick.beat"),
+        &format!("{} {}", c.now - 1080, c.now - 660),
+        0o644,
+    );
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✗') && l.contains("ran 18m"), "{l}");
+}
