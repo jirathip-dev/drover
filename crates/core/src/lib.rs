@@ -28,6 +28,7 @@ pub mod lanes;
 pub mod lesson;
 pub mod outbox;
 pub mod overlap;
+pub mod pending;
 pub mod pipeline;
 pub mod propose;
 pub mod protection;
@@ -621,6 +622,14 @@ fn answer_with(
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
         let merged = events::closed(&events, ask) == Some("closed: merged");
         let open = ask.issue.filter(|_| !merged);
+        // #778: the issue's next lane takes the answer: its start is pending until that lane spawns.
+        if let Some(n) = open {
+            let st = events::fold(&events).remove(&(fleet.to_string(), n));
+            let role = st
+                .and_then(|s| s.build)
+                .unwrap_or(cfg.fleet(fleet)?.flow().start().into());
+            crate::pending::record(ctx, (fleet, n), "answer", &role, events.last().map(|e| e.seq))?;
+        }
         let next = open.map(|n| format!("; the next lane on #{n} gets it in its brief"));
         let gone = format!("recorded; asking agent gone, not prompted{}", next.unwrap_or_default());
         return Ok(writeln!(out, "{fleet} {id}: {text} {gone}")?);

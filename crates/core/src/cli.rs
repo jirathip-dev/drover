@@ -1120,11 +1120,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let w = waits
+                    // #778: a tapped start waiting for its lane says so first.
+                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let wait = waits
                         .iter()
                         .flatten()
-                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue)
-                        .map(|w| w.1.what.clone())
+                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue);
+                    let w = pending
+                        .or_else(|| wait.map(|w| w.1.what.clone()))
                         .or(skip)
                         .or_else(|| {
                             let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
@@ -1607,6 +1610,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
+                    for w in &mut rows {
+                        // #778: a tapped start waiting for its lane, as `status` says it.
+                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                            (w.who, w.what) = ("drive", l);
+                        }
+                    }
                     let slots = crate::drive::holders(ctx);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
