@@ -608,7 +608,10 @@ fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
 /// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
 fn stop(r: &dyn Runner, events: &[Event], id: &str) {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+    if let Some(p) = last
+        .filter(|e| e.kind == "orchestrator-start")
+        .and_then(|e| e.str("pane"))
+    {
         drop(crate::herdr::keys(r, p, "Escape"));
     }
 }
