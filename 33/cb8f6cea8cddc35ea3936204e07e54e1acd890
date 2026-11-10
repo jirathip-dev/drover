@@ -1,0 +1,12 @@
+Decided: structured edits go through the existing line editor config::set_in (now any value type) instead of a new toml_edit dependency.
+Because: "Comments in fleet.toml are kept through structured edits (a TOML-preserving editor)."
+Rejected: toml_edit as a direct dependency — a new dependency needs an owner ask, and set_in already edits value bytes only.
+Decided: a manual edit shares proposal apply's install step (backup, profiles sync, doctor) and logs config-edit by "owner (cooee)".
+Because: "Backup kept, `doctor` run, event logged `by: owner (cooee)`, as `config apply`."
+Decided: pause/resume reuse the existing /api/v1/pause|resume board ops; the new test only covers their round-trip and log.
+Because: crates/server/src/serve.rs:1428
+Decided: a new fleet copies the first fleet's role sections; remove drops only [fleet.X] and [fleet.X.*] sections.
+Because: "remove a fleet (only its config section; never its repo, worktrees or log; refused while it has live lanes unless confirmed)"
+Rejected: reporting every parse error at once — Config::parse stops at the first; collecting all would rewrite its validation.
+Check: crates/cli/tests/config_api.rs drives the real /api/v1 routes: secrets as names, STALE, invalid edit writes nothing, comments kept, add/remove/pause/resume logged.
+Owner: cooee can now read, check and directly edit fleet.toml, add or remove a fleet, and pause or resume one, with comments kept.
