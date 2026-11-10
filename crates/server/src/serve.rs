@@ -459,7 +459,6 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
     }
 }
 
-/// #386: a thread file's type by its extension.
 /// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
 fn disk_file<P: AsRef<std::path::Path>>(
     at: Option<P>,
@@ -477,6 +476,7 @@ fn disk_file<P: AsRef<std::path::Path>>(
     }
 }
 
+/// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
         "png" => PNG,
