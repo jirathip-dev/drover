@@ -1604,9 +1604,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             )),
                             // #724: passes run and only a spawn slot is wanting: not a stuck tick.
                             Some(t) if ctx.now.saturating_sub(t) > 600 && slot.is_some() => slot,
+                            // #791: a long tick still beating is running, not stuck.
+                            Some(_) if let Some(since) = crate::timer::running(ctx, &cfg) => Some(format!(
+                                "drive's pass running for {}",
+                                crate::events::age(ctx.now.saturating_sub(since))
+                            )),
                             Some(t) => {
                                 let late = ctx.now.saturating_sub(t);
-                                let stuck = if late > 600 {
+                                let stuck = if late > crate::timer::stuck_secs(&cfg) {
                                     ": tick stuck? herdsman doctor"
                                 } else {
                                     ""
