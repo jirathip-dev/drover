@@ -72,7 +72,7 @@ fn account_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
         .filter_map(|n| Some((n, crate::usage::row(ctx, n)?)))
     {
         let read = crate::events::age(ctx.now.saturating_sub(m.ts));
-        let fix = "only an interactive Claude status line writes it; a window past its reset reads 0%";
+        let fix = "only an interactive status line writes it; a window past its reset reads 0%";
         row(
             rows,
             ctx.now < m.ts + 5 * 3600,
