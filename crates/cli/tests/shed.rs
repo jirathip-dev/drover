@@ -2395,3 +2395,32 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     assert!(w.contains("held: HOST_BUSY load/cpu 9.00 > "), "{w}");
     assert!(!w.contains("nothing drives this"), "{w}");
 }
+
+#[test]
+fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account() {
+    let (c, b, f, wt, _) = acp_lane("acp-silent");
+    // #785: its brief went in as its first turn; nothing came back.
+    let seq = b.events.lock().unwrap().len() as u64 * 10 + 1;
+    let turn =
+        json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
+    b.events.lock().unwrap().push(turn);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let check = |secs| {
+        let (code, out) = run(&later(&c, secs), &cli, &["check"]);
+        assert_eq!(code, 0, "{out}");
+        out
+    };
+    check(120);
+    assert!(logged(&c, "lane-failed-start").is_empty(), "2 min: not yet");
+    let out = check(200);
+    let failed = logged(&c, "lane-failed-start");
+    assert_eq!(failed.len(), 1, "{out}");
+    assert_eq!(failed[0].str("account"), Some("C"));
+    assert!(failed[0].str("reason").unwrap().contains("account C"), "{failed:?}");
+    check(400);
+    assert_eq!(logged(&c, "lane-failed-start").len(), 1, "once per start");
+    let (_, w) = run(&later(&c, 400), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("failed start") && !w.contains("idle without pushing"), "{w}");
+}

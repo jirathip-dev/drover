@@ -423,6 +423,7 @@ pub const PASSIVE: &[&str] = &[
     "account-capped",
     "agent-unavailable",
     "account-signed-out",
+    "lane-failed-start",
     "cap-banner-ignored",
     "spawn-failed",
     // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.

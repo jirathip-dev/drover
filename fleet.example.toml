@@ -120,7 +120,7 @@ profile = "lane-design"
 # Each account's name (#683: the value is unused; herdsman keeps no token). A lane signs in with `account_env`'s printed
 # JSON env, else the account's own login folder ([accounts.usage]'s, else ~/.config/herdsman/accounts/<name>) as
 # CLAUDE_CONFIG_DIR. Sign in with cooee (Settings › Providers) or `CLAUDE_CONFIG_DIR=<folder> claude /login`.
-# account_env = "cooee accounts env {provider} {name}"
+# account_env = "cooee accounts env {provider} {name} --require-signed-in"   # #785: exit 3 skips a signed-out account
 A = "A"
 B = "B"
 C = "C"
@@ -155,6 +155,7 @@ idle_merged_minutes = 15  # drive/clean: a merged or closed issue's lane not wor
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
 max_pushes_per_pass = 3   # herdsman check pushes at most this many alerts a pass, then one summary
 # fallback_rest_minutes = 60   # #302: an unavailable agent rests this long when its message names no reset
+# acp_start_minutes = 3        # #785: an ACP lane silent this long after its first turn alerts `lane-failed-start`
 # rotate_mb = 20   # #343: an event log over this moves events older than 30 days to events-YYYYMM.jsonl.gz (kept)
 transcript_days = 30      # Claude lanes' cleanupPeriodDays; lanes share ~/.claude, so below 30 (Claude's default) also prunes your own transcripts
 load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
