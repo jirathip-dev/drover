@@ -1,0 +1,8 @@
+Decided: a staging catch-up merge on top of 7324d37 instead of only re-running the red evidence run
+Because: scripts/evidence-check.sh:3
+Because: crates/core/src/gh.rs:412
+Rejected: gh run rerun of the push-time evidence run — it replays the old body and failed again
+Rejected: a body edit alone — the herdsman fleet has no required_checks, so every run counts and the old red one stays
+Check: the push-time evidence run at 7ba15d6 is green, and the merge brings in staging only
+Check: the full test run's failures are disk I/O errors and a paint-timing test; each binary passes alone
+Owner: The red check was a stale run from before the PR text named the tested version; a fresh push clears it
