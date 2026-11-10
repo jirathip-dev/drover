@@ -1,6 +1,3 @@
-//! #557: no Hermes. `self-update` (the `dev.herdsman.update` job) installs only a green head, through the doctor
-//! gate (#707: no signing step), with a fake git, gh and cargo; `clean --scheduled` (the daily job) keeps its 3-day,
-//! 10-per-run and live/dirty rules and closes orphan workspaces; a leftover `[telegram]` only warns.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -36,8 +33,15 @@ fn host(conclusion: &str) -> Fake {
             &checks.to_string(),
         )
         .reply("cargo build --release --locked -p herdsman", "")
+        .reply("which codesign", "/usr/bin/codesign\n")
+        .reply("sh ", "")
         .reply("launchctl kickstart -k gui/", "")
         .reply("systemctl --user restart dev.herdsman.serve.service", "")
+}
+
+fn sign_script(c: &herdsman::Ctx) -> String {
+    let s = c.state.with_file_name("update/src/scripts/signing-identity.sh");
+    s.to_string_lossy().into()
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
@@ -59,7 +63,7 @@ fn red_ci_installs_nothing() {
 }
 
 #[test]
-fn green_is_built_gated_swapped_synced_and_restarted() {
+fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     let (c, live) = setup("upd-green");
     let new = format!("{}.new", live.display());
     let r = host("SUCCESS")
@@ -74,13 +78,13 @@ fn green_is_built_gated_swapped_synced_and_restarted() {
     assert!(out.starts_with("✓ installed abcdef1 at "), "{out}");
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "swapped in");
     assert!(!PathBuf::from(&new).exists());
-    // Gated, then synced, then serve restarted, in that order; #707: never signed, no secret read.
     let at = |p: &str| {
         r.index(p)
             .unwrap_or_else(|| panic!("{p} not called: {:?}", r.calls.borrow()))
     };
     let order = [
         at("cargo build"),
+        at(&format!("sh {} sign {new}", sign_script(&c))),
         at(&format!("{new} doctor --config-only")),
         at(&format!("{} profiles sync", live.display())),
         at(if cfg!(target_os = "macos") {
@@ -91,10 +95,7 @@ fn green_is_built_gated_swapped_synced_and_restarted() {
     ];
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
     let calls = r.calls.borrow().join("\n");
-    assert!(
-        !calls.contains("codesign") && !calls.contains("signing-identity") && !calls.contains("--tokens"),
-        "{calls}"
-    );
+    assert!(!calls.contains("security ") && !calls.contains("--tokens"), "{calls}");
     assert_eq!(kinds(&c, "self-updated")[0].str("sha"), Some(SHA));
 
     let r2 = host("SUCCESS");
@@ -124,6 +125,27 @@ fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     assert_eq!(run(&c, &r2, &["self-update"]).0, 1);
     assert!(!r2.called("profiles sync"));
     assert_eq!(kinds(&c, "self-update-failed").len(), 1);
+}
+
+#[test]
+fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
+    let (c, live) = setup("upd-identity");
+    let r = host("SUCCESS").once_err(&format!("sh {} sign", sign_script(&c)), 2, "");
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("no \"herdsman-local\" identity") && out.contains("signing-identity.sh"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD");
+    assert!(
+        !r.called(&format!("{}.new doctor", live.display())),
+        "an unsigned build is never gated in"
+    );
+    assert!(kinds(&c, "self-update-failed")[0]
+        .str("reason")
+        .unwrap()
+        .contains("no \"herdsman-local\" identity"));
 }
 
 #[test]

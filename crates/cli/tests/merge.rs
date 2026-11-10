@@ -420,7 +420,7 @@ fn merge_into_fleet_repo_prints_reinstall_command_last() {
     assert_eq!(exit, 0, "{out}");
     assert_eq!(
         out.lines().last(),
-        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/herdsman --force"),
+        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/herdsman --force && sh /tmp/does-not-matter/sendmeter/scripts/signing-identity.sh sign /opt/herdsman/bin/herdsman"),
         "{out}"
     );
     assert!(!r.called("cargo"), "printed, never run");

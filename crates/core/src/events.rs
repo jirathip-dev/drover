@@ -401,7 +401,11 @@ pub const PASSIVE: &[&str] = &[
     "why-nudged",
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
+    "nudged",
+    "respawned-silent",
     "budget-freed",
+    // #798: a finished lane's build folder or scratch removed.
+    "build-freed",
     "wip-saved",
     "wip-blocked",
     // #662: a gone ACP lane's local commits drive pushed before resuming it.
@@ -418,6 +422,7 @@ pub const PASSIVE: &[&str] = &[
     "account-capped",
     "agent-unavailable",
     "account-signed-out",
+    "lane-failed-start",
     "cap-banner-ignored",
     "spawn-failed",
     // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.

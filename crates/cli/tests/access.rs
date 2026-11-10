@@ -333,13 +333,16 @@ fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
 }
 
 #[test]
-fn doctor_shows_one_account_source_row_and_accounts_read_each_folders_sign_in_never_the_keychain_or_the_cli() {
+fn doctor_shows_one_account_source_row_and_accounts_ask_each_folders_cli_never_the_keychain() {
     let d = tmpdir("acct-doctor");
     let c = ctx(&d, &folders(&d, "account = \"A\""));
     let (a, b) = (d.join("accounts/A"), d.join("accounts/B"));
     sign_in(&a);
     std::fs::create_dir_all(&b).unwrap(); // B's folder, signed out
-    let r = Fake::default(); // #707: no secret store at all
+                                          // #707: no secret store at all; #785: each folder's own CLI says whether it is signed in.
+    let r = Fake::default()
+        .reply(&auth_status(&d, "A"), r#"{"loggedIn": true}"#)
+        .reply(&auth_status(&d, "B"), r#"{"loggedIn": false}"#);
     let out = run(&c, &r, &["doctor"]).1;
     // #707 (q855): one account-source row; the per-account rows are retired.
     let src: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
@@ -380,12 +383,8 @@ fn doctor_shows_one_account_source_row_and_accounts_read_each_folders_sign_in_ne
     );
     assert!(!out.contains("Keychain") && !out.contains("partition-list"), "{out}");
     let calls = r.calls.borrow();
-    assert!(
-        !calls
-            .iter()
-            .any(|l| l.contains("auth status") && l.contains("claude") || l.starts_with("security ")),
-        "{calls:?}"
-    );
+    assert!(!calls.iter().any(|l| l.starts_with("security ")), "{calls:?}");
+    assert!(calls.contains(&auth_status(&d, "B")), "{calls:?}");
 }
 
 #[test]
@@ -802,4 +801,110 @@ fn a_token_file_others_can_read_refuses_the_spawn() {
         out.contains("! account A token file — REFUSED SECRET_FILE_OPEN"),
         "{out}"
     );
+}
+
+/// #785: Claude Code's own answer for folder `<d>/accounts/<name>`: `claude auth status` there, the env's token unset.
+fn auth_status(d: &Path, name: &str) -> String {
+    let dir = d.join("accounts").join(name);
+    format!(
+        "env -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR={} claude auth status",
+        dir.display()
+    )
+}
+
+#[test]
+fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
+    let d = tmpdir("acct-785-folder");
+    let c = ctx(&d, &folders(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    // A's folder holds a stale login file, but its CLI says it is signed out; B's says signed in.
+    sign_in(&d.join("accounts/A"));
+    let status = |r: Fake| {
+        r.reply(&auth_status(&d, "A"), r#"{"loggedIn": false}"#)
+            .reply(&auth_status(&d, "B"), r#"{"loggedIn": true}"#)
+    };
+    let (r, got) = spawn_with(&c, 12, SIGN_IN, status);
+    assert!(r.called(&auth_status(&d, "A")), "{:?}", r.calls.borrow());
+    assert_eq!(got, format!("{}/accounts/B|", d.display()), "the lane is on B");
+    assert_eq!(kinds(&c, "spawn")[0].str("account"), Some("B"));
+    let out = kinds(&c, "account-signed-out");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].str("account"), Some("A"));
+    assert!(
+        out[0].str("reason").unwrap().contains("claude /login"),
+        "names the sign-in: {out:?}"
+    );
+    // The next spawn skips A without asking again: still one alert.
+    let (r, got) = spawn_with(&c, 13, SIGN_IN, status);
+    assert_eq!(got, format!("{}/accounts/B|", d.display()));
+    assert!(!r.called(&auth_status(&d, "A")));
+    assert_eq!(kinds(&c, "account-signed-out").len(), 1);
+}
+
+#[test]
+fn an_account_env_exit_3_is_signed_out_and_skipped() {
+    let d = tmpdir("acct-785-helper");
+    let cfg = config(&d, "accounts = [\"A\", \"B\"]").replace(
+        "[accounts]\n",
+        "[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name} --require-signed-in\"\n",
+    );
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let f = |r: Fake| {
+        r.once_err("fake-cooee accounts env claude A", 3, "cooee: claude/A is signed out")
+            .reply(
+                "fake-cooee accounts env claude B",
+                r#"{"CLAUDE_CONFIG_DIR": "/cooee/B"}"#,
+            )
+    };
+    let (_, got) = spawn_with(&c, 12, SIGN_IN, f);
+    assert_eq!(got, "/cooee/B|", "the lane is on B");
+    let out = kinds(&c, "account-signed-out");
+    assert_eq!((out.len(), out[0].str("account")), (1, Some("A")), "{out:?}");
+    assert!(out[0].str("reason").unwrap().contains("signed out"), "{out:?}");
+}
+
+#[test]
+fn accounts_lists_live_lanes_only() {
+    let d = tmpdir("acct-785-live");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let ev = |issue: Option<u64>, kind: &str, d: Value| {
+        append(&c.state, &Event::new(c.now - 100, "sendmeter", issue, kind, d)).unwrap();
+    };
+    for (n, agent) in [
+        (12, "sendmeter-impl-12"),
+        (13, "sendmeter-impl-13"),
+        (14, "sendmeter-impl-14"),
+    ] {
+        ev(
+            Some(n),
+            "spawn",
+            json!({"agent": agent, "role": "impl", "account": "A"}),
+        );
+    }
+    ev(
+        None,
+        "spawn",
+        json!({"agent": "conductor-t1", "role": "conductor", "account": "A"}),
+    );
+    // 13's lane died, 14's ACP session is gone, the conductor's was superseded: only 12 still runs.
+    ev(
+        Some(13),
+        "lane-dead",
+        json!({"key": "1:sendmeter-impl-13", "reason": "gone"}),
+    );
+    ev(
+        Some(14),
+        "lane-state",
+        json!({"agent": "sendmeter-impl-14", "state": "gone", "cause": "killed"}),
+    );
+    ev(
+        None,
+        "supersede",
+        json!({"agent": "conductor-t1", "killed": ["conductor-t1"]}),
+    );
+    let (code, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert_eq!(code, 0, "{list}");
+    let a = list.lines().find(|l| l.starts_with("A ")).unwrap();
+    assert!(a.ends_with("1 lanes sendmeter-impl-12"), "{list}");
 }

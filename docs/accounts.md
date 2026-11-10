@@ -15,10 +15,26 @@ in with:
 Standalone, sign each account in once with `CLAUDE_CONFIG_DIR=<folder> claude /login` (or with cooee, Settings ›
 Providers). Claude Code keeps that login itself; herdsman only points the lane at the folder. The lane's profile goes on
 top of that login (`--settings`, `--append-system-prompt-file`; an ACP lane's worktree-local settings), so its hook
-still guards it. `herdsman accounts` shows each account's sign-in from its folder's `.claude.json`, never a Keychain
-read or a `claude` call. `herdsman doctor` shows one row for where accounts sign in from (the folders or the
-`account_env` helper), no row per account (q855). Rotation, caps and `accounts reset` work per account as before.
-Remote hosts get no account env: their lanes sign in through the main host's token proxy (#637).
+still guards it. `herdsman accounts` shows each account's sign-in as its CLI's own status command says
+(`claude auth status` / `codex login status` in the folder, the shell's token unset), never a Keychain read.
+`herdsman doctor` shows one row for where accounts sign in from (the folders or the `account_env` helper), no row per
+account (q855). Rotation, caps and `accounts reset` work per account as before. Remote hosts get no account env: their
+lanes sign in through the main host's token proxy (#637).
+
+## A signed-out account is skipped (#785)
+
+Before a lane starts on an account, herdsman checks its sign-in: with cooee, `account_env = "cooee accounts env
+{provider} {name} --require-signed-in"` exits 3 for a signed-out account; standalone, the folder's status command says
+`loggedIn: false`. Either way the account rests like a capped one (`account-signed-out`, one owner alert naming the
+sign-in), the lane goes on the role's next account, and the account stays out until it is signed in and `herdsman
+accounts reset <name>` is run. A dry run asks nothing. An ACP lane with no event back `[limits] acp_start_minutes`
+(default 3) after its first turn alerts `lane-failed-start` naming its account, and `waiting` calls it a failed start,
+not idle.
+
+The meter (`usage.jsonl`) is written only by an interactive Claude status line; ACP lanes write none, so a reading can be
+days old. `herdsman accounts` shows each reading's age, a window past its reset reads `0% (reset)`, `doctor` warns on a
+reading over 5 h old, and the pick never counts a window past its reset. `herdsman accounts` lists only lanes still
+running.
 
 ## A token file, for a host with no login Keychain (#707)
 

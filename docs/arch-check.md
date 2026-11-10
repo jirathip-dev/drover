@@ -42,6 +42,30 @@ baseline = ".herdsman/arch-baseline.txt" # the default
 `<file>:<fn> <lines>` a line. A function runs from its `fn` / `function` / `const f = (…) => {` line to the first
 later line at its indent starting with `}`, so the source must be formatted.
 
+## Comments and docs (#735)
+
+```toml
+# A comment line added since --base fails (Rust and TypeScript `//`, `/* */`), but `// SAFETY:` right above an
+# `unsafe` line and one `///` or one-line `/** */` on a `pub`/`export` item. Old lines are never judged.
+[comments]
+policy = "off" # "on": no check
+except = ["assets/types/**"] # generated files
+
+# Every repo path, `path:line`, link and (with cli = true) `herdsman …` command and flag in these docs must exist.
+# With --pr-body, a changed `name:` line in a watched file needs a changed doc line naming it (`name` or `name-with-dashes`),
+# or `no doc: <why>` in the PR body.
+[docs]
+paths = ["docs/**/*.md", "README.md"]
+watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
+skip = [".herdsman/**"] # paths that are each fleet repo's, not this one's
+cli = true
+```
+
+A path counts when its first folder exists at the repo root (`../` ones from the doc's folder); fenced blocks are
+skipped. CI runs `herdsman arch-check --base HEAD^1 --pr-body <body>` on a pull request (checkout `fetch-depth: 2`,
+so `HEAD^1` is the base). The reason for a non-obvious line goes in the commit's why note (`herdsman why`), never in a
+comment.
+
 The lesson lane turns a repeated layer crossing or banned call into a `[[layer]]` or `[[ban]]` entry.
 
 Another repo's CI runs it with the reusable workflow:

@@ -320,7 +320,7 @@ lane. A narrower step that needs no runtime switch: use `hc exec --on` / `hc fil
   by default"* (0.1.13). herdsman would start lanes with `--no-parent` (and `--outlive-parent` where a parent is set).
   Track: the CHANGELOG, `hc schema` (`info.version`), and the `hello` method's *"protocol generation"*.
 - **Telemetry.** The herdr-app README: *"Usage telemetry is on by default in releases. Turn it off in Settings →
-  Privacy."* The hc README, `docs/security.md` and `docs/machines.md` do not mention telemetry; the only outbound call
+  Privacy."* The hc README, its docs/security.md and docs/machines.md do not mention telemetry; the only outbound call
   they name is updates: *"The default release service is HTTPS at releases.herdr.dev."* herdsman would need only
   `hc`, never the app. That the core sends none was not verified at the network level.
 - **Updates and running lanes.** *"Updates restart the core while holders keep the terminals running"*

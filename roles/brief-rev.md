@@ -16,3 +16,4 @@
   or `$TMPDIR`; it is deleted when your lane ends.
 - #677: a why note that contradicts the diff is a blocking finding (`Proof: spec`: the note line `>` quoted, plus
   the `file:line`); no why note for the round may be one too.
+- #735: read the commits' why notes (`herdsman why <file:line>`): the reasons live there, not in comments.

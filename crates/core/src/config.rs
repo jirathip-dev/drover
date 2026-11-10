@@ -544,6 +544,8 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
+    /// #792: an ACP lane's open turn with no session event this long is silent: cancelled and nudged, then respawned.
+    pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
@@ -592,6 +594,8 @@ pub struct Limits {
     pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
+    /// #785: an ACP lane with no event back this long after its first turn is a failed start.
+    pub acp_start_minutes: u64,
     /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
@@ -633,6 +637,7 @@ impl Default for Limits {
             review_rounds: 3,
             update_rounds: 3,
             stall_minutes: 30,
+            silent_minutes: 10,
             ci_start_minutes: 10,
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
@@ -674,6 +679,7 @@ impl Default for Limits {
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
+            acp_start_minutes: 3,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -709,6 +715,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "stall",
     "lane-dead",
     "account-signed-out",
+    "lane-failed-start",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",
@@ -1249,19 +1256,11 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
         let l = lines[i];
         let eq = l.find('=').unwrap() + 1;
         let v = eq + l[eq..].len() - l[eq..].trim_start().len();
-        let end = if l[v..].starts_with('"') {
-            l[v + 1..].find('"').map(|c| v + c + 2)
-        } else if lit.starts_with('"') {
-            None
-        } else {
-            Some(
-                v + l[v..]
-                    .find(|c: char| c.is_whitespace() || c == '#')
-                    .unwrap_or(l.len() - v),
-            )
-        };
-        let end = end.ok_or_else(|| anyhow!("{header} {key}: value must be a \"string\""))?;
-        out[i] = format!("{}{lit}{}", &l[..v], &l[end..]);
+        let mut q = false;
+        let end = l[v..]
+            .find(|c| (q ^= c == '"', c == '#' && !q).1)
+            .map_or(l.trim_end().len().max(v), |c| v + c);
+        out[i] = format!("{}{lit}{}", &l[..v], &l[v + l[v..end].trim_end().len()..]);
     } else {
         let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
         if !out[last].ends_with('\n') {

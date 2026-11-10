@@ -1,6 +1,3 @@
-//! #557 `herdsman self-update`, the `dev.herdsman.update` job (every 5 min), no Hermes: the herdsman fleet's
-//! integration head is installed once its CI is all green. Built beside the live binary, gated by the new binary's
-//! `doctor --config-only` on the live config (#539; #707: no signing step, no secret read), swapped in atomically, then `profiles sync` and a serve restart. A failed step keeps the old binary and alerts once per head.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::runner::{ok, Runner};
@@ -69,7 +66,7 @@ pub fn self_update(
         writeln!(out, "{}", plan.join("\n"))?;
         return Ok(0);
     }
-    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &new));
+    let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &home.join("src"), &new));
     let res = staged.and_then(|()| {
         std::fs::rename(&new, &live).with_context(|| format!("swap into {}", live.display()))?;
         std::fs::write(home.join("sha"), sha)?;
@@ -146,12 +143,18 @@ fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Re
     Ok(())
 }
 
-/// Run `new`'s `doctor --config-only` (#539); #707: no signing step, no secret read.
-fn gate(r: &dyn Runner, new: &Path) -> Result<()> {
-    let o = r.run(
-        &new.to_string_lossy(),
-        &crate::runner::argv(&["doctor", "--config-only"]),
-    )?;
+fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
+    let n = new.to_string_lossy();
+    if ok(r, "which", &["codesign"]).is_ok() {
+        let script = src.join("scripts/signing-identity.sh");
+        let o = r.run("sh", &crate::runner::argv(&[&script.to_string_lossy(), "sign", &n]))?;
+        match o.code {
+            0 => {}
+            2 => bail!("sign: no \"herdsman-local\" identity → sh scripts/signing-identity.sh, once"),
+            _ => bail!("sign: {}", format!("{}{}", o.stdout, o.stderr).trim()),
+        }
+    }
+    let o = r.run(&n, &crate::runner::argv(&["doctor", "--config-only"]))?;
     if o.code != 0 {
         bail!("doctor --config-only on the live config: {}", o.stdout.trim());
     }

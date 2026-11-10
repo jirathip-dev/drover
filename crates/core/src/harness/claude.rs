@@ -27,7 +27,8 @@ pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
 pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
 /// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
-const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
+const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in|api error: 401|\
+    authentication_error|token has been revoked";
 
 /// #640: Claude Code's own lines: the last transcript block unless a `⏺` reply/tool call heads it, minus prompts.
 fn own_lines(screen: &str) -> String {
@@ -155,11 +156,12 @@ impl Harness for Claude {
     fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
-    /// #683: Claude Code keeps the folder's account in `.claude.json` (`oauthAccount`) while it is signed in.
-    fn signed_in(&self, dir: &Path) -> bool {
-        let v = std::fs::read_to_string(dir.join(".claude.json")).ok();
-        v.and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
-            .is_some_and(|v| v["oauthAccount"].is_object())
+    /// #785: `claude auth status` in the folder, the shell's token unset (a stale login file is no sign-in).
+    fn signed_in(&self, r: &dyn Runner, dir: &Path) -> Option<bool> {
+        let dir = format!("CLAUDE_CONFIG_DIR={}", dir.display());
+        let a = ["-u", "CLAUDE_CODE_OAUTH_TOKEN", &dir, "claude", "auth", "status"];
+        let o = r.run("env", &crate::runner::argv(&a)).ok()?;
+        serde_json::from_str::<serde_json::Value>(&o.stdout).ok()?["loggedIn"].as_bool()
     }
     /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
     fn acp_profile(&self, settings: &str, role: &str) -> String {

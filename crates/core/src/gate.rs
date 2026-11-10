@@ -1010,10 +1010,13 @@ fn merged(
         // Dogfood fleet: say how to pick up the merged code; never run it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
+        let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force",
-            f.local_path().display(),
+            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/herdsman",
+            src.display(),
+            root.display(),
+            src.display(),
             root.display()
         )?;
     }

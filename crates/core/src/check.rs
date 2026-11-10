@@ -227,6 +227,17 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let to = (u.fleet.as_str(), u.issue);
         fire(ctx, cfg, out, &events, to, "answer-undelivered", d.into())?;
     }
+    // #785: an ACP lane silent after its first turn is a failed start, not idle: once per start, naming its account.
+    let silent = crate::shed::silent(ctx, cfg.limits.acp_start_minutes).into_iter();
+    for (sp, agent, at) in silent.filter_map(|(a, at)| Some((last_spawn(&events, &a)?, a, at))) {
+        let on = sp.str("account").map_or("its login".into(), |a| format!("account {a}"));
+        let why = format!(
+            "{agent}: failed start on {on}, no event {} after its first turn",
+            age(ctx.now - at)
+        );
+        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "account": sp.str("account"), "reason": why});
+        fire(ctx, cfg, out, &events, (&sp.fleet, sp.issue), "lane-failed-start", d)?;
+    }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
@@ -294,7 +305,13 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     let why = match kind {
                         "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
                         "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
-                        _ => format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you sign in or replace its token (an account: then `herdsman accounts reset {name}`)"),
+                        _ => {
+                            let fix = account.map(|a| crate::access::sign_in(cfg, r, a).1);
+                            let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
+                            let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));
+                            let fix = format!("{fix} or replace its token");
+                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `herdsman accounts reset {name}`)")
+                        }
                     };
                     hits.push((kind, format!("{lane}:{name}{auth}"), why));
                     let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
@@ -1226,6 +1243,7 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
         };
         let on = On::new(r, Some(m));
         for b in build_dirs(ctx, cfg, &on) {
+            let b = format!("{b}/{}", crate::spawn::SCRATCH);
             let res = scratch(&on, &b, &[]).and_then(|v| {
                 let held = |n: &String| agents.iter().any(|a| a["name"] == n.as_str());
                 let gone: Vec<String> = v.into_iter().map(|n| n.0).filter(|n| !held(n)).collect();
@@ -1243,7 +1261,7 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
                 }
             };
             for (n, bytes) in gone {
-                let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
+                let p = format!("{b}/{n}");
                 let line = if dry {
                     format!("would remove scratch {name}:{p}")
                 } else {
@@ -1271,33 +1289,65 @@ pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
 /// #536/#651: a lane's scratch (`<root>/.build/.scratch/<agent>`) on `on`'s host stays while its agent is working,
 /// it is an open issue's latest lane of its role, or an agent no spawn names yet holds it; else it goes (`lane ended`).
 /// Under `min_free_gb` every non-working lane's goes (`disk low`). Largest first; a building one stays.
+/// #798: a finished lane's scratch and build folder (`<root>/.build/<agent>`) go at once, its session open or not.
 fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> Result<()> {
     for b in build_dirs(ctx, cfg, on) {
+        sweep_in(ctx, cfg, on, host, &format!("{b}/{}", crate::spawn::SCRATCH), out)?;
         sweep_in(ctx, cfg, on, host, &b, out)?;
     }
     Ok(())
 }
 
+/// #798: why lane `sp`'s folders go, if they do: its issue is done or a newer lane holds its role (`superseded`), or
+/// since its spawn a verdict, a design result or its own `turn done` ended its turn (`lane finished`).
+fn finished(events: &[Event], states: &crate::events::States, i: usize) -> Option<&'static str> {
+    let sp = &events[i];
+    let (agent, role) = (sp.str("agent")?, sp.str("role").unwrap_or_default());
+    let s = states.get(&(sp.fleet.clone(), sp.issue?))?;
+    if s.done() {
+        return Some("lane finished");
+    }
+    if s.lanes.get(role).map(String::as_str) != Some(agent) {
+        return Some("superseded");
+    }
+    let ends = |e: &Event| match e.kind.as_str() {
+        "verdict" | "design-review" => true,
+        "turn-end" => e.str("state") == Some("done") && e.str("role") == Some(role),
+        _ => false,
+    };
+    let mine = events[i + 1..]
+        .iter()
+        .filter(|e| e.fleet == sp.fleet && e.issue == sp.issue);
+    mine.into_iter().any(ends).then_some("lane finished")
+}
+
+/// `b`'s lane folders (`.scratch`'s, or the build folder's own, where a lane no spawn names is left alone) swept.
 fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn Write) -> Result<()> {
     let names = scratch(on, b, &[])?;
     if names.is_empty() {
         return Ok(());
     }
+    let scr = b.ends_with(crate::spawn::SCRATCH);
     let (agents, events) = (host::agents(on)?, read(&ctx.state)?);
     let states = fold(&events);
-    let current: std::collections::BTreeSet<&str> = (states.values().filter(|s| !s.done()))
-        .flat_map(|s| s.lanes.values().map(String::as_str))
-        .collect();
     let agent = |n: &str| agents.iter().find(|a| a["name"] == n);
+    let spawn = |n: &str| (events.iter()).rposition(|e| e.kind == "spawn" && e.str("agent") == Some(n));
     let spawned = |n: &str| (events.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(n));
     let low = host::free_gb(on).is_some_and(|g| g < cfg.limits.min_free_gb);
     let (mut why, total) = (BTreeMap::new(), names.len());
     for (n, _) in names {
-        let held = current.contains(&*n) || agent(&n).is_some() && !spawned(&n);
-        if agent(&n).is_some_and(|a| a["agent_status"] == "working") || held && !low {
+        if agent(&n).is_some_and(|a| a["agent_status"] == "working") {
             continue;
         }
-        why.insert(n, if held { "disk low" } else { "lane ended" });
+        let ended = spawn(&n).and_then(|i| finished(&events, &states, i));
+        let unknown = !spawned(&n);
+        let w = match ended {
+            Some(w) => w,
+            None if unknown && scr && agent(&n).is_none() => "lane ended",
+            None if low && scr => "disk low",
+            None => continue,
+        };
+        why.insert(n, w);
     }
     let gone: Vec<String> = why.keys().cloned().collect();
     let removed = if gone.is_empty() {
@@ -1306,10 +1356,18 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn
         scratch(on, b, &gone)?
     };
     for (n, bytes) in &removed {
-        let p = format!("{b}/{}/{n}", crate::spawn::SCRATCH);
-        writeln!(out, "scratch: {host}: removed {p} {:.2} GB ({})", gb(*bytes), why[n])?;
+        let what = if scr { "scratch" } else { "builds" };
+        writeln!(out, "{what}: {host}: removed {b}/{n} {:.2} GB ({})", gb(*bytes), why[n])?;
+        if let Some(sp) = spawn(n).map(|i| &events[i]) {
+            let d = json!({"agent": n, "bytes": bytes, "why": why[n], "host": host, "path": format!("{b}/{n}")});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &sp.fleet, sp.issue, "build-freed", d),
+            )?;
+        }
     }
-    if on.machine.is_some() {
+    if on.machine.is_some() && scr {
         writeln!(
             out,
             "scratch: {host}: {} kept, {} removed",
@@ -1320,8 +1378,9 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn
     Ok(())
 }
 
-/// #651: on `on`'s host, build folder `b`'s `.scratch` folders (`rm` empty), or `rm`'s removed, largest first, with
-/// their bytes; a building one stays. A remote one runs `SCRATCH` there (no `lsof`: no building check).
+/// #651: on `on`'s host, folder `b`'s lane folders (`rm` empty), or `rm`'s removed, largest first, with their bytes;
+/// a building one stays. A remote one runs `SCRATCH` there (no `lsof`: no building check). #798: `b` is a build
+/// folder or its `.scratch`.
 fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
     if on.machine.is_some() {
         let args = crate::runner::argv(&["-c", SCRATCH, "sh", b]);
@@ -1334,10 +1393,10 @@ fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
         };
         return Ok(o.stdout.lines().filter_map(row).collect());
     }
-    let root = crate::config::expand(b).join(crate::spawn::SCRATCH);
+    let root = crate::config::expand(b);
     let ls = std::fs::read_dir(&root).into_iter().flatten().flatten();
     let all = ls
-        .filter(|e| e.path().is_dir())
+        .filter(|e| e.path().is_dir() && !e.file_name().as_encoded_bytes().starts_with(b"."))
         .map(|e| (e.file_name().to_string_lossy().into_owned(), 0));
     if rm.is_empty() {
         return Ok(all.collect());
@@ -1351,10 +1410,10 @@ fn scratch(on: &On, b: &str, rm: &[String]) -> Result<Vec<(String, u64)>> {
     Ok(v.into_iter().filter_map(gone).collect())
 }
 
-/// #651: `scratch` on a remote host: the folder names, or each named one removed (unless `lsof` shows cargo's lock
+/// #651: `scratch` on a remote host: the folder names (no dot folders), or each named one removed (unless `lsof` shows cargo's lock
 /// held), largest first, as `<KB> <name>`.
 const SCRATCH: &str = r#"b=$1; shift; case $b in "~/"*) b=$HOME/${b#"~/"};; esac
-cd "$b/.scratch" 2>/dev/null || exit 0
+cd "$b" 2>/dev/null || exit 0
 [ $# -eq 0 ] && { for d in */; do [ -d "$d" ] && echo "${d%/}"; done; exit 0; }
 du -sk -- "$@" 2>/dev/null | sort -rn | while read -r s d; do
   l=$(find "$d" -maxdepth 4 -name .cargo-lock 2>/dev/null)

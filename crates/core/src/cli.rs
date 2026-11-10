@@ -27,7 +27,7 @@ type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
     about = "State, gates and harness toggle over herdr",
     disable_help_subcommand = true
 )]
-struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -345,6 +345,10 @@ enum Cmd {
         /// Write today's size offenders to the baseline file instead
         #[arg(long)]
         write_baseline: bool,
+        #[arg(long, help = "The git revision whose added lines the comment and doc checks judge")]
+        base: Option<String>,
+        #[arg(long, requires = "base", help = "The PR body (`no doc: <why>` excuses)")]
+        pr_body: Option<PathBuf>,
     },
     /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
     #[command(hide = true)]
@@ -1047,7 +1051,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
-        Cmd::ArchCheck { config, write_baseline } => return crate::arch::check(&config, write_baseline, out),
+        Cmd::ArchCheck {
+            config,
+            write_baseline,
+            base,
+            pr_body,
+        } => return crate::arch::check(&config, write_baseline, base.as_deref(), pr_body.as_deref(), r, out),
         Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
@@ -1583,7 +1592,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             continue;
                         }
                         let (who, what) = match &s.lane {
-                            Some(l) => ("none", format!("waiting on {l} (working){note}")),
+                            Some(l) => {
+                                let how = crate::waiting::recovered(&events, l, ctx.now);
+                                ("none", format!("waiting on {l} (working){how}{note}"))
+                            }
                             // #604: its last start refused (a kick's too) says so.
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))
