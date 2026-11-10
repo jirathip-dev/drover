@@ -347,8 +347,8 @@ tailscale funnel --bg --https=10000 --set-path /hooks/github http://127.0.0.1:77
 
 In the repo's GitHub settings add a webhook: payload URL `https://<mac>.<tailnet>.ts.net:10000/hooks/github`,
 content type `application/json`, the secret, and the events *Pull requests*, *Check suites*, *Check runs*,
-*Statuses* and *Pushes*. The secret is `GITHUB_WEBHOOK_SECRET` in the OS store (`herdsman secret request <thread>
-GITHUB_WEBHOOK_SECRET --why …`; a fleet's own, else `all`'s); without it the endpoint answers 503 and doctor shows
+*Statuses* and *Pushes*. The secret is the 0600 file `[serve] webhook_secret_file` names (#707; one for every fleet, refused
+`SECRET_FILE_OPEN` if others can read it); without it the endpoint answers 503 and doctor shows
 `! webhook — no secret`.
 
 Each delivery's `X-Hub-Signature-256` (HMAC-SHA256 of the raw body) is checked in constant time; a missing or bad one
@@ -381,7 +381,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "conductor", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
 | `GET repo/<fleet>/threads` | #681: the repo's conductor threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its conductor not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
-| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
+| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
 | `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
 | `GET herd` | #555: Herd mode's data, the same as `/herd.json` |
 | `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the conductor) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |

@@ -8,8 +8,7 @@ use std::path::Path;
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C (#683: old tokens still in the store, `store`, never
-/// read), local repo `<dir>/repo`.
+/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C, local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -30,14 +29,6 @@ fn folders(d: &Path, role_extra: &str) -> String {
     config(d, role_extra) + "\n[accounts.usage]\n" + &dirs
 }
 
-/// #441: the accounts' old tokens in the fake store (#683: no lane gets them).
-fn store(f: Fake) -> Fake {
-    let svc = |v: &str| format!("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_{v}");
-    f.stored(&svc("A"), TOKEN_A)
-        .stored(&svc("B"), TOKEN_B)
-        .stored(&svc("C"), "c")
-}
-
 /// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; its pane's shell's `SIGN_IN`.
 fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
     spawn_var(c, n, SIGN_IN)
@@ -53,7 +44,7 @@ fn spawn_with(c: &herdsman::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) 
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
-    let r = more(store(Fake::default()))
+    let r = more(Fake::default())
         .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
@@ -148,7 +139,7 @@ fn capped_account_is_skipped_until_reset() {
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
 
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -276,7 +267,7 @@ fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
         Fake::default().reply("fake-cooee", r#"{"BAD KEY; rm -rf /": "x"}"#),
     ];
     for (i, r) in fails.into_iter().enumerate() {
-        let r = store(r).reply("herdr agent list", NO_AGENTS).reply("git -C", "");
+        let r = r.reply("herdr agent list", NO_AGENTS).reply("git -C", "");
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
         assert_eq!(code, 3, "{i}: {out}");
         assert!(
@@ -296,34 +287,44 @@ fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
 }
 
 #[test]
-fn doctor_and_accounts_read_each_folders_sign_in_from_its_files_never_the_keychain_or_the_cli() {
+fn doctor_shows_one_account_source_row_and_accounts_read_each_folders_sign_in_never_the_keychain_or_the_cli() {
     let d = tmpdir("acct-doctor");
     let c = ctx(&d, &folders(&d, "account = \"A\""));
     let (a, b) = (d.join("accounts/A"), d.join("accounts/B"));
     sign_in(&a);
     std::fs::create_dir_all(&b).unwrap(); // B's folder, signed out
-                                          // No usable store: an account row that read the Keychain would fail.
-    let r = Fake {
-        no_store: true,
-        ..Fake::default()
-    };
+    let r = Fake::default(); // #707: no secret store at all
     let out = run(&c, &r, &["doctor"]).1;
-    assert!(
-        out.lines()
-            .any(|l| l == format!("✓ account A — signed in ({})", a.display())),
+    // #707 (q855): one account-source row; the per-account rows are retired.
+    let src: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
+    assert_eq!(
+        src,
+        ["✓ accounts — sign in from each account's own folder (`/login` in it, docs/accounts.md)"],
         "{out}"
     );
-    let fix = format!(
-        "cooee Settings › Providers, or CLAUDE_CONFIG_DIR={} claude /login",
-        b.display()
-    );
-    let want = format!("✗ account B — signed in ({}) → {fix}", b.display());
-    assert!(out.lines().any(|l| l == want), "{out}");
-    let (code, gate) = run(&c, &r, &["doctor", "--tokens"]);
-    assert_eq!(code, 1, "B is signed out: {gate}");
+    let helper = c.config.with_file_name("helper.toml");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &helper,
+        text.replace(
+            "[accounts]\n",
+            "[accounts]\naccount_env = \"cooee accounts env {provider} {name}\"\n",
+        ),
+    )
+    .unwrap();
+    let h = herdsman::Ctx {
+        config: helper,
+        ..c.clone()
+    };
+    let out_h = run(&h, &r, &["doctor"]).1;
     assert!(
-        gate.contains(&format!("✓ account A — signed in ({})", a.display())),
-        "{gate}"
+        out_h.contains("✓ accounts — sign in from the account_env helper `cooee accounts env {provider} {name}`"),
+        "{out_h}"
+    );
+    assert_eq!(
+        run(&c, &r, &["doctor", "--tokens"]).0,
+        2,
+        "`doctor --tokens` is retired"
     );
     let list = run(&c, &r, &["accounts"]).1;
     assert!(list.contains(&format!("signed in ({})\n", a.display())), "{list}");
@@ -334,7 +335,9 @@ fn doctor_and_accounts_read_each_folders_sign_in_from_its_files_never_the_keycha
     assert!(!out.contains("Keychain") && !out.contains("partition-list"), "{out}");
     let calls = r.calls.borrow();
     assert!(
-        !calls.iter().any(|l| l.contains("auth status") && l.contains("claude")),
+        !calls
+            .iter()
+            .any(|l| l.contains("auth status") && l.contains("claude") || l.starts_with("security ")),
         "{calls:?}"
     );
 }
@@ -349,7 +352,7 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -364,7 +367,7 @@ fn cap_expires_after_cap_reset_minutes() {
 /// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `herdsman check`.
 fn cap(c: &herdsman::Ctx, banner: &str) {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -553,7 +556,7 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
 /// #640: lane `sendmeter-impl-12` on account A shows `screen`; `herdsman check`'s output.
 fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -675,26 +678,77 @@ fn signed_out_is_its_own_state_never_a_cap() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
+/// #707: `config` with account A's hand-placed `token-file:` at `<dir>/tokens/A` (mode `mode`).
+fn token_file(d: &Path, mode: u32) -> (String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let f = d.join("tokens/A");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, format!("{TOKEN_A}\n")).unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+    let cfg = config(d, "account = \"A\"").replace(
+        "A = \"CLAUDE_CODE_OAUTH_TOKEN_A\"",
+        &format!("A = \"token-file:{}\"", f.display()),
+    );
+    (cfg, f)
+}
+
 #[test]
-fn a_banner_with_a_401_usage_reading_is_signed_out() {
-    let d = tmpdir("acct-meter-401");
-    let cfg = config(&d, "accounts = [\"A\", \"B\"]") + "\n[accounts.usage]\nA = \"~/logins/A\"\n";
+fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
+    let d = tmpdir("acct-token-file");
+    let (cfg, _) = token_file(&d, 0o600);
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    let dir = c.state.parent().unwrap().join("usage");
-    std::fs::create_dir_all(&dir).unwrap();
-    let m = json!({"checked": c.now, "ts": c.now - 7200, "login_needed": true});
-    std::fs::write(dir.join("A.json"), m.to_string()).unwrap();
-    let out = check_shows(&c, "You've hit your limit · resets 3pm");
+    let (r, got) = spawn(&c, 12);
+    // The token from the file, through the secrets file the pane sources: no config folder, never argv or the log.
+    assert_eq!(got, format!("|{TOKEN_A}"));
+    let calls = r.calls.borrow();
+    assert!(calls.iter().any(|l| l.contains("&& . '")), "{calls:?}");
+    assert!(!calls.iter().any(|l| l.contains(TOKEN_A)), "token in argv: {calls:?}");
+    no_token_in_log(&c);
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(
-        out.contains("account-signed-out") && !out.contains("account-capped"),
+        out.contains("✓ accounts — sign in from each account's own folder"),
         "{out}"
     );
-    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert!(out.contains("✓ account A token file — "), "{out}");
+    assert!(!out.contains(TOKEN_A), "{out}");
+}
+
+#[test]
+fn a_token_file_others_can_read_refuses_the_spawn() {
+    let d = tmpdir("acct-token-0644");
+    let (cfg, f) = token_file(&d, 0o644);
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree open",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list --workspace w9",
+            r#"{"result":{"panes":[{"pane_id":"w9:p12","agent":null}]}}"#,
+        );
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
     assert!(
-        list.lines()
-            .any(|l| l.starts_with("A ") && l.contains("signed out: usage 401 at")),
-        "{list}"
+        out.contains(&format!(
+            "REFUSED SECRET_FILE_OPEN: {} is readable by others",
+            f.display()
+        )),
+        "{out}"
+    );
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!out.contains(TOKEN_A), "{out}");
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
+    assert!(
+        out.contains("! account A token file — REFUSED SECRET_FILE_OPEN"),
+        "{out}"
     );
 }

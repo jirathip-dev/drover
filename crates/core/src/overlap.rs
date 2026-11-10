@@ -228,26 +228,109 @@ fn stated_net(body: &str) -> Option<i64> {
     n.replace([',', '+'], "").parse().ok()
 }
 
+/// #754: one cap a count reports: its label (empty: the built-in Rust count), lines and cap.
+struct Count {
+    label: String,
+    lines: i64,
+    limit: i64,
+}
+
+/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap.
+fn cap_script(f: &Fleet) -> Option<String> {
+    let run = |p: &crate::config::Premerge| match p {
+        crate::config::Premerge::Cmd(c) => c.clone(),
+        crate::config::Premerge::Named(c) => c.run.clone(),
+    };
+    (f.cap_script.clone()).or_else(|| f.premerge.iter().flatten().map(run).find(|c| c.contains("cap")))
+}
+
+/// #754: every `<label> N / cap M` line `script` prints in a scratch worktree at `base` (with `branch` merged in);
+/// `None` when the merge conflicts or it prints none.
+fn script_caps(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    f: &Fleet,
+    script: &str,
+    base: &str,
+    branch: Option<&str>,
+) -> Option<Vec<Count>> {
+    let (dir, wt) = (
+        f.local_path(),
+        ctx.state.with_file_name(format!("cap-{}", f.repo.replace('/', "-"))),
+    );
+    let wts = wt.to_string_lossy();
+    let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
+    let _ = tree(&["remove", "--force", &wts]);
+    tree(&["add", "-f", "--detach", &wts, base]).ok()?;
+    let merged = branch.is_none_or(|b| git(r, &wt, &["merge", "--no-ff", "--no-edit", b]).is_ok());
+    let sh = argv(&["-c", &format!("cd \"$0\" && {script}"), &wts]);
+    let o = merged.then(|| r.run("sh", &sh).ok()).flatten();
+    let _ = tree(&["remove", "--force", &wts]);
+    let o = o?;
+    let num = |w: &str| w.replace(',', "").parse::<i64>().ok();
+    let cap = |l: &str| {
+        let (left, rest) = l.split_once(" / cap ")?;
+        let (label, n) = left
+            .trim()
+            .rsplit_once(char::is_whitespace)
+            .unwrap_or(("", left.trim()));
+        Some(Count {
+            label: label.trim().trim_end_matches(':').trim().to_string(),
+            lines: num(n)?,
+            limit: num(rest.split_whitespace().next()?)?,
+        })
+    };
+    let caps: Vec<Count> = format!("{}{}", o.stdout, o.stderr).lines().filter_map(cap).collect();
+    (!caps.is_empty()).then_some(caps)
+}
+
 /// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
 /// whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff),
-/// the queued issues with no PR, and the projected total with the ask a crossing lane files.
+/// the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its
+/// own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
     let _ = git(r, &dir, &["fetch", "-q", "origin"]);
-    let (sha, lines, cap, warn) = cap_at(ctx, cfg, r, fleet).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no ci/cap.toml line_cap at origin/{} in {}",
-            f.integration,
-            dir.display()
+    let script = cap_script(f);
+    let (sha, caps, warn) = if let Some(s) = &script {
+        let sha = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)])?;
+        let toml = git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).unwrap_or_default();
+        let warn = limits(&toml).map_or(500, |l| l.1);
+        let caps = script_caps(ctx, r, f, s, &sha, None)
+            .ok_or_else(|| anyhow::anyhow!("`{s}` printed no `N / cap M` line at origin/{}", f.integration))?;
+        (sha, caps, warn)
+    } else {
+        let (sha, lines, cap, warn) = cap_at(ctx, cfg, r, fleet).ok_or_else(|| {
+            anyhow::anyhow!(
+                "no ci/cap.toml line_cap at origin/{} in {}",
+                f.integration,
+                dir.display()
+            )
+        })?;
+        let label = String::new();
+        (
+            sha,
+            vec![Count {
+                label,
+                lines,
+                limit: cap,
+            }],
+            warn,
         )
-    })?;
-    writeln!(
-        out,
-        "{fleet}: {lines} / cap {cap} at {} {sha:.7}, headroom {}",
-        f.integration,
-        cap - lines
-    )?;
+    };
+    let lab = |c: &Count| format!("{} ", c.label).trim_start().to_string();
+    for c in &caps {
+        writeln!(
+            out,
+            "{fleet}: {}{} / cap {} at {} {sha:.7}, headroom {}",
+            lab(c),
+            c.lines,
+            c.limit,
+            f.integration,
+            c.limit - c.lines
+        )?;
+    }
     let prs = gh::snapshot(ctx, r, f, fleet, ctx.now)?;
     let mut prs: Vec<&Value> = (prs.as_object().into_iter().flat_map(|m| m.values()))
         .filter(|p| p["baseRefName"] == f.integration.as_str())
@@ -265,22 +348,43 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
                 .sum(),
         )
     };
-    let (mut sum, mut has) = (0, std::collections::BTreeSet::new());
+    let scripted = |s: &str, b: &str| -> Option<Vec<i64>> {
+        let m = script_caps(ctx, r, f, s, &sha, Some(&format!("origin/{b}")))?;
+        let net = |c: &Count| Some(m.iter().find(|x| x.label == c.label)?.lines - c.lines);
+        caps.iter().map(net).collect()
+    };
+    let (mut sums, mut has) = (vec![0; caps.len()], std::collections::BTreeSet::new());
     writeln!(out, "open PRs (src/ net):")?;
     for p in prs {
         let b = p["headRefName"].as_str().unwrap_or_default();
         let issue = b.strip_prefix("issue-").and_then(|n| n.parse::<u64>().ok());
         has.extend(issue);
         let who = issue.map_or_else(|| b.to_string(), |n| format!("#{n}"));
-        let net = stated_net(p["body"].as_str().unwrap_or_default())
-            .map(|n| (n, "body"))
-            .or_else(|| measured(b).map(|n| (n, "measured")));
+        let net = match &script {
+            Some(s) => scripted(s, b).map(|n| (n, "script")),
+            None => stated_net(p["body"].as_str().unwrap_or_default())
+                .map(|n| (vec![n], "body"))
+                .or_else(|| measured(b).map(|n| (vec![n], "measured"))),
+        };
         let num = p["number"].as_u64().unwrap_or(0);
         match net {
             Some((n, how)) => {
-                sum += n;
-                writeln!(out, "  {who} (PR #{num}): {n:+} ({how})")?;
+                let each = n.iter().zip(&caps).map(|(n, c)| match caps.len() {
+                    1 => format!("{n:+}"),
+                    _ => format!("{n:+} {}", c.label),
+                });
+                sums.iter_mut().zip(&n).for_each(|(s, n)| *s += n);
+                writeln!(
+                    out,
+                    "  {who} (PR #{num}): {} ({how})",
+                    each.collect::<Vec<_>>().join(", ")
+                )?;
             }
+            None if script.is_some() => writeln!(
+                out,
+                "  {who} (PR #{num}): unknown (conflicts with {} or the script printed no cap)",
+                f.integration
+            )?,
             None => writeln!(
                 out,
                 "  {who} (PR #{num}): unknown (no `src/ net` in its body, branch not fetched)"
@@ -297,16 +401,30 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
         "queued, no PR: {}",
         none.map_or_else(|| crate::queue::hashes(&queued), String::from)
     )?;
-    let projected = lines + sum;
+    let mut raise = Vec::new();
+    for (c, sum) in caps.iter().zip(&sums) {
+        let projected = c.lines + sum;
+        let of = if caps.len() > 1 {
+            format!("{}: ", c.label)
+        } else {
+            String::new()
+        };
+        writeln!(
+            out,
+            "{of}sum of open PRs: {sum:+}; projected total {projected} / cap {}, headroom {}",
+            c.limit,
+            c.limit - projected
+        )?;
+        raise.push((projected > c.limit, format!("{}to {}", lab(c), projected + warn)));
+    }
+    if raise.iter().any(|r| r.0) {
+        raise.retain(|r| r.0);
+    }
+    let raise: Vec<String> = raise.into_iter().map(|r| r.1).collect();
     writeln!(
         out,
-        "sum of open PRs: {sum:+}; projected total {projected} / cap {cap}, headroom {}",
-        cap - projected
-    )?;
-    writeln!(
-        out,
-        "ask options: 1. raise to {} in one conductor-filed issue (recommended) 2. trim",
-        projected + warn
+        "ask options: 1. raise {} in one conductor-filed issue (recommended) 2. trim",
+        raise.join(", ")
     )?;
     Ok(0)
 }

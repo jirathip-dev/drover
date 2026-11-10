@@ -28,7 +28,6 @@ base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
 hkdf = "0.13.0"
 # #441: secrets in the main host's OS store (Keychain, Secret Service, Credential Manager); owner-approved.
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "vendored", "crypto-rust"] }
 # #344: herdsman's state in one SQLite file (WAL); bundled, so no system libsqlite3.
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 p256 = { version = "0.14.0", default-features = false, features = ["ecdh", "ecdsa", "std"] }
@@ -41,7 +40,7 @@ toml = "0.8"
 # #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 # #298, #455: shed's wire types only (serde, no I/O), pinned to shed's rename merge commit until it tags a release.
-shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "1f08d108afc54450d6fdf4b49f68c09d0ca7a8df" }
+shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "56de739060d99e54e2ded43ab9702ff1c5270c37" }
 herdsman-core = { path = "crates/core" }
 herdsman-server = { path = "crates/server" }
 herdsman-service = { path = "crates/service" }

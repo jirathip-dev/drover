@@ -121,6 +121,39 @@ pub fn verdict(
     } else {
         None
     };
+    // #734: a `--perf` PASS needs commit 1's baseline and a `Perf:` block; a `--refactor` one an unchanged test diff.
+    match crate::queue::playbook(&evs, fleet, issue)
+        .filter(|_| pass && stage != "verify")
+        .as_deref()
+    {
+        Some("perf") => {
+            let q = ".commits[0] | .messageHeadline + \"\\n\" + .messageBody";
+            let first = ok(
+                r,
+                "gh",
+                &["pr", "view", &branch, "-R", &f.repo, "--json", "commits", "--jq", q],
+            );
+            if !first.unwrap_or_default().to_ascii_lowercase().contains("baseline") {
+                return refused(
+                    "NO_BASELINE",
+                    "the PR's first commit records no baseline (`baseline:` command and numbers)",
+                );
+            }
+            if !body.lines().any(|l| l.trim().to_ascii_lowercase().starts_with("perf:")) {
+                return refused("NO_BASELINE", "no `Perf:` block: before/after by the same command, the improvement stated, the benchmark checklist");
+            }
+        }
+        Some("refactor") => {
+            let diff = ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?;
+            if let Some(files) = tests_changed(&diff) {
+                return refused(
+                    "TESTS_CHANGED",
+                    format!("a `--refactor` PR edits tests beyond moves and renames: {files}"),
+                );
+            }
+        }
+        _ => {}
+    }
     // #417: a FAIL of a check that shares another's rounds (verify: rev's) is in that check's round at this head.
     let cnt = p.counts(lp);
     // #228: `FAIL (form-only)` with every blocker tagged a form category doesn't count, `form_rounds` times per issue.
@@ -420,6 +453,38 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
     }
 }
 
+/// #734: the test files a diff edits beyond moves and renames (its removed and added test lines differ), if any.
+fn tests_changed(diff: &str) -> Option<String> {
+    let (mut files, mut test, mut hunk, mut minus, mut plus) = (vec![], false, false, vec![], vec![]);
+    for l in diff.lines() {
+        if let Some(p) = l.strip_prefix("diff --git a/") {
+            let p = p.rsplit(" b/").next().unwrap_or(p);
+            let name = p.rsplit('/').next().unwrap_or(p);
+            test = p.split('/').any(|c| matches!(c, "test" | "tests" | "__tests__"))
+                || [".test.", ".spec.", "_test.", "_tests."]
+                    .iter()
+                    .any(|s| name.contains(s));
+            hunk = false;
+            if test {
+                files.push(p.to_string());
+            }
+        } else if l.starts_with("@@") {
+            hunk = true;
+        } else if let Some((side, x)) = l.split_at_checked(1).filter(|_| test && hunk) {
+            match side {
+                "+" => plus.push(x.trim()),
+                "-" => minus.push(x.trim()),
+                _ => {}
+            }
+        }
+    }
+    for v in [&mut minus, &mut plus] {
+        v.retain(|x| !x.is_empty());
+        v.sort_unstable();
+    }
+    (minus != plus).then(|| files.join(", "))
+}
+
 /// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next
 /// heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
@@ -639,7 +704,10 @@ pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Che
     let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
     cs.iter().filter(hit).find_map(|c| {
         let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
-        let o = r.run("sh", &sh).unwrap_or_default();
+        // #713: a check is a build or a test run: 30 min, not the 60 s default.
+        let o = r
+            .run_for("sh", &sh, "", std::time::Duration::from_mins(30))
+            .unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
     })
 }

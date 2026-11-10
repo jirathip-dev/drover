@@ -1241,9 +1241,30 @@ function output(lines, fail) {
     (fail ? `<span class="ol cut t-m">⋯ ${n - 20} lines</span>${all.slice(b).join('')}` : '') +
     `</pre><p class=more2><button type=button><span>show all</span></button><span class=m>20 of ${n} lines</span></p></div>`;
 }
+// #750: a transcript that is not a parsed screen (an ACP session's: `> prompt`, `[tool] title (status)`, the reply)
+// keeps its line breaks; each `[tool] ` entry is one line, the rest of a multi-line title (to its `(status)`) a tap away.
+const flat = lines => lines.length > 0 && !lines.some(l => /^\s*[⏺⎿❯›•┊💻]/.test(plain(l)));
+function text(lines) {
+  const out = [], tool = l => /^\[tool\] /.test(plain(l)), end = l => /\((pending|in_progress|completed|failed)\)\s*$/.test(plain(l));
+  for (let i = 0; i < lines.length;) {
+    let j = i + 1;
+    if (tool(lines[i])) {
+      // A title's later lines run to its `(status)`; none before the next entry: the line stands alone.
+      for (let k = j; !end(lines[i]) && k < lines.length && !tool(lines[k]) && !/^> /.test(plain(lines[k])); k++) if (end(lines[k])) { j = k + 1; break; }
+      const rest = lines.slice(i + 1, j), head = plain(lines[i]).slice(7);
+      out.push({ key: 'tool:' + i + ':' + head, k: 'run', html: `<details class="blk run"><summary><span class=k>tool</span><span class=cmd>${esc(head)}</span><i class=cv></i></summary>${rest.length ? output(rest) : ''}</details>` });
+    } else {
+      while (j < lines.length && !tool(lines[j])) j++;
+      out.push({ key: 'txt:' + i + ':' + plain(lines[i]), k: 'txt', html: `<div class=txt>${lines.slice(i, j).map(l => html(runs(l))).join('\n')}</div>` });
+    }
+    i = j;
+  }
+  return out;
+}
 // Blocks as {key, k, html, open}: tool runs start collapsed, you and the assistant open (Q4); status is a quiet line.
 // `busy`: the live status line shows activity, so a last tool run with no output yet is `running`.
 function blocks(lines, harness, busy) {
+  if (flat(lines)) return text(lines);
   const gs = group(lines);
   return gs.map((g, i) => {
     const head = plain(g.head).trim(), key = g.k + ':' + head + ':' + plain(g.lines[0] || '').trim();
@@ -1268,6 +1289,7 @@ function blocks(lines, harness, busy) {
 function matters(lines, said, notices, harness) {
   const note = (key, t, at) => ({ key, k: 'note', at, html: `<p class="qs note">${esc(t)}</p>` });
   const ns = (notices || []).map(n => note('n:' + n.at + ':' + n.text, n.text, n.at * 1000));
+  if ((!said || !said.length) && flat(lines)) return ns.concat(text(lines));
   if (!said || !said.length) {
     const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
     const rs = bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i));

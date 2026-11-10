@@ -46,22 +46,18 @@ pub trait Runner: Sync {
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }
-    /// #441: keychain service `svc`'s secret in the main host's OS store (None: not set); fakes and wrappers forward.
+    /// #707: herdsman keeps no secret store (`crate::secret` reads 0600 files); always refused. Kept only while the
+    /// frozen board (#552) still forwards it.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
-        bail!("no secret store on this host (wanted {svc})")
+        bail!("herdsman keeps no secret store (wanted {svc})")
     }
-    /// #441: save `svc`'s secret (None: delete it) in the main host's OS store.
+    /// #707: as `secret`.
     fn set_secret(&self, svc: &str, _value: Option<&str>) -> Result<()> {
-        bail!("no secret store on this host (wanted {svc})")
+        bail!("herdsman keeps no secret store (wanted {svc})")
     }
 }
 
 pub struct Real;
-
-/// #441: the OS store's entry for `svc`, under the `herdsman` account `security` used (#387), so old items keep working.
-fn entry(svc: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(svc, "herdsman").with_context(|| format!("secret store: {svc}"))
-}
 
 impl Runner for Real {
     fn local(&self) -> bool {
@@ -71,10 +67,10 @@ impl Runner for Real {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
-        self.within(prog, args, input, limit(prog, args))
+        self.within(prog, args, input.as_bytes(), limit(prog, args))
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
-        self.within(prog, args, input, Some(limit))
+        self.within(prog, args, input.as_bytes(), limit)
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
@@ -99,65 +95,6 @@ impl Runner for Real {
         std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
         Ok(pid)
     }
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        store_get(self, svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        store_set(self, svc, value)
-    }
-}
-
-/// #441: `svc`'s secret in the OS store (None: not set); #548: on `r`'s clock, `KEYCHAIN_LOCKED` past `KEYCHAIN_SECS`.
-pub fn store_get(r: &dyn Runner, svc: &str) -> Result<Option<String>> {
-    let e = entry(svc)?;
-    match keychain(r, svc, move || e.get_password())? {
-        Err(keyring::Error::NoEntry) => Ok(None),
-        x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
-    }
-}
-
-/// #441: save `svc`'s secret (None: delete it) in the OS store; #548: as `store_get`, never blocking.
-pub fn store_set(r: &dyn Runner, svc: &str, value: Option<&str>) -> Result<()> {
-    let (e, v) = (entry(svc)?, value.map(String::from));
-    let done = keychain(r, svc, move || {
-        v.map_or_else(|| e.delete_credential(), |v| e.set_password(&v))
-    })?;
-    done.with_context(|| format!("secret store: {svc}"))
-}
-
-/// #548: how long a keychain call may wait (a macOS access dialog nobody clicks blocks it for good).
-pub const KEYCHAIN_SECS: u64 = 5;
-
-/// #548: `f` (a keychain call on `svc`) on a worker thread, given `KEYCHAIN_SECS` (`r`'s clock) to answer; past that
-/// `KEYCHAIN_LOCKED` with the fix, and the worker is left waiting on the dialog.
-fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || tx.send(f()));
-    let mut got = rx.recv_timeout(Duration::from_millis(200)).ok();
-    for _ in 0..KEYCHAIN_SECS {
-        if got.is_some() {
-            break;
-        }
-        r.sleep(1);
-        got = rx.try_recv().ok();
-    }
-    got.map_or_else(|| locked(r, svc), Ok)
-}
-
-/// #556: the one-time fix for `svc`: the owner's "Always Allow", which lasts across builds signed by "herdsman-local".
-pub fn keychain_fix(svc: &str) -> String {
-    format!("Always Allow for {svc}, once (it lasts while herdsman is signed by \"herdsman-local\")")
-}
-
-fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
-    let host = ok(r, "hostname", &["-s"]).map_or_else(|_| "this host".into(), |h| h.trim().to_string());
-    crate::gate::refused(
-        "KEYCHAIN_LOCKED",
-        format!(
-            "approve herdsman in the Keychain dialog on {host}: {}",
-            keychain_fix(svc)
-        ),
-    )
 }
 
 /// #637: a streamed child's stdout; dropping it waits for the child.
@@ -189,8 +126,8 @@ impl Real {
         let out = c.stdout.take().context("stdout")?;
         Ok(Box::new(Streamed(c, out)))
     }
-    /// `run_in`, killed (exit 124) once `limit` has passed.
-    pub fn within(&self, prog: &str, args: &[String], input: &str, limit: Option<Duration>) -> Result<Out> {
+    /// `run_in` with bytes on stdin, killed (exit 124) once `limit` has passed.
+    pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
         let mut c = Command::new(prog)
@@ -200,17 +137,8 @@ impl Real {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("cannot run {prog}"))?;
-        let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
+        let _ = c.stdin.take().unwrap().write_all(input);
         let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        let Some(limit) = limit else {
-            let o = c.wait_with_output()?;
-            let code = o.status.code().unwrap_or(-1);
-            return Ok(Out {
-                code,
-                stdout: text(&o.stdout),
-                stderr: text(&o.stderr),
-            });
-        };
         let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
         let end = Instant::now() + limit;
         while Instant::now() < end {
@@ -237,10 +165,36 @@ impl Real {
     }
 }
 
-/// #478: another host's `herdr --machine m … list` (its ssh has no timeout of its own) answers in 20 s.
-pub fn limit(prog: &str, args: &[String]) -> Option<Duration> {
-    let remote = prog == crate::herdr::BIN && args.first().is_some_and(|a| a == "--machine");
-    (remote && args.get(3).is_some_and(|a| a == "list")).then(|| Duration::from_secs(20))
+/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is
+/// killed and exits 124.
+/// - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick.
+/// - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08).
+/// - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it.
+/// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
+/// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
+/// - `cargo`: 30 min; self-update's release build.
+/// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
+/// - anything else: 60 s.
+pub fn limit(prog: &str, args: &[String]) -> Duration {
+    let a = |i: usize| args.get(i).map_or("", String::as_str);
+    let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
+    let wait = args
+        .iter()
+        .position(|w| w == "--timeout")
+        .and_then(|i| a(i + 1).parse::<u64>().ok());
+    let name = std::path::Path::new(prog)
+        .file_name()
+        .map_or(prog.into(), |n| n.to_string_lossy());
+    let secs = match &*name {
+        p if p == crate::herdr::BIN && a(0) == "--machine" && a(3) == "list" => 20,
+        "security" | "codesign" => 10,
+        p if p == crate::herdr::BIN => wait.map_or(60, |ms| ms / 1000 + 30),
+        "git" if args.iter().any(net) => 600,
+        "cp" | "rm" => 600,
+        "cargo" => 1800,
+        _ => 60,
+    };
+    Duration::from_secs(secs)
 }
 
 fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {

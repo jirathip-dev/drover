@@ -12,11 +12,12 @@ paths and model ids pass.
 
 ## Anthropic (Claude Code lanes)
 
-**The store (#441).** Every secret lives only in the main host's OS store, through the `keyring` crate: the macOS
-Keychain, Linux Secret Service or the Windows Credential Manager, as `herdsman/<fleet>/<NAME>` (`all` for every fleet).
-There is no plain-file fallback: when fleet.toml names a secret (a `secret:` env) and the
-main host has no usable store, `herdsman serve` refuses `NO_STORE`. Remote hosts
-keep no secrets.
+**No store (#707).** herdsman keeps no secret store and makes no Keychain read. Each secret is a file on the main host
+only its owner reads (mode 0600; a looser one is refused `SECRET_FILE_OPEN`): a `secret:<NAME>` env is
+`<config dir>/secrets/<NAME>`; the webhook secret, a provider key's `env_file` and an account's `token-file:` are the
+files fleet.toml names by path. Place one by hand (`umask 077`), or answer `herdsman secret request`'s masked card from a
+paired device, which writes `<config dir>/secrets/<NAME>`; `herdsman secret rm` deletes it. Remote hosts keep no
+secrets.
 
 **Lane accounts (#683).** herdsman keeps no Claude token. Each `[accounts]` key names an account; a lane on it signs in
 with `account_env`'s printed env, else the account's own login folder as `CLAUDE_CONFIG_DIR`
@@ -25,13 +26,13 @@ with `account_env`'s printed env, else the account's own login folder as `CLAUDE
 ```toml
 [accounts]
 # account_env = "cooee accounts env {provider} {name}"
-A = "A"   # the value is unused
+A = "A"   # the value is unused, unless `token-file:<path>` (accounts.md)
 B = "B"
 ```
 
 A role picks with `account = "A"` or an ordered `accounts = ["A", "B"]`.
 
-**Delivery.** At spawn herdsman reads the lane's `secret:<NAME>` env from the store and writes it to a 0600 file beside
+**Delivery.** At spawn herdsman reads the lane's `secret:<NAME>` env from its file and writes it to a 0600 file beside
 the worktree on the lane's host: directly on the main host, over the ssh channel's stdin on a remote one. The pane's
 shell sources the file; spawn deletes it once the harness has started. A secret never reaches argv, the pane's
 scrollback, the event log or a file left behind. `accounts_env` is retired (#441; a `!` row while set) and
@@ -47,44 +48,13 @@ respawns it with `--supersede` on a free account (the kill pushes its work to `w
 **Usage meter from the lanes.** Claude lanes run `herdsman statusline` as their status line. Claude Code hands
 it the account's 5 h / 7 d limits on every refresh; it appends at most one row per account per minute to
 `<state>/usage.jsonl` (the account from `HERDSMAN_ACCOUNT`, set at spawn) and prints `myapp #12 · 5h 41% · 7d 63%`
-in the pane. The meter shows an account's newest row (with its age), preferring a row under 10 min old over the
-`/login` reading below, which is now optional. `[accounts] pick = "headroom"` makes spawns take the uncapped
-account with the lowest live 5 h / 7 d use; the default, `order`, keeps today's pick.
+in the pane. The meter shows an account's newest row, with its age. It is the only source (#707: herdsman no longer
+polls `/api/oauth/usage`, which read Claude Code's Keychain item): an account with no live lane keeps its last row, and
+`[accounts] pick = "headroom"` (spawns take the uncapped account with the lowest live 5 h / 7 d use; the default,
+`order`, keeps today's pick) works from those older rows. Whether the status line carries `rate_limits` under a
+`token-file:` login is untested.
 
-**Usage meter.** Setup tokens can't read the usage API: they lack the `user:profile` scope, and
-`/api/oauth/usage` answers 403. To get the real meter, log each account in once with a full `claude`
-login in its own config folder:
-
-```sh
-CLAUDE_CONFIG_DIR=~/.config/herdsman/accounts/A claude   # then /login as account A; repeat for B, C
-```
-
-```toml
-[accounts.usage]
-A = "~/.config/herdsman/accounts/A"   # no trailing slash: it must match CLAUDE_CONFIG_DIR exactly
-```
-
-On macOS, Claude Code keeps that login in the Keychain as a generic password. **The service name
-is derived from Claude Code 2.1.308 and is unverified:** `Claude Code-credentials-<h>`, where `<h>`
-is the first 8 hex digits of the SHA-256 of the `CLAUDE_CONFIG_DIR` string exactly as given. A
-trailing slash, `~` or another spelling of the same folder gives a different hash, so write the path
-in `[accounts.usage]` exactly as you set `CLAUDE_CONFIG_DIR`. Without `CLAUDE_CONFIG_DIR` the item is
-plain `Claude Code-credentials`, your default login. herdsman never reads or writes that one, only
-the hashed items of the `[accounts.usage]` folders.
-
-herdsman reads the item's account attribute, then its value, with `security find-generic-password` (these logins are
-Claude Code's own items, not herdsman's store).
-When the access token has expired, herdsman refreshes it and writes the rotated login back to the
-same item (same service and account) the way Claude Code does: `security -i`, with the value
-hex-encoded on stdin. It then re-reads the item to check that the new token was stored. A refresh
-rotates the refresh token, so if the write-back fails, the login is gone. herdsman then logs
-`usage-login-lost` (sent to notifiers) naming the account and the fix, `claude /login in <dir>`.
-An item whose service or account holds a quote or another unusual character is not refreshed at
-all. These logins are used only for the usage read and are never exported to lanes.
-
-The meter is read at most every 10 min per account, one read at a time. A 429 backs off for at
-least its `retry-after`. The cache, `<state>/usage/<name>.json` (mode 0600), holds numbers and
-reset times only. `herdsman accounts` shows (the Host tab shows the same):
+`herdsman accounts` shows (the Host tab shows the same):
 
 ```
 A        ok                           1 lanes app-impl-12
@@ -95,9 +65,7 @@ A        ok                           1 lanes app-impl-12
 The first line is the cap state (`ok`, or `capped until Nov 4 08:00`) and the lanes on the account now.
 
 Each value has a thin bar on the page: amber at 75 % or more, red at 90 % or more. When the weekly rate
-would run out before the reset, the line adds `at this pace: out Mon evening`. If a login is
-missing or expired, the line reads `usage: login needed (claude /login in <dir>)`, and the page
-still loads.
+would run out before the reset, the line adds `at this pace: out Mon evening`.
 
 At spawn, when every uncapped account of the role has a reading under 30 min old, the one with the
 lowest weekly % goes first. Otherwise the configured order holds.
@@ -108,19 +76,19 @@ the lane's `lane-dead`, a supersede, or now. They are not Anthropic's quota.
 
 ## DeepSeek (dsh lanes, Hermes lanes using DeepSeek)
 
-The key lives in an env file, like the Claude tokens:
+The key lives in an env file (mode 0600, else refused `SECRET_FILE_OPEN`):
 
 ```toml
 [providers.deepseek]
 key_env = "DEEPSEEK_API_KEY"     # the variable name
-# env_file = "~/.config/deepseek.env"   # default: the store's `herdsman/all/<key_env>`, else herdsman's environment
+# env_file = "~/.config/deepseek.env"   # default: herdsman's environment
 # warn_below = 5                 # amber, and `provider-low` from `herdsman check`, under this balance
 ```
 
 herdsman reads `GET https://api.deepseek.com/user/balance` with `curl`, at most every 10 min.
 The key goes in a curl config on stdin, never in argv, so `ps` can't show it. The Host tab and
 `herdsman accounts` show `deepseek · USD 2.28 · ok`. The row is hidden when no key is set. If `env_file` is set but unreadable, or
-lacks the variable, a dim `deepseek · key not found in <file>` row shows instead.
+lacks the variable, a dim `deepseek · key not found in <file>` row shows instead (or the refusal, for a loose file).
 `herdsman check` logs `provider-low` once each time the balance drops below `warn_below`.
 
 ## Hermes lanes

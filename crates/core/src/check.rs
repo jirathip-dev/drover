@@ -258,7 +258,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let h = crate::harness::get(harness.unwrap_or_default());
                 // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
                 let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
-                    Some(u) => Some((crate::access::confirm(ctx, cfg, r, account, u), "")),
+                    Some(u) => Some((crate::access::confirm(ctx, account, u), "")),
                     None if h.signed_out(&screen) => {
                         let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
                         let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
@@ -397,26 +397,37 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
-    // #548: a keychain read that timed out on a dialog (a thread's row, a lane's spawn refusal) alerts once per
-    // episode; a start or spawn on an account since ends it.
-    let mut locked: Option<&Event> = None;
-    for e in &events {
-        if matches!(e.kind.as_str(), "conductor-start" | "spawn") && e.data.get("account").is_some_and(|a| !a.is_null())
-        {
-            locked = None;
-        } else if locked.is_none()
-            && e.kind != "keychain-locked"
-            && e.data
-                .values()
-                .any(|v| v.as_str().is_some_and(|t| t.contains("KEYCHAIN_LOCKED")))
-        {
-            locked = Some(e);
+    // #710: Keychain readers piling up behind a dialog nobody sees: once per episode (a clear pass ends it).
+    let jam = host::keychain_jam(r);
+    let last = events
+        .iter()
+        .rev()
+        .find(|e| matches!(e.kind.as_str(), "keychain-jammed" | "keychain-clear"));
+    if jam.0.len() > cfg.limits.keychain_readers {
+        let key = events.iter().rev().find(|e| e.kind == "keychain-clear");
+        let why = format!("Keychain readers {}", host::jam_line(&jam));
+        let d = json!({"key": key.map_or(0, |e| e.seq), "reason": why});
+        fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-jammed", d)?;
+        // Optional: kill the readers, then the stale SecurityAgent (macOS restarts it); securityd never matches.
+        if cfg.limits.reap_keychain_readers {
+            let pids: Vec<String> = jam.0.iter().map(|p| p.0.clone()).collect();
+            let _ = r.run("kill", &pids);
+            let agent = jam.1.map(|a| a.0);
+            if let Some(a) = &agent {
+                let _ = r.run("kill", std::slice::from_ref(a));
+            }
+            let e = Event::new(
+                ctx.now,
+                "herdsman",
+                None,
+                "keychain-reap",
+                json!({"pids": pids, "agent": agent}),
+            );
+            emit(&ctx.state, cfg, e)?;
         }
-    }
-    if let Some(e) = locked {
-        let why = "the Keychain is waiting on a dialog: accounts and secrets can't be read → run `herdsman doctor` for the fix";
-        let d = json!({"key": e.ts, "reason": why});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-locked", d)?;
+    } else if last.is_some_and(|e| e.kind == "keychain-jammed") {
+        let e = Event::new(ctx.now, "herdsman", None, "keychain-clear", json!({}));
+        crate::events::append(&ctx.state, &e)?;
     }
     // #389: a remote lane's outbox line drive has not delivered in 5 min; once per lane and line.
     for (e, lane, ts) in crate::outbox::stale(r, &events, ctx.now) {
