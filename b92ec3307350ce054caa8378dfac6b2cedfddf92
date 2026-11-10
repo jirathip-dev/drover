@@ -1,0 +1,9 @@
+Decided: CLAUDE.local.md and .claude/settings.local.json join spawn::OWN_FILES, so dirty, unsaved, clean's remove and the wip snapshot's reset all skip them
+Because: "Treat the files spawn writes into a worktree as the lane's own, everywhere `OWN_FILES` is used"
+Because: crates/core/src/harness/claude.rs:166
+Decided: spawn::changes also skips an untracked `.claude/` folder line, the form git status gives when spawn made the folder
+Because: "the `.claude/` folder when spawn made it"
+Rejected: git status -uall to see inside .claude/ — it expands node_modules and the screenshot folders that changes() matches as one line
+Rejected: adding CLAUDE.local.md to each repo's .gitignore or info/exclude — the bug is herdsman's, it must not depend on the repo
+Check: design_stage's a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off and check_clean's clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own fail at f9fcef2 and pass at head
+Owner: A design lane whose only leftover is its own instructions file now reaches you for review, and saved work never includes that file.
