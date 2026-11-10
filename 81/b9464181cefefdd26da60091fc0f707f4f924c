@@ -1,0 +1,10 @@
+Decided: merged origin/staging 9d8bf702 for a fresh head 81b9464, so the stale evidence run at 690caae leaves the check rollup
+Because: crates/core/src/gh.rs:438
+Decided: edited the PR body to name 81b9464 before pushing, so the first evidence run at the new head reads it
+Because: .github/workflows/evidence.yml:18
+Rejected: re-running the failed evidence job at 690caae — a re-run replays the old event's body (.github/workflows/evidence.yml:18) and fails again
+Decided: herdsman owns no Keychain item, so it adds no access lists; signing plus the doctor row cover the scope
+Because: "Keychain items herdsman still owns get an access list naming that identity"
+Rejected: a herdsman Keychain read added only to prove criterion 1 — that would be production code added only for a test
+Check: the PR body's Tests section names 81b9464181cefefdd26da60091fc0f707f4f924c and only one evidence run exists at that head
+Owner: Each herdsman build is signed with one fixed identity, and doctor now flags an unsigned build.
