@@ -24,6 +24,25 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
+ * #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
+ * events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
+ * screen is `lines`).
+ */
+export type LaneChat = { blocks: Array<Block>, said?: Array<JsonValue> | null, older: boolean, notices: Array<Notice>, harness: string, acts: Array<string>, pane?: string | null, lines: Array<string>, live: number, status?: string | null, before: number, more: boolean, };
+
+/**
+ * #749: one of an approval's options, as ACP sent it (`allow_once`, `reject_once`, …).
+ */
+export type ApprovalChoice = { id: string, name: string, kind: string, };
+
+/**
+ * #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
+ * prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
+ * title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+ */
+export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown: string, } | { "k": "tool", id: string, kind?: string | null, title_line: string, title: string, status: string, } | { "k": "plan", entries: Array<JsonValue>, } | { "k": "approval", tool: string, options: Array<ApprovalChoice>, answered?: string | null, } | { "k": "screen" };
+
+/**
  * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
  */
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
