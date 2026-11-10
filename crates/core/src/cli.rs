@@ -347,11 +347,7 @@ enum Cmd {
         write_baseline: bool,
         #[arg(long, help = "The git revision whose added lines the comment and doc checks judge")]
         base: Option<String>,
-        #[arg(
-            long,
-            requires = "base",
-            help = "The PR body: `no doc: <why>` excuses a watched change"
-        )]
+        #[arg(long, requires = "base", help = "The PR body (`no doc: <why>` excuses)")]
         pr_body: Option<PathBuf>,
     },
     /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1

@@ -39,15 +39,12 @@ enum Policy {
     Off,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
 struct Docs {
     paths: Vec<String>,
-    #[serde(default)]
     watch: Vec<String>,
-    #[serde(default)]
     skip: Vec<String>,
-    #[serde(default)]
     cli: bool,
 }
 
@@ -177,24 +174,19 @@ pub fn check(
             }
         }
     }
-    let diff = match since {
-        Some(b) => {
-            let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
-            anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
-            changes(&o.stdout)
-        }
-        None => vec![],
-    };
+    let mut diff = vec![];
+    if let Some(b) = since {
+        let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
+        anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
+        diff = changes(&o.stdout);
+    }
     if let Some(c) = a.comments.as_ref().filter(|c| c.policy == Policy::Off) {
         bad.extend(new_comments(&diff, &c.except));
     }
     if let Some(d) = &a.docs {
         bad.extend(stale_docs(d, &files));
-        let excused = match pr_body {
-            Some(p) => std::fs::read_to_string(p)?.contains("no doc:"),
-            None => true,
-        };
-        if !excused {
+        let body = pr_body.map(std::fs::read_to_string).transpose()?;
+        if body.is_some_and(|b| !b.contains("no doc:")) {
             bad.extend(undocumented(d, &diff));
         }
     }
@@ -321,22 +313,16 @@ fn changes(diff: &str) -> Vec<Change> {
         } else if head {
             from = l.strip_prefix("--- a/").unwrap_or(from);
             to = l.strip_prefix("+++ b/").unwrap_or(to);
-        } else if let Some(t) = l.strip_prefix('+') {
+        } else if let Some((sign @ ("+" | "-"), text)) = l.split_at_checked(1) {
+            let added = sign == "+";
+            let (file, line) = if added { (to, &mut new) } else { (from, &mut old) };
             v.push(Change {
-                file: to.into(),
-                line: new,
-                added: true,
-                text: t.into(),
+                file: file.into(),
+                line: *line,
+                added,
+                text: text.into(),
             });
-            new += 1;
-        } else if let Some(t) = l.strip_prefix('-') {
-            v.push(Change {
-                file: from.into(),
-                line: old,
-                added: false,
-                text: t.into(),
-            });
-            old += 1;
+            *line += 1;
         }
     }
     v
@@ -372,11 +358,7 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
                 (quote, i) = (Some(ch), i + 1);
             } else if rust && ch == '\'' && (next == Some('\\') || s.get(i + 2) == Some(&'\'')) {
                 let close = s.get(i + 3..).and_then(|r| r.iter().position(|&x| x == '\''));
-                i += if next == Some('\\') {
-                    close.map_or(1, |p| p + 4)
-                } else {
-                    3
-                };
+                i += close.filter(|_| next == Some('\\')).map_or(3, |p| p + 4);
             } else {
                 i += 1;
             }
@@ -399,25 +381,22 @@ fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
 }
 
 fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
-    let mut seen: BTreeMap<&str, (Vec<String>, Vec<bool>)> = BTreeMap::new();
     let code = |f: &str| [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f);
-    let mut bad = vec![];
+    let (mut added, mut bad) = (BTreeMap::<&str, Vec<usize>>::new(), vec![]);
     for c in diff.iter().filter(|c| c.added && code(&c.file)) {
-        let (lines, com) = seen.entry(&c.file).or_insert_with(|| {
-            let src = std::fs::read_to_string(&c.file).unwrap_or_default();
-            let lines: Vec<String> = src.lines().map(String::from).collect();
-            let com = comment_lines(
-                &lines.iter().map(String::as_str).collect::<Vec<_>>(),
-                Path::new(&c.file).extension().is_some_and(|x| x == "rs"),
-            );
-            (lines, com)
-        });
-        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let i = c.line.saturating_sub(1);
-        if com.get(i) == Some(&true) && !allowed_comment(&lines, com, i) {
+        added.entry(&c.file).or_default().push(c.line.saturating_sub(1));
+    }
+    for (f, at) in added {
+        let src = std::fs::read_to_string(f).unwrap_or_default();
+        let lines: Vec<&str> = src.lines().collect();
+        let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
+        for i in at
+            .into_iter()
+            .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
+        {
             bad.push(format!(
-                "{}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `herdsman why`",
-                c.file, c.line
+                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `herdsman why`",
+                i + 1
             ));
         }
     }
@@ -425,17 +404,14 @@ fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
 }
 
 fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
-    let cli = d.cli.then(|| {
-        let mut c = <crate::cli::Cli as clap::CommandFactory>::command();
+    let mut cli = d.cli.then(<crate::cli::Cli as clap::CommandFactory>::command);
+    if let Some(c) = &mut cli {
         c.build();
-        c
-    });
+    }
     let cli_gap = |rest: &str| -> Option<String> {
         let mut c = cli.as_ref()?;
-        for (n, w) in rest.split_whitespace().enumerate() {
-            if ["|", "||", "&&", ";", ">"].contains(&w) {
-                break;
-            }
+        let stop = |w: &&str| ["|", "||", "&&", ";", ">"].contains(w);
+        for (n, w) in rest.split_whitespace().take_while(|w| !stop(w)).enumerate() {
             let w = w.split('|').next().unwrap_or_default();
             if let Some(f) = w.strip_prefix("--") {
                 let f = f.split('=').next().unwrap_or_default();
@@ -452,23 +428,21 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
     };
     let mut bad = vec![];
     for p in files.iter().filter(|p| any(&d.paths, p)) {
-        let mut fence = false;
+        let (mut fence, dir) = (false, Path::new(p).parent().unwrap_or(Path::new(".")));
         for (i, l) in std::fs::read_to_string(p).unwrap_or_default().lines().enumerate() {
             fence ^= l.trim_start().starts_with("```");
             if fence || l.trim_start().starts_with("```") {
                 continue;
             }
             for s in l.split('`').skip(1).step_by(2) {
-                let dir = Path::new(p).parent().filter(|_| s.starts_with("../"));
                 let gap = match (&cli, s.strip_prefix("herdsman ")) {
                     (Some(_), Some(rest)) => cli_gap(rest),
                     _ if any(&d.skip, s) => None,
-                    _ => missing_path(s, dir.unwrap_or(Path::new("."))),
+                    _ => missing_path(s, if s.starts_with("../") { dir } else { Path::new(".") }),
                 };
                 bad.extend(gap.map(|g| format!("{p}:{}: `{s}`: {g}", i + 1)));
             }
             for t in l.split("](").skip(1).filter_map(|r| r.split([')', ' ', '#']).next()) {
-                let dir = Path::new(p).parent().unwrap_or(Path::new("."));
                 if !t.is_empty() && !t.contains(':') && !dir.join(t).exists() {
                     bad.push(format!("{p}:{}: link `{t}` does not exist", i + 1));
                 }
@@ -493,37 +467,24 @@ fn missing_path(s: &str, root: &Path) -> Option<String> {
         return None;
     }
     let f = root.join(path.trim_end_matches('/'));
-    match (f.exists(), line) {
-        (false, _) => Some("no such path".into()),
-        (true, Some(n)) if std::fs::read_to_string(&f).map_or(0, |t| t.lines().count()) < n => {
-            Some(format!("{path} has fewer than {n} lines"))
-        }
-        _ => None,
+    if !f.exists() {
+        return Some("no such path".into());
     }
+    let n = line?;
+    let short = std::fs::read_to_string(&f).map_or(0, |t| t.lines().count()) < n;
+    short.then(|| format!("{path} has fewer than {n} lines"))
 }
 
 fn undocumented(d: &Docs, diff: &[Change]) -> Vec<String> {
-    let docs: Vec<&str> = diff
-        .iter()
-        .filter(|c| any(&d.paths, &c.file))
-        .map(|c| c.text.as_str())
-        .collect();
-    let mut seen = BTreeSet::new();
-    let mut bad = vec![];
+    let docs = |n: &str| diff.iter().any(|c| any(&d.paths, &c.file) && c.text.contains(n));
+    let key = |n: &str| !n.is_empty() && n.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_'));
+    let (mut seen, mut bad) = (BTreeSet::new(), vec![]);
     for c in diff.iter().filter(|c| any(&d.watch, &c.file)) {
         let t = c.text.trim_start().trim_start_matches("pub ");
-        let Some((name, rest)) = t.split_once(':') else {
+        let Some((name, _)) = t.split_once(':').filter(|(n, r)| key(n) && !r.starts_with(':')) else {
             continue;
         };
-        let key = !name.is_empty()
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-        if !key || rest.starts_with(':') || !seen.insert(name) {
-            continue;
-        }
-        let dash = name.replace('_', "-");
-        if !docs.iter().any(|x| x.contains(name) || x.contains(&dash)) {
+        if seen.insert(name) && !docs(name) && !docs(&name.replace('_', "-")) {
             let (f, n, how) = (&c.file, c.line, if c.added { "added" } else { "removed" });
             bad.push(format!(
                 "{f}:{n}: `{name}` {how}, but no changed doc line names it (or `no doc: <why>` in the PR body)"
