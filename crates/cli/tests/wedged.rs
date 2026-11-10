@@ -61,8 +61,8 @@ impl Runner for Wedged {
 }
 
 /// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
-/// impl lane on A (check confirms its usage-limit banner from the meter).
-fn setup(name: &str) -> herdsman::Ctx {
+/// impl lane on A (check confirms its usage-limit banner from the meter), idle on a fake shed showing the banner.
+fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -73,23 +73,25 @@ fn setup(name: &str) -> herdsman::Ctx {
     );
     let c = ctx(&d, &cfg);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let d = json!({"role": "impl", "agent": IMPL, "pane": "w9:p12", "worktree": wt, "branch": "issue-12",
+    let d = json!({"role": "impl", "agent": IMPL, "pane": IMPL, "worktree": wt, "branch": "issue-12",
                    "harness": "claude", "account": "A"});
     let ev = herdsman::events::Event::new(c.now - 900, "sendmeter", Some(12), "spawn", d);
     herdsman::events::append(&c.state, &ev).unwrap();
-    c
+    let sh = FakeShed::attached(&c);
+    sh.lane(IMPL, "idle", "/x");
+    sh.screen(IMPL, "Claude usage limit reached.");
+    (c, sh)
 }
 
 fn wedged() -> Wedged {
     Wedged(
         Fake::default()
             .reply("hostname -s", "mini\n")
+            // The tick's and doctor's herdr status gate is src's, until #721.
             .reply(
                 "herdr status",
                 "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
             )
-            .reply("herdr agent list", &agents(&[(IMPL, "idle", "/x", "w9:p12")]))
-            .reply("herdr pane read w9:p12", "Claude usage limit reached.")
             .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
             .reply("sysctl -n hw.ncpu", "4")
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
@@ -109,9 +111,11 @@ fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static
 
 /// `herdsman <args>` against the wedged Keychain, within 10 s: (exit code, output).
 fn cli(name: &str, args: &'static [&'static str]) -> (i32, String) {
-    let c = setup(name);
+    let (c, sh) = setup(name);
     in_10_s(&format!("herdsman {}", args.join(" ")), move || {
-        run(&c, &wedged(), args)
+        let r = run(&c, &wedged(), args);
+        drop(sh);
+        r
     })
 }
 
@@ -133,7 +137,8 @@ fn tick_finishes_in_10_s() {
 
 #[test]
 fn serve_starts_and_serves_the_board_in_10_s() {
-    let c: &'static herdsman::Ctx = Box::leak(Box::new(setup("wedged-serve")));
+    let (c, sh) = setup("wedged-serve");
+    let (c, _sh): (&'static herdsman::Ctx, &'static FakeShed) = (Box::leak(Box::new(c)), Box::leak(Box::new(sh)));
     let page = in_10_s("serve", move || {
         let r: &'static Wedged = Box::leak(Box::new(wedged()));
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

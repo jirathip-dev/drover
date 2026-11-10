@@ -394,43 +394,53 @@ fn air_off(name: &str) -> (herdsman::Ctx, PathBuf, [PathBuf; 3]) {
     (c, home, dirs)
 }
 
-/// #678: the disabled Air's runner: #12's worktree there clean and pushed, removable.
-fn air_off_runner(home: &Path) -> Air {
-    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
-    let fake = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-13", "working", "/x", "w5:p1")]),
-        )
-        .reply(
-            "herdr --machine air agent list",
-            &agents(&[("sendmeter-impl-14", "idle", "/y", "w2:p1")]),
-        )
-        .reply("gh issue list", "[]")
-        .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
-        .reply("herdr --machine air worktree remove", "{}")
-        .reply("herdr --machine air pane close", "{}");
+/// #678: the disabled Air's runner: #12's worktree there clean and pushed, removable; its lanes on `air` (#14's
+/// idle), this host's on `here` (#13's working).
+fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
     Air {
-        fake,
+        over: OverSsh {
+            f,
+            hosts: vec![("air", air)],
+        },
         free_kb: 200 * 1_048_576,
         home: home.into(),
     }
 }
+
+/// `air_off_runner`'s fake and the two hosts' sheds (`here` attached to `c`).
+fn air_off_hosts(c: &herdsman::Ctx) -> (Fake, FakeShed, FakeShed) {
+    let wt = AIR_WT;
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+    let f = Fake::default()
+        .reply("gh issue list", "[]")
+        .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(ssh, "");
+    let here = FakeShed::attached(c);
+    here.lane("sendmeter-impl-13", "working", "/x");
+    let air = FakeShed::new();
+    air.lane("sendmeter-impl-14", "idle", "/y");
+    (f, here, air)
+}
+
+/// #12's worktree on the Air (`air_spawn`'s).
+const AIR_WT: &str = "/Users/me/worktrees/sendmeter/sendmeter-impl-12";
 
 /// #678: an explicit `clean` sweeps a disabled host that answers: the dry run lists the merged lane's worktree and the
 /// dead lane's scratch there, `--yes` removes both.
 #[test]
 fn clean_sweeps_a_disabled_but_reachable_host() {
     let (c, home, [dead, ..]) = air_off("scratch-off-clean");
-    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
-    let (code, dry) = run(&c, &air_off_runner(&home), &["clean"]);
+    let wt = AIR_WT;
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, dry) = run(&c, &air_off_runner(&home, &f, &air), &["clean"]);
     assert_eq!(code, 0, "{dry}");
     assert!(!dry.contains("not cleaned"), "{dry}");
     assert!(
-        dry.contains(&format!("would remove air:{wt} (pane w1:p1, sendmeter#12 merged)")),
+        dry.contains(&format!(
+            "would remove air:{wt} (pane sendmeter-impl-12, sendmeter#12 merged)"
+        )),
         "{dry}"
     );
     assert!(
@@ -440,17 +450,22 @@ fn clean_sweeps_a_disabled_but_reachable_host() {
         "{dry}"
     );
     assert!(dead.exists(), "a dry run removes nothing");
-    let r = air_off_runner(&home);
+    let (f, _here, air) = air_off_hosts(&c);
+    let r = air_off_runner(&home, &f, &air);
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("removed air:{wt} (sendmeter#12 merged)")),
         "{out}"
     );
+    let calls = f.calls.borrow();
     assert!(
-        r.fake.called("herdr --machine air worktree remove --workspace w1"),
-        "{out}"
+        calls
+            .iter()
+            .any(|l| l.contains(" air ") && l.contains("worktree") && l.contains("remove") && l.contains(wt)),
+        "{calls:?}"
     );
+    drop(calls);
     assert!(!dead.exists(), "{out}");
     assert!(
         out.contains(&format!(
@@ -465,7 +480,8 @@ fn clean_sweeps_a_disabled_but_reachable_host() {
 #[test]
 fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
     let (c, home, [dead, moved, live]) = air_off("scratch-off-reclaim");
-    let r = air_off_runner(&home);
+    let (f, _here, air) = air_off_hosts(&c);
+    let r = air_off_runner(&home, &f, &air);
     let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
     assert_eq!(code, 0, "{out}");
     assert!(!dead.exists() && !moved.exists(), "{out}");
