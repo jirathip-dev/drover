@@ -1,0 +1,11 @@
+Decided: thread new's --harness help names no harness; the harness-neutral check (#316) bans the names outside harness/
+Because: crates/core/src/cli.rs:560
+Decided: the old board's chat matches the renamed event types and by: values, and its reply label accepts both from: values
+Because: q1209
+Rejected: change the ui audit to long-press any message — every orchestrator reply on the old board read as sent by you
+Decided: chat.rs matches only orchestrator-*: events::aliased already turns every old conductor-* row into the new name
+Because: crates/core/src/events.rs:54
+Decided: chat_tab's queue test and its working-pill and live-turn checks, and lane_asks' [change] checks, are back as on staging
+Because: crates/server/src/serve/chat.rs:76
+Check: chat_tab's demo test fails without the fix: at the reply label without chat.ts, at the asleep header without chat.rs
+Owner: The old board's chat shows orchestrator replies, thread status, Stop and the message queue again; its config sheet still lists the orchestrator as a plain role.
