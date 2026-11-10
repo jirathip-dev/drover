@@ -1635,7 +1635,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             continue;
                         }
                         let (who, what) = match &s.lane {
-                            Some(l) => ("none", format!("waiting on {l} (working){note}")),
+                            Some(l) => {
+                                let how = crate::waiting::recovered(&events, l, ctx.now);
+                                ("none", format!("waiting on {l} (working){how}{note}"))
+                            }
                             // #604: its last start refused (a kick's too) says so.
                             None => match crate::drive::retrying(ctx, &events, &s.fleet, s.issue)
                                 .map(|w| (String::new(), w))

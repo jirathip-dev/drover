@@ -561,6 +561,8 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
+    /// #792: an ACP lane's open turn with no session event this long is silent: cancelled and nudged, then respawned.
+    pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
@@ -652,6 +654,7 @@ impl Default for Limits {
             review_rounds: 3,
             update_rounds: 3,
             stall_minutes: 30,
+            silent_minutes: 10,
             ci_start_minutes: 10,
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
