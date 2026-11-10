@@ -1,6 +1,3 @@
-//! #557: no Hermes. `self-update` (the `dev.herdsman.update` job) installs only a green head, through the signing
-//! (#781) and doctor gates, with a fake git, gh, cargo and codesign; `clean --scheduled` (the daily job) keeps its 3-day,
-//! 10-per-run and live/dirty rules and closes orphan workspaces; a leftover `[telegram]` only warns.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -42,7 +39,6 @@ fn host(conclusion: &str) -> Fake {
         .reply("systemctl --user restart dev.herdsman.serve.service", "")
 }
 
-/// #781: the build's own script signs it by hash.
 fn sign_script(c: &herdsman::Ctx) -> String {
     let s = c.state.with_file_name("update/src/scripts/signing-identity.sh");
     s.to_string_lossy().into()
@@ -82,7 +78,6 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     assert!(out.starts_with("✓ installed abcdef1 at "), "{out}");
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "swapped in");
     assert!(!PathBuf::from(&new).exists());
-    // Signed (#781), gated, then synced, then serve restarted, in that order; no secret read.
     let at = |p: &str| {
         r.index(p)
             .unwrap_or_else(|| panic!("{p} not called: {:?}", r.calls.borrow()))
@@ -132,7 +127,6 @@ fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     assert_eq!(kinds(&c, "self-update-failed").len(), 1);
 }
 
-/// #781: no "herdsman-local" identity: the unsigned build is never gated in, the old binary stays, one alert.
 #[test]
 fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
     let (c, live) = setup("upd-identity");

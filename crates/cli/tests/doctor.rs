@@ -128,7 +128,6 @@ fn all_good_exits_zero_and_never_writes() {
         "webhook",
         "signature",
     ] {
-        // The launchd job and the signature (#781) are macOS only; Linux has no row for them.
         if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
             assert!(!out.contains(&format!(" {check} — ")), "{out}");
             continue;
@@ -138,7 +137,6 @@ fn all_good_exits_zero_and_never_writes() {
     for check in ["vapid.key", "push", "watchdog check", "watchdog drive", "timer"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
-    // #707 (q855): one account-source row, no per-account rows, no Keychain read.
     assert!(
         line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
         "{out}"
@@ -149,7 +147,6 @@ fn all_good_exits_zero_and_never_writes() {
         "{:?}",
         r.calls.borrow()
     );
-    // #781: the signature row names the identity, checked by codesign's requirement on the running binary.
     if cfg!(target_os = "macos") {
         assert!(
             line(&out, "signature").contains(&format!("{} signed by \"herdsman-local\"", c.exe)),
@@ -267,7 +264,6 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "no plist runs herdsman serve",
         ),
         (
-            // #781: an unsigned (ad hoc) build fails codesign's requirement test.
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
             "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign ",

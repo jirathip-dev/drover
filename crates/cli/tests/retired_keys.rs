@@ -69,8 +69,6 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     assert!(first.chars().count() <= 60);
 }
 
-/// The gate runs this build's binary on a config: bad keeps the installed one, good replaces it; #781: signed with
-/// "herdsman-local" by hash first, and no identity or a codesign stuck on a Keychain dialog keeps the installed one.
 #[test]
 fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let d = tmpdir("gate");
@@ -79,8 +77,6 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let dest = d.join("bin/herdsman");
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     std::fs::write(&dest, "old").unwrap();
-    // A fake `codesign` logs how the install signs (sleeping, a Keychain dialog, while HANG is set); a fake `security`
-    // holds the identity unless NOID is set.
     let fake = d.join("fake");
     std::fs::create_dir_all(&fake).unwrap();
     let log = d.join("codesign.log");
@@ -116,7 +112,6 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
     assert!(!log.exists(), "a refused build is never signed");
 
-    // No identity, or a codesign stuck on a Keychain dialog (killed at the time limit): DEST stays, the fix is named.
     for (env, fix) in [
         ("NOID", "fix: sh scripts/signing-identity.sh once"),
         ("HANG", "fix: security set-key-partition-list"),
@@ -129,8 +124,6 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
         assert!(!dest.with_file_name("herdsman.new").exists());
     }
 
-    // A config that loads goes in, signed by the identity's SHA-1 hash in the login keychain (by name, the untrusted
-    // self-signed cert is "no identity").
     let o = gate(RETIRED, "X");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());

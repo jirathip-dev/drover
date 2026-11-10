@@ -1007,7 +1007,7 @@ fn merged(
         writeln!(out, "teardown: {e:#}")?;
     }
     if f.repo.ends_with("/herdsman") {
-        // Dogfood fleet: say how to pick up the merged code; never run it. #781: signed, so the Keychain trusts it.
+        // Dogfood fleet: say how to pick up the merged code; never run it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
         let src = f.local_path();

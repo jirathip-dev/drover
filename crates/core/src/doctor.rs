@@ -203,7 +203,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         Err(e) => (false, format!("{e:#}")),
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
-    // #781: signed by the one local identity, a Keychain access list naming herdsman trusts every build, not one hash.
     if cfg!(target_os = "macos") {
         let req = [
             "-v",
