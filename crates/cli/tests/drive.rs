@@ -2821,9 +2821,9 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(run(&c, &Fake::default(), &park).0, 0);
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
     assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
-    let r = fake(NO_AGENTS).reply("git -C", "");
+    let r = fake(NONE).reply("git -C", "");
     assert!(drive(&c, &r).1.is_empty());
-    assert!(!r.called("herdr agent start"), "a parked issue is skipped");
+    assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = with_queue(
@@ -2861,5 +2861,5 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert!(r.called("herdr agent start sendmeter-impl-12"));
+    assert!(!started("sendmeter-impl-12").is_empty());
 }
