@@ -85,6 +85,7 @@ struct Hang {
     mark: std::path::PathBuf,
     spent: Shared<u64>,
     seen: Shared<Vec<String>>,
+    beats: Shared<Vec<String>>,
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
@@ -108,6 +109,10 @@ impl Runner for Hang {
         self.seen
             .borrow_mut()
             .push(std::fs::read_to_string(&self.mark).unwrap_or_default());
+        let beat = self.mark.with_file_name("tick.beat");
+        self.beats
+            .borrow_mut()
+            .push(std::fs::read_to_string(beat).unwrap_or_default());
         self.spent.set(self.spent.get() + limit.as_secs());
         Ok(Out {
             code: 124,
@@ -134,6 +139,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
+        beats: Shared::default(),
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
@@ -152,6 +158,12 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let mark = r.seen.borrow()[0].clone();
     assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
     assert!(!r.mark.exists(), "the tick's step marker goes when it ends");
+    // #791: a running tick's heartbeat (`<started> <beat>`), gone when it ends.
+    assert_eq!(r.beats.borrow()[0], format!("{NOW} {NOW}"));
+    assert!(
+        !r.mark.with_file_name("tick.beat").exists(),
+        "the heartbeat goes when the tick ends"
+    );
     let cached = herdsman::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(
@@ -210,6 +222,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
+        beats: Shared::default(),
     };
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
