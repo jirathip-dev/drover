@@ -1,0 +1,7 @@
+Decided: fix round only: drop the stray lane logs (.logs/exits.txt, .logs/pr.md, .logs/run.sh) and the pr-body.md draft from the tree in a new commit
+Decided: the docs/serve.md merge conflict keeps both sides: #749's GET lane blocks text and this PR's unpark op
+Because: docs/serve.md:386
+Rejected: rewriting the wip commits out of history — form fixes are new commits, never a force-push
+Rejected: matching the Queue row's [unpark] to the Lanes card's paired check — non-blocking, the server's paired gate already refuses an unpaired POST
+Check: `git ls-files .logs pr-body.md` is empty at the head; the diff against staging only carries #712's files
+Owner: Removed leftover lane log files from the change and brought it up to date with staging.
