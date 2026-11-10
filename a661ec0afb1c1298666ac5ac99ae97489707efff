@@ -1,0 +1,7 @@
+Decided: comment_lines scans each line for `//` or `/*` outside string, raw-string and char literals, so trailing and inline comments fail
+Because: "a PR that adds a comment line fails (Rust `//`, `/* */`; TS `//`, `/* */`)"
+Decided: the two exceptions still need the comment to open the line; a trailing `// SAFETY:` or `///` is a new comment
+Because: crates/core/src/arch.rs:362
+Rejected: a full tokenizer crate — a new dependency for one check; the scanner handles strings, r#"…"#, chars and lifetimes
+Check: the fixture lines 15, 16 and 19 and web/a.ts:4 fail, the `//` inside strings and the lifetime line pass
+Owner: comments at the end of a code line now fail the check too, not just whole comment lines
