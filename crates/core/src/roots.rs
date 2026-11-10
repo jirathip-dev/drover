@@ -138,8 +138,8 @@ pub fn eject(
     Ok(1)
 }
 
-/// #630: `check`'s look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`) and
-/// its lanes restart on the next root; one mounted again is logged back (new lanes use it).
+/// #630: drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); #790:
+/// each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
     let cache = crate::hosts::cached(ctx);
@@ -156,16 +156,18 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let last = events.iter().rev().find(mark);
             let gone = state(&events, &on, name, &root) == "gone";
             let kind = match last.map(|e| e.kind.as_str()) {
-                Some("root-gone") if !gone => "root-back",
-                Some("root-gone") => continue,
-                _ if gone && events.iter().any(used) => "root-gone",
-                _ => continue,
+                Some("root-gone") if !gone => Some("root-back"),
+                Some("root-gone") => None,
+                _ if gone && events.iter().any(used) => Some("root-gone"),
+                _ => None,
             };
-            if gone {
-                writeln!(out, "! root {s} gone")?;
+            if let Some(kind) = kind {
+                if gone {
+                    writeln!(out, "! root {s} gone")?;
+                }
+                let d = json!({"host": name, "root": root});
+                emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))?;
             }
-            let d = json!({"host": name, "root": root});
-            emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))?;
             if gone {
                 restart(ctx, cfg, r, out, (name, &root), true)?;
             }
@@ -175,7 +177,8 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
 }
 
 /// Each open issue's lanes in `root` on host `name`: unsaved work to `wip/<agent>-<stamp>` (as `kill`), the worktree
-/// removed (`gone`: pruned), and the issue's active lane there spawned again on the next root.
+/// removed (`gone`: pruned), and the issue's active lane there spawned again on the next root. #790: only while that
+/// lane's last spawn is still there: `root-moved` (from and to) once it left, a failed start retried on the next pass.
 fn restart(
     ctx: &Ctx,
     cfg: &Config,
@@ -190,13 +193,23 @@ fn restart(
     };
     for s in fold(&events).values().filter(|s| !s.done()) {
         let Some(f) = cfg.fleet.get(&s.fleet) else { continue };
+        let here = |e: &&Event| e.str("host").unwrap_or("local") == name && inside(e, root);
+        let Some((role, agent)) = s.active_lane() else { continue };
+        let latest = |events: &[Event]| -> Option<Event> {
+            events
+                .iter()
+                .rfind(|e| e.is("spawn", &s.fleet, s.issue) && e.str("agent") == Some(agent))
+                .cloned()
+        };
+        let Some(first) = latest(&events).filter(|e| here(&e)) else {
+            continue; // #790: its lane is on another root (moved already, or never here)
+        };
         let mut seen = std::collections::BTreeSet::new();
         let mine: Vec<&Event> = (events.iter().rev())
-            .filter(|e| e.is("spawn", &s.fleet, s.issue) && e.str("host").unwrap_or("local") == name && inside(e, root))
+            .filter(|e| e.is("spawn", &s.fleet, s.issue) && here(e))
             .filter(|e| seen.insert(e.str("worktree")))
             .collect();
-        let Some(first) = mine.first() else { continue };
-        let on = On::of(r, Some(first));
+        let on = On::of(r, Some(&first));
         let home = crate::hosts::cached(ctx)
             .remove(name)
             .map(|h| h.home)
@@ -237,20 +250,18 @@ fn restart(
             ok(&on, "git", &["-C", &local, "worktree", "remove", "--force", wt])?;
         }
         let _ = ok(&on, "git", &["-C", &local, "worktree", "prune"]);
-        let Some((role, agent)) = s
-            .active_lane()
-            .filter(|l| mine.iter().any(|e| e.str("agent") == Some(l.1)))
-        else {
-            continue;
-        };
-        let d = json!({"agent": agent, "host": name, "root": root, "lost": lost.join("; ")});
-        log(s, "root-moved", d)?;
         let o = crate::spawn::Opts {
             supersede: true,
             ..Default::default()
         };
         if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (&s.fleet, s.issue, role), &o) {
             writeln!(out, "{agent}: restart failed: {e:#}")?;
+        }
+        // #790: logged once its lane has left the root; a start that failed is tried again on the next pass.
+        if let Some(to) = latest(&read(&ctx.state)?).filter(|e| !here(&e)) {
+            let lost = lost.join("; ");
+            let d = json!({"agent": agent, "host": name, "root": root, "to": to.str("root"), "to_host": to.str("host"), "lost": lost});
+            log(s, "root-moved", d)?;
         }
     }
     Ok(())
