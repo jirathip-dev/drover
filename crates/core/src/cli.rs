@@ -1333,7 +1333,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?, // #709
                 _ => Config::load(&ctx.config)?,
             };
-            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            // #561: check, clean, drive (#678: and reclaim) probe each remote host once and bound every remote call.
             let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
             let pass = if fast {
                 crate::hosts::Pass::fast(r)
@@ -1341,7 +1341,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::hosts::Pass::new(r, None)
             };
             let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
             };
             let kick = |f: &str, n, why| {
@@ -1662,7 +1662,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
+                    let what = (None, lane.as_deref(), false, true); // #678: disabled hosts that answer too
+                    check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
