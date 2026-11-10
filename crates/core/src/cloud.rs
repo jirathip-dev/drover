@@ -390,7 +390,15 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     } else {
         crate::timer::herdr_versions(r).context("no herdr server here")?.0
     };
-    let sh = |s: &str| on.run("sh", &argv(&["-c", &format!("{SH}{s}")]));
+    let run = |s: &str, l: u64| {
+        on.run_for(
+            "sh",
+            &argv(&["-c", &format!("{SH}{s}")]),
+            "",
+            std::time::Duration::from_secs(l),
+        )
+    };
+    let sh = |s: &str| run(s, 60);
     let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
     // #647: a failed step's command, exit code and last 20 lines of output, shown and logged.
     let fail = |what: &str, cmd: &str, o: &crate::runner::Out| {
@@ -423,7 +431,11 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
             }
             r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]))
         };
-        let o = if install.is_empty() { add()? } else { sh(install)? };
+        let o = if install.is_empty() {
+            add()?
+        } else {
+            run(install, 1800)?
+        };
         let (cmd, o) = if o.code == 0 { (check, sh(check)?) } else { (install, o) };
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
